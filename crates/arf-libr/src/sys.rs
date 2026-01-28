@@ -149,11 +149,6 @@ static REPREX_SETTINGS: RwLock<ReprexSettings> = RwLock::new(ReprexSettings {
     had_output: false,
 });
 
-/// Tracks whether the current command produced error output via stderr.
-/// This is set to true when R writes to stderr (otype != 0 in WriteConsoleEx).
-/// Used as a fallback for error detection.
-static COMMAND_HAD_STDERR: RwLock<bool> = RwLock::new(false);
-
 /// Tracks whether an error condition was signaled via globalCallingHandlers.
 /// This catches rlang/dplyr errors that output to stdout instead of stderr.
 static CONDITION_ERROR_OCCURRED: RwLock<bool> = RwLock::new(false);
@@ -172,9 +167,6 @@ static GLOBAL_ERROR_HANDLER_INITIALIZED: RwLock<bool> = RwLock::new(false);
 ///
 /// Call this before executing a new command to track errors accurately.
 pub fn reset_command_error_state() {
-    if let Ok(mut state) = COMMAND_HAD_STDERR.write() {
-        *state = false;
-    }
     if let Ok(mut state) = CONDITION_ERROR_OCCURRED.write() {
         *state = false;
     }
@@ -195,16 +187,16 @@ pub fn mark_error_condition() {
 /// Check if the current command produced an error.
 ///
 /// Returns `true` if either:
-/// - Any error output (otype != 0) was written to stderr, OR
 /// - An error condition was signaled via R's condition system (globalCallingHandlers), OR
-/// - The R-side error state was set (for rlang/dplyr errors that output to stdout)
+/// - The R-side error state was set via options(error = ...) handler
 ///
-/// The latter two catch rlang/dplyr errors that output to stdout instead of stderr.
+/// Note: We rely on R's error handling mechanism rather than checking stderr output,
+/// because many R functions (e.g., install.packages) write informational messages
+/// to stderr that are not errors.
 pub fn command_had_error() -> bool {
-    let had_stderr = COMMAND_HAD_STDERR.read().map(|s| *s).unwrap_or(false);
     let had_condition = CONDITION_ERROR_OCCURRED.read().map(|s| *s).unwrap_or(false);
     let had_r_error = check_r_error_state();
-    had_stderr || had_condition || had_r_error
+    had_condition || had_r_error
 }
 
 /// Suppress stderr output from R.
@@ -297,13 +289,6 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     };
 
     let is_error = otype != 0;
-
-    // Track error output for exit_status
-    if is_error {
-        if let Ok(mut state) = COMMAND_HAD_STDERR.write() {
-            *state = true;
-        }
-    }
 
     // Check for custom callback first
     if let Some(callback) = unsafe { WRITE_CONSOLE_CALLBACK } {
@@ -1407,30 +1392,13 @@ mod tests {
 
     #[test]
     fn test_command_error_state_reset() {
-        // Manually set stderr error state to true
-        if let Ok(mut state) = COMMAND_HAD_STDERR.write() {
-            *state = true;
-        }
+        // Manually set condition error state to true
+        mark_error_condition();
         assert!(command_had_error());
 
         // Reset should clear the error state
         reset_command_error_state();
         assert!(!command_had_error());
-    }
-
-    #[test]
-    fn test_command_error_state_set_and_check() {
-        reset_command_error_state();
-
-        // Simulate error output being received via stderr
-        if let Ok(mut state) = COMMAND_HAD_STDERR.write() {
-            *state = true;
-        }
-
-        assert!(command_had_error());
-
-        // Reset for other tests
-        reset_command_error_state();
     }
 
     #[test]
@@ -1449,24 +1417,6 @@ mod tests {
         // Reset should clear the error
         reset_command_error_state();
         assert!(!command_had_error());
-    }
-
-    #[test]
-    fn test_combined_error_detection() {
-        reset_command_error_state();
-
-        // Either mechanism should trigger error detection
-        mark_error_condition();
-        assert!(command_had_error());
-
-        reset_command_error_state();
-
-        if let Ok(mut state) = COMMAND_HAD_STDERR.write() {
-            *state = true;
-        }
-        assert!(command_had_error());
-
-        reset_command_error_state();
     }
 
     #[test]
