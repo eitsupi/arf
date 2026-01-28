@@ -112,19 +112,23 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
 ///
 /// When typing an opening bracket or quote, automatically inserts the closing
 /// counterpart and positions the cursor between them.
+///
+/// Also binds closing brackets/quotes to `InsertChar` so that skip-over rules
+/// can distinguish between opening and closing character key presses.
 pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
-    // Define pairs: (opening char, pair string)
+    // Define pairs: (opening char, closing char, pair string)
     let pairs = [
-        ('(', "()"),
-        ('[', "[]"),
-        ('{', "{}"),
-        ('"', r#""""#),
-        ('\'', "''"),
-        ('`', "``"),
+        ('(', ')', "()"),
+        ('[', ']', "[]"),
+        ('{', '}', "{}"),
+        ('"', '"', r#""""#),
+        ('\'', '\'', "''"),
+        ('`', '`', "``"),
     ];
 
-    for (open_char, pair) in pairs {
-        let event = ReedlineEvent::Edit(vec![
+    for (open_char, close_char, pair) in pairs {
+        // Opening char: insert pair and move cursor between them
+        let open_event = ReedlineEvent::Edit(vec![
             EditCommand::InsertString(pair.to_string()),
             EditCommand::MoveLeft { select: false },
         ]);
@@ -136,8 +140,17 @@ pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
         // - US: '(' = Shift+9, '{' = Shift+[
         // - French AZERTY: '(' = 5 (no shift), '{' = AltGr+4
         // By binding both variants, we handle all common layouts.
-        keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(open_char), event.clone());
-        keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(open_char), event);
+        keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(open_char), open_event.clone());
+        keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(open_char), open_event);
+
+        // Closing char: just insert the character (skip-over rules will handle
+        // moving right when cursor is before the same closing char).
+        // Only bind for non-quote pairs (quotes use same char for open/close).
+        if open_char != close_char {
+            let close_event = ReedlineEvent::Edit(vec![EditCommand::InsertChar(close_char)]);
+            keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(close_char), close_event.clone());
+            keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(close_char), close_event);
+        }
     }
 }
 
