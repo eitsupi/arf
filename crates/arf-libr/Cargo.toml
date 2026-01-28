@@ -1,0 +1,19 @@
+[package]
+name = "arf-libr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Low-level R FFI bindings using dynamic loading"
+
+[dependencies]
+libloading.workspace = true
+once_cell.workspace = true
+log.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+exec.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+encoding_rs.workspace = true

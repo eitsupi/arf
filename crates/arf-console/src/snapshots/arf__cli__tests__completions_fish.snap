@@ -1,0 +1,80 @@
+---
+source: crates/arf-console/src/cli.rs
+expression: completions
+---
+# Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
+function __fish_arf_global_optspecs
+	string join \n e/eval= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
+end
+
+function __fish_arf_needs_command
+	# Figure out if the current invocation already has a command.
+	set -l cmd (commandline -opc)
+	set -e cmd[1]
+	argparse -s (__fish_arf_global_optspecs) -- $cmd 2>/dev/null
+	or return
+	if set -q argv[1]
+		# Also print the command, so this can be used to figure out what it is.
+		echo $argv[1]
+		return 1
+	end
+	return 0
+end
+
+function __fish_arf_using_subcommand
+	set -l cmd (__fish_arf_needs_command)
+	test -z "$cmd"
+	and return 1
+	contains -- $cmd[1] $argv
+end
+
+complete -c arf -n "__fish_arf_needs_command" -s e -l eval -d 'Evaluate R expression and exit' -r
+complete -c arf -n "__fish_arf_needs_command" -s c -l config -d 'Path to configuration file' -r -F
+complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
+complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_needs_command" -l reprex -d 'Enable reprex mode (no prompt, output prefixed with #>)'
+complete -c arf -n "__fish_arf_needs_command" -l auto-format -d 'Enable auto-formatting of R code in reprex mode (requires Air CLI)'
+complete -c arf -n "__fish_arf_needs_command" -l no-banner -d 'Suppress the startup banner'
+complete -c arf -n "__fish_arf_needs_command" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
+complete -c arf -n "__fish_arf_needs_command" -s q -l quiet -d '[R] Don\'t print R startup message'
+complete -c arf -n "__fish_arf_needs_command" -l no-save -d '[R] Don\'t save workspace at end of session (default)'
+complete -c arf -n "__fish_arf_needs_command" -l save -d '[R] Save workspace at end of session'
+complete -c arf -n "__fish_arf_needs_command" -l no-restore -d '[R] Don\'t restore previously saved objects (default)'
+complete -c arf -n "__fish_arf_needs_command" -l no-restore-data -d '[R] Don\'t restore previously saved objects'
+complete -c arf -n "__fish_arf_needs_command" -l restore-data -d '[R] Restore previously saved objects'
+complete -c arf -n "__fish_arf_needs_command" -l no-environ -d '[R] Don\'t read the site and user environment files'
+complete -c arf -n "__fish_arf_needs_command" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'
+complete -c arf -n "__fish_arf_needs_command" -l no-init-file -d '[R] Don\'t read the user\'s .Rprofile'
+complete -c arf -n "__fish_arf_needs_command" -l interactive -d '[R] Force R to run interactively (no-op, always interactive)'
+complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
+complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
+complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'
+complete -c arf -n "__fish_arf_needs_command" -l no-completion -d 'Disable completion menu (for testing)'
+complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Disable history (no history saved or loaded)'
+complete -c arf -n "__fish_arf_needs_command" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c arf -n "__fish_arf_needs_command" -s V -l version -d 'Print version'
+complete -c arf -n "__fish_arf_needs_command" -a "completions" -d 'Generate shell completion scripts'
+complete -c arf -n "__fish_arf_needs_command" -a "config" -d 'Configuration management'
+complete -c arf -n "__fish_arf_needs_command" -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_needs_command" -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand completions" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init help" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init help" -f -a "init" -d 'Generate a default configuration file'
+complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand config; and __fish_seen_subcommand_from init" -s f -l force -d 'Overwrite existing configuration file'
+complete -c arf -n "__fish_arf_using_subcommand config; and __fish_seen_subcommand_from init" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "init" -d 'Generate a default configuration file'
+complete -c arf -n "__fish_arf_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand history; and not __fish_seen_subcommand_from schema help" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand history; and not __fish_seen_subcommand_from schema help" -f -a "schema" -d 'Display history database schema and example R code'
+complete -c arf -n "__fish_arf_using_subcommand history; and not __fish_seen_subcommand_from schema help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from schema" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "schema" -d 'Display history database schema and example R code'
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "completions" -d 'Generate shell completion scripts'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "config" -d 'Configuration management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "init" -d 'Generate a default configuration file'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "schema" -d 'Display history database schema and example R code'

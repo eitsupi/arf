@@ -1,0 +1,55 @@
+---
+source: crates/arf-console/src/pager/history_schema.rs
+assertion_line: 843
+expression: output
+---
+# History Database
+
+## Location
+
+- R mode: /test/history/r.db
+- Shell mode: /test/history/shell.db
+
+## SQLite Schema
+
+```sql
+CREATE TABLE history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    command_line    TEXT NOT NULL,
+    start_timestamp INTEGER,  -- Unix timestamp (nullable)
+    session_id      INTEGER,
+    hostname        TEXT,
+    cwd             TEXT,     -- Current working directory
+    duration_ms     INTEGER,
+    exit_status     INTEGER,
+    more_info       TEXT      -- Reserved for future use
+);
+```
+
+## Indexes
+
+- idx_history_time        ON history(start_timestamp)
+- idx_history_cwd         ON history(cwd)
+- idx_history_exit_status ON history(exit_status)
+- idx_history_cmd         ON history(command_line)
+
+## Analyze or Export
+
+Please read the database directly.
+Example in R:
+
+```r
+library(DBI)
+library(tibble)
+
+con <- dbConnect(
+  RSQLite::SQLite(),
+  "/test/history/r.db"
+)
+history_data <- dbGetQuery(
+  con,
+  "SELECT * FROM history ORDER BY id DESC LIMIT 10"
+) |>
+  as_tibble()
+dbDisconnect(con)
+```

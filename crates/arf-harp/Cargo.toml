@@ -1,0 +1,12 @@
+[package]
+name = "arf-harp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "High-level R abstractions for safe R object manipulation"
+
+[dependencies]
+arf-libr.workspace = true
+log.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true

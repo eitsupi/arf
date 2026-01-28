@@ -1,0 +1,479 @@
+---
+source: crates/arf-console/src/config/mod.rs
+expression: schema
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "Main configuration structure.",
+  "type": "object",
+  "properties": {
+    "colors": {
+      "$ref": "#/$defs/ColorsConfig",
+      "default": {
+        "meta": {
+          "command": "Magenta"
+        },
+        "prompt": {
+          "continuation": "LightGreen",
+          "indicator": "Yellow",
+          "main": "LightGreen",
+          "shell": "LightRed",
+          "status": {
+            "error": "LightRed",
+            "success": "LightGreen"
+          }
+        },
+        "r": {
+          "comment": "DarkGray",
+          "constant": "LightCyan",
+          "identifier": "Default",
+          "keyword": "LightBlue",
+          "number": "LightMagenta",
+          "operator": "Yellow",
+          "punctuation": "Default",
+          "string": "Green"
+        }
+      }
+    },
+    "completion": {
+      "$ref": "#/$defs/CompletionConfig",
+      "default": {
+        "debounce_ms": 100,
+        "enabled": true,
+        "function_paren_check_limit": 50,
+        "max_height": 10,
+        "timeout_ms": 50
+      }
+    },
+    "editor": {
+      "$ref": "#/$defs/EditorConfig",
+      "default": {
+        "auto_match": true,
+        "autosuggestion": true,
+        "key_map": {
+          "Alt-Hyphen": " <- ",
+          "Alt-p": " |> "
+        },
+        "mode": "emacs"
+      }
+    },
+    "experimental": {
+      "$ref": "#/$defs/ExperimentalConfig",
+      "default": {
+        "completion_min_chars": null,
+        "history_forget": {
+          "delay": 2,
+          "enabled": false,
+          "on_exit_only": false
+        }
+      }
+    },
+    "history": {
+      "$ref": "#/$defs/HistoryConfig",
+      "default": {
+        "dir": null,
+        "disabled": false,
+        "menu_max_height": 15
+      }
+    },
+    "prompt": {
+      "$ref": "#/$defs/PromptConfig",
+      "default": {
+        "continuation": "+  ",
+        "format": "{status}R {version}> ",
+        "indicators": {
+          "autoformat": "[format] ",
+          "reprex": "[reprex] "
+        },
+        "mode_indicator": "prefix",
+        "shell_format": "[{shell}] $ ",
+        "status": {
+          "override_prompt_color": false,
+          "symbol": {
+            "error": "✗ ",
+            "success": ""
+          }
+        }
+      }
+    },
+    "reprex": {
+      "$ref": "#/$defs/ReprexConfig",
+      "default": {
+        "autoformat": false,
+        "comment": "#> ",
+        "enabled": false
+      }
+    },
+    "startup": {
+      "$ref": "#/$defs/StartupConfig",
+      "default": {
+        "r_source": "auto",
+        "show_banner": true
+      }
+    }
+  },
+  "$defs": {
+    "ColorsConfig": {
+      "description": "Color configuration for syntax highlighting and prompts. Colors can be named (e.g., 'Red', 'DarkGray'), 256-color ({ Fixed: 99 }), or RGB ({ Rgb: [255, 0, 0] }).",
+      "type": "object",
+      "properties": {
+        "meta": {
+          "description": "Colors for meta commands",
+          "type": "object"
+        },
+        "prompt": {
+          "description": "Colors for prompts",
+          "type": "object"
+        },
+        "r": {
+          "description": "Colors for R syntax tokens",
+          "type": "object"
+        }
+      }
+    },
+    "CompletionConfig": {
+      "description": "Completion configuration.",
+      "type": "object",
+      "properties": {
+        "debounce_ms": {
+          "description": "Debounce delay in milliseconds (reuse cached results within this window).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 100,
+          "minimum": 0
+        },
+        "enabled": {
+          "description": "Enable completion.",
+          "type": "boolean",
+          "default": true
+        },
+        "function_paren_check_limit": {
+          "description": "Number of completions to check for function type (for adding parentheses).\nSet to 0 to disable function parenthesis insertion.\nOnly the first N completions are checked to avoid performance issues.",
+          "type": "integer",
+          "format": "uint",
+          "default": 50,
+          "minimum": 0
+        },
+        "max_height": {
+          "description": "Maximum height (rows) for the completion menu.",
+          "type": "integer",
+          "format": "uint16",
+          "default": 10,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "timeout_ms": {
+          "description": "Completion timeout in milliseconds (max time to wait for R completion).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 50,
+          "minimum": 0
+        }
+      }
+    },
+    "EditorConfig": {
+      "description": "Editor configuration.",
+      "type": "object",
+      "properties": {
+        "auto_match": {
+          "description": "Auto-close brackets and quotes.",
+          "type": "boolean",
+          "default": true
+        },
+        "autosuggestion": {
+          "description": "Show history-based autosuggestions (fish/nushell style).\nSuggestions appear grayed out and can be accepted with right arrow.",
+          "type": "boolean",
+          "default": true
+        },
+        "key_map": {
+          "description": "Keyboard shortcuts that insert text.\nFormat: \"modifier-key\" = \"text to insert\"\nExamples: \"alt-hyphen\" = \" <- \", \"alt-p\" = \" |> \"",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {
+            "Alt-Hyphen": " <- ",
+            "Alt-p": " |> "
+          },
+          "examples": [
+            {
+              "alt-hyphen": " <- ",
+              "alt-p": " |> "
+            }
+          ]
+        },
+        "mode": {
+          "description": "Editing mode: \"emacs\" or \"vi\".",
+          "type": "string",
+          "default": "emacs"
+        }
+      }
+    },
+    "ExperimentalConfig": {
+      "description": "Experimental features configuration.\n\nFeatures in this section are subject to change or removal.",
+      "type": "object",
+      "properties": {
+        "completion_min_chars": {
+          "description": "Minimum characters to trigger automatic completion display.\n\nWhen set, the completion menu appears automatically after typing\nthis many characters, without requiring a Tab key press.\nThis is similar to radian's `complete_while_typing` feature.\n\nWhen not set (null/omitted), completion requires Tab key press\n(the default behavior).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
+        },
+        "history_forget": {
+          "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",
+          "$ref": "#/$defs/HistoryForgetConfig",
+          "default": {
+            "delay": 2,
+            "enabled": false,
+            "on_exit_only": false
+          }
+        }
+      }
+    },
+    "HistoryConfig": {
+      "description": "History configuration.",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "Custom history directory (overrides default XDG location).\nR history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "disabled": {
+          "description": "Disable history entirely.",
+          "type": "boolean",
+          "default": false
+        },
+        "menu_max_height": {
+          "description": "Maximum height (rows) for the history search menu (Ctrl+R).\nThe actual height is the minimum of this value and the terminal height minus overhead.",
+          "type": "integer",
+          "format": "uint16",
+          "default": 15,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      }
+    },
+    "HistoryForgetConfig": {
+      "description": "Configuration for automatic removal of failed commands from history.",
+      "type": "object",
+      "properties": {
+        "delay": {
+          "description": "Number of failed commands to keep before purging older ones.\nFor example, with delay = 2, the last 2 failed commands are kept\naccessible for quick retry, while older ones are deleted.",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
+        },
+        "enabled": {
+          "description": "Enable automatic removal of failed commands.",
+          "type": "boolean",
+          "default": false
+        },
+        "on_exit_only": {
+          "description": "If true, only purge failed commands when the session ends.\nIf false, purge on each prompt redraw.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "Indicators": {
+      "description": "Text strings for mode indicators shown in the prompt.\n\nThese are the prefix/suffix texts that indicate special modes like reprex.",
+      "type": "object",
+      "properties": {
+        "autoformat": {
+          "description": "Indicator text for auto-format mode (default: \"[format] \").\nShown when both reprex mode and auto-format are enabled.",
+          "type": "string",
+          "default": "[format] "
+        },
+        "reprex": {
+          "description": "Indicator text for reprex mode (default: \"[reprex] \").",
+          "type": "string",
+          "default": "[reprex] "
+        }
+      }
+    },
+    "ModeIndicatorPosition": {
+      "description": "Position of the mode indicator relative to the prompt.",
+      "oneOf": [
+        {
+          "description": "Show mode indicator before the prompt (e.g., \"[reprex] r> \").",
+          "type": "string",
+          "const": "prefix"
+        },
+        {
+          "description": "Show mode indicator after the prompt (e.g., \"r> [reprex]\").",
+          "type": "string",
+          "const": "suffix"
+        },
+        {
+          "description": "Do not show mode indicator.",
+          "type": "string",
+          "const": "none"
+        }
+      ]
+    },
+    "PromptConfig": {
+      "description": "Prompt configuration.",
+      "type": "object",
+      "properties": {
+        "continuation": {
+          "description": "Continuation prompt for multiline input.",
+          "type": "string",
+          "default": "+  "
+        },
+        "format": {
+          "description": "Main prompt format.",
+          "type": "string",
+          "default": "{status}R {version}> "
+        },
+        "indicators": {
+          "description": "Custom text for mode indicators.",
+          "$ref": "#/$defs/Indicators",
+          "default": {
+            "autoformat": "[format] ",
+            "reprex": "[reprex] "
+          }
+        },
+        "mode_indicator": {
+          "description": "Mode indicator position: \"prefix\", \"suffix\", or \"none\".",
+          "$ref": "#/$defs/ModeIndicatorPosition",
+          "default": "prefix"
+        },
+        "shell_format": {
+          "description": "Shell mode prompt format.\nSupports `{shell}` placeholder for shell name (e.g., \"bash\", \"zsh\").",
+          "type": "string",
+          "default": "[{shell}] $ "
+        },
+        "status": {
+          "description": "Command status indicator configuration.",
+          "$ref": "#/$defs/StatusConfig",
+          "default": {
+            "override_prompt_color": false,
+            "symbol": {
+              "error": "✗ ",
+              "success": ""
+            }
+          }
+        }
+      }
+    },
+    "RSource": {
+      "description": "How to locate the R installation.\n\nCan be specified as:\n- `\"auto\"` (default): Use rig if available, otherwise find R from PATH\n- `\"rig\"`: Use rig's default R version (error if rig unavailable)\n- `{ path = \"/path/to/R\" }`: Use explicit R_HOME path",
+      "anyOf": [
+        {
+          "description": "Use a predefined mode (auto or rig).",
+          "$ref": "#/$defs/RSourceMode"
+        },
+        {
+          "description": "Use an explicit R_HOME path.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Path to R installation (R_HOME).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "RSourceMode": {
+      "description": "Predefined modes for locating R.",
+      "oneOf": [
+        {
+          "description": "Try rig if available, otherwise find R from PATH.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Use rig's default R version (error if rig unavailable).",
+          "type": "string",
+          "const": "rig"
+        }
+      ]
+    },
+    "ReprexConfig": {
+      "description": "Reprex mode configuration.",
+      "type": "object",
+      "properties": {
+        "autoformat": {
+          "description": "Enable auto-formatting of R code (requires Air CLI).\nPreviously in [formatter.enabled].",
+          "type": "boolean",
+          "default": false
+        },
+        "comment": {
+          "description": "Comment prefix for output (default: \"#> \").",
+          "type": "string",
+          "default": "#> "
+        },
+        "enabled": {
+          "description": "Enable reprex mode (no prompt, output prefixed with comment).",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "StartupConfig": {
+      "description": "Startup configuration.\n\nSettings in this section are evaluated once at startup and do not change during the session.",
+      "type": "object",
+      "properties": {
+        "r_source": {
+          "description": "How to locate R installation.",
+          "$ref": "#/$defs/RSource",
+          "default": "auto"
+        },
+        "show_banner": {
+          "description": "Show startup banner.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "StatusConfig": {
+      "description": "Command status indicator configuration.\n\nControls how the prompt indicates success or failure of the previous command.\nUse `symbol` to configure what symbols are displayed via the `{status}` placeholder.",
+      "type": "object",
+      "properties": {
+        "override_prompt_color": {
+          "description": "Also change entire prompt color based on status.\nWhen true, the prompt color is overridden with status colors.",
+          "type": "boolean",
+          "default": false
+        },
+        "symbol": {
+          "description": "Symbols to display for success/error status.\nExample: `symbol = { error = \"✗ \" }`",
+          "$ref": "#/$defs/StatusSymbol",
+          "default": {
+            "error": "✗ ",
+            "success": ""
+          }
+        }
+      }
+    },
+    "StatusSymbol": {
+      "description": "Symbols displayed in the prompt to indicate command success or failure.\n\nExample: `symbol = { error = \"✗ \" }` or `symbol = { success = \"✓ \", error = \"✗ \" }`",
+      "type": "object",
+      "properties": {
+        "error": {
+          "description": "Symbol shown on error (default: \"✗ \").",
+          "type": "string",
+          "default": "✗ "
+        },
+        "success": {
+          "description": "Symbol shown on success (default: \"\" - no symbol).",
+          "type": "string",
+          "default": ""
+        }
+      }
+    }
+  }
+}

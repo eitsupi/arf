@@ -1,0 +1,8 @@
+---
+source: crates/arf-console/src/repl.rs
+expression: banner
+---
+# arf console v0.1.0
+# Edit mode: emacs
+# R is not initialized. Commands will not be evaluated.
+# Type :cmds for meta commands list, Ctrl+D to exit.

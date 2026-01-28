@@ -1,0 +1,149 @@
+---
+source: crates/arf-console/src/cli.rs
+expression: completions
+---
+
+using namespace System.Management.Automation
+using namespace System.Management.Automation.Language
+
+Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+
+    $commandElements = $commandAst.CommandElements
+    $command = @(
+        'arf'
+        for ($i = 1; $i -lt $commandElements.Count; $i++) {
+            $element = $commandElements[$i]
+            if ($element -isnot [StringConstantExpressionAst] -or
+                $element.StringConstantType -ne [StringConstantType]::BareWord -or
+                $element.Value.StartsWith('-') -or
+                $element.Value -eq $wordToComplete) {
+                break
+        }
+        $element.Value
+    }) -join ';'
+
+    $completions = @(switch ($command) {
+        'arf' {
+            [CompletionResult]::new('-e', '-e', [CompletionResultType]::ParameterName, 'Evaluate R expression and exit')
+            [CompletionResult]::new('--eval', '--eval', [CompletionResultType]::ParameterName, 'Evaluate R expression and exit')
+            [CompletionResult]::new('-c', '-c', [CompletionResultType]::ParameterName, 'Path to configuration file')
+            [CompletionResult]::new('--config', '--config', [CompletionResultType]::ParameterName, 'Path to configuration file')
+            [CompletionResult]::new('--with-r-version', '--with-r-version', [CompletionResultType]::ParameterName, 'R version to use via rig (overrides r_source config)')
+            [CompletionResult]::new('--r-home', '--r-home', [CompletionResultType]::ParameterName, 'Explicit R_HOME path (overrides r_source config)')
+            [CompletionResult]::new('--history-dir', '--history-dir', [CompletionResultType]::ParameterName, 'Custom history directory (overrides default XDG location)')
+            [CompletionResult]::new('--reprex', '--reprex', [CompletionResultType]::ParameterName, 'Enable reprex mode (no prompt, output prefixed with #>)')
+            [CompletionResult]::new('--auto-format', '--auto-format', [CompletionResultType]::ParameterName, 'Enable auto-formatting of R code in reprex mode (requires Air CLI)')
+            [CompletionResult]::new('--no-banner', '--no-banner', [CompletionResultType]::ParameterName, 'Suppress the startup banner')
+            [CompletionResult]::new('--vanilla', '--vanilla', [CompletionResultType]::ParameterName, 'Start R in vanilla mode (no init files, no save/restore)')
+            [CompletionResult]::new('-q', '-q', [CompletionResultType]::ParameterName, '[R] Don''t print R startup message')
+            [CompletionResult]::new('--quiet', '--quiet', [CompletionResultType]::ParameterName, '[R] Don''t print R startup message')
+            [CompletionResult]::new('--no-save', '--no-save', [CompletionResultType]::ParameterName, '[R] Don''t save workspace at end of session (default)')
+            [CompletionResult]::new('--save', '--save', [CompletionResultType]::ParameterName, '[R] Save workspace at end of session')
+            [CompletionResult]::new('--no-restore', '--no-restore', [CompletionResultType]::ParameterName, '[R] Don''t restore previously saved objects (default)')
+            [CompletionResult]::new('--no-restore-data', '--no-restore-data', [CompletionResultType]::ParameterName, '[R] Don''t restore previously saved objects')
+            [CompletionResult]::new('--restore-data', '--restore-data', [CompletionResultType]::ParameterName, '[R] Restore previously saved objects')
+            [CompletionResult]::new('--no-environ', '--no-environ', [CompletionResultType]::ParameterName, '[R] Don''t read the site and user environment files')
+            [CompletionResult]::new('--no-site-file', '--no-site-file', [CompletionResultType]::ParameterName, '[R] Don''t read the site-wide Rprofile')
+            [CompletionResult]::new('--no-init-file', '--no-init-file', [CompletionResultType]::ParameterName, '[R] Don''t read the user''s .Rprofile')
+            [CompletionResult]::new('--interactive', '--interactive', [CompletionResultType]::ParameterName, '[R] Force R to run interactively (no-op, always interactive)')
+            [CompletionResult]::new('--no-readline', '--no-readline', [CompletionResultType]::ParameterName, '[R] Don''t use readline (no-op)')
+            [CompletionResult]::new('--no-restore-history', '--no-restore-history', [CompletionResultType]::ParameterName, '[R] Don''t restore history (no-op)')
+            [CompletionResult]::new('--no-auto-match', '--no-auto-match', [CompletionResultType]::ParameterName, 'Disable auto-matching of brackets and quotes (for testing)')
+            [CompletionResult]::new('--no-completion', '--no-completion', [CompletionResultType]::ParameterName, 'Disable completion menu (for testing)')
+            [CompletionResult]::new('--no-history', '--no-history', [CompletionResultType]::ParameterName, 'Disable history (no history saved or loaded)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('-V', '-V ', [CompletionResultType]::ParameterName, 'Print version')
+            [CompletionResult]::new('--version', '--version', [CompletionResultType]::ParameterName, 'Print version')
+            [CompletionResult]::new('completions', 'completions', [CompletionResultType]::ParameterValue, 'Generate shell completion scripts')
+            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'Configuration management')
+            [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'History management')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;completions' {
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            break
+        }
+        'arf;config' {
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('init', 'init', [CompletionResultType]::ParameterValue, 'Generate a default configuration file')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;config;init' {
+            [CompletionResult]::new('-f', '-f', [CompletionResultType]::ParameterName, 'Overwrite existing configuration file')
+            [CompletionResult]::new('--force', '--force', [CompletionResultType]::ParameterName, 'Overwrite existing configuration file')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            break
+        }
+        'arf;config;help' {
+            [CompletionResult]::new('init', 'init', [CompletionResultType]::ParameterValue, 'Generate a default configuration file')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;config;help;init' {
+            break
+        }
+        'arf;config;help;help' {
+            break
+        }
+        'arf;history' {
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;history;schema' {
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            break
+        }
+        'arf;history;help' {
+            [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;history;help;schema' {
+            break
+        }
+        'arf;history;help;help' {
+            break
+        }
+        'arf;help' {
+            [CompletionResult]::new('completions', 'completions', [CompletionResultType]::ParameterValue, 'Generate shell completion scripts')
+            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'Configuration management')
+            [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'History management')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;help;completions' {
+            break
+        }
+        'arf;help;config' {
+            [CompletionResult]::new('init', 'init', [CompletionResultType]::ParameterValue, 'Generate a default configuration file')
+            break
+        }
+        'arf;help;config;init' {
+            break
+        }
+        'arf;help;history' {
+            [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            break
+        }
+        'arf;help;history;schema' {
+            break
+        }
+        'arf;help;help' {
+            break
+        }
+    })
+
+    $completions.Where{ $_.CompletionText -like "$wordToComplete*" } |
+        Sort-Object -Property ListItemText
+}
