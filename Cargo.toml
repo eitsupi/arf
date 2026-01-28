@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+default-members = ["crates/arf-console"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/eitsupi/arf"
+
+[workspace.dependencies]
+# Internal crates
+arf-harp = { path = "crates/arf-harp" }
+arf-libr = { path = "crates/arf-libr" }
+
+# R FFI
+libloading = "0.9"
+
+# Terminal UI
+crossterm = "0.29"
+crokey = "1.3"
+nu-ansi-term = { version = "0.50", features = ["derive_serde_style"] }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "refs/pull/1015/head", features = ["sqlite", "idle_callback"] }
+
+# Configuration
+dirs = "6.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.9"
+
+# Tree-sitter parsing
+tree-sitter = "0.24"
+tree-sitter-r = { git = "https://github.com/r-lib/tree-sitter-r", rev = "95aff097aa927a66bb357f715b58cde821be8867" }
+
+# Fuzzy matching
+nucleo-matcher = "0.3"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
+
+# Utilities
+anyhow = "1.0"
+base64 = "0.22"
+chrono = "0.4"
+encoding_rs = "0.8"
+env_logger = "0.11"
+gethostname = "1.1"
+log = "0.4"
+once_cell = "1.19"
+semver = "1.0"
+thiserror = "2.0"
+
+# Unix
+exec = "0.3"
+libc = "0.2"
+nix = { version = "0.30", features = ["signal", "process"] }
+
+# Schema generation
+schemars = "1.2"
+
+# Testing
+insta = "1.46"
+portable-pty = "0.9"
+regex = "1.11"
+rexpect = "0.5"
+tempfile = "3"
+vt100 = "0.16"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

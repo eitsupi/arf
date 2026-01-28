@@ -1,0 +1,363 @@
+---
+source: crates/arf-console/src/cli.rs
+expression: completions
+---
+#compdef arf
+
+autoload -U is-at-least
+
+_arf() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'-e+[Evaluate R expression and exit]:EVAL:_default' \
+'--eval=[Evaluate R expression and exit]:EVAL:_default' \
+'-c+[Path to configuration file]:CONFIG:_files' \
+'--config=[Path to configuration file]:CONFIG:_files' \
+'(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \
+'(--with-r-version)--r-home=[Explicit R_HOME path (overrides r_source config)]:R_HOME:_files -/' \
+'--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
+'--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
+'--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
+'--no-banner[Suppress the startup banner]' \
+'--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
+'-q[\[R\] Don'\''t print R startup message]' \
+'--quiet[\[R\] Don'\''t print R startup message]' \
+'--no-save[\[R\] Don'\''t save workspace at end of session (default)]' \
+'(--no-save)--save[\[R\] Save workspace at end of session]' \
+'--no-restore[\[R\] Don'\''t restore previously saved objects (default)]' \
+'--no-restore-data[\[R\] Don'\''t restore previously saved objects]' \
+'(--no-restore --no-restore-data)--restore-data[\[R\] Restore previously saved objects]' \
+'--no-environ[\[R\] Don'\''t read the site and user environment files]' \
+'--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \
+'--no-init-file[\[R\] Don'\''t read the user'\''s .Rprofile]' \
+'--interactive[\[R\] Force R to run interactively (no-op, always interactive)]' \
+'--no-readline[\[R\] Don'\''t use readline (no-op)]' \
+'--no-restore-history[\[R\] Don'\''t restore history (no-op)]' \
+'--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \
+'--no-completion[Disable completion menu (for testing)]' \
+'--no-history[Disable history (no history saved or loaded)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'-V[Print version]' \
+'--version[Print version]' \
+'::script -- R script file to execute (non-interactive mode):_files' \
+":: :_arf_commands" \
+"*::: :->arf" \
+&& ret=0
+    case $state in
+    (arf)
+        words=($line[2] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-command-$line[2]:"
+        case $line[2] in
+            (completions)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':shell -- The shell to generate completions for:(bash elvish fish powershell zsh)' \
+&& ret=0
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_arf__config_commands" \
+"*::: :->config" \
+&& ret=0
+
+    case $state in
+    (config)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-config-command-$line[1]:"
+        case $line[1] in
+            (init)
+_arguments "${_arguments_options[@]}" : \
+'-f[Overwrite existing configuration file]' \
+'--force[Overwrite existing configuration file]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__config__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-config-help-command-$line[1]:"
+        case $line[1] in
+            (init)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(history)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_arf__history_commands" \
+"*::: :->history" \
+&& ret=0
+
+    case $state in
+    (history)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-history-command-$line[1]:"
+        case $line[1] in
+            (schema)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__history__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-history-help-command-$line[1]:"
+        case $line[1] in
+            (schema)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-help-command-$line[1]:"
+        case $line[1] in
+            (completions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__help__config_commands" \
+"*::: :->config" \
+&& ret=0
+
+    case $state in
+    (config)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-help-config-command-$line[1]:"
+        case $line[1] in
+            (init)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(history)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__help__history_commands" \
+"*::: :->history" \
+&& ret=0
+
+    case $state in
+    (history)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-help-history-command-$line[1]:"
+        case $line[1] in
+            (schema)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+}
+
+(( $+functions[_arf_commands] )) ||
+_arf_commands() {
+    local commands; commands=(
+'completions:Generate shell completion scripts' \
+'config:Configuration management' \
+'history:History management' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf commands' commands "$@"
+}
+(( $+functions[_arf__completions_commands] )) ||
+_arf__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf completions commands' commands "$@"
+}
+(( $+functions[_arf__config_commands] )) ||
+_arf__config_commands() {
+    local commands; commands=(
+'init:Generate a default configuration file' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf config commands' commands "$@"
+}
+(( $+functions[_arf__config__help_commands] )) ||
+_arf__config__help_commands() {
+    local commands; commands=(
+'init:Generate a default configuration file' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf config help commands' commands "$@"
+}
+(( $+functions[_arf__config__help__help_commands] )) ||
+_arf__config__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf config help help commands' commands "$@"
+}
+(( $+functions[_arf__config__help__init_commands] )) ||
+_arf__config__help__init_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf config help init commands' commands "$@"
+}
+(( $+functions[_arf__config__init_commands] )) ||
+_arf__config__init_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf config init commands' commands "$@"
+}
+(( $+functions[_arf__help_commands] )) ||
+_arf__help_commands() {
+    local commands; commands=(
+'completions:Generate shell completion scripts' \
+'config:Configuration management' \
+'history:History management' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf help commands' commands "$@"
+}
+(( $+functions[_arf__help__completions_commands] )) ||
+_arf__help__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help completions commands' commands "$@"
+}
+(( $+functions[_arf__help__config_commands] )) ||
+_arf__help__config_commands() {
+    local commands; commands=(
+'init:Generate a default configuration file' \
+    )
+    _describe -t commands 'arf help config commands' commands "$@"
+}
+(( $+functions[_arf__help__config__init_commands] )) ||
+_arf__help__config__init_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help config init commands' commands "$@"
+}
+(( $+functions[_arf__help__help_commands] )) ||
+_arf__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help help commands' commands "$@"
+}
+(( $+functions[_arf__help__history_commands] )) ||
+_arf__help__history_commands() {
+    local commands; commands=(
+'schema:Display history database schema and example R code' \
+    )
+    _describe -t commands 'arf help history commands' commands "$@"
+}
+(( $+functions[_arf__help__history__schema_commands] )) ||
+_arf__help__history__schema_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help history schema commands' commands "$@"
+}
+(( $+functions[_arf__history_commands] )) ||
+_arf__history_commands() {
+    local commands; commands=(
+'schema:Display history database schema and example R code' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf history commands' commands "$@"
+}
+(( $+functions[_arf__history__help_commands] )) ||
+_arf__history__help_commands() {
+    local commands; commands=(
+'schema:Display history database schema and example R code' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf history help commands' commands "$@"
+}
+(( $+functions[_arf__history__help__help_commands] )) ||
+_arf__history__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history help help commands' commands "$@"
+}
+(( $+functions[_arf__history__help__schema_commands] )) ||
+_arf__history__help__schema_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history help schema commands' commands "$@"
+}
+(( $+functions[_arf__history__schema_commands] )) ||
+_arf__history__schema_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history schema commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_arf" ]; then
+    _arf "$@"
+else
+    compdef _arf arf
+fi

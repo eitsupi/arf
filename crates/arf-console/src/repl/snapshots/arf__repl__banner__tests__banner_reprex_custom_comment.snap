@@ -1,0 +1,9 @@
+---
+source: crates/arf-console/src/repl.rs
+expression: banner
+---
+# arf console v0.1.0
+# Edit mode: emacs
+# Reprex mode: enabled | Comment: "## "
+# R is ready.
+# Type :cmds for meta commands list, Ctrl+D to exit.

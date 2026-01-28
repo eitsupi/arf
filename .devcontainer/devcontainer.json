@@ -1,0 +1,7 @@
+{
+	"image": "mcr.microsoft.com/devcontainers/base:noble",
+	"features": {
+		"ghcr.io/devcontainers/features/rust:1": {},
+		"ghcr.io/rocker-org/devcontainer-features/r-rig:1": {}
+	}
+}
