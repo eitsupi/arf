@@ -114,26 +114,27 @@ show_banner = true
 [editor]
 mode = "emacs"          # "emacs" or "vi"
 auto_match = true
+autosuggestion = true   # fish/nushell style history suggestions
 
 # Keyboard shortcuts (crokey format)
 [editor.key_map]
 alt-hyphen = " <- "
-alt-p = " |> "              # Use "ctrl-shift-m" for RStudio-style
+alt-p = " |> "          # Use "ctrl-shift-m" for RStudio-style
 
 [prompt]
 format = "{status}R {version}> "
 continuation = "+  "
+shell_format = "[{shell}] $ "
+mode_indicator = "prefix"   # "prefix", "suffix", or "none"
 
-# Command status indicator (shows error symbol on failure)
+# Command status indicator
 [prompt.status]
-mode = "symbol"
-error = "✗ "
-
-[completion]
-enabled = true
+symbol = { error = "✗ " }   # success = "" (empty) by default
+override_prompt_color = false
 
 [reprex]
 enabled = false
+comment = "#> "
 autoformat = false      # Requires Air CLI
 
 # Syntax highlighting colors
@@ -141,6 +142,8 @@ autoformat = false      # Requires Air CLI
 keyword = "LightBlue"
 string = "Green"
 comment = "DarkGray"
+number = "LightMagenta"
+operator = "Yellow"
 
 [colors.prompt]
 main = "LightGreen"
