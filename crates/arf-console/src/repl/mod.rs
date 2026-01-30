@@ -309,7 +309,7 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
-            self.config.prompt.spinner.clone(),
+            self.config.experimental.prompt_spinner.clone(),
         );
 
         // Get history paths for :history commands
@@ -469,7 +469,7 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
-            self.config.prompt.spinner.clone(),
+            self.config.experimental.prompt_spinner.clone(),
         );
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();

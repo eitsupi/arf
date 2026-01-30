@@ -13,6 +13,19 @@ use std::path::PathBuf;
 
 use super::prompt::RPrompt;
 
+/// Convert nu_ansi_term::Color to ANSI escape code string.
+fn color_to_ansi_code(color: Color) -> String {
+    use nu_ansi_term::Style;
+    match color {
+        Color::Default => String::new(),
+        c => {
+            let style = Style::new().fg(c);
+            // Get just the prefix (start code) without the suffix
+            style.prefix().to_string()
+        }
+    }
+}
+
 /// State shared between the REPL and the ReadConsole callback.
 pub struct ReplState {
     /// Line editor for R mode.
@@ -92,8 +105,11 @@ impl PromptRuntimeConfig {
         status_colors: StatusColorConfig,
         spinner_config: SpinnerConfig,
     ) -> Self {
-        // Initialize spinner frames in arf-libr
+        // Initialize spinner in arf-libr
         arf_libr::set_spinner_frames(&spinner_config.frames);
+        // Convert Color to ANSI escape code
+        let color_code = color_to_ansi_code(spinner_config.color);
+        arf_libr::set_spinner_color(&color_code);
 
         Self {
             prompt_formatter,
@@ -760,7 +776,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
-            SpinnerConfig { frames: String::new() }, // Disabled
+            SpinnerConfig { frames: String::new(), color: Color::Default }, // Disabled
         );
         // Should not panic when spinner is disabled
         config.start_spinner();

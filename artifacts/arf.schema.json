@@ -62,6 +62,10 @@
           "delay": 2,
           "enabled": false,
           "on_exit_only": false
+        },
+        "prompt_spinner": {
+          "color": "Cyan",
+          "frames": ""
         }
       }
     },
@@ -84,9 +88,6 @@
         },
         "mode_indicator": "prefix",
         "shell_format": "[{shell}] $ ",
-        "spinner": {
-          "frames": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        },
         "status": {
           "override_prompt_color": false,
           "symbol": {
@@ -210,26 +211,33 @@
       }
     },
     "ExperimentalConfig": {
-      "description": "Experimental features configuration.\n\nFeatures in this section are subject to change or removal.",
+      "description": "Experimental features configuration. Features in this section are subject to change or removal.",
       "type": "object",
       "properties": {
         "completion_min_chars": {
-          "description": "Minimum characters to trigger automatic completion display.\n\nWhen set, the completion menu appears automatically after typing\nthis many characters, without requiring a Tab key press.\nThis is similar to radian's `complete_while_typing` feature.\n\nWhen not set (null/omitted), completion requires Tab key press\n(the default behavior).",
+          "description": "Minimum characters to trigger automatic completion display",
           "type": [
             "integer",
             "null"
-          ],
-          "format": "uint",
-          "default": null,
-          "minimum": 0
+          ]
         },
         "history_forget": {
-          "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",
-          "$ref": "#/$defs/HistoryForgetConfig",
-          "default": {
-            "delay": 2,
-            "enabled": false,
-            "on_exit_only": false
+          "$ref": "#/$defs/HistoryForgetConfig"
+        },
+        "prompt_spinner": {
+          "description": "Spinner configuration for busy indicator during R execution",
+          "type": "object",
+          "properties": {
+            "color": {
+              "description": "Color for the spinner (e.g., 'Cyan', 'LightBlue')",
+              "type": "string",
+              "default": "Cyan"
+            },
+            "frames": {
+              "description": "Animation frames (each character is one frame). Empty string to disable.",
+              "type": "string",
+              "default": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+            }
           }
         }
       }
@@ -352,13 +360,6 @@
           "type": "string",
           "default": "[{shell}] $ "
         },
-        "spinner": {
-          "description": "Spinner configuration for busy indicator during R execution.",
-          "$ref": "#/$defs/SpinnerConfig",
-          "default": {
-            "frames": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-          }
-        },
         "status": {
           "description": "Command status indicator configuration.",
           "$ref": "#/$defs/StatusConfig",
@@ -427,17 +428,6 @@
           "description": "Enable reprex mode (no prompt, output prefixed with comment).",
           "type": "boolean",
           "default": false
-        }
-      }
-    },
-    "SpinnerConfig": {
-      "description": "Spinner configuration for showing activity during R code execution.\n\nThe spinner is displayed at the start of the line while R is evaluating code,\nproviding visual feedback that the system is busy.",
-      "type": "object",
-      "properties": {
-        "frames": {
-          "description": "Spinner animation frames as a string where each character is one frame.\nEmpty string disables the spinner.\n\nExample: `frames = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"` (braille dots)\nExample: `frames = \"|/-\\\\\"` (ASCII spinner)",
-          "type": "string",
-          "default": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         }
       }
     },

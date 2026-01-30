@@ -151,6 +151,42 @@ main = "LightGreen"
 
 See the full [Configuration Guide](docs/configuration.md) for all options.
 
+## Experimental Features
+
+Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` section.
+
+### Spinner
+
+Displays an animated spinner at the start of the line while R is evaluating code, providing visual feedback that the system is busy. **Disabled by default.**
+
+To enable, set the `frames` option:
+
+```toml
+[experimental.prompt_spinner]
+frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # Braille dots
+color = "Cyan"              # Spinner color (default: Cyan)
+```
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `frames` | `""` (disabled) | Animation frames (each character is one frame). |
+| `color` | `"Cyan"` | Spinner color. Accepts standard ANSI color names: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, and their `Light` variants (e.g., `LightBlue`). |
+
+**Frame style examples:**
+
+```toml
+# Braille dots (recommended)
+frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# ASCII spinner (works in all terminals)
+frames = "|/-\\"
+
+# Block spinner
+frames = "▖▘▝▗"
+```
+
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`

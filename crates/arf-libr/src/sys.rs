@@ -149,14 +149,17 @@ static REPREX_SETTINGS: RwLock<ReprexSettings> = RwLock::new(ReprexSettings {
     had_output: false,
 });
 
-/// Spinner configuration (frames to display).
+/// Spinner configuration (frames and color to display).
 struct SpinnerConfig {
     /// Animation frames as a string (each character is one frame).
     frames: String,
+    /// ANSI color code for the spinner (e.g., "\x1b[36m" for cyan).
+    color_code: String,
 }
 
 static SPINNER_CONFIG: RwLock<SpinnerConfig> = RwLock::new(SpinnerConfig {
     frames: String::new(),
+    color_code: String::new(),
 });
 
 /// Spinner thread state for animated busy indicator.
@@ -1268,6 +1271,16 @@ pub fn set_spinner_frames(frames: &str) {
     }
 }
 
+/// Configure the spinner color.
+///
+/// The `color_code` should be an ANSI escape sequence for the color,
+/// e.g., "\x1b[36m" for cyan.
+pub fn set_spinner_color(color_code: &str) {
+    if let Ok(mut config) = SPINNER_CONFIG.write() {
+        config.color_code = color_code.to_string();
+    }
+}
+
 /// Start the spinner (display the busy indicator).
 ///
 /// Spawns a background thread that animates the spinner at ~12.5fps.
@@ -1279,9 +1292,9 @@ pub fn start_spinner() {
     use std::thread;
     use std::time::Duration;
 
-    // Get the frames from config
-    let frames = match SPINNER_CONFIG.read() {
-        Ok(config) => config.frames.clone(),
+    // Get the frames and color from config
+    let (frames, color_code) = match SPINNER_CONFIG.read() {
+        Ok(config) => (config.frames.clone(), config.color_code.clone()),
         Err(_) => return,
     };
 
@@ -1303,6 +1316,9 @@ pub fn start_spinner() {
     let stop_signal = Arc::new(AtomicBool::new(false));
     let stop_signal_clone = stop_signal.clone();
 
+    // ANSI reset code
+    const ANSI_RESET: &str = "\x1b[0m";
+
     // Spawn the spinner thread
     let handle = thread::spawn(move || {
         let frames_chars: Vec<char> = frames.chars().collect();
@@ -1313,8 +1329,12 @@ pub fn start_spinner() {
         let mut frame_index = 0;
         let frame_duration = Duration::from_millis(80); // ~12.5 fps for smooth animation
 
-        // Display the first frame
-        print!("{} ", frames_chars[frame_index]);
+        // Display the first frame with color
+        if color_code.is_empty() {
+            print!("{} ", frames_chars[frame_index]);
+        } else {
+            print!("{}{}{} ", color_code, frames_chars[frame_index], ANSI_RESET);
+        }
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
         while !stop_signal_clone.load(Ordering::Relaxed) {
@@ -1327,9 +1347,13 @@ pub fn start_spinner() {
             // Advance to next frame
             frame_index = (frame_index + 1) % frames_chars.len();
 
-            // Update the display: move cursor back and print new frame
+            // Update the display: move cursor back and print new frame with color
             // \r moves to start of line, then print frame + space
-            print!("\r{} ", frames_chars[frame_index]);
+            if color_code.is_empty() {
+                print!("\r{} ", frames_chars[frame_index]);
+            } else {
+                print!("\r{}{}{} ", color_code, frames_chars[frame_index], ANSI_RESET);
+            }
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
     });
@@ -1530,60 +1554,61 @@ pub fn polled_events_for_repl() {
 mod tests {
     use super::*;
 
+    /// Combined spinner test to avoid race conditions from parallel tests sharing global state.
+    /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
     #[test]
-    fn test_spinner_state_initial() {
-        // Initial state should be inactive
-        assert!(!is_spinner_active());
-    }
+    fn test_spinner_lifecycle() {
+        // Acquire the spinner lock for the entire test to prevent interference
+        let _guard = SPINNER_THREAD.lock().unwrap();
+        drop(_guard); // Release immediately so we can use start_spinner/stop_spinner
 
-    #[test]
-    fn test_spinner_disabled_with_empty_frames() {
-        // Configure with empty frames (disabled)
+        // Reset to known state first
+        stop_spinner();
+        set_spinner_frames("");
+
+        // Test 1: Initial state should be inactive
+        assert!(!is_spinner_active());
+
+        // Test 2: Spinner disabled with empty frames
         set_spinner_frames("");
         start_spinner();
-        // Should not be active when frames are empty
-        assert!(!is_spinner_active());
-    }
+        assert!(!is_spinner_active()); // Should not be active when frames are empty
 
-    #[test]
-    fn test_spinner_start_stop() {
-        // Configure with frames
+        // Test 3: Basic start/stop
         set_spinner_frames("⠋⠙⠹");
         start_spinner();
         assert!(is_spinner_active());
         stop_spinner();
         assert!(!is_spinner_active());
-        // Cleanup
-        set_spinner_frames("");
-    }
 
-    #[test]
-    fn test_spinner_double_start() {
-        // Configure with frames
+        // Test 4: With color
         set_spinner_frames("⠋⠙⠹");
-        start_spinner();
-        assert!(is_spinner_active());
-        // Second start should be a no-op
+        set_spinner_color("\x1b[36m"); // Cyan
         start_spinner();
         assert!(is_spinner_active());
         stop_spinner();
         assert!(!is_spinner_active());
-        // Cleanup
-        set_spinner_frames("");
-    }
 
-    #[test]
-    fn test_spinner_double_stop() {
-        // Configure with frames
+        // Test 5: Double start (should be no-op)
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        assert!(is_spinner_active());
+        start_spinner(); // Second start should be a no-op
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+
+        // Test 6: Double stop (should be no-op)
         set_spinner_frames("⠋⠙⠹");
         start_spinner();
         stop_spinner();
         assert!(!is_spinner_active());
-        // Second stop should be a no-op
-        stop_spinner();
+        stop_spinner(); // Second stop should be a no-op
         assert!(!is_spinner_active());
+
         // Cleanup
         set_spinner_frames("");
+        set_spinner_color("");
     }
 
     #[test]
