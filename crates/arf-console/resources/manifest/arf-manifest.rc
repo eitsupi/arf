@@ -1,0 +1,19 @@
+// Windows Application Manifest resource file for arf.exe
+// This enables UTF-8 support on Windows with R 4.2.0 UCRT builds.
+//
+// Based on ark's manifest resource file:
+// https://github.com/posit-dev/ark/blob/main/crates/ark/resources/manifest/ark-manifest.rc
+//
+// ark is licensed under the MIT License:
+// Copyright (c) 2024 Posit Software, PBC
+//
+// References:
+// https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests
+// https://learn.microsoft.com/en-us/cpp/build/reference/manifest-create-side-by-side-assembly-manifest
+
+// This defines `RT_MANIFEST` to `24`. embed-resource ensures the header is available.
+// https://github.com/nabijaczleweli/rust-embed-resource/issues/11#issuecomment-779295722
+#include <winuser.h>
+
+// The `1` is a `resource_id` that specifies us as an executable file
+1 RT_MANIFEST "arf.exe.manifest"
