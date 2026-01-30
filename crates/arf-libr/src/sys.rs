@@ -149,21 +149,26 @@ static REPREX_SETTINGS: RwLock<ReprexSettings> = RwLock::new(ReprexSettings {
     had_output: false,
 });
 
-/// Spinner state for busy indicator during R code execution.
-struct SpinnerState {
-    /// Whether the spinner is currently displayed.
-    active: bool,
+/// Spinner configuration (frames to display).
+struct SpinnerConfig {
     /// Animation frames as a string (each character is one frame).
     frames: String,
-    /// Current frame index.
-    frame_index: usize,
 }
 
-static SPINNER_STATE: RwLock<SpinnerState> = RwLock::new(SpinnerState {
-    active: false,
+static SPINNER_CONFIG: RwLock<SpinnerConfig> = RwLock::new(SpinnerConfig {
     frames: String::new(),
-    frame_index: 0,
 });
+
+/// Spinner thread state for animated busy indicator.
+/// Uses a separate thread to animate the spinner while R is evaluating code.
+struct SpinnerThread {
+    /// Signal to stop the spinner thread.
+    stop_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Handle to the spinner thread.
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+static SPINNER_THREAD: std::sync::Mutex<Option<SpinnerThread>> = std::sync::Mutex::new(None);
 
 /// Tracks whether an error condition was signaled via globalCallingHandlers.
 /// This catches rlang/dplyr errors that output to stdout instead of stderr.
@@ -1258,35 +1263,81 @@ fn reset_r_error_state() {
 ///
 /// Example: `"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"` for braille dots spinner.
 pub fn set_spinner_frames(frames: &str) {
-    if let Ok(mut state) = SPINNER_STATE.write() {
-        state.frames = frames.to_string();
-        state.frame_index = 0;
+    if let Ok(mut config) = SPINNER_CONFIG.write() {
+        config.frames = frames.to_string();
     }
 }
 
 /// Start the spinner (display the busy indicator).
 ///
-/// Shows the first frame of the spinner at the beginning of the line.
+/// Spawns a background thread that animates the spinner at ~12.5fps.
 /// The spinner is stopped automatically when R output is produced or
 /// when the next ReadConsole prompt is displayed.
 pub fn start_spinner() {
-    if let Ok(mut state) = SPINNER_STATE.write() {
-        if state.frames.is_empty() {
-            return; // Spinner disabled
-        }
-        if state.active {
-            return; // Already running
-        }
-        state.active = true;
-        state.frame_index = 0;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
 
-        // Display the first frame at the start of the line
-        if let Some(frame) = state.frames.chars().next() {
-            // Print frame followed by space (as per design)
-            print!("{} ", frame);
+    // Get the frames from config
+    let frames = match SPINNER_CONFIG.read() {
+        Ok(config) => config.frames.clone(),
+        Err(_) => return,
+    };
+
+    if frames.is_empty() {
+        return; // Spinner disabled
+    }
+
+    // Check if already running
+    let mut spinner_guard = match SPINNER_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if spinner_guard.is_some() {
+        return; // Already running
+    }
+
+    // Create stop signal
+    let stop_signal = Arc::new(AtomicBool::new(false));
+    let stop_signal_clone = stop_signal.clone();
+
+    // Spawn the spinner thread
+    let handle = thread::spawn(move || {
+        let frames_chars: Vec<char> = frames.chars().collect();
+        if frames_chars.is_empty() {
+            return;
+        }
+
+        let mut frame_index = 0;
+        let frame_duration = Duration::from_millis(80); // ~12.5 fps for smooth animation
+
+        // Display the first frame
+        print!("{} ", frames_chars[frame_index]);
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
+        while !stop_signal_clone.load(Ordering::Relaxed) {
+            thread::sleep(frame_duration);
+
+            if stop_signal_clone.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Advance to next frame
+            frame_index = (frame_index + 1) % frames_chars.len();
+
+            // Update the display: move cursor back and print new frame
+            // \r moves to start of line, then print frame + space
+            print!("\r{} ", frames_chars[frame_index]);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
-    }
+    });
+
+    *spinner_guard = Some(SpinnerThread {
+        stop_signal,
+        handle: Some(handle),
+    });
 }
 
 /// Stop the spinner and clear it from the display.
@@ -1294,26 +1345,34 @@ pub fn start_spinner() {
 /// This is called automatically when R produces output or when
 /// the next prompt is about to be displayed.
 pub fn stop_spinner() {
-    if let Ok(mut state) = SPINNER_STATE.write() {
-        if !state.active {
-            return; // Not running
-        }
-        state.active = false;
+    use std::sync::atomic::Ordering;
 
-        // Clear the spinner from the display:
-        // Move cursor back by 2 (frame + space) and clear to end of line
-        if !state.frames.is_empty() {
-            // Use carriage return to go to start of line, then clear the line
-            // This is cleaner than trying to calculate exact positions
-            print!("\r\x1b[K");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+    let mut spinner_guard = match SPINNER_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if let Some(spinner) = spinner_guard.take() {
+        // Signal the thread to stop
+        spinner.stop_signal.store(true, Ordering::Relaxed);
+
+        // Wait for the thread to finish
+        if let Some(handle) = spinner.handle {
+            let _ = handle.join();
         }
+
+        // Clear the spinner from the display
+        print!("\r\x1b[K");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }
 
 /// Check if the spinner is currently active.
 pub fn is_spinner_active() -> bool {
-    SPINNER_STATE.read().map(|s| s.active).unwrap_or(false)
+    SPINNER_THREAD
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
 }
 
 /// Enable reprex mode with the given comment prefix.
