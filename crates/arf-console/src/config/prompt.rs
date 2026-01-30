@@ -20,6 +20,8 @@ pub struct PromptConfig {
     pub indicators: Indicators,
     /// Command status indicator configuration.
     pub status: StatusConfig,
+    /// Spinner configuration for busy indicator during R execution.
+    pub spinner: SpinnerConfig,
 }
 
 impl Default for PromptConfig {
@@ -31,6 +33,7 @@ impl Default for PromptConfig {
             mode_indicator: ModeIndicatorPosition::default(),
             indicators: Indicators::default(),
             status: StatusConfig::default(),
+            spinner: SpinnerConfig::default(),
         }
     }
 }
@@ -123,6 +126,34 @@ impl Default for Indicators {
         Self {
             reprex: "[reprex] ".to_string(),
             autoformat: "[format] ".to_string(),
+        }
+    }
+}
+
+/// Spinner configuration for showing activity during R code execution.
+///
+/// The spinner is displayed at the start of the line while R is evaluating code,
+/// providing visual feedback that the system is busy.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct SpinnerConfig {
+    /// Spinner animation frames as a string where each character is one frame.
+    /// Empty string disables the spinner.
+    ///
+    /// Example: `frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"` (braille dots)
+    /// Example: `frames = "|/-\\"` (ASCII spinner)
+    #[serde(default = "default_spinner_frames")]
+    pub frames: String,
+}
+
+fn default_spinner_frames() -> String {
+    "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".to_string()
+}
+
+impl Default for SpinnerConfig {
+    fn default() -> Self {
+        Self {
+            frames: default_spinner_frames(),
         }
     }
 }

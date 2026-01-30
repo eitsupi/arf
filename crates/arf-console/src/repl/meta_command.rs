@@ -327,7 +327,9 @@ fn process_history_clear(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Indicators, ModeIndicatorPosition, StatusColorConfig, StatusConfig};
+    use crate::config::{
+        Indicators, ModeIndicatorPosition, SpinnerConfig, StatusColorConfig, StatusConfig,
+    };
     use crate::editor::prompt::PromptFormatter;
     use nu_ansi_term::Color;
 
@@ -350,6 +352,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         )
     }
 

@@ -149,6 +149,22 @@ static REPREX_SETTINGS: RwLock<ReprexSettings> = RwLock::new(ReprexSettings {
     had_output: false,
 });
 
+/// Spinner state for busy indicator during R code execution.
+struct SpinnerState {
+    /// Whether the spinner is currently displayed.
+    active: bool,
+    /// Animation frames as a string (each character is one frame).
+    frames: String,
+    /// Current frame index.
+    frame_index: usize,
+}
+
+static SPINNER_STATE: RwLock<SpinnerState> = RwLock::new(SpinnerState {
+    active: false,
+    frames: String::new(),
+    frame_index: 0,
+});
+
 /// Tracks whether an error condition was signaled via globalCallingHandlers.
 /// This catches rlang/dplyr errors that output to stdout instead of stderr.
 static CONDITION_ERROR_OCCURRED: RwLock<bool> = RwLock::new(false);
@@ -236,6 +252,10 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     if buf.is_null() {
         return;
     }
+
+    // Stop the spinner when R produces output
+    // This provides immediate feedback that R is no longer "thinking"
+    stop_spinner();
 
     // Check if stderr is suppressed (during completion) - only affects error output
     let is_error = otype != 0;
@@ -889,6 +909,10 @@ unsafe extern "C" fn r_read_console(
 ) -> c_int {
     log::info!("r_read_console: called with buflen={}", buflen);
 
+    // Stop the spinner when a new prompt is displayed
+    // This handles cases where R finishes evaluation without producing output
+    stop_spinner();
+
     // In reprex mode, print a blank line between expressions for readability
     // Only print for main prompts (not continuation prompts like "+")
     if let Ok(mut settings) = REPREX_SETTINGS.write() {
@@ -1227,6 +1251,71 @@ fn reset_r_error_state() {
     }
 }
 
+/// Configure the spinner animation frames.
+///
+/// The `frames` string contains characters to cycle through.
+/// An empty string disables the spinner.
+///
+/// Example: `"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"` for braille dots spinner.
+pub fn set_spinner_frames(frames: &str) {
+    if let Ok(mut state) = SPINNER_STATE.write() {
+        state.frames = frames.to_string();
+        state.frame_index = 0;
+    }
+}
+
+/// Start the spinner (display the busy indicator).
+///
+/// Shows the first frame of the spinner at the beginning of the line.
+/// The spinner is stopped automatically when R output is produced or
+/// when the next ReadConsole prompt is displayed.
+pub fn start_spinner() {
+    if let Ok(mut state) = SPINNER_STATE.write() {
+        if state.frames.is_empty() {
+            return; // Spinner disabled
+        }
+        if state.active {
+            return; // Already running
+        }
+        state.active = true;
+        state.frame_index = 0;
+
+        // Display the first frame at the start of the line
+        if let Some(frame) = state.frames.chars().next() {
+            // Print frame followed by space (as per design)
+            print!("{} ", frame);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+}
+
+/// Stop the spinner and clear it from the display.
+///
+/// This is called automatically when R produces output or when
+/// the next prompt is about to be displayed.
+pub fn stop_spinner() {
+    if let Ok(mut state) = SPINNER_STATE.write() {
+        if !state.active {
+            return; // Not running
+        }
+        state.active = false;
+
+        // Clear the spinner from the display:
+        // Move cursor back by 2 (frame + space) and clear to end of line
+        if !state.frames.is_empty() {
+            // Use carriage return to go to start of line, then clear the line
+            // This is cleaner than trying to calculate exact positions
+            print!("\r\x1b[K");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+}
+
+/// Check if the spinner is currently active.
+pub fn is_spinner_active() -> bool {
+    SPINNER_STATE.read().map(|s| s.active).unwrap_or(false)
+}
+
 /// Enable reprex mode with the given comment prefix.
 ///
 /// In reprex mode, all R output is prefixed with the comment string.
@@ -1381,6 +1470,62 @@ pub fn polled_events_for_repl() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_spinner_state_initial() {
+        // Initial state should be inactive
+        assert!(!is_spinner_active());
+    }
+
+    #[test]
+    fn test_spinner_disabled_with_empty_frames() {
+        // Configure with empty frames (disabled)
+        set_spinner_frames("");
+        start_spinner();
+        // Should not be active when frames are empty
+        assert!(!is_spinner_active());
+    }
+
+    #[test]
+    fn test_spinner_start_stop() {
+        // Configure with frames
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+        // Cleanup
+        set_spinner_frames("");
+    }
+
+    #[test]
+    fn test_spinner_double_start() {
+        // Configure with frames
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        assert!(is_spinner_active());
+        // Second start should be a no-op
+        start_spinner();
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+        // Cleanup
+        set_spinner_frames("");
+    }
+
+    #[test]
+    fn test_spinner_double_stop() {
+        // Configure with frames
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        stop_spinner();
+        assert!(!is_spinner_active());
+        // Second stop should be a no-op
+        stop_spinner();
+        assert!(!is_spinner_active());
+        // Cleanup
+        set_spinner_frames("");
+    }
 
     #[test]
     fn test_command_error_state_initial() {

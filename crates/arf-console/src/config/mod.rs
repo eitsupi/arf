@@ -15,7 +15,7 @@ pub use editor::EditorConfig;
 pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
 #[allow(unused_imports)] // StatusSymbol is part of public API for programmatic StatusConfig construction
-pub use prompt::{Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol};
+pub use prompt::{Indicators, ModeIndicatorPosition, PromptConfig, SpinnerConfig, StatusConfig, StatusSymbol};
 pub use reprex::ReprexConfig;
 pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
 

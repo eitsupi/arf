@@ -309,6 +309,7 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
+            self.config.prompt.spinner.clone(),
         );
 
         // Get history paths for :history commands
@@ -468,6 +469,7 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
+            self.config.prompt.spinner.clone(),
         );
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();
@@ -818,6 +820,13 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     if state.prompt_config.is_reprex_enabled() && !code.is_empty() {
                         clear_input_lines(&original_line, &code);
                     }
+
+                    // Start the spinner to indicate R is evaluating code
+                    // The spinner will be stopped when R produces output or the next prompt appears
+                    if !code.is_empty() {
+                        state.prompt_config.start_spinner();
+                    }
+
                     // Return the (possibly formatted) code to R
                     return Some(code);
                 }

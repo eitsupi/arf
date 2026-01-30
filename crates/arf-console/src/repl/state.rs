@@ -1,8 +1,8 @@
 //! REPL state management.
 
 use crate::config::{
-    HistoryForgetConfig, Indicators, ModeIndicatorPosition, RSourceStatus, StatusColorConfig,
-    StatusConfig,
+    HistoryForgetConfig, Indicators, ModeIndicatorPosition, RSourceStatus, SpinnerConfig,
+    StatusColorConfig, StatusConfig,
 };
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
@@ -68,6 +68,8 @@ pub struct PromptRuntimeConfig {
     status_colors: StatusColorConfig,
     /// Whether the last command failed (for status indicator).
     last_command_failed: bool,
+    /// Spinner configuration for busy indicator.
+    spinner_config: SpinnerConfig,
 }
 
 impl PromptRuntimeConfig {
@@ -88,7 +90,11 @@ impl PromptRuntimeConfig {
         mode_indicator_color: Color,
         status_config: StatusConfig,
         status_colors: StatusColorConfig,
+        spinner_config: SpinnerConfig,
     ) -> Self {
+        // Initialize spinner frames in arf-libr
+        arf_libr::set_spinner_frames(&spinner_config.frames);
+
         Self {
             prompt_formatter,
             main_template,
@@ -107,6 +113,7 @@ impl PromptRuntimeConfig {
             status_config,
             status_colors,
             last_command_failed: false,
+            spinner_config,
         }
     }
 
@@ -276,6 +283,22 @@ impl PromptRuntimeConfig {
             code.to_string()
         }
     }
+
+    /// Start the spinner if enabled and not in shell mode.
+    ///
+    /// The spinner provides visual feedback that R is evaluating code.
+    /// It is automatically stopped when R produces output or the next prompt appears.
+    pub fn start_spinner(&self) {
+        // Don't show spinner in shell mode (shell commands have their own feedback)
+        if self.shell_enabled {
+            return;
+        }
+        // Don't show spinner if frames are empty (disabled)
+        if self.spinner_config.frames.is_empty() {
+            return;
+        }
+        arf_libr::start_spinner();
+    }
 }
 
 #[cfg(test)]
@@ -310,6 +333,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         )
     }
 
@@ -439,6 +463,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         );
 
         let prompt = config.build_main_prompt();
@@ -478,6 +503,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         );
 
         // Get the current directory
@@ -541,6 +567,7 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         );
 
         // Initially no error - empty status symbol
@@ -596,6 +623,7 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         );
 
         // With empty symbols, status placeholder should expand to empty string
@@ -635,6 +663,7 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            SpinnerConfig::default(),
         );
 
         // Prompt stays the same regardless of status
@@ -676,6 +705,7 @@ mod tests {
             Color::Default,
             status_config,
             status_colors,
+            SpinnerConfig::default(),
         );
 
         // On success, prompt should use success color (Green)
@@ -698,5 +728,41 @@ mod tests {
             "Should contain error symbol and prompt, got: {}",
             rendered
         );
+    }
+
+    #[test]
+    fn test_spinner_not_started_in_shell_mode() {
+        let mut config = create_test_config(false, false);
+        config.set_shell(true);
+        // In shell mode, start_spinner should be a no-op (no panic, etc.)
+        config.start_spinner();
+        // Verify shell mode is still enabled
+        assert!(config.is_shell_enabled());
+    }
+
+    #[test]
+    fn test_spinner_not_started_with_empty_frames() {
+        let formatter = PromptFormatter::default();
+        // Create config with empty spinner frames (disabled)
+        let config = PromptRuntimeConfig::new(
+            formatter,
+            "r> ".to_string(),
+            "+  ".to_string(),
+            "[bash] $ ".to_string(),
+            ModeIndicatorPosition::Prefix,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            SpinnerConfig { frames: String::new() }, // Disabled
+        );
+        // Should not panic when spinner is disabled
+        config.start_spinner();
     }
 }
