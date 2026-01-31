@@ -236,7 +236,7 @@
             "frames": {
               "description": "Animation frames (each character is one frame). Empty string to disable.",
               "type": "string",
-              "default": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+              "default": ""
             }
           }
         }

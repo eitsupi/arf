@@ -1340,10 +1340,6 @@ pub fn start_spinner() {
         while !stop_signal_clone.load(Ordering::Relaxed) {
             thread::sleep(frame_duration);
 
-            if stop_signal_clone.load(Ordering::Relaxed) {
-                break;
-            }
-
             // Advance to next frame
             frame_index = (frame_index + 1) % frames_chars.len();
 

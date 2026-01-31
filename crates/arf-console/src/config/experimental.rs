@@ -57,7 +57,7 @@ impl JsonSchema for ExperimentalConfig {
                         "frames": {
                             "type": "string",
                             "description": "Animation frames (each character is one frame). Empty string to disable.",
-                            "default": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+                            "default": ""
                         },
                         "color": {
                             "type": "string",
