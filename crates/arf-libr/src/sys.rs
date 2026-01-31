@@ -1337,8 +1337,13 @@ pub fn start_spinner() {
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
-        while !stop_signal_clone.load(Ordering::Relaxed) {
+        loop {
+            // Check stop signal before sleeping for more responsive shutdown
             thread::sleep(frame_duration);
+
+            if stop_signal_clone.load(Ordering::Relaxed) {
+                break;
+            }
 
             // Advance to next frame
             frame_index = (frame_index + 1) % frames_chars.len();
@@ -1554,9 +1559,9 @@ mod tests {
     /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
     #[test]
     fn test_spinner_lifecycle() {
-        // Acquire the spinner lock for the entire test to prevent interference
-        let _guard = SPINNER_THREAD.lock().unwrap();
-        drop(_guard); // Release immediately so we can use start_spinner/stop_spinner
+        // Verify the spinner lock isn't poisoned from a previous panic.
+        // We release immediately since start_spinner/stop_spinner need to acquire it.
+        drop(SPINNER_THREAD.lock().unwrap());
 
         // Reset to known state first
         stop_spinner();
