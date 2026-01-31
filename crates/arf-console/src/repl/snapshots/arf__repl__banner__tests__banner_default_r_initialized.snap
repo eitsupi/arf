@@ -1,8 +1,8 @@
 ---
-source: crates/arf-console/src/repl.rs
+source: crates/arf-console/src/repl/banner.rs
 expression: banner
 ---
-# arf console v0.1.0
+# arf console v0.1.1
 # Edit mode: emacs
 # R is ready.
 # Type :cmds for meta commands list, Ctrl+D to exit.
