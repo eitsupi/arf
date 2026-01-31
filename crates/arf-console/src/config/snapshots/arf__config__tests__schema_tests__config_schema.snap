@@ -215,33 +215,37 @@ expression: schema
       }
     },
     "ExperimentalConfig": {
-      "description": "Experimental features configuration. Features in this section are subject to change or removal.",
+      "$ref": "#/$defs/ExperimentalConfigSchema"
+    },
+    "ExperimentalConfigSchema": {
+      "description": "Schema-only mirror of `ExperimentalConfig` that can derive `JsonSchema`.\n\nThis allows `schemars` to auto-generate detailed metadata (defaults,\nnumeric formats, minimum values, and full documentation), which would\notherwise be lost in a fully manual `JsonSchema` implementation.",
       "type": "object",
       "properties": {
         "completion_min_chars": {
-          "description": "Minimum characters to trigger automatic completion display",
+          "description": "Minimum characters to trigger automatic completion display.\n\nWhen set, the completion menu appears automatically after typing\nthis many characters, without requiring a Tab key press.\nThis is similar to radian's `complete_while_typing` feature.\n\nWhen not set (null/omitted), completion requires Tab key press\n(the default behavior).",
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
         },
         "history_forget": {
-          "$ref": "#/$defs/HistoryForgetConfig"
+          "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",
+          "$ref": "#/$defs/HistoryForgetConfig",
+          "default": {
+            "delay": 2,
+            "enabled": false,
+            "on_exit_only": false
+          }
         },
         "prompt_spinner": {
-          "description": "Spinner configuration for busy indicator during R execution",
-          "type": "object",
-          "properties": {
-            "color": {
-              "description": "Color for the spinner (e.g., 'Cyan', 'LightBlue')",
-              "type": "string",
-              "default": "Cyan"
-            },
-            "frames": {
-              "description": "Animation frames (each character is one frame). Empty string to disable.",
-              "type": "string",
-              "default": ""
-            }
+          "description": "Spinner configuration for busy indicator during R execution.",
+          "$ref": "#/$defs/SpinnerConfigSchema",
+          "default": {
+            "color": "Cyan",
+            "frames": ""
           }
         }
       }
@@ -432,6 +436,22 @@ expression: schema
           "description": "Enable reprex mode (no prompt, output prefixed with comment).",
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "SpinnerConfigSchema": {
+      "description": "Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.\n\nThis type is used solely for JSON Schema generation, so that we can still\nprovide a helpful schema while `Color` does not implement `JsonSchema`.",
+      "type": "object",
+      "properties": {
+        "color": {
+          "description": "Color for the spinner (e.g., \"Cyan\", \"LightBlue\").",
+          "type": "string",
+          "default": "Cyan"
+        },
+        "frames": {
+          "description": "Spinner animation frames as a string where each character is one frame.\nEmpty string disables the spinner.\n\nExample: `frames = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"` (braille dots)\nExample: `frames = \"|/-\\\\\"` (ASCII spinner)",
+          "type": "string",
+          "default": ""
         }
       }
     },

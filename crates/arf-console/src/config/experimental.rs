@@ -33,41 +33,81 @@ pub struct ExperimentalConfig {
     pub prompt_spinner: SpinnerConfig,
 }
 
+/// Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.
+///
+/// This type is used solely for JSON Schema generation, so that we can still
+/// provide a helpful schema while `Color` does not implement `JsonSchema`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+struct SpinnerConfigSchema {
+    /// Spinner animation frames as a string where each character is one frame.
+    /// Empty string disables the spinner.
+    ///
+    /// Example: `frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"` (braille dots)
+    /// Example: `frames = "|/-\\"` (ASCII spinner)
+    pub frames: String,
+
+    /// Color for the spinner (e.g., "Cyan", "LightBlue").
+    pub color: String,
+}
+
+impl Default for SpinnerConfigSchema {
+    fn default() -> Self {
+        SpinnerConfigSchema {
+            frames: String::new(),
+            color: "Cyan".to_string(),
+        }
+    }
+}
+
+/// Schema-only mirror of `ExperimentalConfig` that can derive `JsonSchema`.
+///
+/// This allows `schemars` to auto-generate detailed metadata (defaults,
+/// numeric formats, minimum values, and full documentation), which would
+/// otherwise be lost in a fully manual `JsonSchema` implementation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+struct ExperimentalConfigSchema {
+    /// Sponge-like automatic removal of failed commands from history.
+    ///
+    /// Similar to fish's sponge plugin, this feature removes commands that
+    /// produced errors from the history after a configurable delay.
+    pub history_forget: HistoryForgetConfig,
+
+    /// Minimum characters to trigger automatic completion display.
+    ///
+    /// When set, the completion menu appears automatically after typing
+    /// this many characters, without requiring a Tab key press.
+    /// This is similar to radian's `complete_while_typing` feature.
+    ///
+    /// When not set (null/omitted), completion requires Tab key press
+    /// (the default behavior).
+    pub completion_min_chars: Option<usize>,
+
+    /// Spinner configuration for busy indicator during R execution.
+    pub prompt_spinner: SpinnerConfigSchema,
+}
+
+impl Default for ExperimentalConfigSchema {
+    fn default() -> Self {
+        ExperimentalConfigSchema {
+            history_forget: HistoryForgetConfig::default(),
+            completion_min_chars: None,
+            prompt_spinner: SpinnerConfigSchema::default(),
+        }
+    }
+}
+
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
-// doesn't implement JsonSchema.
+// doesn't implement JsonSchema. We delegate to a schema-only mirror type so that
+// schemars can still auto-generate rich metadata (defaults, formats, etc.).
 impl JsonSchema for ExperimentalConfig {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("ExperimentalConfig")
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "object",
-            "description": "Experimental features configuration. Features in this section are subject to change or removal.",
-            "properties": {
-                "history_forget": generator.subschema_for::<HistoryForgetConfig>(),
-                "completion_min_chars": {
-                    "type": ["integer", "null"],
-                    "description": "Minimum characters to trigger automatic completion display"
-                },
-                "prompt_spinner": {
-                    "type": "object",
-                    "description": "Spinner configuration for busy indicator during R execution",
-                    "properties": {
-                        "frames": {
-                            "type": "string",
-                            "description": "Animation frames (each character is one frame). Empty string to disable.",
-                            "default": ""
-                        },
-                        "color": {
-                            "type": "string",
-                            "description": "Color for the spinner (e.g., 'Cyan', 'LightBlue')",
-                            "default": "Cyan"
-                        }
-                    }
-                }
-            }
-        })
+        generator.subschema_for::<ExperimentalConfigSchema>()
     }
 }
 
