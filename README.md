@@ -187,6 +187,36 @@ frames = "|/-\\"
 frames = "▖▘▝▗"
 ```
 
+### Auto-completion while typing
+
+Show the completion menu automatically after typing a minimum number of characters, without requiring Tab.
+
+```toml
+[experimental]
+completion_min_chars = 3  # Show completions after 3 characters
+```
+
+When not set, completion requires pressing Tab (the default behavior). This is similar to radian's `complete_while_typing` feature.
+
+### History forget
+
+Automatically remove commands that produced errors from history. Similar to fish's [sponge](https://github.com/meaningful-ooo/sponge) plugin.
+
+```toml
+[experimental.history_forget]
+enabled = true
+delay = 2          # Keep last N failed commands for quick retry
+on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
+```
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | `false` | Enable automatic removal of failed commands. |
+| `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
+| `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
+
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`
