@@ -66,6 +66,10 @@ expression: schema
           "delay": 2,
           "enabled": false,
           "on_exit_only": false
+        },
+        "prompt_spinner": {
+          "color": "Cyan",
+          "frames": ""
         }
       }
     },
@@ -211,7 +215,10 @@ expression: schema
       }
     },
     "ExperimentalConfig": {
-      "description": "Experimental features configuration.\n\nFeatures in this section are subject to change or removal.",
+      "$ref": "#/$defs/ExperimentalConfigSchema"
+    },
+    "ExperimentalConfigSchema": {
+      "description": "Schema-only mirror of `ExperimentalConfig` that can derive `JsonSchema`.\n\nThis allows `schemars` to auto-generate detailed metadata (defaults,\nnumeric formats, minimum values, and full documentation), which would\notherwise be lost in a fully manual `JsonSchema` implementation.",
       "type": "object",
       "properties": {
         "completion_min_chars": {
@@ -231,6 +238,14 @@ expression: schema
             "delay": 2,
             "enabled": false,
             "on_exit_only": false
+          }
+        },
+        "prompt_spinner": {
+          "description": "Spinner configuration for busy indicator during R execution.",
+          "$ref": "#/$defs/SpinnerConfigSchema",
+          "default": {
+            "color": "Cyan",
+            "frames": ""
           }
         }
       }
@@ -421,6 +436,22 @@ expression: schema
           "description": "Enable reprex mode (no prompt, output prefixed with comment).",
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "SpinnerConfigSchema": {
+      "description": "Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.\n\nThis type is used solely for JSON Schema generation, so that we can still\nprovide a helpful schema while `Color` does not implement `JsonSchema`.",
+      "type": "object",
+      "properties": {
+        "color": {
+          "description": "Color for the spinner (e.g., \"Cyan\", \"LightBlue\").",
+          "type": "string",
+          "default": "Cyan"
+        },
+        "frames": {
+          "description": "Spinner animation frames as a string where each character is one frame.\nEmpty string disables the spinner.\n\nExample: `frames = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"` (braille dots)\nExample: `frames = \"|/-\\\\\"` (ASCII spinner)",
+          "type": "string",
+          "default": ""
         }
       }
     },

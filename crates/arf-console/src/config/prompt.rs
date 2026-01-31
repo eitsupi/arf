@@ -126,3 +126,4 @@ impl Default for Indicators {
         }
     }
 }
+

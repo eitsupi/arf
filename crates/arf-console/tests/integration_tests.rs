@@ -987,6 +987,9 @@ fn test_pty_history_sponge_forget() {
 enabled = true
 delay = 1
 on_exit_only = false
+
+[experimental.prompt_spinner]
+frames = ""
 "#
     )
     .expect("Failed to write config");
