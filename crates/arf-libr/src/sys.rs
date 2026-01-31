@@ -1338,12 +1338,18 @@ pub fn start_spinner() {
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
         loop {
-            // Check stop signal before each frame to allow timely shutdown
+            // Check stop signal at loop start
             if stop_signal_clone.load(Ordering::Relaxed) {
                 break;
             }
 
             thread::sleep(frame_duration);
+
+            // Check again after sleep for faster response to stop signal
+            // This avoids unnecessary frame display when stop was called during sleep
+            if stop_signal_clone.load(Ordering::Relaxed) {
+                break;
+            }
 
             // Advance to next frame
             frame_index = (frame_index + 1) % frames_chars.len();
