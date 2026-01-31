@@ -120,15 +120,72 @@
       "properties": {
         "meta": {
           "description": "Colors for meta commands",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "command": {
+              "description": "Color for meta command lines"
+            }
+          }
         },
         "prompt": {
           "description": "Colors for prompts",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "continuation": {
+              "description": "Color for the continuation prompt"
+            },
+            "indicator": {
+              "description": "Color for the mode indicator text"
+            },
+            "main": {
+              "description": "Color for the main R prompt"
+            },
+            "shell": {
+              "description": "Color for the shell mode prompt"
+            },
+            "status": {
+              "description": "Colors for command status indicator",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "Color for error status"
+                },
+                "success": {
+                  "description": "Color for success status"
+                }
+              }
+            }
+          }
         },
         "r": {
           "description": "Colors for R syntax tokens",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "comment": {
+              "description": "Color for comments"
+            },
+            "constant": {
+              "description": "Color for constants (TRUE, FALSE, NULL, NA, etc.)"
+            },
+            "identifier": {
+              "description": "Color for identifiers"
+            },
+            "keyword": {
+              "description": "Color for keywords"
+            },
+            "number": {
+              "description": "Color for numeric literals"
+            },
+            "operator": {
+              "description": "Color for operators"
+            },
+            "punctuation": {
+              "description": "Color for punctuation"
+            },
+            "string": {
+              "description": "Color for string literals"
+            }
+          }
         }
       }
     },

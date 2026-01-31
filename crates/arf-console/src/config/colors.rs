@@ -30,15 +30,42 @@ impl JsonSchema for ColorsConfig {
             "properties": {
                 "r": {
                     "type": "object",
-                    "description": "Colors for R syntax tokens"
+                    "description": "Colors for R syntax tokens",
+                    "properties": {
+                        "comment": { "description": "Color for comments" },
+                        "string": { "description": "Color for string literals" },
+                        "number": { "description": "Color for numeric literals" },
+                        "keyword": { "description": "Color for keywords" },
+                        "constant": { "description": "Color for constants (TRUE, FALSE, NULL, NA, etc.)" },
+                        "operator": { "description": "Color for operators" },
+                        "punctuation": { "description": "Color for punctuation" },
+                        "identifier": { "description": "Color for identifiers" }
+                    }
                 },
                 "meta": {
                     "type": "object",
-                    "description": "Colors for meta commands"
+                    "description": "Colors for meta commands",
+                    "properties": {
+                        "command": { "description": "Color for meta command lines" }
+                    }
                 },
                 "prompt": {
                     "type": "object",
-                    "description": "Colors for prompts"
+                    "description": "Colors for prompts",
+                    "properties": {
+                        "main": { "description": "Color for the main R prompt" },
+                        "continuation": { "description": "Color for the continuation prompt" },
+                        "shell": { "description": "Color for the shell mode prompt" },
+                        "indicator": { "description": "Color for the mode indicator text" },
+                        "status": {
+                            "type": "object",
+                            "description": "Colors for command status indicator",
+                            "properties": {
+                                "success": { "description": "Color for success status" },
+                                "error": { "description": "Color for error status" }
+                            }
+                        }
+                    }
                 }
             }
         })
