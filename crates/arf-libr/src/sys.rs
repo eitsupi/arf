@@ -790,8 +790,11 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         // ark uses RGui mode (not RTerm or LinkDLL)
         (*params_ptr).character_mode = UImode::RGui;
 
-        // Never load user or site .Rprofile during initialization
-        // We handle this ourselves later
+        // Disable R's built-in profile loading during initialization.
+        // We source .Rprofile manually in arf-console/src/main.rs after R is
+        // fully initialized. This allows globalCallingHandlers() to work in
+        // .Rprofile (used by packages like prompt).
+        // See: https://github.com/posit-dev/ark/blob/ca75dbb466875c8d3cd04ad8fbf5684d59b31ba1/crates/ark/src/startup.rs
         (*params_ptr).load_init_file = R_FALSE;
         (*params_ptr).load_site_file = R_FALSE;
 
