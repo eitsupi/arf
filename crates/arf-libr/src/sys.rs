@@ -1339,11 +1339,11 @@ pub fn start_spinner() {
 
         loop {
             // Check stop signal before sleeping for more responsive shutdown
-            thread::sleep(frame_duration);
-
             if stop_signal_clone.load(Ordering::Relaxed) {
                 break;
             }
+
+            thread::sleep(frame_duration);
 
             // Advance to next frame
             frame_index = (frame_index + 1) % frames_chars.len();
