@@ -23,6 +23,8 @@ use config::{
 use repl::Repl;
 use std::fs;
 use std::process::ExitCode;
+#[cfg(windows)]
+use std::path::PathBuf;
 
 fn main() -> ExitCode {
     match run() {
@@ -143,14 +145,29 @@ fn run() -> Result<()> {
 
     // Initialize R with CLI-specified flags
     log::info!("Initializing R...");
-    unsafe {
-        if let Err(e) = arf_libr::initialize_r_with_args(&r_args_refs) {
-            eprintln!("Warning: Failed to initialize R: {}", e);
-            eprintln!("R evaluation will not be available.");
-            eprintln!("Make sure R is installed and R_HOME is set correctly.\n");
-        } else {
-            log::info!("R initialized successfully");
+    #[allow(unused_variables)]
+    let r_initialized = unsafe {
+        match arf_libr::initialize_r_with_args(&r_args_refs) {
+            Ok(()) => {
+                log::info!("R initialized successfully");
+                true
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to initialize R: {}", e);
+                eprintln!("R evaluation will not be available.");
+                eprintln!("Make sure R is installed and R_HOME is set correctly.\n");
+                false
+            }
         }
+    };
+
+    // Source R profile files after R initialization (Windows only)
+    // On Windows, R's built-in profile loading is disabled during initialization
+    // (load_init_file = R_FALSE in arf-libr/src/sys.rs), so we must manually
+    // source .Rprofile files here. On Unix, R handles this automatically.
+    #[cfg(windows)]
+    if r_initialized {
+        source_r_profiles(&r_args);
     }
 
     // Create and run the REPL
@@ -411,5 +428,40 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
         Err(e) => {
             anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
         }
+    }
+}
+
+/// Source R profile files after R initialization.
+///
+/// This handles loading of:
+/// - Site-level Rprofile.site (unless --no-site-file or --vanilla)
+/// - User-level .Rprofile (unless --no-init-file or --vanilla)
+///
+/// On Windows, R's built-in profile loading is disabled during initialization
+/// for compatibility with `globalCallingHandlers()`, so we must manually
+/// source these files here.
+#[cfg(windows)]
+fn source_r_profiles(r_args: &[String]) {
+    // Get R_HOME from environment (set earlier in setup_r)
+    let r_home = match std::env::var("R_HOME") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => {
+            log::warn!("R_HOME not set, skipping R profile sourcing");
+            return;
+        }
+    };
+
+    // Source site-level R profile unless --no-site-file or --vanilla
+    if !arf_harp::should_ignore_site_r_profile(r_args) {
+        arf_harp::source_site_r_profile(&r_home);
+    } else {
+        log::trace!("Skipping site R profile (--no-site-file or --vanilla)");
+    }
+
+    // Source user-level R profile unless --no-init-file or --vanilla
+    if !arf_harp::should_ignore_user_r_profile(r_args) {
+        arf_harp::source_user_r_profile();
+    } else {
+        log::trace!("Skipping user R profile (--no-init-file or --vanilla)");
     }
 }

@@ -8,8 +8,13 @@ mod error;
 pub mod help;
 mod object;
 mod protect;
+pub mod startup;
 
 pub use error::*;
 pub use help::*;
 pub use object::*;
 pub use protect::*;
+pub use startup::{
+    should_ignore_site_r_profile, should_ignore_user_r_profile, source_site_r_profile,
+    source_user_r_profile,
+};
