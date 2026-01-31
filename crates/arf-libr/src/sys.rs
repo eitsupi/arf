@@ -1338,7 +1338,7 @@ pub fn start_spinner() {
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
         loop {
-            // Check stop signal before sleeping for more responsive shutdown
+            // Check stop signal before each frame to allow timely shutdown
             if stop_signal_clone.load(Ordering::Relaxed) {
                 break;
             }
