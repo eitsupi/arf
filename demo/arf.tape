@@ -3,10 +3,10 @@ Output arf.gif
 
 # Terminal settings
 Set Shell bash
-Set FontSize 22
-Set Width 960
-Set Height 600
-Set Padding 20
+Set FontSize 14
+Set Width 600
+Set Height 400
+Set Padding 14
 Set TypingSpeed 75ms
 
 # Start arf
