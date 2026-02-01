@@ -30,7 +30,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run cargo fmt
-
         run: |
           rustup component add rustfmt
           cargo fmt \
@@ -51,7 +50,7 @@ jobs:
             --all-features \
             --locked \
             -- \
-            -D warnings \
+            -D warnings
 
   test:
     strategy:
