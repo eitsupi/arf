@@ -2488,3 +2488,133 @@ fn test_pty_menu_prompt() {
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Test {vi} placeholder mode indicator timing behavior.
+///
+/// This test documents the current behavior where the {vi} placeholder
+/// is always 1 render cycle behind the actual vi mode.
+///
+/// Known issue: Due to reedline's Prompt trait design, render_prompt_left()
+/// is called before render_prompt_indicator(), so the {vi} placeholder
+/// cannot know the current mode until the next render cycle.
+#[test]
+fn test_pty_vi_placeholder_mode_switch() {
+    use common::Terminal;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // Create a config file with vi mode and {vi} placeholder
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[editor]
+mode = "vi"
+
+[prompt]
+format = "{{vi}}r> "
+
+[prompt.vi]
+symbol = {{ insert = "[I]", normal = "[N]" }}
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Check initial prompt shows insert mode indicator
+    let screen = terminal.screen().expect("Should get screen");
+    terminal.dump_screen().ok();
+    
+    // Find the prompt line
+    let prompt_line = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+    assert!(
+        prompt_line.is_some(),
+        "Should find prompt line with 'r> '"
+    );
+    let prompt_line = prompt_line.unwrap();
+    assert!(
+        prompt_line.contains("[I]"),
+        "Initial prompt should show [I] for insert mode, got: {}",
+        prompt_line
+    );
+
+    // Press Escape to switch to normal mode
+    terminal.send("\x1b").expect("Should send Escape");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Check prompt after Escape
+    let screen = terminal.screen().expect("Should get screen after Escape");
+    eprintln!("=== After Escape ===");
+    terminal.dump_screen().ok();
+
+    let prompt_line_after_esc = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+
+    // Press another key (j - a vi normal mode motion) to trigger another render
+    terminal.send("j").expect("Should send j");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let screen = terminal.screen().expect("Should get screen after j");
+    eprintln!("=== After pressing 'j' ===");
+    terminal.dump_screen().ok();
+
+    let prompt_line_after_j = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+
+    // Press 'i' to go back to insert mode
+    terminal.send("i").expect("Should send i");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let screen = terminal.screen().expect("Should get screen after i");
+    eprintln!("=== After pressing 'i' (back to insert) ===");
+    terminal.dump_screen().ok();
+
+    let prompt_line_after_i = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+
+    // Report findings
+    eprintln!("\n=== Summary ===");
+    eprintln!("After Escape: {:?}", prompt_line_after_esc);
+    eprintln!("After 'j':    {:?}", prompt_line_after_j);
+    eprintln!("After 'i':    {:?}", prompt_line_after_i);
+
+    // Document the current (buggy) behavior:
+    // The {vi} placeholder is always 1 render cycle behind.
+    //
+    // Ideal behavior:
+    //   After Escape: [N] (normal mode)
+    //   After 'j':    [N] (still normal mode)
+    //   After 'i':    [I] (back to insert mode)
+    //
+    // Actual behavior (1 cycle behind):
+    //   After Escape: [I] (still showing old insert mode)
+    //   After 'j':    [N] (now showing normal mode from previous render)
+    //   After 'i':    [N] (still showing old normal mode)
+
+    // This test documents the current behavior, not the ideal behavior.
+    // TODO: Fix the 1-cycle delay issue (requires reedline changes or alternative approach)
+    assert!(
+        prompt_line_after_esc.as_ref().map_or(false, |l| l.contains("[I]")),
+        "BUG: After Escape, placeholder still shows [I] (1 cycle behind), got: {:?}",
+        prompt_line_after_esc
+    );
+    assert!(
+        prompt_line_after_j.as_ref().map_or(false, |l| l.contains("[N]")),
+        "After 'j', placeholder finally shows [N], got: {:?}",
+        prompt_line_after_j
+    );
+    assert!(
+        prompt_line_after_i.as_ref().map_or(false, |l| l.contains("[N]")),
+        "BUG: After 'i', placeholder still shows [N] (1 cycle behind), got: {:?}",
+        prompt_line_after_i
+    );
+
+    terminal.quit().expect("Should quit cleanly");
+}
