@@ -1644,41 +1644,36 @@ mod tests {
         set_spinner_color("");
     }
 
+    /// Test command error state tracking.
+    ///
+    /// These assertions are combined into a single test to avoid race conditions
+    /// when tests run in parallel (they share global state via CONDITION_ERROR_OCCURRED).
     #[test]
-    fn test_command_error_state_initial() {
+    fn test_command_error_state() {
         // Reset to known state first
-        reset_command_error_state();
-        // Initial state should be false (no error)
-        assert!(!command_had_error());
-    }
-
-    #[test]
-    fn test_command_error_state_reset() {
-        // Manually set condition error state to true
-        mark_error_condition();
-        assert!(command_had_error());
-
-        // Reset should clear the error state
-        reset_command_error_state();
-        assert!(!command_had_error());
-    }
-
-    #[test]
-    fn test_condition_error_detection() {
         reset_command_error_state();
 
         // Initially no error
-        assert!(!command_had_error());
+        assert!(!command_had_error(), "initial state should be false");
 
-        // Simulate an error condition being signaled (rlang/dplyr style)
+        // Mark an error condition
         mark_error_condition();
+        assert!(command_had_error(), "should detect error after mark");
 
-        // Error should be detected
-        assert!(command_had_error());
-
-        // Reset should clear the error
+        // Reset should clear the error state
         reset_command_error_state();
-        assert!(!command_had_error());
+        assert!(
+            !command_had_error(),
+            "should be false after reset_command_error_state"
+        );
+
+        // Mark error again and verify detection
+        mark_error_condition();
+        assert!(command_had_error(), "should detect error condition");
+
+        // Final reset
+        reset_command_error_state();
+        assert!(!command_had_error(), "should be false after final reset");
     }
 
     #[test]
