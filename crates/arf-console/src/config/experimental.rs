@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Features in this section are subject to change or removal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ExperimentalConfig {
     /// Sponge-like automatic removal of failed commands from history.
     ///
@@ -67,6 +68,7 @@ impl Default for SpinnerConfigSchema {
 /// otherwise be lost in a fully manual `JsonSchema` implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[derive(Default)]
 struct ExperimentalConfigSchema {
     /// Sponge-like automatic removal of failed commands from history.
     ///
@@ -88,16 +90,6 @@ struct ExperimentalConfigSchema {
     pub prompt_spinner: SpinnerConfigSchema,
 }
 
-impl Default for ExperimentalConfigSchema {
-    fn default() -> Self {
-        ExperimentalConfigSchema {
-            history_forget: HistoryForgetConfig::default(),
-            completion_min_chars: None,
-            prompt_spinner: SpinnerConfigSchema::default(),
-        }
-    }
-}
-
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
 // doesn't implement JsonSchema. We delegate to a schema-only mirror type so that
 // schemars can still auto-generate rich metadata (defaults, formats, etc.).
@@ -108,16 +100,6 @@ impl JsonSchema for ExperimentalConfig {
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         generator.subschema_for::<ExperimentalConfigSchema>()
-    }
-}
-
-impl Default for ExperimentalConfig {
-    fn default() -> Self {
-        ExperimentalConfig {
-            history_forget: HistoryForgetConfig::default(),
-            completion_min_chars: None,
-            prompt_spinner: SpinnerConfig::default(),
-        }
     }
 }
 

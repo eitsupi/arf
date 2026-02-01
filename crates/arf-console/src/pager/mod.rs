@@ -9,7 +9,7 @@ pub mod history_schema;
 pub use help::run_help_browser;
 
 use crossterm::{
-    cursor,
+    ExecutableCommand, cursor,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
         MouseEventKind,
@@ -20,7 +20,6 @@ use crossterm::{
         self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
         LeaveAlternateScreen,
     },
-    ExecutableCommand,
 };
 use std::io::{self, Write};
 use std::time::Duration;
@@ -156,9 +155,7 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                         (KeyCode::Up, _)
                         | (KeyCode::Char('k'), KeyModifiers::NONE)
                         | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                            if scroll_offset > 0 {
-                                scroll_offset -= 1;
-                            }
+                            scroll_offset = scroll_offset.saturating_sub(1);
                         }
 
                         // Navigation - down

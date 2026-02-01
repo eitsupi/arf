@@ -17,7 +17,7 @@
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
-use arf_libr::{r_library, r_nil_value, restore_stderr, suppress_stderr, ParseStatus, SEXP};
+use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value, restore_stderr, suppress_stderr};
 use std::ffi::CString;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -249,12 +249,12 @@ fn extract_identifier_before_cursor(before_cursor: &str) -> Option<String> {
 /// Get the list of installed packages with caching.
 fn get_installed_packages() -> HarpResult<Vec<String>> {
     // Check cache first
-    if let Ok(cache) = PACKAGE_CACHE.lock() {
-        if let Some(last_updated) = cache.last_updated {
-            if last_updated.elapsed() < CACHE_DURATION && !cache.packages.is_empty() {
-                return Ok(cache.packages.clone());
-            }
-        }
+    if let Ok(cache) = PACKAGE_CACHE.lock()
+        && let Some(last_updated) = cache.last_updated
+        && last_updated.elapsed() < CACHE_DURATION
+        && !cache.packages.is_empty()
+    {
+        return Ok(cache.packages.clone());
     }
 
     // Fetch from R
@@ -381,11 +381,7 @@ pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpRe
             // Add R's built-in completions (for variables, functions, etc.)
             // Filter out `pkg::` completions since we already have them from get_namespace_completions
             if let Ok(r_completions) = get_r_builtin_completions(line, cursor_pos, timeout_ms) {
-                completions.extend(
-                    r_completions
-                        .into_iter()
-                        .filter(|c| !c.ends_with("::")),
-                );
+                completions.extend(r_completions.into_iter().filter(|c| !c.ends_with("::")));
             }
             return Ok(completions);
         }
@@ -621,10 +617,10 @@ unsafe fn extract_string_vector(sexp: SEXP) -> HarpResult<Vec<String>> {
         for i in 0..len {
             let elt = (lib.string_elt)(sexp, i);
             let cstr = (lib.r_charsxp)(elt);
-            if !cstr.is_null() {
-                if let Ok(s) = std::ffi::CStr::from_ptr(cstr).to_str() {
-                    result.push(s.to_string());
-                }
+            if !cstr.is_null()
+                && let Ok(s) = std::ffi::CStr::from_ptr(cstr).to_str()
+            {
+                result.push(s.to_string());
             }
         }
 
@@ -687,7 +683,10 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
 
     // Build R code to check all names at once
     // Using mode(get0(x, inherits=TRUE)) == "function" for each name
-    let names_r: Vec<String> = names.iter().map(|n| format!(r#""{}""#, escape_r_string(n))).collect();
+    let names_r: Vec<String> = names
+        .iter()
+        .map(|n| format!(r#""{}""#, escape_r_string(n)))
+        .collect();
     let names_vector = names_r.join(", ");
 
     let code = format!(
@@ -908,19 +907,13 @@ mod tests {
     #[test]
     fn test_detect_namespace_context_not_in_string() {
         // Inside double-quoted string - no namespace context
-        assert_eq!(
-            detect_package_context(r#""sta"#, 4),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context(r#""sta"#, 4), PackageContext::None);
         assert_eq!(
             detect_package_context(r#"x <- "sta"#, 9),
             PackageContext::None
         );
         // Inside single-quoted string
-        assert_eq!(
-            detect_package_context("'sta", 4),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context("'sta", 4), PackageContext::None);
     }
 
     #[test]
@@ -954,14 +947,8 @@ mod tests {
     #[test]
     fn test_detect_namespace_context_after_colons() {
         // After :: - R's built-in handles this
-        assert_eq!(
-            detect_package_context("stats::", 7),
-            PackageContext::None
-        );
-        assert_eq!(
-            detect_package_context("stats:::", 8),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context("stats::", 7), PackageContext::None);
+        assert_eq!(detect_package_context("stats:::", 8), PackageContext::None);
         // Inside existing pkg::func - don't suggest pkg:: again
         // (cursor at position 5 means "stats" with "::" following)
         assert_eq!(
@@ -973,28 +960,16 @@ mod tests {
     #[test]
     fn test_detect_namespace_context_no_identifier() {
         // No identifier at cursor
-        assert_eq!(
-            detect_package_context("x <- ", 5),
-            PackageContext::None
-        );
-        assert_eq!(
-            detect_package_context("", 0),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context("x <- ", 5), PackageContext::None);
+        assert_eq!(detect_package_context("", 0), PackageContext::None);
         // Just operators/punctuation
-        assert_eq!(
-            detect_package_context("(", 1),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context("(", 1), PackageContext::None);
     }
 
     #[test]
     fn test_detect_namespace_context_numeric() {
         // Starts with digit - not a valid identifier
-        assert_eq!(
-            detect_package_context("123abc", 6),
-            PackageContext::None
-        );
+        assert_eq!(detect_package_context("123abc", 6), PackageContext::None);
     }
 
     #[test]
@@ -1031,5 +1006,4 @@ mod tests {
         assert_eq!(extract_identifier_before_cursor("123"), None);
         assert_eq!(extract_identifier_before_cursor("x <- "), None);
     }
-
 }

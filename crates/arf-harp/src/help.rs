@@ -13,7 +13,7 @@
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
-use arf_libr::{r_library, r_nil_value, ParseStatus, SEXP};
+use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use std::ffi::CString;
 
 /// A help topic from R's help database.
@@ -325,9 +325,10 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
         // Extract the string result
         if let Some(result) = payload.result {
             if result == r_nil_value()? {
-                return Err(HarpError::RError(arf_libr::RError::EvalError(
-                    format!("No help found for topic '{}'", topic),
-                )));
+                return Err(HarpError::RError(arf_libr::RError::EvalError(format!(
+                    "No help found for topic '{}'",
+                    topic
+                ))));
             }
 
             // Check if it's a character vector

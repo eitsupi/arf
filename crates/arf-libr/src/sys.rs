@@ -53,7 +53,9 @@ fn r_lib_folder() -> &'static str {
 pub fn find_r_library() -> RResult<PathBuf> {
     // First, check R_HOME environment variable
     if let Ok(r_home) = env::var("R_HOME") {
-        let lib_path = PathBuf::from(&r_home).join(r_lib_folder()).join(r_lib_name());
+        let lib_path = PathBuf::from(&r_home)
+            .join(r_lib_folder())
+            .join(r_lib_name());
         if lib_path.exists() {
             return Ok(lib_path);
         }
@@ -65,13 +67,15 @@ pub fn find_r_library() -> RResult<PathBuf> {
     #[cfg(windows)]
     let r_cmd = "R.exe";
 
-    if let Ok(output) = Command::new(r_cmd).args(["RHOME"]).output() {
-        if output.status.success() {
-            let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let lib_path = PathBuf::from(&r_home).join(r_lib_folder()).join(r_lib_name());
-            if lib_path.exists() {
-                return Ok(lib_path);
-            }
+    if let Ok(output) = Command::new(r_cmd).args(["RHOME"]).output()
+        && output.status.success()
+    {
+        let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let lib_path = PathBuf::from(&r_home)
+            .join(r_lib_folder())
+            .join(r_lib_name());
+        if lib_path.exists() {
+            return Ok(lib_path);
         }
     }
 
@@ -298,21 +302,26 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     #[cfg(not(windows))]
     let processed: &[u8] = slice;
 
-    // Try UTF-8 first, fall back to platform-specific encoding
+    // Try UTF-8 first, fall back to platform-specific encoding.
+    // Note: `processed` is `Cow<[u8]>` on Windows but `&[u8]` on other platforms,
+    // so we need separate cfg blocks to avoid clippy warnings.
+    #[cfg(windows)]
     let s: std::borrow::Cow<str> = match std::str::from_utf8(&processed) {
         Ok(s) => std::borrow::Cow::Borrowed(s),
         Err(_) => {
             log::debug!("r_write_console_ex: UTF-8 decode failed");
-            #[cfg(windows)]
-            {
-                // On Windows, decode using the system's ANSI code page
-                decode_windows_native(&processed)
-            }
-            #[cfg(not(windows))]
-            {
-                // On Unix, fall back to lossy UTF-8 conversion
-                String::from_utf8_lossy(&processed)
-            }
+            // On Windows, decode using the system's ANSI code page
+            decode_windows_native(&processed)
+        }
+    };
+
+    #[cfg(not(windows))]
+    let s: std::borrow::Cow<str> = match std::str::from_utf8(processed) {
+        Ok(s) => std::borrow::Cow::Borrowed(s),
+        Err(_) => {
+            log::debug!("r_write_console_ex: UTF-8 decode failed");
+            // On Unix, fall back to lossy UTF-8 conversion
+            String::from_utf8_lossy(processed)
         }
     };
 
@@ -325,35 +334,35 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     }
 
     // Check for reprex mode
-    if let Ok(mut settings) = REPREX_SETTINGS.write() {
-        if settings.enabled {
-            // In reprex mode, we need to handle dynamic terminal output:
-            // 1. Strip ANSI escape sequences (colors, cursor movement, etc.)
-            // 2. Handle carriage returns (\r) used by progress bars
-            let cleaned = strip_ansi_escapes(&s);
+    if let Ok(mut settings) = REPREX_SETTINGS.write()
+        && settings.enabled
+    {
+        // In reprex mode, we need to handle dynamic terminal output:
+        // 1. Strip ANSI escape sequences (colors, cursor movement, etc.)
+        // 2. Handle carriage returns (\r) used by progress bars
+        let cleaned = strip_ansi_escapes(&s);
 
-            // Process the cleaned string character by character
-            for ch in cleaned.chars() {
-                match ch {
-                    '\n' => {
-                        // Newline: print the buffered line with prefix
-                        println!("{}{}", settings.comment, settings.line_buffer);
-                        settings.line_buffer.clear();
-                        settings.had_output = true;
-                    }
-                    '\r' => {
-                        // Carriage return: clear the buffer (progress bar overwrite)
-                        // This means only the final state before \n will be shown
-                        settings.line_buffer.clear();
-                    }
-                    _ => {
-                        settings.line_buffer.push(ch);
-                    }
+        // Process the cleaned string character by character
+        for ch in cleaned.chars() {
+            match ch {
+                '\n' => {
+                    // Newline: print the buffered line with prefix
+                    println!("{}{}", settings.comment, settings.line_buffer);
+                    settings.line_buffer.clear();
+                    settings.had_output = true;
+                }
+                '\r' => {
+                    // Carriage return: clear the buffer (progress bar overwrite)
+                    // This means only the final state before \n will be shown
+                    settings.line_buffer.clear();
+                }
+                _ => {
+                    settings.line_buffer.push(ch);
                 }
             }
-
-            return;
         }
+
+        return;
     }
 
     // Default: print to stdout/stderr
@@ -462,21 +471,21 @@ fn decode_windows_native(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
 
     // Map Windows code page to encoding_rs encoding
     let encoding = match code_page {
-        932 => encoding_rs::SHIFT_JIS,        // Japanese
-        936 => encoding_rs::GBK,              // Simplified Chinese
-        949 => encoding_rs::EUC_KR,           // Korean
-        950 => encoding_rs::BIG5,             // Traditional Chinese
-        874 => encoding_rs::WINDOWS_874,      // Thai
-        1250 => encoding_rs::WINDOWS_1250,    // Central European
-        1251 => encoding_rs::WINDOWS_1251,    // Cyrillic
-        1252 => encoding_rs::WINDOWS_1252,    // Western European
-        1253 => encoding_rs::WINDOWS_1253,    // Greek
-        1254 => encoding_rs::WINDOWS_1254,    // Turkish
-        1255 => encoding_rs::WINDOWS_1255,    // Hebrew
-        1256 => encoding_rs::WINDOWS_1256,    // Arabic
-        1257 => encoding_rs::WINDOWS_1257,    // Baltic
-        1258 => encoding_rs::WINDOWS_1258,    // Vietnamese
-        65001 => encoding_rs::UTF_8,          // UTF-8 (already handled, but just in case)
+        932 => encoding_rs::SHIFT_JIS,     // Japanese
+        936 => encoding_rs::GBK,           // Simplified Chinese
+        949 => encoding_rs::EUC_KR,        // Korean
+        950 => encoding_rs::BIG5,          // Traditional Chinese
+        874 => encoding_rs::WINDOWS_874,   // Thai
+        1250 => encoding_rs::WINDOWS_1250, // Central European
+        1251 => encoding_rs::WINDOWS_1251, // Cyrillic
+        1252 => encoding_rs::WINDOWS_1252, // Western European
+        1253 => encoding_rs::WINDOWS_1253, // Greek
+        1254 => encoding_rs::WINDOWS_1254, // Turkish
+        1255 => encoding_rs::WINDOWS_1255, // Hebrew
+        1256 => encoding_rs::WINDOWS_1256, // Arabic
+        1257 => encoding_rs::WINDOWS_1257, // Baltic
+        1258 => encoding_rs::WINDOWS_1258, // Vietnamese
+        65001 => encoding_rs::UTF_8,       // UTF-8 (already handled, but just in case)
         _ => {
             // Unknown code page, fall back to lossy UTF-8
             log::warn!(
@@ -593,21 +602,21 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
     init_r_library(&lib_path)?;
 
     // Set R_HOME if not already set
-    if env::var("R_HOME").is_err() {
-        if let Ok(r_home) = get_r_home() {
-            // SAFETY: We're in single-threaded initialization
-            unsafe { env::set_var("R_HOME", &r_home) };
-        }
+    if env::var("R_HOME").is_err()
+        && let Ok(r_home) = get_r_home()
+    {
+        // SAFETY: We're in single-threaded initialization
+        unsafe { env::set_var("R_HOME", &r_home) };
     }
 
     // Set R_LIBS_SITE to ensure R can find base packages (including compiler for JIT)
     // SAFETY: We're in single-threaded initialization
-    if env::var("R_LIBS_SITE").is_err() {
-        if let Ok(r_home) = get_r_home() {
-            let lib_path = r_home.join("library");
-            if lib_path.exists() {
-                unsafe { env::set_var("R_LIBS_SITE", lib_path.to_string_lossy().as_ref()) };
-            }
+    if env::var("R_LIBS_SITE").is_err()
+        && let Ok(r_home) = get_r_home()
+    {
+        let lib_path = r_home.join("library");
+        if lib_path.exists() {
+            unsafe { env::set_var("R_LIBS_SITE", lib_path.to_string_lossy().as_ref()) };
         }
     }
 
@@ -732,7 +741,7 @@ fn enable_windows_virtual_terminal() {
 /// This follows the ark pattern for Windows R initialization.
 #[cfg(windows)]
 unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
-    use crate::types::{Rstart, UImode, R_FALSE};
+    use crate::types::{R_FALSE, Rstart, UImode};
     use std::mem::MaybeUninit;
 
     log::info!("[WINDOWS] initialize_r_windows called (ark pattern)");
@@ -780,10 +789,14 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
                 args.push(cstr);
             }
         }
-        let mut arg_ptrs: Vec<*mut c_char> = args.iter().map(|s| s.as_ptr() as *mut c_char).collect();
+        let mut arg_ptrs: Vec<*mut c_char> =
+            args.iter().map(|s| s.as_ptr() as *mut c_char).collect();
         let mut argc = args.len() as c_int;
         (lib.r_common_command_line)(&mut argc, arg_ptrs.as_mut_ptr(), params_ptr);
-        log::info!("[WINDOWS] R_common_command_line processed {} args", args.len());
+        log::info!(
+            "[WINDOWS] R_common_command_line processed {} args",
+            args.len()
+        );
 
         // Step 4: Configure the params (ark pattern)
         (*params_ptr).r_interactive = 1;
@@ -807,7 +820,10 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         (*params_ptr).callback = Some(r_callback);
         (*params_ptr).busy = Some(r_busy);
         (*params_ptr).suicide = Some(r_suicide);
-        log::info!("[WINDOWS] Console callbacks set (read_console={:p})", r_read_console as *const ());
+        log::info!(
+            "[WINDOWS] Console callbacks set (read_console={:p})",
+            r_read_console as *const ()
+        );
 
         // Set paths
         (*params_ptr).rhome = r_home_cstr.as_ptr() as *mut c_char;
@@ -926,22 +942,23 @@ unsafe extern "C" fn r_read_console(
 
     // In reprex mode, print a blank line between expressions for readability
     // Only print for main prompts (not continuation prompts like "+")
-    if let Ok(mut settings) = REPREX_SETTINGS.write() {
-        if settings.enabled && settings.had_output {
-            // Check if this is a main prompt (not continuation)
-            let is_main_prompt = if prompt.is_null() {
-                true
-            } else {
-                // SAFETY: prompt is a valid C string from R
-                let prompt_str = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_string_lossy();
-                // Continuation prompts typically start with "+" or spaces
-                !prompt_str.starts_with('+') && !prompt_str.trim().is_empty()
-            };
+    if let Ok(mut settings) = REPREX_SETTINGS.write()
+        && settings.enabled
+        && settings.had_output
+    {
+        // Check if this is a main prompt (not continuation)
+        let is_main_prompt = if prompt.is_null() {
+            true
+        } else {
+            // SAFETY: prompt is a valid C string from R
+            let prompt_str = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_string_lossy();
+            // Continuation prompts typically start with "+" or spaces
+            !prompt_str.starts_with('+') && !prompt_str.trim().is_empty()
+        };
 
-            if is_main_prompt {
-                println!();
-                settings.had_output = false;
-            }
+        if is_main_prompt {
+            println!();
+            settings.had_output = false;
         }
     }
 
@@ -956,14 +973,13 @@ unsafe extern "C" fn r_read_console(
             drop(pending); // Release lock before callback
 
             // Get the prompt string
-            let prompt_str = if prompt.is_null() {
+            let prompt_str: &str = if prompt.is_null() {
                 ""
             } else {
                 // SAFETY: prompt is a valid C string from R
-                match unsafe { std::ffi::CStr::from_ptr(prompt) }.to_str() {
-                    Ok(s) => s,
-                    Err(_) => "",
-                }
+                unsafe { std::ffi::CStr::from_ptr(prompt) }
+                    .to_str()
+                    .unwrap_or_default()
             };
 
             log::debug!("r_read_console: prompt={:?}", prompt_str);
@@ -1111,7 +1127,10 @@ pub fn mark_global_error_handler_initialized() {
 
 /// Check if the global error handler has been initialized.
 fn is_global_error_handler_initialized() -> bool {
-    GLOBAL_ERROR_HANDLER_INITIALIZED.read().map(|s| *s).unwrap_or(false)
+    GLOBAL_ERROR_HANDLER_INITIALIZED
+        .read()
+        .map(|s| *s)
+        .unwrap_or(false)
 }
 
 /// R code to set up the global error handler.
@@ -1290,8 +1309,8 @@ pub fn set_spinner_color(color_code: &str) {
 /// The spinner is stopped automatically when R output is produced or
 /// when the next ReadConsole prompt is displayed.
 pub fn start_spinner() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::Duration;
 
@@ -1362,7 +1381,10 @@ pub fn start_spinner() {
             if color_code.is_empty() {
                 print!("\r{} ", frames_chars[frame_index]);
             } else {
-                print!("\r{}{}{} ", color_code, frames_chars[frame_index], ANSI_RESET);
+                print!(
+                    "\r{}{}{} ",
+                    color_code, frames_chars[frame_index], ANSI_RESET
+                );
             }
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
@@ -1431,14 +1453,15 @@ pub fn set_reprex_mode(enabled: bool, comment: &str) {
 ///
 /// Call this after R evaluation to ensure partial lines are printed.
 pub fn flush_reprex_buffer() {
-    if let Ok(mut settings) = REPREX_SETTINGS.write() {
-        if settings.enabled && !settings.line_buffer.is_empty() {
-            // Print remaining content with prefix and newline
-            // This handles cat() output without trailing newline
-            println!("{}{}", settings.comment, settings.line_buffer);
-            settings.line_buffer.clear();
-            settings.had_output = true;
-        }
+    if let Ok(mut settings) = REPREX_SETTINGS.write()
+        && settings.enabled
+        && !settings.line_buffer.is_empty()
+    {
+        // Print remaining content with prefix and newline
+        // This handles cat() output without trailing newline
+        println!("{}{}", settings.comment, settings.line_buffer);
+        settings.line_buffer.clear();
+        settings.had_output = true;
     }
 }
 

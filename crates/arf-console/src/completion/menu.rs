@@ -47,17 +47,17 @@ impl FunctionAwareMenu {
     /// completion). Without this sync, auto_match and bracket_delete rules
     /// will malfunction.
     fn sync_editor_state(&self, editor: &Editor) {
-        if let Some(state_ref) = &self.editor_state {
-            if let Ok(mut state) = state_ref.lock() {
-                let buffer = editor.get_buffer();
-                let cursor_pos = editor.line_buffer().insertion_point();
+        if let Some(state_ref) = &self.editor_state
+            && let Ok(mut state) = state_ref.lock()
+        {
+            let buffer = editor.get_buffer();
+            let cursor_pos = editor.line_buffer().insertion_point();
 
-                // Update shadow state to match actual buffer
-                state.buffer = buffer.to_string();
-                state.buffer_len = buffer.chars().count();
-                state.cursor_pos = buffer[..cursor_pos].chars().count();
-                state.uncertain = false;
-            }
+            // Update shadow state to match actual buffer
+            state.buffer = buffer.to_string();
+            state.buffer_len = buffer.chars().count();
+            state.cursor_pos = buffer[..cursor_pos].chars().count();
+            state.uncertain = false;
         }
     }
 }
@@ -194,17 +194,17 @@ impl StateSyncHistoryMenu {
 
     /// Synchronize the shadow state with the actual editor buffer.
     fn sync_editor_state(&self, editor: &Editor) {
-        if let Some(state_ref) = &self.editor_state {
-            if let Ok(mut state) = state_ref.lock() {
-                let buffer = editor.get_buffer();
-                let cursor_pos = editor.line_buffer().insertion_point();
+        if let Some(state_ref) = &self.editor_state
+            && let Ok(mut state) = state_ref.lock()
+        {
+            let buffer = editor.get_buffer();
+            let cursor_pos = editor.line_buffer().insertion_point();
 
-                // Update shadow state to match actual buffer
-                state.buffer = buffer.to_string();
-                state.buffer_len = buffer.chars().count();
-                state.cursor_pos = buffer[..cursor_pos].chars().count();
-                state.uncertain = false;
-            }
+            // Update shadow state to match actual buffer
+            state.buffer = buffer.to_string();
+            state.buffer_len = buffer.chars().count();
+            state.cursor_pos = buffer[..cursor_pos].chars().count();
+            state.uncertain = false;
         }
     }
 }

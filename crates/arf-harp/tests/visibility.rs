@@ -61,10 +61,7 @@ fn test_simple_expression_is_visible() {
 fn test_assignment_is_invisible() {
     with_r(|| {
         let result = eval_string_with_visibility("x <- 42").expect("eval should succeed");
-        assert!(
-            !result.visible,
-            "Assignment with <- should be invisible"
-        );
+        assert!(!result.visible, "Assignment with <- should be invisible");
     });
 }
 
@@ -72,10 +69,7 @@ fn test_assignment_is_invisible() {
 fn test_equals_assignment_is_invisible() {
     with_r(|| {
         let result = eval_string_with_visibility("y = 100").expect("eval should succeed");
-        assert!(
-            !result.visible,
-            "Assignment with = should be invisible"
-        );
+        assert!(!result.visible, "Assignment with = should be invisible");
     });
 }
 
@@ -87,10 +81,7 @@ fn test_variable_lookup_is_visible() {
 
         // Then look it up - should be visible
         let result = eval_string_with_visibility("test_var").expect("eval should succeed");
-        assert!(
-            result.visible,
-            "Variable lookup should be visible"
-        );
+        assert!(result.visible, "Variable lookup should be visible");
     });
 }
 
@@ -98,10 +89,7 @@ fn test_variable_lookup_is_visible() {
 fn test_invisible_function_makes_result_invisible() {
     with_r(|| {
         let result = eval_string_with_visibility("invisible(42)").expect("eval should succeed");
-        assert!(
-            !result.visible,
-            "invisible() should make result invisible"
-        );
+        assert!(!result.visible, "invisible() should make result invisible");
     });
 }
 
@@ -111,10 +99,7 @@ fn test_print_function_is_visible() {
         // print() returns its argument invisibly, but we're testing the return
         let result = eval_string_with_visibility("print(1)").expect("eval should succeed");
         // print() returns its argument invisibly
-        assert!(
-            !result.visible,
-            "print() returns its argument invisibly"
-        );
+        assert!(!result.visible, "print() returns its argument invisibly");
     });
 }
 
@@ -145,10 +130,7 @@ fn test_null_result_is_not_visible() {
 fn test_string_literal_is_visible() {
     with_r(|| {
         let result = eval_string_with_visibility(r#""hello""#).expect("eval should succeed");
-        assert!(
-            result.visible,
-            "String literal should be visible"
-        );
+        assert!(result.visible, "String literal should be visible");
     });
 }
 
@@ -156,10 +138,7 @@ fn test_string_literal_is_visible() {
 fn test_vector_creation_is_visible() {
     with_r(|| {
         let result = eval_string_with_visibility("c(1, 2, 3)").expect("eval should succeed");
-        assert!(
-            result.visible,
-            "Vector creation should be visible"
-        );
+        assert!(result.visible, "Vector creation should be visible");
     });
 }
 
@@ -250,7 +229,10 @@ fn test_complete_expression() {
 fn test_incomplete_expression_open_paren() {
     with_r(|| {
         let result = arf_harp::is_expression_complete("(1 +").expect("should not error");
-        assert!(!result, "Expression with unclosed paren should be incomplete");
+        assert!(
+            !result,
+            "Expression with unclosed paren should be incomplete"
+        );
     });
 }
 
@@ -258,7 +240,10 @@ fn test_incomplete_expression_open_paren() {
 fn test_incomplete_expression_open_brace() {
     with_r(|| {
         let result = arf_harp::is_expression_complete("function() {").expect("should not error");
-        assert!(!result, "Expression with unclosed brace should be incomplete");
+        assert!(
+            !result,
+            "Expression with unclosed brace should be incomplete"
+        );
     });
 }
 
@@ -266,7 +251,10 @@ fn test_incomplete_expression_open_brace() {
 fn test_incomplete_expression_trailing_operator() {
     with_r(|| {
         let result = arf_harp::is_expression_complete("1 +").expect("should not error");
-        assert!(!result, "Expression with trailing operator should be incomplete");
+        assert!(
+            !result,
+            "Expression with trailing operator should be incomplete"
+        );
     });
 }
 
@@ -282,7 +270,8 @@ fn test_complete_multiline_expression() {
 #[test]
 fn test_complete_if_statement() {
     with_r(|| {
-        let result = arf_harp::is_expression_complete("if (TRUE) 1 else 2").expect("should not error");
+        let result =
+            arf_harp::is_expression_complete("if (TRUE) 1 else 2").expect("should not error");
         assert!(result, "Complete if-else should be complete");
     });
 }
@@ -291,7 +280,8 @@ fn test_complete_if_statement() {
 fn test_incomplete_if_statement() {
     with_r(|| {
         // R's parser considers "if (TRUE) 1 else" as incomplete
-        let result = arf_harp::is_expression_complete("if (TRUE) 1 else").expect("should not error");
+        let result =
+            arf_harp::is_expression_complete("if (TRUE) 1 else").expect("should not error");
         assert!(!result, "if-else without second value should be incomplete");
     });
 }
@@ -302,7 +292,10 @@ fn test_parse_error_is_complete() {
         // Parse errors are NOT marked as incomplete - they are "complete" in the sense
         // that we should try to evaluate them to show the error
         let result = arf_harp::is_expression_complete("1 + + 2").expect("should not error");
-        assert!(result, "Parse error should be considered complete (not incomplete)");
+        assert!(
+            result,
+            "Parse error should be considered complete (not incomplete)"
+        );
     });
 }
 

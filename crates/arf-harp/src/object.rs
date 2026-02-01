@@ -2,7 +2,7 @@
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
-use arf_libr::{r_library, r_nil_value, ParseStatus, SexpType, SEXP};
+use arf_libr::{ParseStatus, SEXP, SexpType, r_library, r_nil_value};
 use std::ffi::CString;
 
 /// A safe wrapper around an R SEXP object.
@@ -88,11 +88,10 @@ pub fn eval_string(code: &str) -> HarpResult<RObject> {
 
     unsafe {
         // Create R string from code
-        let code_cstring =
-            CString::new(code).map_err(|_| HarpError::TypeMismatch {
-                expected: "valid UTF-8".to_string(),
-                actual: "string with null byte".to_string(),
-            })?;
+        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
+            expected: "valid UTF-8".to_string(),
+            actual: "string with null byte".to_string(),
+        })?;
 
         let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
 
@@ -284,11 +283,10 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
 
     unsafe {
         // Create R string from code
-        let code_cstring =
-            CString::new(code).map_err(|_| HarpError::TypeMismatch {
-                expected: "valid UTF-8".to_string(),
-                actual: "string with null byte".to_string(),
-            })?;
+        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
+            expected: "valid UTF-8".to_string(),
+            actual: "string with null byte".to_string(),
+        })?;
 
         let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
 
@@ -366,8 +364,10 @@ pub unsafe fn deparse_to_string(expr: SEXP) -> HarpResult<String> {
         let deparse_sym = install_symbol("deparse")?;
 
         // Build: quote(expr) - this will return expr unevaluated when evaluated
-        let quoted_expr =
-            protect.protect((lib.rf_lcons)(quote_sym, (lib.rf_lcons)(expr, r_nil_value()?)));
+        let quoted_expr = protect.protect((lib.rf_lcons)(
+            quote_sym,
+            (lib.rf_lcons)(expr, r_nil_value()?),
+        ));
 
         // Build: deparse(quote(expr))
         let call = protect.protect((lib.rf_lcons)(
@@ -584,11 +584,10 @@ pub fn is_expression_complete(code: &str) -> HarpResult<bool> {
     let mut protect = RProtect::new();
 
     unsafe {
-        let code_cstring =
-            CString::new(code).map_err(|_| HarpError::TypeMismatch {
-                expected: "valid UTF-8".to_string(),
-                actual: "string with null byte".to_string(),
-            })?;
+        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
+            expected: "valid UTF-8".to_string(),
+            actual: "string with null byte".to_string(),
+        })?;
 
         let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
 

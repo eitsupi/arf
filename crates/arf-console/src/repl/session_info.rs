@@ -4,8 +4,8 @@ use crate::config::RSourceStatus;
 use crate::editor::prompt::get_r_version;
 use crate::external::{formatter, rig};
 
-use super::state::PromptRuntimeConfig;
 use super::arf_println;
+use super::state::PromptRuntimeConfig;
 
 /// Display session information for the :info command.
 pub fn display_session_info(
@@ -33,7 +33,10 @@ pub fn display_session_info(
         if path.exists() {
             println!("#   Config file:    {}", path.display());
         } else {
-            println!("#   Config file:    {} (not found, using defaults)", path.display());
+            println!(
+                "#   Config file:    {} (not found, using defaults)",
+                path.display()
+            );
         }
     } else {
         println!("#   Config file:    (using defaults)");
@@ -60,20 +63,20 @@ pub fn display_session_info(
     // rig status
     if rig::rig_available() {
         print!("#   rig:            installed");
-        if let Ok(versions) = rig::list_versions() {
-            if !versions.is_empty() {
-                let version_list: Vec<_> = versions
-                    .iter()
-                    .map(|v| {
-                        if v.default {
-                            format!("{}*", v.name)
-                        } else {
-                            v.name.clone()
-                        }
-                    })
-                    .collect();
-                print!(" ({})", version_list.join(", "));
-            }
+        if let Ok(versions) = rig::list_versions()
+            && !versions.is_empty()
+        {
+            let version_list: Vec<_> = versions
+                .iter()
+                .map(|v| {
+                    if v.default {
+                        format!("{}*", v.name)
+                    } else {
+                        v.name.clone()
+                    }
+                })
+                .collect();
+            print!(" ({})", version_list.join(", "));
         }
         println!();
     } else {
@@ -127,7 +130,13 @@ pub fn display_session_info(
     println!("#");
 
     // R-related environment variables
-    let env_vars = ["R_LIBS", "R_LIBS_USER", "R_LIBS_SITE", "R_PROFILE", "R_ENVIRON"];
+    let env_vars = [
+        "R_LIBS",
+        "R_LIBS_USER",
+        "R_LIBS_SITE",
+        "R_PROFILE",
+        "R_ENVIRON",
+    ];
     let mut has_env = false;
     for var in &env_vars {
         if let Ok(value) = std::env::var(var) {

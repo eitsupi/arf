@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Color configuration for syntax highlighting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ColorsConfig {
     /// Colors for R syntax highlighting.
     pub r: RColorConfig,
@@ -69,16 +70,6 @@ impl JsonSchema for ColorsConfig {
                 }
             }
         })
-    }
-}
-
-impl Default for ColorsConfig {
-    fn default() -> Self {
-        ColorsConfig {
-            r: RColorConfig::default(),
-            meta: MetaColorConfig::default(),
-            prompt: PromptColorConfig::default(),
-        }
     }
 }
 

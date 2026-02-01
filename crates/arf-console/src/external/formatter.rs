@@ -58,7 +58,10 @@ pub fn format_code(code: &str) -> String {
 
     // Check if formatter is available
     if !is_formatter_available() {
-        log::debug!("Formatter '{}' not available, skipping format", FORMATTER_COMMAND);
+        log::debug!(
+            "Formatter '{}' not available, skipping format",
+            FORMATTER_COMMAND
+        );
         return code.to_string();
     }
 
@@ -97,7 +100,10 @@ fn format_via_temp_file(code: &str) -> Result<String, FormatterError> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Parse errors are common (incomplete expressions), don't log as error
         if stderr.contains("Parse") || stderr.contains("parse") {
-            log::trace!("Formatter parse error (expected for incomplete code): {}", stderr);
+            log::trace!(
+                "Formatter parse error (expected for incomplete code): {}",
+                stderr
+            );
         } else {
             log::debug!("Formatter returned error: {}", stderr);
         }

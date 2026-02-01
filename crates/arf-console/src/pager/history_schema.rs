@@ -3,11 +3,11 @@
 //! This module provides functions to display the history database schema
 //! and example R code for accessing it, used by both CLI and REPL commands.
 
+use super::{PagerAction, PagerConfig, PagerContent, run};
 use crate::config::history_dir;
 use crate::highlighter::RTreeSitterHighlighter;
-use super::{run, PagerAction, PagerConfig, PagerContent};
 use base64::{Engine, engine::general_purpose};
-use crossterm::{event::KeyCode, event::KeyModifiers, Command};
+use crossterm::{Command, event::KeyCode, event::KeyModifiers};
 use nu_ansi_term::{Color, Style};
 use reedline::Highlighter;
 use std::cell::{Cell, RefCell};
@@ -386,15 +386,28 @@ fn style_sql_line(line: &str) -> String {
 
         // Style SQL keywords (blue bold)
         result = result
-            .replace("INTEGER PRIMARY KEY AUTOINCREMENT", &"INTEGER PRIMARY KEY AUTOINCREMENT".blue().bold().to_string())
+            .replace(
+                "INTEGER PRIMARY KEY AUTOINCREMENT",
+                &"INTEGER PRIMARY KEY AUTOINCREMENT"
+                    .blue()
+                    .bold()
+                    .to_string(),
+            )
             .replace("INTEGER", &"INTEGER".blue().bold().to_string())
             .replace("TEXT NOT NULL", &"TEXT NOT NULL".blue().bold().to_string())
             .replace("TEXT", &"TEXT".blue().bold().to_string());
 
         // Style column names (yellow) - they come at the start after spaces
         let column_names = [
-            "id", "command_line", "start_timestamp", "session_id",
-            "hostname", "cwd", "duration_ms", "exit_status", "more_info",
+            "id",
+            "command_line",
+            "start_timestamp",
+            "session_id",
+            "hostname",
+            "cwd",
+            "duration_ms",
+            "exit_status",
+            "more_info",
         ];
         for name in column_names {
             // Match column name at start of trimmed line
@@ -452,8 +465,10 @@ fn style_index_line(line: &str) -> String {
 
     // Highlight index names
     let index_names = [
-        "idx_history_time", "idx_history_cwd",
-        "idx_history_exit_status", "idx_history_cmd",
+        "idx_history_time",
+        "idx_history_cwd",
+        "idx_history_exit_status",
+        "idx_history_cmd",
     ];
     for name in index_names {
         result = result.replace(name, &name.yellow().to_string());
@@ -590,7 +605,10 @@ fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
         s.r_keyword.paint("dbConnect")
     );
     println!("  RSQLite::{}(),", s.r_keyword.paint("SQLite"));
-    println!("  {}", s.r_string.paint(format!("\"{}/r.db\"", history_path)));
+    println!(
+        "  {}",
+        s.r_string.paint(format!("\"{}/r.db\"", history_path))
+    );
     println!(")");
 
     // history_data <- dbGetQuery(...) |> as_tibble()
@@ -718,8 +736,16 @@ mod tests {
     fn test_generate_schema_lines_count() {
         let lines = generate_schema_lines("/test/path");
         // Ensure we have a reasonable number of lines (schema should be ~50 lines)
-        assert!(lines.len() >= 40, "Expected at least 40 lines, got {}", lines.len());
-        assert!(lines.len() <= 60, "Expected at most 60 lines, got {}", lines.len());
+        assert!(
+            lines.len() >= 40,
+            "Expected at least 40 lines, got {}",
+            lines.len()
+        );
+        assert!(
+            lines.len() <= 60,
+            "Expected at most 60 lines, got {}",
+            lines.len()
+        );
     }
 
     #[test]
@@ -753,7 +779,10 @@ mod tests {
         let styled = style_sql_line(line);
 
         // Should contain ANSI codes for styling
-        assert!(styled.len() > line.len(), "Styled line should be longer due to ANSI codes");
+        assert!(
+            styled.len() > line.len(),
+            "Styled line should be longer due to ANSI codes"
+        );
         // Original text should still be present (somewhere in the styled output)
         assert!(styled.contains("id") || styled.contains("\x1b")); // Either plain or with escape codes
     }
@@ -764,7 +793,10 @@ mod tests {
         let styled = style_sql_line(line);
 
         // Should contain ANSI codes
-        assert!(styled.len() > line.len(), "Styled line should be longer due to ANSI codes");
+        assert!(
+            styled.len() > line.len(),
+            "Styled line should be longer due to ANSI codes"
+        );
     }
 
     #[test]
@@ -774,7 +806,10 @@ mod tests {
         let styled = style_r_line(line);
 
         // Should contain ANSI codes for keywords (if, else) and constants (TRUE)
-        assert!(styled.len() > line.len(), "Styled line should be longer due to ANSI codes");
+        assert!(
+            styled.len() > line.len(),
+            "Styled line should be longer due to ANSI codes"
+        );
     }
 
     #[test]
@@ -792,7 +827,10 @@ mod tests {
         let styled = style_r_line(line);
 
         // Should contain ANSI codes
-        assert!(styled.len() > line.len(), "Styled line should be longer due to ANSI codes");
+        assert!(
+            styled.len() > line.len(),
+            "Styled line should be longer due to ANSI codes"
+        );
     }
 
     #[test]
@@ -832,7 +870,10 @@ mod tests {
         let state = StyleState::new();
 
         let fence = style_line_with_state("```sql", &state);
-        assert!(fence.contains("\x1b"), "Code fence should be styled (dark grey)");
+        assert!(
+            fence.contains("\x1b"),
+            "Code fence should be styled (dark grey)"
+        );
     }
 
     #[test]

@@ -90,15 +90,15 @@ impl RTreeSitterHighlighter {
 
     /// Synchronize the shadow state with the actual buffer content.
     fn sync_editor_state(&self, line: &str, cursor: usize) {
-        if let Some(state_ref) = &self.editor_state {
-            if let Ok(mut state) = state_ref.lock() {
-                // Update shadow state to match actual buffer
-                state.buffer = line.to_string();
-                state.buffer_len = line.chars().count();
-                // Convert byte position to char position
-                state.cursor_pos = line[..cursor.min(line.len())].chars().count();
-                state.uncertain = false;
-            }
+        if let Some(state_ref) = &self.editor_state
+            && let Ok(mut state) = state_ref.lock()
+        {
+            // Update shadow state to match actual buffer
+            state.buffer = line.to_string();
+            state.buffer_len = line.chars().count();
+            // Convert byte position to char position
+            state.cursor_pos = line[..cursor.min(line.len())].chars().count();
+            state.uncertain = false;
         }
     }
 
@@ -199,7 +199,7 @@ impl RTreeSitterHighlighter {
     }
 
     /// Fill gaps between tokens with whitespace.
-    fn fill_gaps(&self, tokens: &mut Vec<Token>, total_len: usize) -> Vec<Token> {
+    fn fill_gaps(&self, tokens: &mut [Token], total_len: usize) -> Vec<Token> {
         let mut result = Vec::new();
         let mut pos = 0;
 
@@ -276,7 +276,6 @@ impl Highlighter for RTreeSitterHighlighter {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,12 +332,7 @@ mod tests {
         let cases = vec!["42", "3.14", "1e-5", "0xFF", "1L", "2i"];
         for case in cases {
             let tokens = get_token_types(case);
-            assert_eq!(
-                tokens[0].1,
-                TokenType::Number,
-                "Failed for: {}",
-                case
-            );
+            assert_eq!(tokens[0].1, TokenType::Number, "Failed for: {}", case);
         }
     }
 
@@ -605,11 +599,17 @@ mod tests {
 
         // Check number
         let num_seg = styled.buffer.iter().find(|(_, t)| t == "1");
-        assert_eq!(num_seg.map(|(s, _)| s.foreground), Some(Some(Color::Yellow)));
+        assert_eq!(
+            num_seg.map(|(s, _)| s.foreground),
+            Some(Some(Color::Yellow))
+        );
 
         // Check constant
         let const_seg = styled.buffer.iter().find(|(_, t)| t == "TRUE");
-        assert_eq!(const_seg.map(|(s, _)| s.foreground), Some(Some(Color::Blue)));
+        assert_eq!(
+            const_seg.map(|(s, _)| s.foreground),
+            Some(Some(Color::Blue))
+        );
 
         // Check identifier
         let id_seg = styled.buffer.iter().find(|(_, t)| t == "x");

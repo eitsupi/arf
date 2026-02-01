@@ -180,7 +180,9 @@ fn get_r_home_from_binary(binary_path: &str) -> Result<String, RigError> {
     let output = Command::new(binary_path)
         .arg("RHOME")
         .output()
-        .map_err(|e| RigError::CommandFailed(format!("Failed to run {} RHOME: {}", binary_path, e)))?;
+        .map_err(|e| {
+            RigError::CommandFailed(format!("Failed to run {} RHOME: {}", binary_path, e))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

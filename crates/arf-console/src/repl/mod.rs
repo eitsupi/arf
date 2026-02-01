@@ -1,7 +1,5 @@
 //! REPL (Read-Eval-Print Loop) implementation.
 
-use arf_harp;
-
 mod banner;
 mod meta_command;
 mod prompt;
@@ -12,40 +10,39 @@ mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
-use crate::config::{history_dir, Config, ModeIndicatorPosition, RSourceStatus};
+use crate::config::{Config, ModeIndicatorPosition, RSourceStatus, history_dir};
+use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
 use crate::highlighter::{CombinedHighlighter, MetaCommandHighlighter};
-use crate::editor::hinter::RLanguageHinter;
 use crate::history::FuzzyHistory;
 use anyhow::Result;
 use crossterm::{
+    ExecutableCommand,
     style::Stylize,
     terminal::{self, ClearType},
-    ExecutableCommand,
 };
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
     DefaultHinter, Emacs, IdeMenu, ListMenu, MenuBuilder, Reedline, ReedlineMenu, Signal,
-    SqliteBackedHistory, Vi,
+    SqliteBackedHistory, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
+    default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io;
 
-use banner::format_banner;
 use crate::editor::keybindings::{
     add_auto_match_keybindings, add_common_keybindings, add_key_map_keybindings,
     wrap_edit_mode_with_conditional_rules,
 };
-use meta_command::{process_meta_command, MetaCommandResult};
+use crate::editor::validator::RValidator;
+use banner::format_banner;
+use meta_command::{MetaCommandResult, process_meta_command};
 use prompt::RPrompt;
 use reprex::{clear_input_lines, strip_reprex_output};
 use shell::{execute_shell_command, restart_process};
 use state::{PromptRuntimeConfig, ReplState};
-use crate::editor::validator::RValidator;
-
 
 // Thread-local storage for the REPL state.
 // This allows the ReadConsole callback to access the line editor.
@@ -261,8 +258,9 @@ impl Repl {
 
         // Set up validator for multiline input
         // Pass editor_state so validator can synchronize shadow state with actual buffer
-        line_editor = line_editor
-            .with_validator(Box::new(RValidator::new().with_editor_state(editor_state.clone())));
+        line_editor = line_editor.with_validator(Box::new(
+            RValidator::new().with_editor_state(editor_state.clone()),
+        ));
 
         // Set up syntax highlighter (R code + meta commands)
         // Pass editor_state so highlighter can sync shadow state on every redraw
@@ -273,8 +271,8 @@ impl Repl {
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
         if self.config.editor.autosuggestion {
-            let hinter = RLanguageHinter::new()
-                .with_style(Style::new().italic().fg(Color::DarkGray));
+            let hinter =
+                RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
         }
 
@@ -359,15 +357,14 @@ impl Repl {
         // so the most recent failed command might remain in history.
         // The main value of sponge is purging OLD failed commands during the session.
         REPL_STATE.with(|state| {
-            if let Some(ref mut repl_state) = *state.borrow_mut() {
-                if repl_state.forget_config.enabled
-                    && !repl_state.failed_commands_queue.is_empty()
-                {
-                    while let Some(id_to_delete) = repl_state.failed_commands_queue.pop_back() {
-                        let _ = repl_state.line_editor.history_mut().delete(id_to_delete);
-                    }
-                    let _ = repl_state.line_editor.sync_history();
+            if let Some(ref mut repl_state) = *state.borrow_mut()
+                && repl_state.forget_config.enabled
+                && !repl_state.failed_commands_queue.is_empty()
+            {
+                while let Some(id_to_delete) = repl_state.failed_commands_queue.pop_back() {
+                    let _ = repl_state.line_editor.history_mut().delete(id_to_delete);
                 }
+                let _ = repl_state.line_editor.sync_history();
             }
         });
 
@@ -425,20 +422,19 @@ impl Repl {
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
         if self.config.editor.autosuggestion {
-            let hinter = RLanguageHinter::new()
-                .with_style(Style::new().italic().fg(Color::DarkGray));
+            let hinter =
+                RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
         }
 
         // Mode indicator for special modes (reprex, etc.)
         let mode_position = self.config.prompt.mode_indicator;
-        let mode_indicator = if self.config.reprex.enabled
-            && mode_position != ModeIndicatorPosition::None
-        {
-            Some(self.config.prompt.indicators.reprex.clone())
-        } else {
-            None
-        };
+        let mode_indicator =
+            if self.config.reprex.enabled && mode_position != ModeIndicatorPosition::None {
+                Some(self.config.prompt.indicators.reprex.clone())
+            } else {
+                None
+            };
 
         let prompt = RPrompt::new(
             self.prompt_formatter.format(&self.config.prompt.format),
@@ -518,10 +514,7 @@ impl Repl {
                     }
 
                     // Not a meta command - show R not initialized message
-                    println!(
-                        "{}",
-                        format!("[R not initialized] {}", line).dark_grey()
-                    );
+                    println!("{}", format!("[R not initialized] {}", line).dark_grey());
                 }
                 Ok(Signal::CtrlC) => {
                     // Clear any visible completion menu before printing ^C
@@ -585,7 +578,14 @@ impl Repl {
             // - `:switch` - R version switching
             // - `:h`, `:help` - R help browser
             let completer = Box::new(MetaCommandCompleter::with_exclusions(vec![
-                "shell", "system", "autoformat", "format", "restart", "reprex", "switch", "h",
+                "shell",
+                "system",
+                "autoformat",
+                "format",
+                "restart",
+                "reprex",
+                "switch",
+                "h",
                 "help",
             ]));
             shell_editor = shell_editor.with_completer(completer);
@@ -614,13 +614,14 @@ impl Repl {
         shell_editor = shell_editor.with_menu(ReedlineMenu::HistoryMenu(history_menu));
 
         // Set up highlighter for meta command visual feedback
-        shell_editor =
-            shell_editor.with_highlighter(Box::new(MetaCommandHighlighter::new(self.config.colors.meta.clone())));
+        shell_editor = shell_editor.with_highlighter(Box::new(MetaCommandHighlighter::new(
+            self.config.colors.meta.clone(),
+        )));
 
         // Set up history-based autosuggestion (uses shell history)
         if self.config.editor.autosuggestion {
-            let hinter = DefaultHinter::default()
-                .with_style(Style::new().italic().fg(Color::DarkGray));
+            let hinter =
+                DefaultHinter::default().with_style(Style::new().italic().fg(Color::DarkGray));
             shell_editor = shell_editor.with_hinter(Box::new(hinter));
         }
 
@@ -687,10 +688,8 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                 // Sponge feature: track failed commands and purge old ones
                 if state.forget_config.enabled {
                     // Always track failed commands
-                    if had_error {
-                        if let Some(id) = captured_id.get() {
-                            state.failed_commands_queue.push_front(id);
-                        }
+                    if had_error && let Some(id) = captured_id.get() {
+                        state.failed_commands_queue.push_front(id);
                     }
 
                     // Purge old failed commands immediately unless on_exit_only is set
@@ -754,7 +753,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     }
 
                     // Check for meta commands first
-                    if let Some(result) = process_meta_command(&line, &mut state.prompt_config, &state.config_path, &state.r_history_path, &state.shell_history_path, &state.r_source_status) {
+                    if let Some(result) = process_meta_command(
+                        &line,
+                        &mut state.prompt_config,
+                        &state.config_path,
+                        &state.r_history_path,
+                        &state.shell_history_path,
+                        &state.r_source_status,
+                    ) {
                         match result {
                             MetaCommandResult::Handled => {
                                 // Command processed, show new prompt
@@ -765,7 +771,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 return None;
                             }
                             MetaCommandResult::Unknown(cmd) => {
-                                arf_println!("Unknown command: {}. Type :commands for available commands.", cmd);
+                                arf_println!(
+                                    "Unknown command: {}. Type :commands for available commands.",
+                                    cmd
+                                );
                                 continue;
                             }
                             MetaCommandResult::ShellExecuted => {
@@ -905,12 +914,12 @@ fn is_r_command_prompt(prompt: &str) -> bool {
 /// The history is wrapped with FuzzyHistory to provide fuzzy search capabilities.
 fn setup_history(line_editor: Reedline, history_path: Option<std::path::PathBuf>) -> Reedline {
     // Set up SQLite-backed history if we have a path
-    if let Some(path) = history_path {
-        if let Ok(history) = SqliteBackedHistory::with_file(path, None, None) {
-            // Wrap with FuzzyHistory for fuzzy Ctrl+R search
-            let fuzzy_history = FuzzyHistory::new(history);
-            return line_editor.with_history(Box::new(fuzzy_history));
-        }
+    if let Some(path) = history_path
+        && let Ok(history) = SqliteBackedHistory::with_file(path, None, None)
+    {
+        // Wrap with FuzzyHistory for fuzzy Ctrl+R search
+        let fuzzy_history = FuzzyHistory::new(history);
+        return line_editor.with_history(Box::new(fuzzy_history));
     }
 
     line_editor

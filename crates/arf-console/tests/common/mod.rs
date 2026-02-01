@@ -25,7 +25,7 @@
 //! - `assert_contains("substring")` - Assert line contains substring
 //! - `assert_equal("exact")` - Assert line equals exact string
 
-use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use regex::Regex;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,7 +103,7 @@ impl Terminal {
         let mut cmd = CommandBuilder::new(bin_path);
         // Disable history by default to avoid writing to user's actual history file during tests.
         // Skip this if --history-dir is explicitly provided (for history-related tests).
-        let has_history_dir = args.iter().any(|&a| a == "--history-dir");
+        let has_history_dir = args.contains(&"--history-dir");
         if !has_history_dir {
             cmd.arg("--no-history");
         }
@@ -219,12 +219,8 @@ impl Terminal {
                             state.screen.cursor_row = cursor_row;
                             state.screen.cursor_col = cursor_col;
                             for row in 0..DEFAULT_ROWS {
-                                let row_content = screen.contents_between(
-                                    row,
-                                    0,
-                                    row,
-                                    DEFAULT_COLS - 1,
-                                );
+                                let row_content =
+                                    screen.contents_between(row, 0, row, DEFAULT_COLS - 1);
                                 state.screen.lines[row as usize] = row_content;
                             }
                         }
@@ -368,7 +364,9 @@ impl Terminal {
         writer
             .write_all(data.as_bytes())
             .map_err(|e| format!("Failed to send line: {}", e))?;
-        writer.flush().map_err(|e| format!("Failed to flush: {}", e))
+        writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))
     }
 
     /// Send raw text without newline.
@@ -377,7 +375,9 @@ impl Terminal {
         writer
             .write_all(text.as_bytes())
             .map_err(|e| format!("Failed to send: {}", e))?;
-        writer.flush().map_err(|e| format!("Failed to flush: {}", e))
+        writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))
     }
 
     /// Send Ctrl+C (interrupt).
@@ -523,16 +523,9 @@ impl ScreenLine {
         let row = match self.line_getter {
             LineGetter::Absolute(r) => r,
             LineGetter::CurrentLine => state.screen.cursor_row as usize,
-            LineGetter::PreviousLine(n) => {
-                (state.screen.cursor_row as usize).saturating_sub(n)
-            }
+            LineGetter::PreviousLine(n) => (state.screen.cursor_row as usize).saturating_sub(n),
         };
-        Ok(state
-            .screen
-            .lines
-            .get(row)
-            .cloned()
-            .unwrap_or_default())
+        Ok(state.screen.lines.get(row).cloned().unwrap_or_default())
     }
 
     /// Assert line starts with prefix (with timeout).
