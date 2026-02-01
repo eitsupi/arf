@@ -201,14 +201,16 @@ fn handle_history_command(action: &HistoryAction) -> Result<()> {
         HistoryAction::Import {
             from,
             file,
+            hostname,
             dry_run,
-        } => handle_history_import(*from, file.as_ref(), *dry_run),
+        } => handle_history_import(*from, file.as_ref(), hostname.as_deref(), *dry_run),
     }
 }
 
 fn handle_history_import(
     source: ImportSource,
     file: Option<&std::path::PathBuf>,
+    hostname: Option<&str>,
     dry_run: bool,
 ) -> Result<()> {
     use history::import::{
@@ -301,9 +303,12 @@ fn handle_history_import(
     };
 
     // Import entries
-    let result = import_entries(&mut targets, entries, false)?;
+    let result = import_entries(&mut targets, entries, false, hostname)?;
 
     println!("\nImport complete:");
+    if let Some(h) = hostname {
+        println!("  Hostname:       {}", h);
+    }
     println!("  R commands:     {}", result.r_imported);
     println!("  Shell commands: {}", result.shell_imported);
     println!("  Skipped:        {}", result.skipped);

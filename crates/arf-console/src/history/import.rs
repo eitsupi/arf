@@ -256,10 +256,15 @@ fn classify_mode(mode: Option<&str>) -> Option<bool> {
 /// - Entries with mode "shell" go to the shell history database
 /// - Entries with mode "r", "browse", or None go to the R history database
 /// - Entries with unknown modes are skipped with a warning
+///
+/// If `hostname_override` is provided, all imported entries will have their
+/// hostname field set to this value, making them distinguishable from native
+/// arf entries.
 pub fn import_entries(
     targets: &mut ImportTargets,
     entries: Vec<ImportEntry>,
     dry_run: bool,
+    hostname_override: Option<&str>,
 ) -> Result<ImportResult> {
     use reedline::History;
 
@@ -301,7 +306,7 @@ pub fn import_entries(
             command_line: entry.command,
             start_timestamp: entry.timestamp,
             session_id: None,
-            hostname: None,
+            hostname: hostname_override.map(|s| s.to_string()),
             cwd: None,
             duration: None,
             exit_status: None,
@@ -499,7 +504,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
 
         assert_eq!(result.r_imported, 2);
         assert_eq!(result.shell_imported, 0);
@@ -543,7 +548,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 2);
@@ -589,7 +594,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, true).unwrap();
+        let result = import_entries(&mut targets, entries, true, None).unwrap();
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 1);
@@ -621,7 +626,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
 
         assert_eq!(result.r_imported, 1); // "valid" goes to R (mode: None)
         assert_eq!(result.shell_imported, 0);
@@ -658,7 +663,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 1);
@@ -689,7 +694,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
 
         // browse mode should go to R database
         assert_eq!(result.r_imported, 2);
@@ -807,7 +812,7 @@ mod tests {
 
         // Import to target databases (in separate directory)
         let mut targets = create_test_targets(&target_dir);
-        let result = import_entries(&mut targets, shell_entries, false).unwrap();
+        let result = import_entries(&mut targets, shell_entries, false, None).unwrap();
 
         assert_eq!(result.r_imported, 0);
         assert_eq!(result.shell_imported, 1);
@@ -846,7 +851,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut targets = create_test_targets(&temp_dir);
 
-        let result = import_entries(&mut targets, entries, false).unwrap();
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
         assert_eq!(result.r_imported, 2);
         assert_eq!(result.shell_imported, 1);
 
@@ -864,5 +869,47 @@ mod tests {
         assert_eq!(shell_items.len(), 1);
         assert_eq!(shell_items[0].command_line, "git status");
         assert!(shell_items[0].start_timestamp.is_some());
+    }
+
+    #[test]
+    fn test_import_entries_with_hostname_override() {
+        use reedline::History;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut targets = create_test_targets(&temp_dir);
+
+        let entries = vec![
+            ImportEntry {
+                command: "library(dplyr)".to_string(),
+                timestamp: None,
+                mode: Some("r".to_string()),
+            },
+            ImportEntry {
+                command: "ls -la".to_string(),
+                timestamp: None,
+                mode: Some("shell".to_string()),
+            },
+        ];
+
+        // Import with custom hostname
+        let result =
+            import_entries(&mut targets, entries, false, Some("radian-import")).unwrap();
+
+        assert_eq!(result.r_imported, 1);
+        assert_eq!(result.shell_imported, 1);
+
+        // Verify R history has the custom hostname
+        let r_query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
+        let r_items = targets.r_history.search(r_query).unwrap();
+        assert_eq!(r_items.len(), 1);
+        assert_eq!(r_items[0].hostname, Some("radian-import".to_string()));
+
+        // Verify shell history also has the custom hostname
+        let shell_query =
+            reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
+        let shell_items = targets.shell_history.search(shell_query).unwrap();
+        assert_eq!(shell_items.len(), 1);
+        assert_eq!(shell_items[0].hostname, Some("radian-import".to_string()));
     }
 }

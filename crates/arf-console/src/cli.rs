@@ -179,6 +179,14 @@ pub enum HistoryAction {
         #[arg(long, value_hint = ValueHint::FilePath)]
         file: Option<PathBuf>,
 
+        /// Override hostname for imported entries
+        ///
+        /// Use this to mark imported entries with a custom hostname,
+        /// making them distinguishable from native arf entries.
+        /// Example: --hostname "radian-import"
+        #[arg(long)]
+        hostname: Option<String>,
+
         /// Perform a dry run without actually importing
         #[arg(long)]
         dry_run: bool,

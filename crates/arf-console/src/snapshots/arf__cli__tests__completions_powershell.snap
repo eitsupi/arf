@@ -108,6 +108,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         'arf;history;import' {
             [CompletionResult]::new('--from', '--from', [CompletionResultType]::ParameterName, 'Source format to import from')
             [CompletionResult]::new('--file', '--file', [CompletionResultType]::ParameterName, 'Path to the history file/database to import')
+            [CompletionResult]::new('--hostname', '--hostname', [CompletionResultType]::ParameterName, 'Override hostname for imported entries')
             [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Perform a dry run without actually importing')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')

@@ -426,7 +426,7 @@ _arf() {
             return 0
             ;;
         arf__history__import)
-            opts="-h --from --file --dry-run --help"
+            opts="-h --from --file --hostname --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -449,6 +449,10 @@ _arf() {
                     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
                         compopt -o filenames
                     fi
+                    return 0
+                    ;;
+                --hostname)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)
