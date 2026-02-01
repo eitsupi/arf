@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0-rc.1] - 2026-02-01
+
 ### Added
 
 - Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)

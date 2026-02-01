@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/arf-console"]
 
 [workspace.package]
-version = "0.2.0-beta.1"
+version = "0.2.0-rc.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/eitsupi/arf"
