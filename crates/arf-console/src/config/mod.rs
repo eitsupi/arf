@@ -78,6 +78,20 @@ pub fn history_dir() -> Option<PathBuf> {
     data_dir().map(|p| p.join("history"))
 }
 
+/// Mask home directory in path with `~` for privacy.
+///
+/// Replaces the user's home directory prefix with `~` to avoid displaying
+/// usernames in paths. Works on both Unix and Windows (PowerShell supports `~`).
+/// Uses platform-native path separators.
+pub fn mask_home_path(path: &std::path::Path) -> String {
+    if let Some(home) = dirs::home_dir()
+        && let Ok(stripped) = path.strip_prefix(&home)
+    {
+        return format!("~{}{}", std::path::MAIN_SEPARATOR, stripped.display());
+    }
+    path.display().to_string()
+}
+
 /// Load configuration from file, or return defaults if not found.
 pub fn load_config() -> Config {
     let Some(config_path) = config_file_path() else {
@@ -642,6 +656,53 @@ show_banner = false
             assert!(
                 properties.get("formatter").is_none(),
                 "Schema should NOT have formatter section"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_home_path_with_home_prefix() {
+        if let Some(home) = dirs::home_dir() {
+            let test_path = home.join("test").join("file.txt");
+            let masked = mask_home_path(&test_path);
+            assert!(
+                masked.starts_with("~"),
+                "Path should start with ~: {}",
+                masked
+            );
+            assert!(
+                masked.contains("test"),
+                "Path should contain 'test': {}",
+                masked
+            );
+            assert!(
+                masked.contains("file.txt"),
+                "Path should contain 'file.txt': {}",
+                masked
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_home_path_without_home_prefix() {
+        let test_path = PathBuf::from("/opt/R/4.5.0");
+        let expected = test_path.display().to_string();
+        let masked = mask_home_path(&test_path);
+        assert_eq!(
+            masked, expected,
+            "Path without home prefix should be unchanged"
+        );
+    }
+
+    #[test]
+    fn test_mask_home_path_exact_home() {
+        if let Some(home) = dirs::home_dir() {
+            let masked = mask_home_path(&home);
+            // Should be just "~/" or "~\" depending on platform
+            assert!(
+                masked.starts_with("~"),
+                "Home path should start with ~: {}",
+                masked
             );
         }
     }

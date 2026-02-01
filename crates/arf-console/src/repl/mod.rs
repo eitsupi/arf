@@ -4,9 +4,8 @@ mod banner;
 mod meta_command;
 mod prompt;
 mod reprex;
-mod session_info;
 mod shell;
-mod state;
+pub(crate) mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};

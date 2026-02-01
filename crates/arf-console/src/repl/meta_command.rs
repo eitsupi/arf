@@ -2,11 +2,10 @@
 
 use crate::config::RSourceStatus;
 use crate::external::formatter;
-use crate::pager::run_help_browser;
+use crate::pager::{display_session_info, run_help_browser};
 use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
 
-use super::session_info::display_session_info;
 use super::shell::confirm_action;
 use super::state::PromptRuntimeConfig;
 use super::{ARF_PREFIX, arf_println};
@@ -419,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
     fn test_process_meta_command_info() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -431,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
     fn test_process_meta_command_info_with_config_path() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();

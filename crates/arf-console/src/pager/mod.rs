@@ -5,11 +5,14 @@
 
 mod help;
 pub mod history_schema;
+pub mod session_info;
 
 pub use help::run_help_browser;
+pub use session_info::display_session_info;
 
+use base64::{Engine, engine::general_purpose};
 use crossterm::{
-    ExecutableCommand, cursor,
+    Command, ExecutableCommand, cursor,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
         MouseEventKind,
@@ -294,4 +297,43 @@ fn content_rows_with_height(height: usize) -> usize {
 /// Calculate max scroll offset for given line count.
 fn max_scroll_offset(line_count: usize) -> usize {
     line_count.saturating_sub(content_rows())
+}
+
+/// OSC 52 clipboard command for copying text via terminal escape sequence.
+///
+/// Reference: <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands>
+/// Based on television's implementation: refs/television/television/utils/clipboard.rs
+struct SetClipboard {
+    content: String,
+}
+
+impl SetClipboard {
+    fn new(content: &str) -> Self {
+        Self {
+            content: general_purpose::STANDARD.encode(content.as_bytes()),
+        }
+    }
+}
+
+impl Command for SetClipboard {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "\x1b]52;c;{}\x1b\\", self.content)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        // OSC 52 is ANSI-based, no WinAPI implementation needed.
+        // Modern Windows terminals support ANSI sequences.
+        Ok(())
+    }
+}
+
+/// Copy text to clipboard using OSC 52 escape sequence.
+///
+/// This uses the terminal's OSC 52 support to copy text to the system clipboard.
+/// Most modern terminals support this (iTerm2, kitty, WezTerm, Windows Terminal, etc.).
+pub fn copy_to_clipboard(text: &str) -> io::Result<()> {
+    use std::io::BufWriter;
+    let mut writer = BufWriter::new(io::stderr());
+    crossterm::execute!(writer, SetClipboard::new(text))
 }
