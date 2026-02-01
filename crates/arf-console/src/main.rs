@@ -330,7 +330,7 @@ fn handle_history_import(
     };
 
     // Import entries
-    let result = import_entries(&mut targets, entries, false, hostname)?;
+    let result = import_entries(&mut targets, entries, hostname)?;
 
     println!("\nImport complete:");
     if let Some(h) = hostname {

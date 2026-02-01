@@ -250,7 +250,7 @@ arf history import --from radian --hostname "radian-import"
 | Option | Description |
 |--------|-------------|
 | `--from` | Source format: `radian`, `r`, or `arf` (required) |
-| `--file` | Path to source file (defaults to standard locations) |
+| `--file` | Path to source file (required for `arf`, defaults to standard locations for others) |
 | `--hostname` | Custom hostname to mark imported entries |
 | `--dry-run` | Preview without importing |
 
@@ -260,12 +260,12 @@ arf history import --from radian --hostname "radian-import"
 |--------|-------------|:----------:|:---------:|:------------:|
 | `radian` | `~/.radian_history` | Preserved | Preserved | By `# mode:` |
 | `r` | `.Rhistory` or `R_HISTFILE` | - | - | → `r.db` |
-| `arf` | SQLite database backup | Preserved | Preserved | By filename |
+| `arf` | SQLite database (`--file` required) | Preserved | Preserved | By filename |
 
 **Mode routing:**
 
 - **radian**: Routes by `# mode:` header (r/browse → `r.db`, shell → `shell.db`)
-- **arf**: Routes by filename (`shell.db` → `shell.db`, others → `r.db`)
+- **arf**: Routes by filename (`shell.db` → `shell.db`, others → `r.db`). To import both R and shell history, run the command twice with each database file.
 - **r**: All commands go to `r.db` (no mode information)
 
 Entries with unknown modes are skipped with a warning.
