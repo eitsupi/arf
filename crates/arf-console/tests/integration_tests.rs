@@ -911,7 +911,6 @@ fn test_pty_history_exit_status() {
 ///
 /// Requires dplyr to be installed.
 #[test]
-#[cfg(unix)]
 fn test_pty_rlang_error_detection() {
     if !common::has_dplyr() {
         eprintln!("Skipping test: dplyr not available");
@@ -2041,7 +2040,6 @@ fn test_pty_history_schema_pager_mouse_scroll() {
 ///
 /// Requires Air CLI for autoformat functionality.
 #[test]
-#[cfg(unix)]
 fn test_pty_reprex_paste_strips_output_lines() {
     if !common::has_air_cli() {
         eprintln!("Skipping test: Air CLI not available");
