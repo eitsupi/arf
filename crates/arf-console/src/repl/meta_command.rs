@@ -2,11 +2,10 @@
 
 use crate::config::RSourceStatus;
 use crate::external::formatter;
-use crate::pager::run_help_browser;
+use crate::pager::{display_session_info, run_help_browser};
 use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
 
-use super::session_info::display_session_info;
 use super::shell::confirm_action;
 use super::state::PromptRuntimeConfig;
 use super::{ARF_PREFIX, arf_println};

@@ -3,15 +3,14 @@
 //! This module provides functions to display the history database schema
 //! and example R code for accessing it, used by both CLI and REPL commands.
 
-use super::{PagerAction, PagerConfig, PagerContent, run};
+use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
 use crate::config::history_dir;
 use crate::highlighter::RTreeSitterHighlighter;
-use base64::{Engine, engine::general_purpose};
-use crossterm::{Command, event::KeyCode, event::KeyModifiers};
+use crossterm::event::{KeyCode, KeyModifiers};
 use nu_ansi_term::{Color, Style};
 use reedline::Highlighter;
 use std::cell::{Cell, RefCell};
-use std::io::{self, BufWriter, IsTerminal};
+use std::io::{self, IsTerminal};
 
 /// Error returned when history directory cannot be determined.
 #[derive(Debug)]
@@ -632,35 +631,6 @@ fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
     println!("{}", s.code_fence.paint("```"));
 }
 
-/// OSC 52 clipboard command for copying text via terminal escape sequence.
-///
-/// Reference: <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands>
-/// Based on television's implementation: refs/television/television/utils/clipboard.rs
-struct SetClipboard {
-    content: String,
-}
-
-impl SetClipboard {
-    fn new(content: &str) -> Self {
-        Self {
-            content: general_purpose::STANDARD.encode(content.as_bytes()),
-        }
-    }
-}
-
-impl Command for SetClipboard {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1b]52;c;{}\x1b\\", self.content)
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        // OSC 52 is ANSI-based, no WinAPI implementation needed.
-        // Modern Windows terminals support ANSI sequences.
-        Ok(())
-    }
-}
-
 /// Extract the R code block content from schema lines.
 ///
 /// Returns the lines between ```r and ```, excluding the fence markers.
@@ -682,12 +652,6 @@ fn extract_r_code_block(lines: &[String]) -> String {
     }
 
     code_lines.join("\n")
-}
-
-/// Copy text to clipboard using OSC 52 escape sequence.
-fn copy_to_clipboard(text: &str) -> io::Result<()> {
-    let mut writer = BufWriter::new(io::stderr());
-    crossterm::execute!(writer, SetClipboard::new(text))
 }
 
 #[cfg(test)]
