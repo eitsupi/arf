@@ -2,13 +2,32 @@
 //!
 //! These tests cover both non-interactive (script execution) and interactive (PTY) modes.
 //!
+//! # PTY Tests (Unix only)
+//!
 //! The PTY tests use a custom terminal emulator based on vt100-rust that properly
 //! responds to cursor position queries (CSI 6n) from reedline, enabling full
 //! interactive testing of arf.
 //!
-//! Note: Currently disabled on Windows due to PTY handling issues.
-
-#![cfg(unix)]
+//! ## Why PTY tests are Unix-only
+//!
+//! On Windows, crossterm's `cursor::position()` uses WinAPI (`GetConsoleScreenBufferInfo`)
+//! instead of ANSI escape sequences (CSI 6n). When running inside Windows ConPTY:
+//!
+//! 1. WinAPI calls don't work correctly with the virtualized console
+//! 2. reedline's painter calls `cursor::position()?` during initialization
+//! 3. This causes arf to exit immediately before displaying any output
+//!
+//! This is a known limitation. Even crossterm itself marks cursor position tests
+//! with `#[ignore]` in CI environments, and uses `temp_screen_buffer()` (which creates
+//! a real console buffer) for Windows-specific WinAPI tests.
+//!
+//! See: <https://github.com/crossterm-rs/crossterm/blob/master/src/cursor.rs>
+//!      <https://github.com/crossterm-rs/crossterm/blob/master/src/cursor/sys/windows.rs>
+//!
+//! # Non-interactive Tests (Cross-platform)
+//!
+//! CLI tests using `arf --eval`, `arf --version`, etc. work on all platforms
+//! as they don't require PTY interaction.
 
 mod common;
 
@@ -542,9 +561,17 @@ fn test_r_complete_token() {
 }
 
 // ============================================================================
-// PTY-based Interactive Tests
+// PTY-based Interactive Tests (Unix only)
 // ============================================================================
+//
+// These tests are disabled on Windows because crossterm's cursor::position()
+// uses WinAPI calls that don't work correctly inside ConPTY. This matches
+// crossterm's own testing strategy where cursor position tests are either
+// marked #[ignore] or use temp_screen_buffer() for Windows-specific WinAPI tests.
+//
+// Reference: crossterm/src/cursor.rs, crossterm/src/cursor/sys/windows.rs
 
+#[cfg(unix)]
 use common::Terminal;
 
 /// Test that arf starts up correctly and shows the prompt.
@@ -552,6 +579,7 @@ use common::Terminal;
 /// This test uses a custom PTY proxy that responds to cursor position queries
 /// (CSI 6n) from reedline, enabling proper interactive testing.
 #[test]
+#[cfg(unix)]
 fn test_pty_startup() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -568,6 +596,7 @@ fn test_pty_startup() {
 
 /// Test Ctrl+C cancels input.
 #[test]
+#[cfg(unix)]
 fn test_pty_ctrl_c() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -595,6 +624,7 @@ fn test_pty_ctrl_c() {
 /// - Prompt appears on the correct line
 /// - Cursor is positioned correctly after the prompt
 #[test]
+#[cfg(unix)]
 fn test_pty_startup_screen() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -623,6 +653,7 @@ fn test_pty_startup_screen() {
 ///
 /// This is a more robust version of test_eval_basic that uses PTY and screen assertions.
 #[test]
+#[cfg(unix)]
 fn test_pty_basic_expression() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -648,6 +679,7 @@ fn test_pty_basic_expression() {
 
 /// Test variable assignment and retrieval (inspired by radian's test_strings).
 #[test]
+#[cfg(unix)]
 fn test_pty_variable_assignment() {
     // Use --no-auto-match to disable auto-bracket insertion for PTY tests
     let mut terminal =
@@ -683,6 +715,7 @@ fn test_pty_variable_assignment() {
 /// Tests that R's cat() function works correctly in interactive mode.
 /// Note: readline() requires special handling that may not be fully supported yet.
 #[test]
+#[cfg(unix)]
 fn test_pty_cat_output() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -708,6 +741,7 @@ fn test_pty_cat_output() {
 
 /// Test multiline expression handling.
 #[test]
+#[cfg(unix)]
 fn test_pty_multiline_input() {
     // Use --no-auto-match to disable auto-bracket insertion for PTY tests
     let mut terminal =
@@ -753,6 +787,7 @@ fn test_pty_multiline_input() {
 /// This tests the specific case where a string with embedded newline is entered
 /// across multiple lines, which requires proper handling by the validator.
 #[test]
+#[cfg(unix)]
 fn test_pty_multiline_string_input() {
     // Use --no-auto-match to disable auto-bracket insertion for PTY tests
     let mut terminal =
@@ -793,6 +828,7 @@ fn test_pty_multiline_string_input() {
 
 /// Test error handling in PTY mode.
 #[test]
+#[cfg(unix)]
 fn test_pty_error_handling() {
     // Use --no-auto-match to avoid bracket insertion interfering with the test
     let mut terminal =
@@ -1129,6 +1165,7 @@ frames = ""
 
 /// Test Ctrl+C interrupts long-running computation.
 #[test]
+#[cfg(unix)]
 fn test_pty_interrupt_computation() {
     // Use --no-auto-match to disable auto-bracket insertion for PTY tests
     let mut terminal =
@@ -1174,6 +1211,7 @@ fn test_pty_interrupt_computation() {
 ///
 /// Port of: radian/tests/test_startup.py::test_startup
 #[test]
+#[cfg(unix)]
 fn test_pty_cursor_position() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -1257,6 +1295,7 @@ fn test_pty_cursor_position() {
 ///
 /// Port of: radian/tests/test_startup.py cursor and line assertions
 #[test]
+#[cfg(unix)]
 fn test_pty_screen_state_inspection() {
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
@@ -1609,6 +1648,7 @@ fn test_pty_bracketed_paste_with_auto_match() {
 ///
 /// Port of: radian/tests/test_readline.py::test_early_termination
 #[test]
+#[cfg(unix)]
 fn test_pty_escape_cancels_input() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
@@ -1654,6 +1694,7 @@ fn test_pty_escape_cancels_input() {
 ///
 /// Port of: radian/tests/test_readline.py::test_readline
 #[test]
+#[cfg(unix)]
 fn test_pty_readline() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
@@ -1699,6 +1740,7 @@ fn test_pty_readline() {
 //   1. R -e "install.packages('askpass')"
 //   2. cargo test test_pty_askpass -- --ignored
 #[test]
+#[cfg(unix)]
 #[ignore] // Requires askpass package - run with: cargo test -- --ignored
 fn test_pty_askpass() {
     let mut terminal =
@@ -2314,6 +2356,7 @@ fn test_pty_backtick_does_not_crash() {
 /// This is a regression test for the issue where the validator receives empty strings
 /// during interactive multiline editing of raw strings.
 #[test]
+#[cfg(unix)]
 fn test_pty_multiline_raw_string_input() {
     // Use --no-auto-match to disable auto-bracket insertion for PTY tests
     let mut terminal =
@@ -2362,6 +2405,7 @@ fn test_pty_multiline_raw_string_input() {
 ///
 /// Workaround: Use `--no-auto-match` flag or paste raw strings via bracketed paste.
 #[test]
+#[cfg(unix)]
 #[ignore] // Known issue: auto-match doesn't support raw strings
 fn test_pty_raw_string_with_auto_match() {
     // Enable auto-match (default behavior)
@@ -2448,6 +2492,7 @@ fn test_r_event_processing_api() {
 ///
 /// Regression test for a prompt display bug that was fixed.
 #[test]
+#[cfg(unix)]
 fn test_pty_menu_prompt() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
@@ -2495,6 +2540,7 @@ fn test_pty_menu_prompt() {
 /// it's always synchronized with the actual editing mode (unlike a placeholder
 /// approach which would be 1 render cycle behind).
 #[test]
+#[cfg(unix)]
 fn test_pty_vi_mode_indicator() {
     use common::Terminal;
     use std::io::Write;

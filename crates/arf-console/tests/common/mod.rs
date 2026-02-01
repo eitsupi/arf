@@ -4,14 +4,22 @@
 //! cursor position queries (CSI 6n) from reedline. This is essential for testing
 //! interactive features of arf.
 //!
-//! ## Architecture
+//! # Platform Support
+//!
+//! This module is Unix-only because crossterm's `cursor::position()` uses WinAPI
+//! on Windows, which doesn't work correctly inside ConPTY. This matches crossterm's
+//! own testing approach where cursor position tests are marked `#[ignore]` in CI.
+//!
+//! See: <https://github.com/crossterm-rs/crossterm/blob/master/src/cursor.rs>
+//!
+//! # Architecture
 //!
 //! The Terminal struct uses:
 //! - `portable-pty` for cross-platform PTY management
 //! - `vt100` for terminal emulation and cursor query detection
 //! - Separate threads for reading PTY output and handling cursor queries
 //!
-//! ## Assertion Style (inspired by radian)
+//! # Assertion Style (inspired by radian)
 //!
 //! This module provides screen-based assertions similar to radian's test framework:
 //! - `line(n)` - Get line n from the screen
@@ -24,6 +32,7 @@
 //! - `assert_endswith("suffix")` - Assert line ends with suffix
 //! - `assert_contains("substring")` - Assert line contains substring
 //! - `assert_equal("exact")` - Assert line equals exact string
+#![cfg(unix)]
 
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use regex::Regex;

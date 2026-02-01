@@ -3,7 +3,7 @@
 use crokey::KeyCombination;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Editor configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -19,9 +19,25 @@ pub struct EditorConfig {
     /// Keyboard shortcuts that insert text.
     /// Format: "modifier-key" = "text to insert"
     /// Examples: "alt-hyphen" = " <- ", "alt-p" = " |> "
-    #[serde(default = "default_key_map")]
+    #[serde(
+        default = "default_key_map",
+        serialize_with = "serialize_key_map_sorted"
+    )]
     #[schemars(schema_with = "key_map_schema")]
     pub key_map: HashMap<KeyCombination, String>,
+}
+
+/// Serialize key_map with keys sorted alphabetically for deterministic output.
+fn serialize_key_map_sorted<S>(
+    map: &HashMap<KeyCombination, String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Convert to BTreeMap<String, &String> for sorted serialization
+    let sorted: BTreeMap<String, &String> = map.iter().map(|(k, v)| (k.to_string(), v)).collect();
+    sorted.serialize(serializer)
 }
 
 fn default_key_map() -> HashMap<KeyCombination, String> {
