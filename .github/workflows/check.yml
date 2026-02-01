@@ -64,6 +64,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Air CLI
+        uses: posit-dev/setup-air@v1
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
       - name: Install R
