@@ -80,7 +80,7 @@ jobs:
       - name: Run tests
         run: >
           cargo test
-            --all-targets
-            --all-features
-            --workspace
-            --locked
+          --all-targets
+          --all-features
+          --workspace
+          --locked
