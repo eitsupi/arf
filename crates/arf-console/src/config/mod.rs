@@ -686,9 +686,10 @@ show_banner = false
     #[test]
     fn test_mask_home_path_without_home_prefix() {
         let test_path = PathBuf::from("/opt/R/4.5.0");
+        let expected = test_path.display().to_string();
         let masked = mask_home_path(&test_path);
         assert_eq!(
-            masked, "/opt/R/4.5.0",
+            masked, expected,
             "Path without home prefix should be unchanged"
         );
     }
