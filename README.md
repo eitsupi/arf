@@ -46,6 +46,18 @@
 - Syntax highlighting with customizable colors
 - SQLite-backed persistent history
 
+## Installation
+
+### Pre-built Binaries
+
+Download pre-built binaries for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases).
+
+### Build from Source
+
+```sh
+cargo install --git https://github.com/eitsupi/arf.git
+```
+
 ## Quick Start
 
 ```sh
