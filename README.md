@@ -270,6 +270,11 @@ arf history import --from radian --hostname "radian-import"
 
 Entries with unknown modes are skipped with a warning.
 
+**Notes:**
+
+- Importing the same file multiple times will create duplicate entries. Use `--dry-run` first to preview what would be imported.
+- Self-import is detected and rejected when importing from an arf database to the same target file.
+
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`

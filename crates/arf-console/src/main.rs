@@ -255,7 +255,7 @@ fn handle_history_import(
         (ImportSource::Arf, None) => {
             anyhow::bail!(
                 "The --file option is required when importing from arf format.\n\
-                 Without --file, the source would default to the same database as the import target."
+                 Example: arf history import --from arf --file /path/to/backup/r.db"
             );
         }
     };
