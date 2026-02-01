@@ -64,7 +64,6 @@ schemars = "1.2"
 insta = "1.46"
 portable-pty = "0.9"
 regex = "1.11"
-rexpect = "0.5"
 tempfile = "3"
 vt100 = "0.16"
 

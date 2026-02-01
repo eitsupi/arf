@@ -704,3 +704,31 @@ impl Drop for Terminal {
         let _ = self.child.kill();
     }
 }
+
+// ============================================================================
+// External tool detection helpers
+// ============================================================================
+
+use std::process::Command;
+
+/// Check if Air CLI is available on the system.
+///
+/// Returns true if `air --version` runs successfully.
+pub fn has_air_cli() -> bool {
+    Command::new("air")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Check if dplyr R package is available.
+///
+/// Returns true if R can load dplyr without error.
+pub fn has_dplyr() -> bool {
+    Command::new("Rscript")
+        .args(["-e", "library(dplyr)"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
