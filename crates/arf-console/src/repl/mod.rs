@@ -102,8 +102,8 @@ impl Repl {
         let prompt_formatter = PromptFormatter::new();
 
         // Set up reprex mode if enabled
-        if config.reprex.enabled {
-            arf_libr::set_reprex_mode(true, &config.reprex.comment);
+        if config.startup.mode.reprex {
+            arf_libr::set_reprex_mode(true, &config.mode.reprex.comment);
         }
 
         Ok(Repl {
@@ -297,10 +297,10 @@ impl Repl {
             self.config.prompt.continuation.clone(),
             self.config.prompt.shell_format.clone(),
             self.config.prompt.mode_indicator,
-            self.config.reprex.enabled,
-            self.config.reprex.comment.clone(),
+            self.config.startup.mode.reprex,
+            self.config.mode.reprex.comment.clone(),
             self.config.prompt.indicators.clone(),
-            self.config.reprex.autoformat,
+            self.config.startup.mode.autoformat,
             self.config.colors.prompt.main,
             self.config.colors.prompt.continuation,
             self.config.colors.prompt.shell,
@@ -432,7 +432,7 @@ impl Repl {
         // Mode indicator for special modes (reprex, etc.)
         let mode_position = self.config.prompt.mode_indicator;
         let mode_indicator =
-            if self.config.reprex.enabled && mode_position != ModeIndicatorPosition::None {
+            if self.config.startup.mode.reprex && mode_position != ModeIndicatorPosition::None {
                 Some(self.config.prompt.indicators.reprex.clone())
             } else {
                 None

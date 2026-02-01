@@ -16,6 +16,9 @@ pub struct StartupConfig {
     /// Show startup banner.
     #[serde(default = "default_true")]
     pub show_banner: bool,
+    /// Initial mode settings (reprex, autoformat).
+    #[serde(default)]
+    pub mode: StartupModeConfig,
 }
 
 fn default_true() -> bool {
@@ -27,8 +30,23 @@ impl Default for StartupConfig {
         StartupConfig {
             r_source: RSource::default(),
             show_banner: true,
+            mode: StartupModeConfig::default(),
         }
     }
+}
+
+/// Initial mode configuration.
+///
+/// These modes can be toggled at runtime via meta commands, but
+/// this configuration determines their initial state at startup.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+#[derive(Default)]
+pub struct StartupModeConfig {
+    /// Enable reprex mode (no prompt, output prefixed with comment).
+    pub reprex: bool,
+    /// Enable auto-formatting of R code in reprex mode (requires Air CLI).
+    pub autoformat: bool,
 }
 
 /// How to locate the R installation.

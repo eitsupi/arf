@@ -2,7 +2,7 @@
 source: crates/arf-console/src/repl/banner.rs
 expression: banner
 ---
-# arf console v0.1.1
+# arf console v0.2.0-beta.1
 # Edit mode: emacs
 # R is not initialized. Commands will not be evaluated.
 # Type :cmds for meta commands list, Ctrl+D to exit.

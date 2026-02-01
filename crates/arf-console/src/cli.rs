@@ -22,13 +22,13 @@ pub struct Cli {
 
     /// Enable reprex mode (no prompt, output prefixed with #>)
     ///
-    /// Config: reprex.enabled
+    /// Config: startup.mode.reprex
     #[arg(long)]
     pub reprex: bool,
 
     /// Enable auto-formatting of R code in reprex mode (requires Air CLI)
     ///
-    /// Config: reprex.autoformat
+    /// Config: startup.mode.autoformat
     #[arg(long)]
     pub auto_format: bool,
 

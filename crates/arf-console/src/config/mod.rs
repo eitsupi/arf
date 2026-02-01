@@ -5,8 +5,8 @@ mod completion;
 mod editor;
 mod experimental;
 mod history;
+mod mode;
 pub(crate) mod prompt;
-mod reprex;
 mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
@@ -15,12 +15,12 @@ pub use editor::EditorConfig;
 pub use experimental::SpinnerConfig;
 pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
+pub use mode::ModeConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
 pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
-pub use reprex::ReprexConfig;
 pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
 
 use schemars::JsonSchema;
@@ -41,7 +41,9 @@ pub struct Config {
     pub prompt: PromptConfig,
     pub completion: CompletionConfig,
     pub history: HistoryConfig,
-    pub reprex: ReprexConfig,
+    /// Mode-specific static configuration (not changeable at runtime).
+    /// For initial mode state (enabled/disabled), see `startup.mode`.
+    pub mode: ModeConfig,
     pub colors: ColorsConfig,
     #[serde(default)]
     pub experimental: ExperimentalConfig,
@@ -245,6 +247,10 @@ auto_match = false
 r_source = "rig"
 show_banner = false
 
+[startup.mode]
+reprex = true
+autoformat = true
+
 [editor]
 mode = "vi"
 auto_match = false
@@ -257,10 +263,8 @@ continuation = ".. "
 enabled = true
 timeout_ms = 100
 
-[reprex]
-enabled = true
+[mode.reprex]
 comment = "# "
-autoformat = true
 "##;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(matches!(
@@ -271,8 +275,9 @@ autoformat = true
         assert_eq!(config.editor.mode, "vi");
         assert!(!config.editor.auto_match);
         assert_eq!(config.prompt.format, "R> ");
-        assert!(config.reprex.enabled);
-        assert!(config.reprex.autoformat);
+        assert!(config.startup.mode.reprex);
+        assert!(config.startup.mode.autoformat);
+        assert_eq!(config.mode.reprex.comment, "# ");
     }
 
     #[test]
@@ -474,6 +479,18 @@ show_banner = false
             "Should have show_banner in startup section"
         );
 
+        // Should have [startup.mode] section
+        assert!(
+            config_str.contains("[startup.mode]"),
+            "Should have [startup.mode] section"
+        );
+
+        // Should have [mode.reprex] section
+        assert!(
+            config_str.contains("[mode.reprex]"),
+            "Should have [mode.reprex] section"
+        );
+
         // Should NOT have old sections
         assert!(
             !config_str.contains("[general]"),
@@ -488,14 +505,10 @@ show_banner = false
             "Should NOT have [formatter] section"
         );
 
-        // Should have new sections
+        // Should have other sections
         assert!(
             config_str.contains("[editor]"),
             "Should have [editor] section"
-        );
-        assert!(
-            config_str.contains("[reprex]"),
-            "Should have [reprex] section"
         );
     }
 
@@ -506,6 +519,14 @@ show_banner = false
         fn test_schema_snapshot() {
             let schema = generate_schema();
             insta::assert_snapshot!("config_schema", schema);
+        }
+
+        /// Snapshot test for the default configuration file.
+        /// This ensures we notice when the config structure changes.
+        #[test]
+        fn test_default_config_snapshot() {
+            let config = crate::config::generate_default_config();
+            insta::assert_snapshot!("default_config", config);
         }
 
         #[test]
@@ -567,10 +588,16 @@ show_banner = false
                 .get("properties")
                 .expect("Schema should have properties");
 
-            // Should have startup section (contains r_version and show_banner)
+            // Should have startup section (contains r_source, show_banner, mode)
             assert!(
                 properties.get("startup").is_some(),
                 "Schema should have startup section"
+            );
+
+            // Should have mode section (contains reprex static config)
+            assert!(
+                properties.get("mode").is_some(),
+                "Schema should have mode section"
             );
 
             // Should have other sections
@@ -587,18 +614,18 @@ show_banner = false
                 "Schema should have completion section"
             );
             assert!(
-                properties.get("reprex").is_some(),
-                "Schema should have reprex section"
-            );
-            assert!(
                 properties.get("experimental").is_some(),
                 "Schema should have experimental section"
             );
 
-            // Should NOT have legacy sections or top-level fields that moved to startup
+            // Should NOT have legacy sections or top-level fields that moved
             assert!(
                 properties.get("general").is_none(),
                 "Schema should NOT have general section"
+            );
+            assert!(
+                properties.get("reprex").is_none(),
+                "reprex should be in mode section, not top-level"
             );
             assert!(
                 properties.get("r_version").is_none(),

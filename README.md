@@ -111,6 +111,11 @@ arf config init
 r_source = "auto"       # "auto", "rig", or { path = "/path/to/R" }
 show_banner = true
 
+# Initial mode settings (can be toggled at runtime)
+[startup.mode]
+reprex = false
+autoformat = false      # Requires Air CLI
+
 [editor]
 mode = "emacs"          # "emacs" or "vi"
 auto_match = true
@@ -132,10 +137,9 @@ mode_indicator = "prefix"   # "prefix", "suffix", or "none"
 symbol = { error = "✗ " }   # success = "" (empty) by default
 override_prompt_color = false
 
-[reprex]
-enabled = false
+# Reprex static configuration
+[mode.reprex]
 comment = "#> "
-autoformat = false      # Requires Air CLI
 
 # Syntax highlighting colors
 [colors.r]

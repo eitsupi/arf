@@ -18,14 +18,14 @@ pub fn format_banner(config: &Config, r_initialized: bool) -> String {
     lines.push(format!("# arf console v{}", env!("CARGO_PKG_VERSION")));
     lines.push(format!("# Edit mode: {}", config.editor.mode));
 
-    if config.reprex.enabled {
+    if config.startup.mode.reprex {
         lines.push(format!(
             "# Reprex mode: enabled | Comment: {:?}",
-            config.reprex.comment
+            config.mode.reprex.comment
         ));
     }
 
-    if config.reprex.autoformat {
+    if config.startup.mode.autoformat {
         lines.push("# Auto-format: enabled (using air)".to_string());
     }
 
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_banner_reprex_mode() {
         let mut config = Config::default();
-        config.reprex.enabled = true;
+        config.startup.mode.reprex = true;
         let banner = format_banner(&config, true);
         insta::assert_snapshot!("banner_reprex_mode", banner);
     }
@@ -75,8 +75,8 @@ mod tests {
     #[test]
     fn test_banner_reprex_custom_comment() {
         let mut config = Config::default();
-        config.reprex.enabled = true;
-        config.reprex.comment = "## ".to_string();
+        config.startup.mode.reprex = true;
+        config.mode.reprex.comment = "## ".to_string();
         let banner = format_banner(&config, true);
         insta::assert_snapshot!("banner_reprex_custom_comment", banner);
     }
