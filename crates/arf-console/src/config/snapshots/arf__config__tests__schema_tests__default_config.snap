@@ -1,0 +1,98 @@
+---
+source: crates/arf-console/src/config/mod.rs
+expression: config
+---
+#:schema https://raw.githubusercontent.com/eitsupi/arf/main/artifacts/arf.schema.json
+# arf configuration file
+#
+# Documentation: https://github.com/eitsupi/arf
+
+[startup]
+r_source = "auto"
+show_banner = true
+
+[startup.mode]
+reprex = false
+autoformat = false
+
+[editor]
+mode = "emacs"
+auto_match = true
+autosuggestion = true
+
+[editor.key_map]
+Alt-Hyphen = " <- "
+Alt-p = " |> "
+
+[prompt]
+format = "{status}R {version}> "
+continuation = "+  "
+shell_format = "[{shell}] $ "
+mode_indicator = "prefix"
+
+[prompt.indicators]
+reprex = "[reprex] "
+autoformat = "[format] "
+
+[prompt.status]
+override_prompt_color = false
+
+[prompt.status.symbol]
+success = ""
+error = "✗ "
+
+[prompt.vi.symbol]
+insert = ""
+normal = ""
+non_vi = ""
+
+[completion]
+enabled = true
+timeout_ms = 50
+debounce_ms = 100
+max_height = 10
+function_paren_check_limit = 50
+
+[history]
+menu_max_height = 15
+disabled = false
+
+[mode.reprex]
+comment = "#> "
+
+[colors.r]
+comment = "DarkGray"
+string = "Green"
+number = "LightMagenta"
+keyword = "LightBlue"
+constant = "LightCyan"
+operator = "Yellow"
+punctuation = "Default"
+identifier = "Default"
+
+[colors.meta]
+command = "Magenta"
+
+[colors.prompt]
+main = "LightGreen"
+continuation = "LightGreen"
+shell = "LightRed"
+indicator = "Yellow"
+
+[colors.prompt.status]
+success = "LightGreen"
+error = "LightRed"
+
+[colors.prompt.vi]
+insert = "Default"
+normal = "Default"
+non_vi = "Default"
+
+[experimental.history_forget]
+enabled = false
+delay = 2
+on_exit_only = false
+
+[experimental.prompt_spinner]
+frames = ""
+color = "Cyan"

@@ -43,6 +43,10 @@ If no configuration file exists, arf uses these defaults:
 r_source = "auto"       # How to locate R: "auto", "rig", or { path = "..." }
 show_banner = true      # Show startup banner
 
+[startup.mode]
+reprex = false          # Enable reprex mode
+autoformat = false      # Enable auto-formatting (requires air)
+
 [editor]
 mode = "emacs"          # Editing mode: "emacs" or "vi"
 auto_match = true       # Auto-close brackets and quotes
@@ -81,10 +85,8 @@ menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
 disabled = false           # Disable history entirely
 # dir = "/custom/path"     # Custom history directory (optional)
 
-[reprex]
-enabled = false            # Enable reprex mode
-comment = "#> "            # Comment prefix for output
-autoformat = false         # Enable auto-formatting (requires air)
+[mode.reprex]
+comment = "#> "            # Comment prefix for reprex output
 
 # Syntax highlighting colors
 [colors.r]
@@ -383,8 +385,8 @@ arf supports auto-formatting of R code using [air](https://github.com/posit-dev/
 ### Configuration
 
 ```toml
-[reprex]
-enabled = true      # Enable reprex mode
+[startup.mode]
+reprex = true       # Enable reprex mode
 autoformat = true   # Enable auto-formatting
 ```
 
@@ -493,8 +495,8 @@ Command-line options take precedence over config file settings:
 | `--r-home` | Overrides `startup.r_source` (explicit path) |
 | `--with-r-version` | Overrides `startup.r_source` (uses rig) |
 | `--no-banner` | `startup.show_banner` |
-| `--reprex` | `reprex.enabled` |
-| `--auto-format` | `reprex.autoformat` |
+| `--reprex` | `startup.mode.reprex` |
+| `--auto-format` | `startup.mode.autoformat` |
 | `--no-history` | `history.disabled` |
 | `--history-dir` | `history.dir` |
 

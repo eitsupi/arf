@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.2.0-beta.1] - 2026-02-01
+
+### Changed
+
+- **BREAKING:** Configuration structure reorganized - the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization.
+  - `reprex.enabled` → `startup.mode.reprex`
+  - `reprex.autoformat` → `startup.mode.autoformat`
+  - `reprex.comment` → `mode.reprex.comment`
+
+#### Migration Guide
+
+If you have a custom configuration file, update your `[reprex]` section as follows:
+
+**Before (0.1.x):**
+
+```toml
+[reprex]
+enabled = false
+comment = "#> "
+autoformat = false
+```
+
+**After (0.2.0):**
+
+```toml
+# Initial mode settings (can be toggled at runtime via :reprex, :autoformat)
+[startup.mode]
+reprex = false
+autoformat = false
+
+# Static reprex configuration (not changeable at runtime)
+[mode.reprex]
+comment = "#> "
+```
+
 ## [0.1.1] - 2026-01-31
 
 ### Added

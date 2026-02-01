@@ -87,7 +87,7 @@ fn run() -> Result<()> {
 
     // Apply CLI overrides
     if cli.reprex {
-        config.reprex.enabled = true;
+        config.startup.mode.reprex = true;
     }
     if cli.auto_format {
         if !external::formatter::is_formatter_available() {
@@ -96,7 +96,7 @@ fn run() -> Result<()> {
                  Install Air CLI from https://github.com/posit-dev/air"
             );
         }
-        config.reprex.autoformat = true;
+        config.startup.mode.autoformat = true;
     }
     if cli.no_banner {
         config.startup.show_banner = false;
@@ -116,7 +116,7 @@ fn run() -> Result<()> {
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
-    if config.reprex.autoformat
+    if config.startup.mode.autoformat
         && !cli.auto_format
         && !external::formatter::is_formatter_available()
     {
@@ -126,7 +126,7 @@ fn run() -> Result<()> {
         eprintln!(
             "         Auto-format has been disabled. Install Air CLI from https://github.com/posit-dev/air"
         );
-        config.reprex.autoformat = false;
+        config.startup.mode.autoformat = false;
     }
 
     // Set up R based on r_source config (with optional CLI override)
@@ -243,10 +243,10 @@ fn run_script(cli: &Cli) -> Result<()> {
     };
 
     // Evaluate the code - use reprex mode if enabled (CLI or config)
-    let reprex_enabled = cli.reprex || config.reprex.enabled;
+    let reprex_enabled = cli.reprex || config.startup.mode.reprex;
     if reprex_enabled {
         // In reprex mode, echo source code before each result
-        match arf_harp::eval_string_reprex(&code, &config.reprex.comment) {
+        match arf_harp::eval_string_reprex(&code, &config.mode.reprex.comment) {
             Ok(_) => Ok(()),
             Err(e) => {
                 eprintln!("{}", e);

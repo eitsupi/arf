@@ -292,7 +292,7 @@ fn test_eval_reprex_custom_comment() {
     let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
     writeln!(
         config_file,
-        r###"[reprex]
+        r###"[mode.reprex]
 comment = "## "
 "###
     )
