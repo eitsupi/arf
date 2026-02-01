@@ -56,7 +56,7 @@ fn run() -> Result<()> {
             return handle_config_command(action);
         }
         Some(Commands::History { action }) => {
-            return handle_history_command(action);
+            return handle_history_command(action, cli.config.as_ref(), cli.history_dir.as_ref());
         }
         None => {}
     }
@@ -193,7 +193,11 @@ fn handle_config_command(action: &ConfigAction) -> Result<()> {
     }
 }
 
-fn handle_history_command(action: &HistoryAction) -> Result<()> {
+fn handle_history_command(
+    action: &HistoryAction,
+    config_path: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::PathBuf>,
+) -> Result<()> {
     match action {
         HistoryAction::Schema => {
             pager::history_schema::print_schema().context("Failed to display history schema")
@@ -203,7 +207,14 @@ fn handle_history_command(action: &HistoryAction) -> Result<()> {
             file,
             hostname,
             dry_run,
-        } => handle_history_import(*from, file.as_ref(), hostname.as_deref(), *dry_run),
+        } => handle_history_import(
+            *from,
+            file.as_ref(),
+            hostname.as_deref(),
+            *dry_run,
+            config_path,
+            cli_history_dir,
+        ),
     }
 }
 
@@ -212,28 +223,41 @@ fn handle_history_import(
     file: Option<&std::path::PathBuf>,
     hostname: Option<&str>,
     dry_run: bool,
+    config_path: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::PathBuf>,
 ) -> Result<()> {
     use history::import::{
-        default_arf_path, default_r_history_path, default_radian_path, import_entries,
-        import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
+        default_r_history_path, default_radian_path, import_entries, import_entries_dry_run,
+        parse_arf_history, parse_r_history, parse_radian_history,
     };
     use reedline::SqliteBackedHistory;
 
-    // Load config to get effective history directory (respects config and CLI overrides)
-    let config = load_config();
-    let history_dir = config
-        .history
-        .dir
-        .clone()
+    // Load config (respecting --config flag if provided)
+    let config = if let Some(path) = config_path {
+        load_config_from_path(path)
+    } else {
+        load_config()
+    };
+
+    // Resolve effective history directory (CLI --history-dir takes precedence)
+    let history_dir = cli_history_dir
+        .cloned()
+        .or(config.history.dir.clone())
         .or_else(config::history_dir)
         .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
 
     // Determine source file path
+    // Note: --from arf requires --file to avoid self-import (source = target)
     let source_path = match (source, file) {
         (_, Some(path)) => path.clone(),
         (ImportSource::Radian, None) => default_radian_path(),
         (ImportSource::R, None) => default_r_history_path(),
-        (ImportSource::Arf, None) => default_arf_path(&history_dir),
+        (ImportSource::Arf, None) => {
+            anyhow::bail!(
+                "The --file option is required when importing from arf format.\n\
+                 Without --file, the source would default to the same database as the import target."
+            );
+        }
     };
 
     // Check if source file exists
@@ -285,8 +309,15 @@ fn handle_history_import(
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 
-    // Ensure directories exist and open target databases
-    config::ensure_directories()?;
+    // Ensure the history directory exists (config::ensure_directories only creates XDG base dirs,
+    // not the history subdirectory or custom --history-dir paths)
+    fs::create_dir_all(&history_dir).with_context(|| {
+        format!(
+            "Failed to create history directory: {}",
+            history_dir.display()
+        )
+    })?;
+
     println!("Target databases:");
     println!("  R:     {}", r_path.display());
     println!("  Shell: {}", shell_path.display());

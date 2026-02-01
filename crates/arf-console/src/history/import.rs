@@ -84,15 +84,6 @@ pub fn default_r_history_path() -> PathBuf {
     PathBuf::from(".Rhistory")
 }
 
-/// Get the default arf history database path for a given history directory.
-///
-/// This helper simply appends `r.db` to the provided, resolved history
-/// directory. Callers are responsible for resolving the history directory
-/// based on configuration (XDG defaults, arf.toml, CLI overrides, etc.).
-pub fn default_arf_path(history_dir: &Path) -> PathBuf {
-    history_dir.join("r.db")
-}
-
 /// Parse a radian history file.
 ///
 /// The radian format uses:
@@ -124,6 +115,10 @@ pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
                 });
                 current_lines.clear();
             }
+
+            // Reset mode on new timestamp boundary to prevent carryover
+            // (e.g., if previous entry had "# mode: shell" but new entry has no mode line)
+            current_mode = None;
 
             // Parse timestamp: "# time: 2024-01-15 10:30:00 UTC"
             let time_str = line.trim_start_matches("# time: ").trim();
@@ -978,5 +973,162 @@ mod tests {
         let shell_items = targets.shell_history.search(shell_query).unwrap();
         assert_eq!(shell_items.len(), 1);
         assert_eq!(shell_items[0].hostname, Some("radian-import".to_string()));
+    }
+
+    // === Edge case tests for regression prevention ===
+
+    #[test]
+    fn test_parse_radian_history_mode_not_carried_over() {
+        // Regression test: mode should NOT carry over from previous entry
+        // when a new timestamp boundary is encountered without a mode line.
+        let mut file = NamedTempFile::new().unwrap();
+        // First entry with explicit shell mode
+        writeln!(file, "# time: 2024-01-15 10:30:00 UTC").unwrap();
+        writeln!(file, "# mode: shell").unwrap();
+        writeln!(file, "+ls -la").unwrap();
+        writeln!(file).unwrap();
+        // Second entry WITHOUT mode line - should NOT inherit "shell" from previous
+        writeln!(file, "# time: 2024-01-15 10:31:00 UTC").unwrap();
+        writeln!(file, "+library(dplyr)").unwrap();
+
+        let entries = parse_radian_history(file.path()).unwrap();
+        assert_eq!(entries.len(), 2);
+
+        // First entry should be shell
+        assert_eq!(entries[0].command, "ls -la");
+        assert_eq!(entries[0].mode, Some("shell".to_string()));
+
+        // Second entry should have no mode (None), not "shell"
+        assert_eq!(entries[1].command, "library(dplyr)");
+        assert_eq!(entries[1].mode, None);
+    }
+
+    #[test]
+    fn test_parse_radian_history_consecutive_timestamps_without_commands() {
+        // Edge case: consecutive timestamp headers without commands should not cause issues
+        let mut file = NamedTempFile::new().unwrap();
+        // First timestamp with no command lines
+        writeln!(file, "# time: 2024-01-15 10:30:00 UTC").unwrap();
+        writeln!(file, "# mode: r").unwrap();
+        // Empty line acts as separator
+        writeln!(file).unwrap();
+        // Second timestamp immediately follows
+        writeln!(file, "# time: 2024-01-15 10:31:00 UTC").unwrap();
+        writeln!(file, "# mode: shell").unwrap();
+        writeln!(file, "+git status").unwrap();
+
+        let entries = parse_radian_history(file.path()).unwrap();
+        // Only one entry should be parsed (the one with actual command)
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "git status");
+        assert_eq!(entries[0].mode, Some("shell".to_string()));
+    }
+
+    #[test]
+    fn test_parse_radian_history_file_not_found() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let missing_path = temp_dir.path().join("nonexistent_radian_history");
+
+        let result = parse_radian_history(&missing_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to open radian history"));
+    }
+
+    #[test]
+    fn test_parse_r_history_file_not_found() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let missing_path = temp_dir.path().join("nonexistent_Rhistory");
+
+        let result = parse_r_history(&missing_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to open R history"));
+    }
+
+    #[test]
+    fn test_parse_radian_history_mode_reset_between_entries() {
+        // Another regression test: ensure mode is properly reset between entries
+        // even when separated by empty lines
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# time: 2024-01-15 10:30:00 UTC").unwrap();
+        writeln!(file, "# mode: shell").unwrap();
+        writeln!(file, "+pwd").unwrap();
+        writeln!(file).unwrap(); // Empty line separator
+        writeln!(file, "# time: 2024-01-15 10:31:00 UTC").unwrap();
+        // No mode line for this entry
+        writeln!(file, "+summary(iris)").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "# time: 2024-01-15 10:32:00 UTC").unwrap();
+        writeln!(file, "# mode: browse").unwrap();
+        writeln!(file, "+n").unwrap();
+
+        let entries = parse_radian_history(file.path()).unwrap();
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].mode, Some("shell".to_string()));
+        assert_eq!(entries[1].mode, None); // Mode was reset, not carried over
+        assert_eq!(entries[2].mode, Some("browse".to_string()));
+    }
+
+    #[test]
+    fn test_parse_r_history_whitespace_only_lines_skipped() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "library(dplyr)").unwrap();
+        writeln!(file, "   ").unwrap(); // Whitespace-only line
+        writeln!(file, "\t").unwrap(); // Tab-only line
+        writeln!(file, "print(1)").unwrap();
+
+        let entries = parse_r_history(file.path()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].command, "library(dplyr)");
+        assert_eq!(entries[1].command, "print(1)");
+    }
+
+    #[test]
+    fn test_import_entries_none_mode_goes_to_r_database() {
+        // Entries with mode=None should go to R database (default behavior)
+        use reedline::History;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut targets = create_test_targets(&temp_dir);
+
+        let entries = vec![ImportEntry {
+            command: "summary(mtcars)".to_string(),
+            timestamp: None,
+            mode: None, // No mode specified
+        }];
+
+        let result = import_entries(&mut targets, entries, false, None).unwrap();
+        assert_eq!(result.r_imported, 1);
+        assert_eq!(result.shell_imported, 0);
+
+        // Verify it's in R history
+        let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
+        let items = targets.r_history.search(query).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].command_line, "summary(mtcars)");
+    }
+
+    #[test]
+    fn test_parse_radian_history_crlf_line_endings() {
+        // Test that CRLF line endings (Windows) are handled correctly
+        let mut file = NamedTempFile::new().unwrap();
+        // Write with explicit \r\n
+        file.write_all(b"# time: 2024-01-15 10:30:00 UTC\r\n")
+            .unwrap();
+        file.write_all(b"# mode: r\r\n").unwrap();
+        file.write_all(b"+print(1)\r\n").unwrap();
+
+        let entries = parse_radian_history(file.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        // Command should not have trailing \r
+        assert_eq!(entries[0].command, "print(1)");
+        assert!(!entries[0].command.ends_with('\r'));
     }
 }
