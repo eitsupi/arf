@@ -4,6 +4,8 @@
 
 *Alternative R Frontend*
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/eitsupi/arf)
+
 </div>
 
 <br>
