@@ -6,9 +6,8 @@
 //! responds to cursor position queries (CSI 6n) from reedline, enabling full
 //! interactive testing of arf.
 //!
-//! Note: Currently disabled on Windows due to PTY handling issues.
-
-#![cfg(unix)]
+//! Cross-platform support: Tests use vt100-parsed screen content for pattern matching,
+//! which correctly handles ANSI escape sequences on all platforms including Windows.
 
 mod common;
 

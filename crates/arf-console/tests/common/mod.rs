@@ -329,10 +329,59 @@ impl Terminal {
         ))
     }
 
-    /// Wait for the prompt to appear.
-    /// Looks for "> " which matches both "r> " and "R {version}> " prompts.
+    /// Wait for the prompt to appear using screen-based matching.
+    /// Looks for "> " on the current line which matches both "r> " and "R {version}> " prompts.
+    ///
+    /// This uses vt100-parsed screen content which correctly handles ANSI escape sequences
+    /// on all platforms including Windows.
     pub fn wait_for_prompt(&mut self) -> Result<(), String> {
-        self.expect("> ")
+        self.expect_screen("> ")
+    }
+
+    /// Wait for a pattern to appear in the vt100-parsed screen content.
+    ///
+    /// Unlike `expect()` which searches the raw output buffer (including ANSI codes),
+    /// this method searches the interpreted screen content from vt100, making it
+    /// work correctly on Windows where ANSI sequences would break pattern matching.
+    pub fn expect_screen(&mut self, pattern: &str) -> Result<(), String> {
+        let timeout = Duration::from_millis(DEFAULT_TIMEOUT_MS);
+        let start = Instant::now();
+
+        while start.elapsed() < timeout {
+            // Check if still running
+            {
+                let state = self.state.lock().map_err(|e| e.to_string())?;
+                if !state.running {
+                    // Check screen content before giving up
+                    let screen_content: String = state.screen.lines.join("\n");
+                    if screen_content.contains(pattern) {
+                        return Ok(());
+                    }
+                    return Err(format!(
+                        "Process exited before finding pattern '{}' on screen. Screen:\n{}",
+                        pattern, screen_content
+                    ));
+                }
+                // Check all lines in screen
+                let screen_content: String = state.screen.lines.join("\n");
+                if screen_content.contains(pattern) {
+                    return Ok(());
+                }
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        // Timeout - get final screen for error message
+        let screen_content = self
+            .state
+            .lock()
+            .map(|s| s.screen.lines.join("\n"))
+            .unwrap_or_default();
+        Err(format!(
+            "Timeout waiting for pattern '{}' on screen. Screen content:\n{}",
+            pattern, screen_content
+        ))
     }
 
     /// Clear the output buffer and wait for new output matching pattern.
@@ -346,7 +395,7 @@ impl Terminal {
             state.output_buffer.clear();
         }
 
-        // Now wait for the pattern
+        // Now wait for the pattern in raw buffer
         self.expect(pattern)
     }
 
