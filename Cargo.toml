@@ -19,7 +19,7 @@ libloading = "0.9"
 
 # Terminal UI
 crossterm = "0.29"
-crokey = "1.3"
+crokey = "1.4"
 nu-ansi-term = { version = "0.50", features = ["derive_serde_style"] }
 reedline = { git = "https://github.com/nushell/reedline.git", rev = "refs/pull/1015/head", features = ["sqlite", "idle_callback"] }
 
