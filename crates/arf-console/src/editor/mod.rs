@@ -9,3 +9,5 @@ pub mod mode;
 pub mod prompt;
 pub mod validator;
 pub mod word_nav;
+
+pub use prompt::{PromptFormatter, ViMode};

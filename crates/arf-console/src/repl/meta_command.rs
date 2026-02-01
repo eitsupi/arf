@@ -329,6 +329,7 @@ mod tests {
     use super::*;
     use crate::config::{
         Indicators, ModeIndicatorPosition, SpinnerConfig, StatusColorConfig, StatusConfig,
+        ViColorConfig, ViConfig,
     };
     use crate::editor::prompt::PromptFormatter;
     use nu_ansi_term::Color;
@@ -353,6 +354,8 @@ mod tests {
             StatusConfig::default(),
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         )
     }
 

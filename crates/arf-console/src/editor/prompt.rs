@@ -5,9 +5,21 @@
 //! - `{cwd}` - Current working directory (full path)
 //! - `{cwd_short}` - Current working directory (basename only)
 //! - `{shell}` - Shell name from $SHELL (e.g., "bash", "zsh")
+//! - `{vi}` - Vi mode indicator (insert/normal, or empty for Emacs mode)
 
+use crate::config::prompt::ViSymbol;
 use std::env;
 use std::path::Path;
+
+/// Vi editing mode for prompt display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViMode {
+    /// Insert mode (typing text).
+    #[default]
+    Insert,
+    /// Normal mode (command mode).
+    Normal,
+}
 
 /// Prompt formatter that expands placeholders.
 #[derive(Debug, Clone)]
@@ -52,6 +64,42 @@ impl PromptFormatter {
             let cwd_short = get_cwd_short(&cwd);
             result = result.replace("{cwd}", &cwd);
             result = result.replace("{cwd_short}", &cwd_short);
+        }
+
+        result
+    }
+
+    /// Expand placeholders including vi mode indicator.
+    ///
+    /// # Placeholders
+    ///
+    /// - `{version}` - R version (e.g., "4.4.0")
+    /// - `{cwd}` - Current working directory (full path)
+    /// - `{cwd_short}` - Current working directory (basename only)
+    /// - `{shell}` - Shell name from $SHELL (e.g., "bash", "zsh")
+    /// - `{vi}` - Vi mode indicator (from symbol config, or empty if None)
+    ///
+    /// # Arguments
+    ///
+    /// - `template` - The format string with placeholders
+    /// - `vi_mode` - Current vi mode (None for Emacs mode)
+    /// - `vi_symbol` - Symbols to use for insert/normal mode
+    pub fn format_with_vi(
+        &self,
+        template: &str,
+        vi_mode: Option<ViMode>,
+        vi_symbol: &ViSymbol,
+    ) -> String {
+        let mut result = self.format(template);
+
+        // Expand {vi} placeholder based on mode
+        if result.contains("{vi}") {
+            let vi_text = match vi_mode {
+                Some(ViMode::Insert) => &vi_symbol.insert,
+                Some(ViMode::Normal) => &vi_symbol.normal,
+                None => &vi_symbol.non_vi, // Non-vi modes (Emacs, etc.)
+            };
+            result = result.replace("{vi}", vi_text);
         }
 
         result
@@ -188,5 +236,101 @@ mod tests {
 
         assert_eq!(formatter.format("[{shell}] $ "), "[zsh] $ ");
         assert_eq!(formatter.format("{shell}> "), "zsh> ");
+    }
+
+    #[test]
+    fn test_vi_placeholder_insert_mode() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+
+        let result = formatter.format_with_vi("{vi}r> ", Some(ViMode::Insert), &symbol);
+        assert_eq!(result, "[I] r> ");
+    }
+
+    #[test]
+    fn test_vi_placeholder_normal_mode() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+
+        let result = formatter.format_with_vi("{vi}r> ", Some(ViMode::Normal), &symbol);
+        assert_eq!(result, "[N] r> ");
+    }
+
+    #[test]
+    fn test_vi_placeholder_non_vi_mode() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+
+        // Non-vi mode (vi_mode = None) should use non_vi symbol
+        let result = formatter.format_with_vi("{vi}r> ", None, &symbol);
+        assert_eq!(result, "[E] r> ");
+    }
+
+    #[test]
+    fn test_vi_placeholder_with_empty_symbols() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol::default(); // All empty
+
+        // Even with vi mode, empty symbols should expand to empty string
+        let result = formatter.format_with_vi("{vi}r> ", Some(ViMode::Insert), &symbol);
+        assert_eq!(result, "r> ");
+    }
+
+    #[test]
+    fn test_vi_placeholder_combined_with_others() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+
+        // Test combining {vi} with other placeholders
+        let result = formatter.format_with_vi("{vi}R {version}> ", Some(ViMode::Normal), &symbol);
+        assert_eq!(result, "[N] R 4.4.0> ");
+    }
+
+    #[test]
+    fn test_no_vi_placeholder_format_with_vi_still_works() {
+        let formatter = PromptFormatter {
+            r_version: "4.4.0".to_string(),
+            shell_name: "bash".to_string(),
+        };
+        let symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+
+        // Template without {vi} placeholder should work normally
+        let result = formatter.format_with_vi("R {version}> ", Some(ViMode::Insert), &symbol);
+        assert_eq!(result, "R 4.4.0> ");
     }
 }

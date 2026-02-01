@@ -20,6 +20,8 @@ pub struct PromptConfig {
     pub indicators: Indicators,
     /// Command status indicator configuration.
     pub status: StatusConfig,
+    /// Vi mode indicator configuration.
+    pub vi: ViConfig,
 }
 
 impl Default for PromptConfig {
@@ -31,6 +33,7 @@ impl Default for PromptConfig {
             mode_indicator: ModeIndicatorPosition::default(),
             indicators: Indicators::default(),
             status: StatusConfig::default(),
+            vi: ViConfig::default(),
         }
     }
 }
@@ -83,6 +86,55 @@ impl Default for StatusConfig {
         Self {
             symbol: StatusSymbol::default(),
             override_prompt_color: false,
+        }
+    }
+}
+
+/// Symbols displayed in the prompt to indicate vi editing mode.
+///
+/// Example: `symbol = { insert = "> ", normal = ": ", non_vi = "> " }`
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub(crate) struct ViSymbol {
+    /// Symbol shown in vi insert mode (default: "").
+    #[serde(default)]
+    pub insert: String,
+    /// Symbol shown in vi normal mode (default: "").
+    #[serde(default)]
+    pub normal: String,
+    /// Symbol shown in non-vi modes like Emacs (default: "").
+    /// Use this to maintain consistent prompt appearance across all editor modes.
+    #[serde(default)]
+    pub non_vi: String,
+}
+
+impl Default for ViSymbol {
+    fn default() -> Self {
+        Self {
+            insert: String::new(),
+            normal: String::new(),
+            non_vi: String::new(),
+        }
+    }
+}
+
+/// Vi mode indicator configuration.
+///
+/// Controls how the prompt indicates the current editing mode via the `{vi}` placeholder.
+/// Supports vi insert/normal modes and non-vi modes (Emacs, potentially Helix in future).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ViConfig {
+    /// Symbols to display for insert/normal mode.
+    /// Example: `symbol = { insert = "[I] ", normal = "[N] " }`
+    #[serde(default)]
+    pub symbol: ViSymbol,
+}
+
+impl Default for ViConfig {
+    fn default() -> Self {
+        Self {
+            symbol: ViSymbol::default(),
         }
     }
 }

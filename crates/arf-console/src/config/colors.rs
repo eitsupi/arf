@@ -64,6 +64,15 @@ impl JsonSchema for ColorsConfig {
                                 "success": { "description": "Color for success status" },
                                 "error": { "description": "Color for error status" }
                             }
+                        },
+                        "vi": {
+                            "type": "object",
+                            "description": "Colors for vi mode indicator",
+                            "properties": {
+                                "insert": { "description": "Color for vi insert mode" },
+                                "normal": { "description": "Color for vi normal mode" },
+                                "non_vi": { "description": "Color for non-vi modes (Emacs, etc.)" }
+                            }
                         }
                     }
                 }
@@ -157,6 +166,8 @@ pub struct PromptColorConfig {
     pub indicator: Color,
     /// Colors for command status indicator.
     pub status: StatusColorConfig,
+    /// Colors for vi mode indicator.
+    pub vi: ViColorConfig,
 }
 
 impl Default for PromptColorConfig {
@@ -167,6 +178,7 @@ impl Default for PromptColorConfig {
             shell: Color::LightRed,
             indicator: Color::Yellow,
             status: StatusColorConfig::default(),
+            vi: ViColorConfig::default(),
         }
     }
 }
@@ -186,6 +198,28 @@ impl Default for StatusColorConfig {
         StatusColorConfig {
             success: Color::LightGreen,
             error: Color::LightRed,
+        }
+    }
+}
+
+/// Color configuration for vi mode indicator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViColorConfig {
+    /// Color for vi insert mode indicator.
+    pub insert: Color,
+    /// Color for vi normal mode indicator.
+    pub normal: Color,
+    /// Color for non-vi modes (Emacs, etc.).
+    pub non_vi: Color,
+}
+
+impl Default for ViColorConfig {
+    fn default() -> Self {
+        ViColorConfig {
+            insert: Color::Default,
+            normal: Color::Default,
+            non_vi: Color::Default,
         }
     }
 }

@@ -1,8 +1,9 @@
 //! Custom prompt implementation.
 
-use crate::config::ModeIndicatorPosition;
+use crate::config::prompt::ViSymbol;
+use crate::config::{ModeIndicatorPosition, ViColorConfig};
 use nu_ansi_term::{Color, Style};
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus};
+use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode};
 use std::borrow::Cow;
 
 /// Custom prompt for arf.
@@ -21,6 +22,10 @@ pub struct RPrompt {
     continuation_color: Color,
     /// Color for the mode indicator.
     mode_indicator_color: Color,
+    /// Vi mode symbols for the prompt indicator.
+    vi_symbol: ViSymbol,
+    /// Vi mode colors for the prompt indicator.
+    vi_color: ViColorConfig,
 }
 
 impl RPrompt {
@@ -33,6 +38,8 @@ impl RPrompt {
             prompt_color: Color::Default,
             continuation_color: Color::Default,
             mode_indicator_color: Color::Default,
+            vi_symbol: ViSymbol::default(),
+            vi_color: ViColorConfig::default(),
         }
     }
 
@@ -52,6 +59,16 @@ impl RPrompt {
         self.mode_indicator_color = mode_indicator;
         self
     }
+
+    pub fn with_vi_symbol(mut self, vi_symbol: ViSymbol) -> Self {
+        self.vi_symbol = vi_symbol;
+        self
+    }
+
+    pub fn with_vi_color(mut self, vi_color: ViColorConfig) -> Self {
+        self.vi_color = vi_color;
+        self
+    }
 }
 
 impl Clone for RPrompt {
@@ -64,6 +81,8 @@ impl Clone for RPrompt {
             prompt_color: self.prompt_color,
             continuation_color: self.continuation_color,
             mode_indicator_color: self.mode_indicator_color,
+            vi_symbol: self.vi_symbol.clone(),
+            vi_color: self.vi_color.clone(),
         }
     }
 }
@@ -102,9 +121,24 @@ impl Prompt for RPrompt {
         }
     }
 
-    fn render_prompt_indicator(&self, _edit_mode: PromptEditMode) -> Cow<'_, str> {
-        // No indicator - the prompt string already includes everything
-        Cow::Borrowed("")
+    fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
+        let (symbol, color) = match edit_mode {
+            PromptEditMode::Vi(PromptViMode::Insert) => {
+                (&self.vi_symbol.insert, self.vi_color.insert)
+            }
+            PromptEditMode::Vi(PromptViMode::Normal) => {
+                (&self.vi_symbol.normal, self.vi_color.normal)
+            }
+            // Emacs, Default, or any other non-vi modes
+            _ => (&self.vi_symbol.non_vi, self.vi_color.non_vi),
+        };
+
+        if symbol.is_empty() {
+            Cow::Borrowed("")
+        } else {
+            let style = color_to_style(color);
+            Cow::Owned(style.paint(symbol).to_string())
+        }
     }
 
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
@@ -169,5 +203,73 @@ mod tests {
             .with_mode_indicator(None, ModeIndicatorPosition::Prefix);
         assert_eq!(prompt.render_prompt_left(), "r> ");
         assert_eq!(prompt.render_prompt_right(), "");
+    }
+
+    #[test]
+    fn test_rprompt_vi_insert_mode_indicator() {
+        let vi_symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol);
+
+        let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert));
+        assert_eq!(indicator, "[I] ");
+    }
+
+    #[test]
+    fn test_rprompt_vi_normal_mode_indicator() {
+        let vi_symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol);
+
+        let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal));
+        assert_eq!(indicator, "[N] ");
+    }
+
+    #[test]
+    fn test_rprompt_emacs_mode_indicator() {
+        let vi_symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[E] ".to_string(),
+        };
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol);
+
+        let indicator = prompt.render_prompt_indicator(PromptEditMode::Emacs);
+        assert_eq!(indicator, "[E] ");
+    }
+
+    #[test]
+    fn test_rprompt_default_mode_indicator() {
+        let vi_symbol = ViSymbol {
+            insert: "[I] ".to_string(),
+            normal: "[N] ".to_string(),
+            non_vi: "[D] ".to_string(),
+        };
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol);
+
+        // Default mode should use non_vi symbol
+        let indicator = prompt.render_prompt_indicator(PromptEditMode::Default);
+        assert_eq!(indicator, "[D] ");
+    }
+
+    #[test]
+    fn test_rprompt_empty_vi_symbols() {
+        // Default empty symbols
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string());
+
+        // All modes should return empty string with default (empty) symbols
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)), "");
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)), "");
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "");
     }
 }
