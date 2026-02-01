@@ -68,7 +68,7 @@ jobs:
       - name: Install R packages for tests
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          working-directory: tests/r-deps
+          working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
       - name: Run tests
         run: cargo test
