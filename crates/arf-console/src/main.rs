@@ -309,6 +309,27 @@ fn handle_history_import(
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 
+    // Prevent self-import when using `--from arf` with `--file` pointing at the
+    // same database as the target, which would duplicate history entries.
+    if matches!(source, ImportSource::Arf)
+        && let Ok(source_canon) = fs::canonicalize(&source_path)
+    {
+        if fs::canonicalize(&r_path).is_ok_and(|r_canon| source_canon == r_canon) {
+            anyhow::bail!(
+                "Refusing to import from '{}' into itself (R history database). \
+                 Please specify a different --file or history directory.",
+                source_path.display()
+            );
+        }
+        if fs::canonicalize(&shell_path).is_ok_and(|shell_canon| source_canon == shell_canon) {
+            anyhow::bail!(
+                "Refusing to import from '{}' into itself (shell history database). \
+                 Please specify a different --file or history directory.",
+                source_path.display()
+            );
+        }
+    }
+
     // Ensure the history directory exists (config::ensure_directories only creates XDG base dirs,
     // not the history subdirectory or custom --history-dir paths)
     fs::create_dir_all(&history_dir).with_context(|| {

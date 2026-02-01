@@ -180,6 +180,52 @@ fn test_history_schema_piped_no_colors() {
     );
 }
 
+/// Test `arf history import --from arf` rejects self-import (source == target).
+#[test]
+fn test_history_import_rejects_self_import() {
+    use reedline::SqliteBackedHistory;
+    use tempfile::TempDir;
+
+    // Create a temporary history directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let history_dir = temp_dir.path();
+
+    // Create an r.db file using reedline's SqliteBackedHistory
+    let r_db_path = history_dir.join("r.db");
+    let _db = SqliteBackedHistory::with_file(r_db_path.clone(), None, None)
+        .expect("Failed to create r.db");
+    drop(_db); // Close the database
+
+    // Try to import from r.db into the same directory's r.db
+    // Note: --history-dir is a top-level option, must come before subcommand
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "--history-dir",
+            history_dir.to_str().unwrap(),
+            "history",
+            "import",
+            "--from",
+            "arf",
+            "--file",
+            r_db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf history import");
+
+    // Should fail with self-import error
+    assert!(
+        !output.status.success(),
+        "Self-import should fail, but succeeded"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Refusing to import") && stderr.contains("into itself"),
+        "Error should mention refusing self-import, got: {}",
+        stderr
+    );
+}
+
 // ============================================================================
 // Script Execution Mode Tests (-e flag)
 // ============================================================================
