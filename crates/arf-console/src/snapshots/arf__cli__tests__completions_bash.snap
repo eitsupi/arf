@@ -59,17 +59,26 @@ _arf() {
             arf__help__config,init)
                 cmd="arf__help__config__init"
                 ;;
+            arf__help__history,import)
+                cmd="arf__help__history__import"
+                ;;
             arf__help__history,schema)
                 cmd="arf__help__history__schema"
                 ;;
             arf__history,help)
                 cmd="arf__history__help"
                 ;;
+            arf__history,import)
+                cmd="arf__history__import"
+                ;;
             arf__history,schema)
                 cmd="arf__history__schema"
                 ;;
             arf__history__help,help)
                 cmd="arf__history__help__help"
+                ;;
+            arf__history__help,import)
+                cmd="arf__history__help__import"
                 ;;
             arf__history__help,schema)
                 cmd="arf__history__help__schema"
@@ -305,8 +314,22 @@ _arf() {
             return 0
             ;;
         arf__help__history)
-            opts="schema"
+            opts="schema import"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__history__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -333,7 +356,7 @@ _arf() {
             return 0
             ;;
         arf__history)
-            opts="-h --help schema help"
+            opts="-h --help schema import help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -347,7 +370,7 @@ _arf() {
             return 0
             ;;
         arf__history__help)
-            opts="schema help"
+            opts="schema import help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -374,6 +397,20 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        arf__history__help__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         arf__history__help__schema)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
@@ -381,6 +418,39 @@ _arf() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__history__import)
+            opts="-h --from --file --dry-run --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --from)
+                    COMPREPLY=($(compgen -W "radian r arf" -- "${cur}"))
+                    return 0
+                    ;;
+                --file)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;

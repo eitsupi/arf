@@ -15,7 +15,7 @@ mod traps;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, HistoryAction};
+use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource};
 use config::{
     RSource, RSourceMode, RSourceStatus, config_file_path, ensure_directories, init_config,
     load_config, load_config_from_path,
@@ -198,7 +198,127 @@ fn handle_history_command(action: &HistoryAction) -> Result<()> {
         HistoryAction::Schema => {
             pager::history_schema::print_schema().context("Failed to display history schema")
         }
+        HistoryAction::Import {
+            from,
+            file,
+            dry_run,
+        } => handle_history_import(*from, file.as_ref(), *dry_run),
     }
+}
+
+fn handle_history_import(
+    source: ImportSource,
+    file: Option<&std::path::PathBuf>,
+    dry_run: bool,
+) -> Result<()> {
+    use history::import::{
+        default_arf_path, default_r_history_path, default_radian_path, import_entries,
+        parse_arf_history, parse_r_history, parse_radian_history,
+    };
+    use reedline::SqliteBackedHistory;
+
+    // Determine source file path
+    let source_path = match (source, file) {
+        (_, Some(path)) => path.clone(),
+        (ImportSource::Radian, None) => default_radian_path(),
+        (ImportSource::R, None) => default_r_history_path(),
+        (ImportSource::Arf, None) => {
+            default_arf_path().context("Could not determine default arf history path")?
+        }
+    };
+
+    // Check if source file exists
+    if !source_path.exists() {
+        anyhow::bail!(
+            "Source history file not found: {}\nSpecify the path with --file",
+            source_path.display()
+        );
+    }
+
+    println!("Importing from: {}", source_path.display());
+
+    // Parse entries from source
+    let entries = match source {
+        ImportSource::Radian => parse_radian_history(&source_path)?,
+        ImportSource::R => parse_r_history(&source_path)?,
+        ImportSource::Arf => parse_arf_history(&source_path)?,
+    };
+
+    println!("Found {} entries to import", entries.len());
+
+    if dry_run {
+        // Count by mode
+        let r_count = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() != Some("shell"))
+            .count();
+        let shell_count = entries.len() - r_count;
+
+        println!("\n[Dry run] Would import:");
+        println!("  R commands:     {}", r_count);
+        println!("  Shell commands: {}", shell_count);
+
+        if !entries.is_empty() {
+            println!("\nSample entries:");
+            for (i, entry) in entries.iter().take(5).enumerate() {
+                let cmd_preview: String = entry.command.chars().take(60).collect();
+                let ellipsis = if entry.command.len() > 60 { "..." } else { "" };
+                let mode_label = match entry.mode.as_deref() {
+                    Some("shell") => "shell",
+                    Some("r") => "r",
+                    Some("browse") => "r/browse",
+                    _ => "r",
+                };
+                println!("  {}. [{}] {}{}", i + 1, mode_label, cmd_preview, ellipsis);
+            }
+            if entries.len() > 5 {
+                println!("  ... and {} more", entries.len() - 5);
+            }
+        }
+        return Ok(());
+    }
+
+    // Determine target database paths
+    let history_dir = config::history_dir().context("Could not determine history directory")?;
+    config::ensure_directories()?;
+
+    let r_path = history_dir.join("r.db");
+    let shell_path = history_dir.join("shell.db");
+
+    println!("Target databases:");
+    println!("  R:     {}", r_path.display());
+    println!("  Shell: {}", shell_path.display());
+
+    // Open target databases
+    let r_history = SqliteBackedHistory::with_file(r_path, None, None)
+        .context("Failed to open R history database")?;
+    let shell_history = SqliteBackedHistory::with_file(shell_path, None, None)
+        .context("Failed to open shell history database")?;
+
+    let mut targets = history::import::ImportTargets {
+        r_history,
+        shell_history,
+    };
+
+    // Import entries
+    let result = import_entries(&mut targets, entries, false)?;
+
+    println!("\nImport complete:");
+    println!("  R commands:     {}", result.r_imported);
+    println!("  Shell commands: {}", result.shell_imported);
+    println!("  Skipped:        {}", result.skipped);
+
+    if !result.warnings.is_empty() {
+        println!("\nWarnings:");
+        for warning in result.warnings.iter().take(10) {
+            println!("  - {}", warning);
+        }
+        if result.warnings.len() > 10 {
+            println!("  ... and {} more warnings", result.warnings.len() - 10);
+        }
+    }
+
+    Ok(())
 }
 
 /// Run in script execution mode (non-interactive).

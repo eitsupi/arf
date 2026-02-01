@@ -137,6 +137,17 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(import)
+_arguments "${_arguments_options[@]}" : \
+'--from=[Source format to import from]:FROM:((radian\:"radian history file (~/.radian_history)"
+r\:"R native history file (.Rhistory)"
+arf\:"Another arf SQLite history database"))' \
+'--file=[Path to the history file/database to import]:FILE:_files' \
+'--dry-run[Perform a dry run without actually importing]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_arf__history__help_commands" \
@@ -150,6 +161,10 @@ _arguments "${_arguments_options[@]}" : \
         curcontext="${curcontext%:*:*}:arf-history-help-command-$line[1]:"
         case $line[1] in
             (schema)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(import)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -214,6 +229,10 @@ _arguments "${_arguments_options[@]}" : \
         curcontext="${curcontext%:*:*}:arf-help-history-command-$line[1]:"
         case $line[1] in
             (schema)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(import)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -316,8 +335,14 @@ _arf__help__help_commands() {
 _arf__help__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
+'import:Import history from another source (experimental)' \
     )
     _describe -t commands 'arf help history commands' commands "$@"
+}
+(( $+functions[_arf__help__history__import_commands] )) ||
+_arf__help__history__import_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help history import commands' commands "$@"
 }
 (( $+functions[_arf__help__history__schema_commands] )) ||
 _arf__help__history__schema_commands() {
@@ -328,6 +353,7 @@ _arf__help__history__schema_commands() {
 _arf__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
+'import:Import history from another source (experimental)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf history commands' commands "$@"
@@ -336,6 +362,7 @@ _arf__history_commands() {
 _arf__history__help_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
+'import:Import history from another source (experimental)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf history help commands' commands "$@"
@@ -345,10 +372,20 @@ _arf__history__help__help_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help help commands' commands "$@"
 }
+(( $+functions[_arf__history__help__import_commands] )) ||
+_arf__history__help__import_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history help import commands' commands "$@"
+}
 (( $+functions[_arf__history__help__schema_commands] )) ||
 _arf__history__help__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help schema commands' commands "$@"
+}
+(( $+functions[_arf__history__import_commands] )) ||
+_arf__history__import_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history import commands' commands "$@"
 }
 (( $+functions[_arf__history__schema_commands] )) ||
 _arf__history__schema_commands() {

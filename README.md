@@ -221,6 +221,43 @@ on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 | `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
 | `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
 
+### History import from radian/R
+
+> [!CAUTION]
+> This feature is experimental and has not been thoroughly tested. Always back up your history files before importing. The import format and behavior may change in future versions.
+
+Import command history from radian or R's native `.Rhistory` file into arf's SQLite database:
+
+```sh
+# Preview what would be imported (dry run)
+arf history import --from radian --dry-run
+
+# Import from radian (default: ~/.radian_history)
+arf history import --from radian
+
+# Import from R's native history
+arf history import --from r --file .Rhistory
+
+# Import from another arf database
+arf history import --from arf --file /path/to/r.db
+```
+
+**Supported sources:**
+
+| Source | Description | Timestamps | Multiline | Mode routing |
+|--------|-------------|:----------:|:---------:|:------------:|
+| `radian` | `~/.radian_history` | Preserved | Preserved | By `# mode:` |
+| `r` | `.Rhistory` or `R_HISTFILE` | - | - | → `r.db` |
+| `arf` | SQLite database backup | Preserved | Preserved | By filename |
+
+**Mode routing:**
+
+- **radian**: Routes by `# mode:` header (r/browse → `r.db`, shell → `shell.db`)
+- **arf**: Routes by filename (`shell.db` → `shell.db`, others → `r.db`)
+- **r**: All commands go to `r.db` (no mode information)
+
+Entries with unknown modes are skipped with a warning.
+
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`

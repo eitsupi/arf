@@ -161,6 +161,39 @@ pub enum Commands {
 pub enum HistoryAction {
     /// Display history database schema and example R code
     Schema,
+    /// Import history from another source (experimental)
+    ///
+    /// Import command history from radian, R's native .Rhistory, or another arf database.
+    /// This is an experimental feature and the format may change in future versions.
+    Import {
+        /// Source format to import from
+        #[arg(long, value_enum)]
+        from: ImportSource,
+
+        /// Path to the history file/database to import
+        ///
+        /// Defaults to standard locations:
+        /// - radian: ~/.radian_history
+        /// - r: .Rhistory in current directory or R_HISTFILE
+        /// - arf: XDG data directory
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        file: Option<PathBuf>,
+
+        /// Perform a dry run without actually importing
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// Source format for history import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ImportSource {
+    /// radian history file (~/.radian_history)
+    Radian,
+    /// R native history file (.Rhistory)
+    R,
+    /// Another arf SQLite history database
+    Arf,
 }
 
 #[derive(Subcommand, Debug)]
