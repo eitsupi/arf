@@ -302,21 +302,26 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     #[cfg(not(windows))]
     let processed: &[u8] = slice;
 
-    // Try UTF-8 first, fall back to platform-specific encoding
+    // Try UTF-8 first, fall back to platform-specific encoding.
+    // Note: `processed` is `Cow<[u8]>` on Windows but `&[u8]` on other platforms,
+    // so we need separate cfg blocks to avoid clippy warnings.
+    #[cfg(windows)]
+    let s: std::borrow::Cow<str> = match std::str::from_utf8(&processed) {
+        Ok(s) => std::borrow::Cow::Borrowed(s),
+        Err(_) => {
+            log::debug!("r_write_console_ex: UTF-8 decode failed");
+            // On Windows, decode using the system's ANSI code page
+            decode_windows_native(&processed)
+        }
+    };
+
+    #[cfg(not(windows))]
     let s: std::borrow::Cow<str> = match std::str::from_utf8(processed) {
         Ok(s) => std::borrow::Cow::Borrowed(s),
         Err(_) => {
             log::debug!("r_write_console_ex: UTF-8 decode failed");
-            #[cfg(windows)]
-            {
-                // On Windows, decode using the system's ANSI code page
-                decode_windows_native(processed)
-            }
-            #[cfg(not(windows))]
-            {
-                // On Unix, fall back to lossy UTF-8 conversion
-                String::from_utf8_lossy(processed)
-            }
+            // On Unix, fall back to lossy UTF-8 conversion
+            String::from_utf8_lossy(processed)
         }
     };
 
