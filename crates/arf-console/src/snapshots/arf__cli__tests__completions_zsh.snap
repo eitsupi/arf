@@ -142,7 +142,7 @@ _arguments "${_arguments_options[@]}" : \
 '--from=[Source format to import from]:FROM:((radian\:"radian history file (~/.radian_history)"
 r\:"R native history file (.Rhistory)"
 arf\:"Another arf SQLite history database"))' \
-'--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=XDG data dir]:FILE:_files' \
+'--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db]:FILE:_files' \
 '--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_hosts' \
 '--dry-run[Perform a dry run without actually importing]' \
 '-h[Print help (see more with '\''--help'\'')]' \

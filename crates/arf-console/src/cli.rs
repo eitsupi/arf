@@ -171,7 +171,7 @@ pub enum HistoryAction {
         from: ImportSource,
 
         /// Path to the history file/database to import.
-        /// Defaults: radian=~/.radian_history, r=.Rhistory, arf=XDG data dir
+        /// Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db
         #[arg(long, value_hint = ValueHint::FilePath)]
         file: Option<PathBuf>,
 

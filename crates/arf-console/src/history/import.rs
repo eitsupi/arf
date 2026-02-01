@@ -85,8 +85,11 @@ pub fn default_r_history_path() -> PathBuf {
 }
 
 /// Get the default arf history database path.
+///
+/// Returns the path to the R history database in arf's history directory,
+/// matching the location used by `config::history_dir()`.
 pub fn default_arf_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("arf").join("r.db"))
+    crate::config::history_dir().map(|d| d.join("r.db"))
 }
 
 /// Parse a radian history file.

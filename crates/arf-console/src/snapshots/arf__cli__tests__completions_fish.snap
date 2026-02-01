@@ -74,7 +74,7 @@ complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcomm
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l from -d 'Source format to import from' -r -f -a "radian\t'radian history file (~/.radian_history)'
 r\t'R native history file (.Rhistory)'
 arf\t'Another arf SQLite history database'"
-complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l file -d 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=XDG data dir' -r -F
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l file -d 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db' -r -F
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l hostname -d 'Override hostname for imported entries. Marks entries to distinguish them from native arf history' -r -f -a "(__fish_print_hostnames)"
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l dry-run -d 'Perform a dry run without actually importing'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -s h -l help -d 'Print help (see more with \'--help\')'

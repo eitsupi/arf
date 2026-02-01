@@ -250,22 +250,29 @@ fn handle_history_import(
 
     // Determine target database paths
     let history_dir = config::history_dir().context("Could not determine history directory")?;
-    config::ensure_directories()?;
-
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 
-    if !dry_run {
+    // Open target databases (use in-memory for dry-run to avoid creating files)
+    let (r_history, shell_history) = if dry_run {
+        (
+            SqliteBackedHistory::in_memory()
+                .context("Failed to create in-memory R history database")?,
+            SqliteBackedHistory::in_memory()
+                .context("Failed to create in-memory shell history database")?,
+        )
+    } else {
+        config::ensure_directories()?;
         println!("Target databases:");
         println!("  R:     {}", r_path.display());
         println!("  Shell: {}", shell_path.display());
-    }
-
-    // Open target databases
-    let r_history = SqliteBackedHistory::with_file(r_path, None, None)
-        .context("Failed to open R history database")?;
-    let shell_history = SqliteBackedHistory::with_file(shell_path, None, None)
-        .context("Failed to open shell history database")?;
+        (
+            SqliteBackedHistory::with_file(r_path, None, None)
+                .context("Failed to open R history database")?,
+            SqliteBackedHistory::with_file(shell_path, None, None)
+                .context("Failed to open shell history database")?,
+        )
+    };
 
     let mut targets = history::import::ImportTargets {
         r_history,
