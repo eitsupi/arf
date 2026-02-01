@@ -128,6 +128,15 @@ impl Prompt for RPrompt {
         }
     }
 
+    /// Render vi mode indicator at the end of the prompt.
+    ///
+    /// Due to reedline's fixed render order (`prompt_left + indicator + input`),
+    /// the vi mode indicator always appears after the main prompt text.
+    /// This is the same approach used by nushell.
+    ///
+    /// Note: radian shows the indicator before the prompt, but that requires
+    /// prompt-toolkit's different architecture. In reedline, a `{vi}` placeholder
+    /// approach would cause a 1-cycle delay (showing the previous mode).
     fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
         let (symbol, color) = match edit_mode {
             PromptEditMode::Vi(PromptViMode::Insert) => {

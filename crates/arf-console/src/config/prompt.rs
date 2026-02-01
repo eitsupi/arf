@@ -102,8 +102,9 @@ pub(crate) struct ViSymbol {
 
 /// Vi mode indicator configuration.
 ///
-/// Controls how the prompt indicates the current editing mode via the `{vi}` placeholder.
-/// Supports vi insert/normal modes and non-vi modes (Emacs, potentially Helix in future).
+/// Controls symbols shown via `render_prompt_indicator()` for different editing modes.
+/// Symbols appear at the end of the prompt line (after the main prompt text).
+/// This is the same approach used by nushell, due to reedline's fixed render order.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(default)]
 pub struct ViConfig {

@@ -598,7 +598,7 @@
       }
     },
     "ViConfig": {
-      "description": "Vi mode indicator configuration.\n\nControls how the prompt indicates the current editing mode via the `{vi}` placeholder.\nSupports vi insert/normal modes and non-vi modes (Emacs, potentially Helix in future).",
+      "description": "Vi mode indicator configuration.\n\nControls symbols shown via `render_prompt_indicator()` for different editing modes.\nSymbols appear at the end of the prompt line (after the main prompt text).\nThis is the same approach used by nushell, due to reedline's fixed render order.",
       "type": "object",
       "properties": {
         "symbol": {

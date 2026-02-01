@@ -240,7 +240,6 @@ The `prompt.format`, `prompt.continuation`, and `prompt.shell_format` fields sup
 | `{cwd_short}` | Current working directory (basename only) | `project` |
 | `{shell}` | Shell name from $SHELL (Unix) or "cmd" (Windows) | `bash`, `zsh`, `cmd` |
 | `{status}` | Command status indicator (see below) | `✗ ` on error |
-| `{vi}` | Vi mode indicator (see below) | `[I] ` in insert mode |
 
 ### Prompt Examples
 
@@ -309,24 +308,26 @@ override_prompt_color = true
 
 arf can show a visual indicator for the current vi editing mode. This is useful when using vi keybindings to know whether you're in insert or normal mode.
 
-### Configuration
+The vi mode indicator is displayed at the end of the prompt (after the main prompt text), following the same approach as nushell.
 
-The `prompt.vi.symbol` table configures which symbols are shown via the `{vi}` placeholder:
+### Recommended Configuration
+
+The recommended approach uses `>` for insert mode and `:` for normal mode:
 
 ```toml
 [editor]
 mode = "vi"
 
 [prompt]
-format = "{vi}R {version}> "
+format = "R {version} "   # No trailing ">" - the vi indicator provides it
 
 [prompt.vi]
-symbol = { insert = "[I] ", normal = "[N] " }
-
-[colors.prompt.vi]
-insert = "LightGreen"    # Color for insert mode indicator
-normal = "LightYellow"   # Color for normal mode indicator
+symbol = { insert = "> ", normal = ": " }
 ```
+
+With this configuration, the prompt changes based on vi mode:
+- Insert mode: `R 4.4.0 > `
+- Normal mode: `R 4.4.0 : `
 
 ### Symbol Configuration
 
@@ -347,32 +348,31 @@ normal = "LightYellow"   # Color for normal mode indicator
 ### Examples
 
 ```toml
-# Classic vi-style indicators
+# Recommended: mode-aware prompt suffix (like nushell)
 [prompt]
-format = "{vi}R {version}> "
-
-[prompt.vi]
-symbol = { insert = "[I] ", normal = "[N] " }
-
-# Minimal indicators
+format = "R {version} "
 [prompt.vi]
 symbol = { insert = "> ", normal = ": " }
 
+# Bracketed indicators after standard prompt
+[prompt]
+format = "R {version}> "
+[prompt.vi]
+symbol = { insert = "[I] ", normal = "[N] " }
+
 # With colors
 [prompt.vi]
-symbol = { insert = "● ", normal = "○ " }
-
+symbol = { insert = "> ", normal = ": " }
 [colors.prompt.vi]
 insert = "LightGreen"
 normal = "LightYellow"
 
-# Consistent appearance across all editor modes
-# (show indicator even when using Emacs mode)
+# Unicode indicators
 [prompt.vi]
-symbol = { insert = "[I] ", normal = "[N] ", non_vi = "[E] " }
+symbol = { insert = "● ", normal = "○ " }
 ```
 
-> **Note**: The `{vi}` placeholder only expands to a value when vi mode symbols are configured. By default, all symbols are empty, so the placeholder expands to nothing.
+> **Note**: By default, all symbols are empty, so no vi mode indicator is shown. Configure `[prompt.vi.symbol]` to enable it.
 
 ## Auto-Formatting (Reprex Mode)
 
