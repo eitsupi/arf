@@ -170,20 +170,13 @@ pub enum HistoryAction {
         #[arg(long, value_enum)]
         from: ImportSource,
 
-        /// Path to the history file/database to import
-        ///
-        /// Defaults to standard locations:
-        /// - radian: ~/.radian_history
-        /// - r: .Rhistory in current directory or R_HISTFILE
-        /// - arf: XDG data directory
+        /// Path to the history file/database to import.
+        /// Defaults: radian=~/.radian_history, r=.Rhistory, arf=XDG data dir
         #[arg(long, value_hint = ValueHint::FilePath)]
         file: Option<PathBuf>,
 
-        /// Override hostname for imported entries
-        ///
-        /// Use this to mark imported entries with a custom hostname,
-        /// making them distinguishable from native arf entries.
-        /// Example: --hostname "radian-import"
+        /// Override hostname for imported entries.
+        /// Marks entries to distinguish them from native arf history
         #[arg(long)]
         hostname: Option<String>,
 
@@ -326,6 +319,19 @@ impl Cli {
         generate(shell, &mut cmd, "arf", &mut buf);
         String::from_utf8(buf).expect("Completions should be valid UTF-8")
     }
+
+    /// Generate help output for a subcommand path for testing.
+    #[cfg(test)]
+    fn generate_help_string(subcommand_path: &[&str]) -> String {
+        let mut cmd = Cli::command();
+        for &name in subcommand_path {
+            cmd = cmd
+                .find_subcommand(name)
+                .expect("Subcommand not found")
+                .clone();
+        }
+        cmd.render_long_help().to_string()
+    }
 }
 
 #[cfg(test)]
@@ -354,5 +360,11 @@ mod tests {
     fn test_completions_powershell_snapshot() {
         let completions = Cli::generate_completions_string(Shell::PowerShell);
         insta::assert_snapshot!("completions_powershell", completions);
+    }
+
+    #[test]
+    fn test_help_history_import_snapshot() {
+        let help = Cli::generate_help_string(&["history", "import"]);
+        insta::assert_snapshot!("help_history_import", help);
     }
 }

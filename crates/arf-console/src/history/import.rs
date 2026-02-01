@@ -397,7 +397,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "library(dplyr)").unwrap();
         writeln!(file, "print(\"hello\")").unwrap();
-        writeln!(file, "").unwrap(); // Empty line should be skipped
+        writeln!(file).unwrap(); // Empty line should be skipped
         writeln!(file, "summary(iris)").unwrap();
 
         let entries = parse_r_history(file.path()).unwrap();
@@ -893,8 +893,7 @@ mod tests {
         ];
 
         // Import with custom hostname
-        let result =
-            import_entries(&mut targets, entries, false, Some("radian-import")).unwrap();
+        let result = import_entries(&mut targets, entries, false, Some("radian-import")).unwrap();
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 1);

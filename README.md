@@ -240,7 +240,19 @@ arf history import --from r --file .Rhistory
 
 # Import from another arf database
 arf history import --from arf --file /path/to/r.db
+
+# Import with custom hostname (to distinguish from native entries)
+arf history import --from radian --hostname "radian-import"
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--from` | Source format: `radian`, `r`, or `arf` (required) |
+| `--file` | Path to source file (defaults to standard locations) |
+| `--hostname` | Custom hostname to mark imported entries |
+| `--dry-run` | Preview without importing |
 
 **Supported sources:**
 
