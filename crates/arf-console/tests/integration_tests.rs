@@ -5,6 +5,10 @@
 //! The PTY tests use a custom terminal emulator based on vt100-rust that properly
 //! responds to cursor position queries (CSI 6n) from reedline, enabling full
 //! interactive testing of arf.
+//!
+//! Note: Currently disabled on Windows due to PTY handling issues.
+
+#![cfg(unix)]
 
 mod common;
 
