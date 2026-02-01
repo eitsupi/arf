@@ -63,6 +63,9 @@ mode_indicator = "prefix"  # Position of mode indicator: "prefix", "suffix", or 
 symbol = { error = "✗ " }  # Status symbols: success and error (both default to empty)
 override_prompt_color = false  # Also change entire prompt color based on status
 
+[prompt.vi]
+symbol = {}                # Vi mode symbols (all empty by default)
+
 [prompt.indicators]
 reprex = "[reprex] "       # Indicator text for reprex mode
 autoformat = "[format] "   # Indicator text for autoformat mode
@@ -106,6 +109,11 @@ indicator = "Yellow"
 [colors.prompt.status]
 success = "LightGreen"     # Color for success (symbol and/or prompt)
 error = "LightRed"         # Color for error (symbol and/or prompt)
+
+[colors.prompt.vi]
+insert = "Default"         # Color for vi insert mode indicator
+normal = "Default"         # Color for vi normal mode indicator
+non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 
 [experimental]
 # Reserved for future experimental features
@@ -217,6 +225,9 @@ string = { Rgb = [0, 255, 128] }    # RGB values 0-255
 | `indicator` | Mode indicator text color ([reprex], [format], #!) | Yellow |
 | `status.success` | Color for success (symbol and/or prompt when override_prompt_color is true) | LightGreen |
 | `status.error` | Color for error (symbol and/or prompt when override_prompt_color is true) | LightRed |
+| `vi.insert` | Color for vi insert mode indicator | Default |
+| `vi.normal` | Color for vi normal mode indicator | Default |
+| `vi.non_vi` | Color for non-vi modes (Emacs, etc.) | Default |
 
 ## Prompt Placeholders
 
@@ -229,6 +240,7 @@ The `prompt.format`, `prompt.continuation`, and `prompt.shell_format` fields sup
 | `{cwd_short}` | Current working directory (basename only) | `project` |
 | `{shell}` | Shell name from $SHELL (Unix) or "cmd" (Windows) | `bash`, `zsh`, `cmd` |
 | `{status}` | Command status indicator (see below) | `✗ ` on error |
+| `{vi}` | Vi mode indicator (see below) | `[I] ` in insert mode |
 
 ### Prompt Examples
 
@@ -292,6 +304,75 @@ override_prompt_color = true
 symbol = { error = "✗ " }
 override_prompt_color = true
 ```
+
+## Vi Mode Indicator
+
+arf can show a visual indicator for the current vi editing mode. This is useful when using vi keybindings to know whether you're in insert or normal mode.
+
+### Configuration
+
+The `prompt.vi.symbol` table configures which symbols are shown via the `{vi}` placeholder:
+
+```toml
+[editor]
+mode = "vi"
+
+[prompt]
+format = "{vi}R {version}> "
+
+[prompt.vi]
+symbol = { insert = "[I] ", normal = "[N] " }
+
+[colors.prompt.vi]
+insert = "LightGreen"    # Color for insert mode indicator
+normal = "LightYellow"   # Color for normal mode indicator
+```
+
+### Symbol Configuration
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `insert` | Symbol shown in vi insert mode | `""` (empty) |
+| `normal` | Symbol shown in vi normal mode | `""` (empty) |
+| `non_vi` | Symbol shown in non-vi modes (Emacs) | `""` (empty) |
+
+### Color Configuration
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `insert` | Color for vi insert mode indicator | Default |
+| `normal` | Color for vi normal mode indicator | Default |
+| `non_vi` | Color for non-vi modes (Emacs) | Default |
+
+### Examples
+
+```toml
+# Classic vi-style indicators
+[prompt]
+format = "{vi}R {version}> "
+
+[prompt.vi]
+symbol = { insert = "[I] ", normal = "[N] " }
+
+# Minimal indicators
+[prompt.vi]
+symbol = { insert = "> ", normal = ": " }
+
+# With colors
+[prompt.vi]
+symbol = { insert = "● ", normal = "○ " }
+
+[colors.prompt.vi]
+insert = "LightGreen"
+normal = "LightYellow"
+
+# Consistent appearance across all editor modes
+# (show indicator even when using Emacs mode)
+[prompt.vi]
+symbol = { insert = "[I] ", normal = "[N] ", non_vi = "[E] " }
+```
+
+> **Note**: The `{vi}` placeholder only expands to a value when vi mode symbols are configured. By default, all symbols are empty, so the placeholder expands to nothing.
 
 ## Auto-Formatting (Reprex Mode)
 
