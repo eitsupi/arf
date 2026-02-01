@@ -328,9 +328,22 @@ mod tests {
             assert_eq!(expanded, home.to_string_lossy().to_string());
         }
 
-        // No tilde - unchanged
-        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+        // Relative path - unchanged on all platforms
         assert_eq!(expand_tilde("./foo"), "./foo");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_expand_tilde_unix_paths() {
+        // Unix absolute paths - unchanged
+        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_expand_tilde_windows_paths() {
+        // Windows absolute paths - unchanged
+        assert_eq!(expand_tilde("C:\\Users"), "C:\\Users");
     }
 
     #[test]
