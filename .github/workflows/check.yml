@@ -65,14 +65,22 @@ jobs:
       - uses: actions/checkout@v6
       - name: Set up Air CLI
         uses: posit-dev/setup-air@v1
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
       - name: Install R
         uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          Ncpus: "2"
       - name: Install R packages for tests
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test
+        run: |
+          cargo test \
+            --all-targets \
+            --all-features \
+            --workspace \
+            --locked
