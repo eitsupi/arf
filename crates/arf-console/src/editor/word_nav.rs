@@ -155,10 +155,10 @@ fn collect_tokens_recursive(
         let end = node.end_byte();
         if start < end {
             // Skip whitespace-only tokens
-            if let Ok(text) = std::str::from_utf8(&source[start..end]) {
-                if !text.chars().all(char::is_whitespace) {
-                    tokens.push((start, end));
-                }
+            if let Ok(text) = std::str::from_utf8(&source[start..end])
+                && !text.chars().all(char::is_whitespace)
+            {
+                tokens.push((start, end));
             }
         }
         return;
@@ -177,13 +177,12 @@ fn skip_whitespace_left(source: &[u8], pos: usize) -> usize {
     let mut p = pos;
     while p > 0 {
         let prev_char_start = find_char_start(source, p - 1);
-        if let Ok(s) = std::str::from_utf8(&source[prev_char_start..p]) {
-            if let Some(c) = s.chars().next() {
-                if c.is_whitespace() {
-                    p = prev_char_start;
-                    continue;
-                }
-            }
+        if let Ok(s) = std::str::from_utf8(&source[prev_char_start..p])
+            && let Some(c) = s.chars().next()
+            && c.is_whitespace()
+        {
+            p = prev_char_start;
+            continue;
         }
         break;
     }
@@ -194,13 +193,12 @@ fn skip_whitespace_left(source: &[u8], pos: usize) -> usize {
 fn skip_whitespace_right(source: &[u8], pos: usize) -> usize {
     let mut p = pos;
     while p < source.len() {
-        if let Ok(s) = std::str::from_utf8(&source[p..]) {
-            if let Some(c) = s.chars().next() {
-                if c.is_whitespace() {
-                    p += c.len_utf8();
-                    continue;
-                }
-            }
+        if let Ok(s) = std::str::from_utf8(&source[p..])
+            && let Some(c) = s.chars().next()
+            && c.is_whitespace()
+        {
+            p += c.len_utf8();
+            continue;
         }
         break;
     }

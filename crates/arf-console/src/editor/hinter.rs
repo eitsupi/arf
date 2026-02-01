@@ -93,10 +93,10 @@ fn find_first_token_bounds(node: &tree_sitter::Node, source: &[u8]) -> Option<(u
             // Skip if empty
             if start < end {
                 // Check if it's whitespace
-                if let Ok(text) = std::str::from_utf8(&source[start..end]) {
-                    if !text.chars().all(char::is_whitespace) {
-                        return Some((start, end));
-                    }
+                if let Ok(text) = std::str::from_utf8(&source[start..end])
+                    && !text.chars().all(char::is_whitespace)
+                {
+                    return Some((start, end));
                 }
             }
         } else if !is_atomic_node(kind) {
@@ -175,7 +175,8 @@ impl Hinter for RLanguageHinter {
         cwd: &str,
     ) -> String {
         // Delegate to DefaultHinter for history lookup
-        self.inner.handle(line, pos, history, use_ansi_coloring, cwd)
+        self.inner
+            .handle(line, pos, history, use_ansi_coloring, cwd)
     }
 
     fn complete_hint(&self) -> String {

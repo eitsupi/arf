@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use super::session_info::display_session_info;
 use super::shell::confirm_action;
 use super::state::PromptRuntimeConfig;
-use super::{arf_println, ARF_PREFIX};
+use super::{ARF_PREFIX, arf_println};
 
 /// Result of processing a meta command.
 pub enum MetaCommandResult {
@@ -77,7 +77,9 @@ pub fn process_meta_command(
                         arf_println!("Autoformat enabled (activate reprex mode to use)");
                     }
                 } else {
-                    arf_println!("Error: Cannot enable autoformat - Air CLI ('air' command) not found in PATH.");
+                    arf_println!(
+                        "Error: Cannot enable autoformat - Air CLI ('air' command) not found in PATH."
+                    );
                     arf_println!("Install Air CLI from https://github.com/posit-dev/air");
                 }
             }
@@ -108,7 +110,10 @@ pub fn process_meta_command(
             Some(MetaCommandResult::ShellExecuted)
         }
         "restart" => {
-            if confirm_action(&format!("{} Restart R session? Current session will be lost.", ARF_PREFIX)) {
+            if confirm_action(&format!(
+                "{} Restart R session? Current session will be lost.",
+                ARF_PREFIX
+            )) {
                 arf_println!("Restarting R session...");
                 Some(MetaCommandResult::Restart(None))
             } else {
@@ -120,7 +125,9 @@ pub fn process_meta_command(
             // :switch requires rig to be enabled at startup
             if !r_source_status.rig_enabled() {
                 arf_println!("Error: :switch requires rig to be available at startup.");
-                arf_println!(r#"Start arf with r_source = "auto" (with rig installed) or r_source = "rig"."#);
+                arf_println!(
+                    r#"Start arf with r_source = "auto" (with rig installed) or r_source = "rig"."#
+                );
                 return Some(MetaCommandResult::Handled);
             }
 
@@ -145,7 +152,12 @@ pub fn process_meta_command(
             match subcmd {
                 "clear" => {
                     let target = parts.get(2).copied().unwrap_or("");
-                    process_history_clear(r_history_path, shell_history_path, target, prompt_config.is_shell_enabled())
+                    process_history_clear(
+                        r_history_path,
+                        shell_history_path,
+                        target,
+                        prompt_config.is_shell_enabled(),
+                    )
                 }
                 "schema" => {
                     if let Err(e) = crate::pager::history_schema::show_schema_pager() {
@@ -160,7 +172,10 @@ pub fn process_meta_command(
                     Some(MetaCommandResult::Handled)
                 }
                 _ => {
-                    arf_println!("Unknown history subcommand: {}. Use :history for help", subcmd);
+                    arf_println!(
+                        "Unknown history subcommand: {}. Use :history for help",
+                        subcmd
+                    );
                     Some(MetaCommandResult::Handled)
                 }
             }
@@ -175,7 +190,13 @@ pub fn process_meta_command(
             Some(MetaCommandResult::Handled)
         }
         "info" | "session" => {
-            display_session_info(prompt_config, config_path, r_history_path, shell_history_path, r_source_status);
+            display_session_info(
+                prompt_config,
+                config_path,
+                r_history_path,
+                shell_history_path,
+                r_source_status,
+            );
             Some(MetaCommandResult::Handled)
         }
         "commands" | "cmds" => {
@@ -186,7 +207,9 @@ pub fn process_meta_command(
             println!("#   :r             - Return to R mode (from shell mode)");
             println!("#   :system <cmd>  - Execute a single system command");
             println!("#   :reprex        - Toggle reprex mode");
-            println!("#   :autoformat    - Toggle auto-formatting in reprex mode (requires Air CLI)");
+            println!(
+                "#   :autoformat    - Toggle auto-formatting in reprex mode (requires Air CLI)"
+            );
             println!("#   :history       - History management (clear, schema)");
             println!("#   :restart       - Restart R session");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
@@ -215,11 +238,7 @@ fn process_history_clear(
     let clear_target = match target {
         "" => {
             // Default: clear based on current mode
-            if is_shell_mode {
-                "shell"
-            } else {
-                "r"
-            }
+            if is_shell_mode { "shell" } else { "r" }
         }
         "r" | "R" => "r",
         "shell" => "shell",
@@ -304,13 +323,13 @@ fn process_history_clear(
     for (name, path) in &paths_to_clear {
         match SqliteBackedHistory::with_file((*path).clone(), None, None) {
             Ok(mut history) => {
-                if let Ok(count) = history.count_all() {
-                    if count > 0 {
-                        if let Err(e) = history.clear() {
-                            arf_println!("Failed to clear {} history: {}", name, e);
-                        } else {
-                            cleared_count += count;
-                        }
+                if let Ok(count) = history.count_all()
+                    && count > 0
+                {
+                    if let Err(e) = history.clear() {
+                        arf_println!("Failed to clear {} history: {}", name, e);
+                    } else {
+                        cleared_count += count;
                     }
                 }
             }
@@ -419,13 +438,27 @@ mod tests {
         // Test with existing config path (using tempfile)
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let existing_path = temp_file.path().to_path_buf();
-        let result = process_meta_command(":info", &mut config, &Some(existing_path), &None, &None, &status);
+        let result = process_meta_command(
+            ":info",
+            &mut config,
+            &Some(existing_path),
+            &None,
+            &None,
+            &status,
+        );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test with non-existing config path (using tempfile directory with fake filename)
         let temp_dir = tempfile::tempdir().unwrap();
         let non_existing_path = temp_dir.path().join("nonexistent_config.toml");
-        let result = process_meta_command(":info", &mut config, &Some(non_existing_path), &None, &None, &status);
+        let result = process_meta_command(
+            ":info",
+            &mut config,
+            &Some(non_existing_path),
+            &None,
+            &None,
+            &status,
+        );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test with None config path (using defaults)
@@ -519,7 +552,14 @@ mod tests {
     fn test_process_meta_command_system() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":system echo hello", &mut config, &None, &None, &None, &status);
+        let result = process_meta_command(
+            ":system echo hello",
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status,
+        );
         assert!(matches!(result, Some(MetaCommandResult::ShellExecuted)));
     }
 
@@ -538,12 +578,21 @@ mod tests {
 
         // With PATH mode (rig not enabled), :switch should show error
         let status_path = RSourceStatus::Path;
-        let result = process_meta_command(":switch 4.4", &mut config, &None, &None, &None, &status_path);
+        let result = process_meta_command(
+            ":switch 4.4",
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status_path,
+        );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // With Rig mode (rig enabled), :switch should work (but needs confirmation which we can't test here)
         // Just verify it doesn't immediately reject
-        let status_rig = RSourceStatus::Rig { version: "4.4.0".to_string() };
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+        };
         // Note: This will prompt for confirmation, so we can't fully test it in unit tests
         // Just testing the setup path here
         let result = process_meta_command(":switch", &mut config, &None, &None, &None, &status_rig);

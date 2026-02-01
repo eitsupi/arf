@@ -1,8 +1,8 @@
 //! R code completion for reedline.
 
+use super::path::{PathCompletionOptions, complete_path};
 use crate::external::rig;
 use crate::fuzzy::fuzzy_match;
-use super::path::{complete_path, PathCompletionOptions};
 use reedline::{Completer, Span, Suggestion};
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -427,7 +427,11 @@ impl CombinedCompleter {
     }
 
     /// Create a new CombinedCompleter with custom settings.
-    pub fn with_settings(timeout_ms: u64, debounce_ms: u64, function_paren_check_limit: usize) -> Self {
+    pub fn with_settings(
+        timeout_ms: u64,
+        debounce_ms: u64,
+        function_paren_check_limit: usize,
+    ) -> Self {
         Self::with_settings_and_rig(timeout_ms, debounce_ms, function_paren_check_limit, true)
     }
 
@@ -449,7 +453,11 @@ impl CombinedCompleter {
         }
 
         CombinedCompleter {
-            r_completer: RCompleter::with_settings(timeout_ms, debounce_ms, function_paren_check_limit),
+            r_completer: RCompleter::with_settings(
+                timeout_ms,
+                debounce_ms,
+                function_paren_check_limit,
+            ),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }
     }
@@ -506,7 +514,11 @@ impl RCompleter {
     }
 
     /// Create a new RCompleter with custom settings.
-    pub fn with_settings(timeout_ms: u64, debounce_ms: u64, function_paren_check_limit: usize) -> Self {
+    pub fn with_settings(
+        timeout_ms: u64,
+        debounce_ms: u64,
+        function_paren_check_limit: usize,
+    ) -> Self {
         RCompleter {
             timeout_ms,
             debounce_ms,
@@ -595,10 +607,7 @@ impl Completer for RCompleter {
         }
 
         // Get the token being completed (for filtering and span calculation)
-        let token = match arf_harp::completion::get_token(line, pos) {
-            Ok(t) => t,
-            Err(_) => String::new(),
-        };
+        let token = arf_harp::completion::get_token(line, pos).unwrap_or_default();
 
         // Try to use cache for prefix extensions or debounced requests
         let completions = if self.should_use_cache(&token) {
@@ -653,7 +662,7 @@ impl Completer for RCompleter {
         let match_len = token.len();
         filtered
             .into_iter()
-            .zip(is_function.into_iter())
+            .zip(is_function)
             .filter(|(c, is_func)| {
                 // Include if: different from token, OR is a function (will get "(" added)
                 c != &token || (*is_func && !has_special_suffix(c))
@@ -860,15 +869,11 @@ fn find_incomplete_string_in_error<'a>(
             }
 
             // Return the unclosed quote position
-            if in_double {
-                if let Some(pos) = last_double_pos {
-                    return Some((pos, '"'));
-                }
+            if in_double && let Some(pos) = last_double_pos {
+                return Some((pos, '"'));
             }
-            if in_single {
-                if let Some(pos) = last_single_pos {
-                    return Some((pos, '\''));
-                }
+            if in_single && let Some(pos) = last_single_pos {
+                return Some((pos, '\''));
             }
         }
         current = n.parent();
@@ -981,11 +986,7 @@ fn detect_string_context(line: &str, cursor_pos: usize) -> Option<StringContext>
 }
 
 /// Complete paths using Rust-native path completion.
-fn complete_path_in_string(
-    _line: &str,
-    pos: usize,
-    ctx: &StringContext,
-) -> Vec<Suggestion> {
+fn complete_path_in_string(_line: &str, pos: usize, ctx: &StringContext) -> Vec<Suggestion> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let options = PathCompletionOptions::default();
 
@@ -996,7 +997,7 @@ fn complete_path_in_string(
         .map(|c| {
             let match_indices = c.match_indices.map(|indices| {
                 // Offset indices to account for quote position
-                indices.into_iter().map(|i| i).collect()
+                indices.into_iter().collect()
             });
 
             Suggestion {
@@ -1098,14 +1099,25 @@ mod tests {
         let suggestions = completer.complete(":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(!values.contains(&"r"), "`:r` should be excluded in R mode");
-        assert!(values.contains(&"shell"), "`:shell` should still be present");
+        assert!(
+            values.contains(&"shell"),
+            "`:shell` should still be present"
+        );
     }
 
     #[test]
     fn test_meta_command_completer_excludes_shell_mode_commands() {
         // In Shell mode, R-specific commands should be excluded from completion
         let mut completer = MetaCommandCompleter::with_exclusions(vec![
-            "shell", "system", "autoformat", "format", "restart", "reprex", "switch", "h", "help",
+            "shell",
+            "system",
+            "autoformat",
+            "format",
+            "restart",
+            "reprex",
+            "switch",
+            "h",
+            "help",
         ]);
         let suggestions = completer.complete(":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
@@ -1113,9 +1125,15 @@ mod tests {
         // These should be excluded in Shell mode
         assert!(!values.contains(&"shell"), "`:shell` should be excluded");
         assert!(!values.contains(&"system"), "`:system` should be excluded");
-        assert!(!values.contains(&"autoformat"), "`:autoformat` should be excluded");
+        assert!(
+            !values.contains(&"autoformat"),
+            "`:autoformat` should be excluded"
+        );
         assert!(!values.contains(&"format"), "`:format` should be excluded");
-        assert!(!values.contains(&"restart"), "`:restart` should be excluded");
+        assert!(
+            !values.contains(&"restart"),
+            "`:restart` should be excluded"
+        );
         assert!(!values.contains(&"reprex"), "`:reprex` should be excluded");
         assert!(!values.contains(&"switch"), "`:switch` should be excluded");
         assert!(!values.contains(&"h"), "`:h` should be excluded");
@@ -1123,7 +1141,10 @@ mod tests {
 
         // These should still be present in Shell mode
         assert!(values.contains(&"r"), "`:r` should be present");
-        assert!(values.contains(&"commands"), "`:commands` should be present");
+        assert!(
+            values.contains(&"commands"),
+            "`:commands` should be present"
+        );
         assert!(values.contains(&"quit"), "`:quit` should be present");
         assert!(values.contains(&"exit"), "`:exit` should be present");
     }
@@ -1135,7 +1156,10 @@ mod tests {
         // Typing ":r" should not match excluded "r" command
         let suggestions = completer.complete(":r", 2);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
-        assert!(!values.contains(&"r"), "`:r` should not appear even with partial match");
+        assert!(
+            !values.contains(&"r"),
+            "`:r` should not appear even with partial match"
+        );
         // But "restart" and "reprex" should still appear
         assert!(values.contains(&"restart"));
         assert!(values.contains(&"reprex"));
@@ -1147,8 +1171,14 @@ mod tests {
         let mut completer = CombinedCompleter::new();
         let suggestions = completer.complete(":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
-        assert!(!values.contains(&"r"), "`:r` should be excluded in CombinedCompleter (R mode)");
-        assert!(values.contains(&"shell"), "`:shell` should be present in R mode");
+        assert!(
+            !values.contains(&"r"),
+            "`:r` should be excluded in CombinedCompleter (R mode)"
+        );
+        assert!(
+            values.contains(&"shell"),
+            "`:shell` should be present in R mode"
+        );
     }
 
     #[test]
@@ -1181,7 +1211,18 @@ mod tests {
         let suggestions = completer.complete(":", 1);
 
         // Commands without arguments
-        for cmd_name in &["shell", "r", "reprex", "autoformat", "format", "commands", "cmds", "restart", "quit", "exit"] {
+        for cmd_name in &[
+            "shell",
+            "r",
+            "reprex",
+            "autoformat",
+            "format",
+            "commands",
+            "cmds",
+            "restart",
+            "quit",
+            "exit",
+        ] {
             if let Some(cmd) = suggestions.iter().find(|s| s.value == *cmd_name) {
                 assert!(
                     !cmd.append_whitespace,
@@ -1241,7 +1282,10 @@ mod tests {
 
         // Verify match_indices are correct for each
         for suggestion in &suggestions {
-            let expected_pos = suggestion.value.find('r').or_else(|| suggestion.value.find('R'));
+            let expected_pos = suggestion
+                .value
+                .find('r')
+                .or_else(|| suggestion.value.find('R'));
             assert_eq!(
                 suggestion.match_indices,
                 expected_pos.map(|p| vec![p]),
@@ -1290,7 +1334,10 @@ mod tests {
         );
 
         // Check match_indices
-        let autoformat = suggestions.iter().find(|s| s.value == "autoformat").unwrap();
+        let autoformat = suggestions
+            .iter()
+            .find(|s| s.value == "autoformat")
+            .unwrap();
         assert_eq!(
             autoformat.match_indices,
             Some(vec![0, 4]),
@@ -1305,10 +1352,7 @@ mod tests {
         // ":cms" should match "cmds" - c=0, m=1, d=2, s=3
         let suggestions = completer.complete(":cms", 4);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
-        assert!(
-            values.contains(&"cmds"),
-            "`:cms` should fuzzy match `cmds`"
-        );
+        assert!(values.contains(&"cmds"), "`:cms` should fuzzy match `cmds`");
 
         let cmds = suggestions.iter().find(|s| s.value == "cmds").unwrap();
         assert_eq!(
@@ -1345,10 +1389,7 @@ mod tests {
 
         let suggestions = completer.complete(":h", 2);
         let h = suggestions.iter().find(|s| s.value == "h").unwrap();
-        assert!(
-            !h.append_whitespace,
-            "`:h` should NOT append whitespace"
-        );
+        assert!(!h.append_whitespace, "`:h` should NOT append whitespace");
     }
 
     // --- String context detection tests ---

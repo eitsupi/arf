@@ -4,7 +4,7 @@
 //! This module provides a RAII wrapper to ensure objects are properly
 //! protected and unprotected.
 
-use arf_libr::{r_library, SEXP};
+use arf_libr::{SEXP, r_library};
 
 /// RAII guard for R's protection stack.
 ///
@@ -49,11 +49,11 @@ impl Default for RProtect {
 
 impl Drop for RProtect {
     fn drop(&mut self) {
-        if self.count > 0 {
-            if let Ok(lib) = r_library() {
-                unsafe {
-                    (lib.rf_unprotect)(self.count);
-                }
+        if self.count > 0
+            && let Ok(lib) = r_library()
+        {
+            unsafe {
+                (lib.rf_unprotect)(self.count);
             }
         }
     }

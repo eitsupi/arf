@@ -71,6 +71,7 @@ impl Default for StatusSymbol {
 /// Use `symbol` to configure what symbols are displayed via the `{status}` placeholder.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[derive(Default)]
 pub struct StatusConfig {
     /// Symbols to display for success/error status.
     /// Example: `symbol = { error = "✗ " }`
@@ -81,19 +82,10 @@ pub struct StatusConfig {
     pub override_prompt_color: bool,
 }
 
-impl Default for StatusConfig {
-    fn default() -> Self {
-        Self {
-            symbol: StatusSymbol::default(),
-            override_prompt_color: false,
-        }
-    }
-}
-
 /// Symbols displayed in the prompt to indicate vi editing mode.
 ///
 /// Example: `symbol = { insert = "> ", normal = ": ", non_vi = "> " }`
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(default)]
 pub(crate) struct ViSymbol {
     /// Symbol shown in vi insert mode (default: "").
@@ -108,21 +100,11 @@ pub(crate) struct ViSymbol {
     pub non_vi: String,
 }
 
-impl Default for ViSymbol {
-    fn default() -> Self {
-        Self {
-            insert: String::new(),
-            normal: String::new(),
-            non_vi: String::new(),
-        }
-    }
-}
-
 /// Vi mode indicator configuration.
 ///
 /// Controls how the prompt indicates the current editing mode via the `{vi}` placeholder.
 /// Supports vi insert/normal modes and non-vi modes (Emacs, potentially Helix in future).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(default)]
 pub struct ViConfig {
     /// Symbols to display for insert/normal mode.
@@ -131,30 +113,18 @@ pub struct ViConfig {
     pub symbol: ViSymbol,
 }
 
-impl Default for ViConfig {
-    fn default() -> Self {
-        Self {
-            symbol: ViSymbol::default(),
-        }
-    }
-}
-
 /// Position of the mode indicator relative to the prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ModeIndicatorPosition {
     /// Show mode indicator before the prompt (e.g., "[reprex] r> ").
+    #[default]
     Prefix,
     /// Show mode indicator after the prompt (e.g., "r> [reprex]").
     Suffix,
     /// Do not show mode indicator.
     None,
-}
-
-impl Default for ModeIndicatorPosition {
-    fn default() -> Self {
-        Self::Prefix
-    }
 }
 
 /// Text strings for mode indicators shown in the prompt.
@@ -178,4 +148,3 @@ impl Default for Indicators {
         }
     }
 }
-

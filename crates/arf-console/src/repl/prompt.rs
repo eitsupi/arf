@@ -3,7 +3,9 @@
 use crate::config::prompt::ViSymbol;
 use crate::config::{ModeIndicatorPosition, ViColorConfig};
 use nu_ansi_term::{Color, Style};
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode};
+use reedline::{
+    Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode,
+};
 use std::borrow::Cow;
 
 /// Custom prompt for arf.
@@ -53,7 +55,12 @@ impl RPrompt {
         self
     }
 
-    pub fn with_colors(mut self, prompt: Color, continuation: Color, mode_indicator: Color) -> Self {
+    pub fn with_colors(
+        mut self,
+        prompt: Color,
+        continuation: Color,
+        mode_indicator: Color,
+    ) -> Self {
         self.prompt_color = prompt;
         self.continuation_color = continuation;
         self.mode_indicator_color = mode_indicator;
@@ -154,7 +161,10 @@ impl Prompt for RPrompt {
             PromptHistorySearchStatus::Passing => "",
             PromptHistorySearchStatus::Failing => "failing ",
         };
-        Cow::Owned(format!("({}reverse-search: {}) ", prefix, history_search.term))
+        Cow::Owned(format!(
+            "({}reverse-search: {}) ",
+            prefix, history_search.term
+        ))
     }
 }
 
@@ -212,8 +222,7 @@ mod tests {
             normal: "[N] ".to_string(),
             non_vi: "[E] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_vi_symbol(vi_symbol);
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert));
         assert_eq!(indicator, "[I] ");
@@ -226,8 +235,7 @@ mod tests {
             normal: "[N] ".to_string(),
             non_vi: "[E] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_vi_symbol(vi_symbol);
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal));
         assert_eq!(indicator, "[N] ");
@@ -240,8 +248,7 @@ mod tests {
             normal: "[N] ".to_string(),
             non_vi: "[E] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_vi_symbol(vi_symbol);
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Emacs);
         assert_eq!(indicator, "[E] ");
@@ -254,8 +261,7 @@ mod tests {
             normal: "[N] ".to_string(),
             non_vi: "[D] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_vi_symbol(vi_symbol);
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
         // Default mode should use non_vi symbol
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Default);
@@ -268,8 +274,14 @@ mod tests {
         let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string());
 
         // All modes should return empty string with default (empty) symbols
-        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)), "");
-        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)), "");
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
+            ""
+        );
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)),
+            ""
+        );
         assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "");
     }
 }

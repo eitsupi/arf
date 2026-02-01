@@ -5,6 +5,10 @@
 //! The PTY tests use a custom terminal emulator based on vt100-rust that properly
 //! responds to cursor position queries (CSI 6n) from reedline, enabling full
 //! interactive testing of arf.
+//!
+//! Note: Currently disabled on Windows due to PTY handling issues.
+
+#![cfg(unix)]
 
 mod common;
 
@@ -81,10 +85,7 @@ fn test_history_schema_subcommand() {
         .output()
         .expect("Failed to run arf history schema");
 
-    assert!(
-        output.status.success(),
-        "arf history schema should succeed"
-    );
+    assert!(output.status.success(), "arf history schema should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -175,11 +176,7 @@ fn test_eval_basic() {
     assert!(output.status.success(), "arf -e should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("[1] 2"),
-        "Should output [1] 2: {}",
-        stdout
-    );
+    assert!(stdout.contains("[1] 2"), "Should output [1] 2: {}", stdout);
 }
 
 /// Test multiple expressions with -e flag.
@@ -227,7 +224,10 @@ fn test_eval_error_handling() {
         .expect("Failed to run arf -e");
 
     // Should still exit successfully (R errors are expected behavior)
-    assert!(output.status.success(), "arf -e should succeed even with R errors");
+    assert!(
+        output.status.success(),
+        "arf -e should succeed even with R errors"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -245,7 +245,10 @@ fn test_eval_pipe_error() {
         .output()
         .expect("Failed to run arf -e");
 
-    assert!(output.status.success(), "arf -e should succeed even with R errors");
+    assert!(
+        output.status.success(),
+        "arf -e should succeed even with R errors"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -469,7 +472,10 @@ fn test_script_file_not_found() {
         .output()
         .expect("Failed to run arf");
 
-    assert!(!output.status.success(), "arf should fail for non-existent file");
+    assert!(
+        !output.status.success(),
+        "arf should fail for non-existent file"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -488,37 +494,39 @@ fn test_script_file_not_found() {
 fn test_r_completion_functions() {
     // Test that utils completion functions are available
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["-e", r#"
+        .args([
+            "-e",
+            r#"
             utils:::.assignLinebuffer("pri")
             utils:::.assignEnd(3)
             token <- utils:::.guessTokenFromLine()
             print(token)
-        "#])
+        "#,
+        ])
         .output()
         .expect("Failed to run arf -e");
 
     assert!(output.status.success(), "arf -e should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("pri"),
-        "Token should be 'pri': {}",
-        stdout
-    );
+    assert!(stdout.contains("pri"), "Token should be 'pri': {}", stdout);
 }
 
 /// Test that R's completeToken works.
 #[test]
 fn test_r_complete_token() {
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["-e", r#"
+        .args([
+            "-e",
+            r#"
             utils:::.assignLinebuffer("prin")
             utils:::.assignEnd(4L)
             utils:::.guessTokenFromLine()
             utils:::.completeToken()
             comps <- utils:::.retrieveCompletions()
             print(comps)
-        "#])
+        "#,
+        ])
         .output()
         .expect("Failed to run arf -e");
 
@@ -648,16 +656,24 @@ fn test_pty_variable_assignment() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Assign a string variable
-    terminal.send_line("x <- 'hello'").expect("Should send assignment");
+    terminal
+        .send_line("x <- 'hello'")
+        .expect("Should send assignment");
 
     // Clear buffer and wait for fresh prompt (no output for assignment)
-    terminal.clear_and_expect("> ").expect("Should show prompt after assignment");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after assignment");
 
     // Check the variable length
-    terminal.send_line("nchar(x)").expect("Should send nchar(x)");
+    terminal
+        .send_line("nchar(x)")
+        .expect("Should send nchar(x)");
 
     // Clear buffer and wait for result
-    terminal.clear_and_expect("[1] 5").expect("nchar(x) should return 5");
+    terminal
+        .clear_and_expect("[1] 5")
+        .expect("nchar(x) should return 5");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -683,7 +699,9 @@ fn test_pty_cat_output() {
         .expect("Should see cat output");
 
     // Should return to prompt
-    terminal.wait_for_prompt().expect("Should show prompt after cat");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after cat");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -698,23 +716,35 @@ fn test_pty_multiline_input() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Start a function definition (incomplete expression)
-    terminal.send_line("f <- function(x) {").expect("Should send first line");
+    terminal
+        .send_line("f <- function(x) {")
+        .expect("Should send first line");
 
     // Wait for continuation prompt
-    terminal.clear_and_expect("+").expect("Should show continuation prompt");
+    terminal
+        .clear_and_expect("+")
+        .expect("Should show continuation prompt");
 
     // Complete the function
-    terminal.send_line("  x + 1").expect("Should send second line");
-    terminal.clear_and_expect("+").expect("Should show continuation prompt again");
+    terminal
+        .send_line("  x + 1")
+        .expect("Should send second line");
+    terminal
+        .clear_and_expect("+")
+        .expect("Should show continuation prompt again");
 
     terminal.send_line("}").expect("Should send closing brace");
 
     // Wait for normal prompt to return
-    terminal.clear_and_expect("> ").expect("Should show normal prompt");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show normal prompt");
 
     // Test the function
     terminal.send_line("f(10)").expect("Should call function");
-    terminal.clear_and_expect("[1] 11").expect("f(10) should return 11");
+    terminal
+        .clear_and_expect("[1] 11")
+        .expect("f(10) should return 11");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -747,7 +777,9 @@ fn test_pty_multiline_string_input() {
         .expect("Should show continuation prompt for incomplete string");
 
     // Complete the string
-    terminal.send("end\"").expect("Should send closing text and quote");
+    terminal
+        .send("end\"")
+        .expect("Should send closing text and quote");
     terminal.send("\r").expect("Should send Enter");
 
     // The complete string should be submitted and R should output it
@@ -769,12 +801,12 @@ fn test_pty_error_handling() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Trigger an error
-    terminal.send_line("stop('Test error')").expect("Should send stop()");
+    terminal
+        .send_line("stop('Test error')")
+        .expect("Should send stop()");
 
     // Should see error message
-    terminal
-        .expect("Error")
-        .expect("Should see error output");
+    terminal.expect("Error").expect("Should see error output");
 
     // Should return to prompt
     terminal
@@ -800,12 +832,9 @@ fn test_pty_history_exit_status() {
     let history_dir = temp_dir.path().to_string_lossy().to_string();
 
     // Start arf with custom history directory
-    let mut terminal = Terminal::spawn_with_args(&[
-        "--no-auto-match",
-        "--history-dir",
-        &history_dir,
-    ])
-    .expect("Failed to spawn arf");
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match", "--history-dir", &history_dir])
+            .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -880,9 +909,15 @@ fn test_pty_history_exit_status() {
 /// This test verifies that errors from packages like dplyr that use rlang's
 /// condition system (which may output to stdout instead of stderr) are still
 /// correctly detected and tracked in history.
+///
+/// Requires dplyr to be installed.
 #[test]
 #[cfg(unix)]
 fn test_pty_rlang_error_detection() {
+    if !common::has_dplyr() {
+        eprintln!("Skipping test: dplyr not available");
+        return;
+    }
     use reedline::{History, SearchDirection, SearchQuery, SqliteBackedHistory};
 
     // Create a temporary directory for history
@@ -890,12 +925,9 @@ fn test_pty_rlang_error_detection() {
     let history_dir = temp_dir.path().to_string_lossy().to_string();
 
     // Start arf with custom history directory
-    let mut terminal = Terminal::spawn_with_args(&[
-        "--no-auto-match",
-        "--history-dir",
-        &history_dir,
-    ])
-    .expect("Failed to spawn arf");
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match", "--history-dir", &history_dir])
+            .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -912,7 +944,9 @@ fn test_pty_rlang_error_detection() {
         .expect("Should see dplyr error message");
 
     // Wait for prompt with status indicator
-    terminal.wait_for_prompt().expect("Should show prompt after error");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after error");
 
     // Run another successful command to trigger history update
     terminal.send_line("1").expect("Should send expression");
@@ -1085,10 +1119,7 @@ frames = ""
     }
 
     // Successful command should be present
-    let success_commands: Vec<_> = entries
-        .iter()
-        .filter(|e| e.command_line == "1")
-        .collect();
+    let success_commands: Vec<_> = entries.iter().filter(|e| e.command_line == "1").collect();
     assert_eq!(
         success_commands.len(),
         1,
@@ -1106,7 +1137,9 @@ fn test_pty_interrupt_computation() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Start a long computation (infinite loop)
-    terminal.send_line("while(TRUE) {}").expect("Should start loop");
+    terminal
+        .send_line("while(TRUE) {}")
+        .expect("Should start loop");
 
     // Give it a moment to start
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1115,13 +1148,19 @@ fn test_pty_interrupt_computation() {
     terminal.send_interrupt().expect("Should send interrupt");
 
     // Should return to prompt
-    terminal.wait_for_prompt().expect("Should show prompt after interrupt");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after interrupt");
 
     // Verify we can still do work
-    terminal.send_line("42").expect("Should send simple expression");
+    terminal
+        .send_line("42")
+        .expect("Should send simple expression");
 
     // Use expect for more robust checking
-    terminal.expect("[1] 42").expect("Should execute normally after interrupt");
+    terminal
+        .expect("[1] 42")
+        .expect("Should execute normally after interrupt");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1141,7 +1180,9 @@ fn test_pty_cursor_position() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Get initial cursor position after prompt (position varies with prompt format)
-    let (initial_row, initial_col) = terminal.cursor_position().expect("Should get cursor position");
+    let (initial_row, initial_col) = terminal
+        .cursor_position()
+        .expect("Should get cursor position");
     // Prompt could be "r> " (3 chars) or "R 4.5.2> " (9 chars) etc., so just verify it's > 0
     assert!(initial_col > 0, "Cursor should be after prompt");
 
@@ -1156,9 +1197,17 @@ fn test_pty_cursor_position() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // Cursor should have moved down but column should still be at prompt position
-    let (after_enter_row, after_enter_col) = terminal.cursor_position().expect("Should get cursor position after enter");
-    assert!(after_enter_row > initial_row, "Cursor row should increase after Enter");
-    assert_eq!(after_enter_col, initial_col, "Cursor should still be at prompt position after Enter");
+    let (after_enter_row, after_enter_col) = terminal
+        .cursor_position()
+        .expect("Should get cursor position after enter");
+    assert!(
+        after_enter_row > initial_row,
+        "Cursor row should increase after Enter"
+    );
+    assert_eq!(
+        after_enter_col, initial_col,
+        "Cursor should still be at prompt position after Enter"
+    );
 
     // Verify prompt on new line
     terminal
@@ -1171,8 +1220,14 @@ fn test_pty_cursor_position() {
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Cursor should now be at initial_col + 1 (after "prompt a")
-    let (_, col_with_a) = terminal.cursor_position().expect("Should get cursor position with 'a'");
-    assert_eq!(col_with_a, initial_col + 1, "Cursor should be one position after prompt after typing 'a'");
+    let (_, col_with_a) = terminal
+        .cursor_position()
+        .expect("Should get cursor position with 'a'");
+    assert_eq!(
+        col_with_a,
+        initial_col + 1,
+        "Cursor should be one position after prompt after typing 'a'"
+    );
 
     // Send interrupt
     terminal.send_interrupt().expect("Should send interrupt");
@@ -1180,10 +1235,17 @@ fn test_pty_cursor_position() {
 
     // After interrupt, should be back at prompt position
     // Note: The row may or may not increase depending on terminal behavior
-    terminal.wait_for_prompt().expect("Should show prompt after interrupt");
-    let (_after_intr_row, after_intr_col) = terminal.cursor_position().expect("Should get cursor position after interrupt");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after interrupt");
+    let (_after_intr_row, after_intr_col) = terminal
+        .cursor_position()
+        .expect("Should get cursor position after interrupt");
     // Cursor should be at prompt position after interrupt (column is what matters)
-    assert_eq!(after_intr_col, initial_col, "Cursor should be at prompt position after interrupt");
+    assert_eq!(
+        after_intr_col, initial_col,
+        "Cursor should be at prompt position after interrupt"
+    );
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1202,10 +1264,13 @@ fn test_pty_screen_state_inspection() {
 
     // Get full screen state
     let screen = terminal.screen().expect("Should get screen snapshot");
-    assert!(screen.lines.len() > 0, "Screen should have lines");
+    assert!(!screen.lines.is_empty(), "Screen should have lines");
     // Prompt length varies ("r> " is 3, "R 4.5.2> " is 9), just verify it's > 0
     let initial_col = screen.cursor_col;
-    assert!(initial_col > 0, "Initial cursor column should be after prompt");
+    assert!(
+        initial_col > 0,
+        "Initial cursor column should be after prompt"
+    );
 
     // Get prompt row for line-based assertions
     let prompt_row = screen.cursor_row as usize;
@@ -1218,7 +1283,9 @@ fn test_pty_screen_state_inspection() {
 
     // Execute a simple expression
     terminal.send_line("100").expect("Should send 100");
-    terminal.clear_and_expect("[1] 100").expect("Should show result");
+    terminal
+        .clear_and_expect("[1] 100")
+        .expect("Should show result");
 
     // Use assert_cursor for position verification - cursor should be at prompt position
     terminal
@@ -1259,20 +1326,34 @@ fn test_pty_bracketed_paste() {
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
     terminal.send(&pasted).expect("Should send bracketed paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after paste");
 
-    terminal.send_line("nchar(x)").expect("Should send nchar(x)");
-    terminal.clear_and_expect("[1] 10").expect("nchar(x) should return 10");
+    terminal
+        .send_line("nchar(x)")
+        .expect("Should send nchar(x)");
+    terminal
+        .clear_and_expect("[1] 10")
+        .expect("nchar(x) should return 10");
 
     // Test medium bracketed paste (100 characters) - validates paste handling
     let content = "y <- '".to_string() + &"b".repeat(100) + "'";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send medium bracketed paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after medium paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send medium bracketed paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after medium paste");
 
-    terminal.send_line("nchar(y)").expect("Should send nchar(y)");
-    terminal.clear_and_expect("[1] 100").expect("nchar(y) should return 100");
+    terminal
+        .send_line("nchar(y)")
+        .expect("Should send nchar(y)");
+    terminal
+        .clear_and_expect("[1] 100")
+        .expect("nchar(y) should return 100");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1300,11 +1381,19 @@ fn test_pty_bracketed_paste_long_string() {
     let content = "x <- '".to_string() + &"a".repeat(5000) + "'";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send long bracketed paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after long paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send long bracketed paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after long paste");
 
-    terminal.send_line("nchar(x)").expect("Should send nchar(x)");
-    terminal.clear_and_expect("[1] 5000").expect("nchar(x) should return 5000");
+    terminal
+        .send_line("nchar(x)")
+        .expect("Should send nchar(x)");
+    terminal
+        .clear_and_expect("[1] 5000")
+        .expect("nchar(x) should return 5000");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1331,11 +1420,19 @@ fn test_pty_bracketed_paste_multiline_long_string() {
     let content = "x <- '".to_string() + &"a".repeat(2000) + "\n" + &"b".repeat(2000) + "'";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send multiline long paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after multiline paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send multiline long paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after multiline paste");
 
-    terminal.send_line("nchar(x)").expect("Should send nchar(x)");
-    terminal.clear_and_expect("[1] 4001").expect("nchar(x) should return 4001");
+    terminal
+        .send_line("nchar(x)")
+        .expect("Should send nchar(x)");
+    terminal
+        .clear_and_expect("[1] 4001")
+        .expect("nchar(x) should return 4001");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1362,25 +1459,47 @@ fn test_pty_bracketed_paste_long_multibyte_string() {
 
     // Test with multibyte characters (Chinese characters, 3 bytes each in UTF-8)
     // 1000 '中' + '\n' + 1000 '文' + '\n' + 1000 '中' + '\n' + 1000 '文' = 4003 chars total
-    let s = "中".repeat(1000) + "\n" + &"文".repeat(1000) + "\n" + &"中".repeat(1000) + "\n" + &"文".repeat(1000);
+    let s = "中".repeat(1000)
+        + "\n"
+        + &"文".repeat(1000)
+        + "\n"
+        + &"中".repeat(1000)
+        + "\n"
+        + &"文".repeat(1000);
     let content = "x <- '".to_string() + &s + "'";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send multibyte long paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after multibyte paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send multibyte long paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after multibyte paste");
 
-    terminal.send_line("nchar(x)").expect("Should send nchar(x)");
-    terminal.clear_and_expect("[1] 4003").expect("nchar(x) should return 4003");
+    terminal
+        .send_line("nchar(x)")
+        .expect("Should send nchar(x)");
+    terminal
+        .clear_and_expect("[1] 4003")
+        .expect("nchar(x) should return 4003");
 
     // Test with different variable name (different padding)
     let content = "xy <- '".to_string() + &s + "'";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send multibyte paste with different padding");
-    terminal.clear_and_expect("> ").expect("Should show prompt after second paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send multibyte paste with different padding");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after second paste");
 
-    terminal.send_line("nchar(xy)").expect("Should send nchar(xy)");
-    terminal.clear_and_expect("[1] 4003").expect("nchar(xy) should return 4003");
+    terminal
+        .send_line("nchar(xy)")
+        .expect("Should send nchar(xy)");
+    terminal
+        .clear_and_expect("[1] 4003")
+        .expect("nchar(xy) should return 4003");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1408,7 +1527,9 @@ fn test_pty_multiple_expressions_print_intermediate() {
     let content = "1 + 1\n2 + 2";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send multiple expressions");
+    terminal
+        .send(&pasted)
+        .expect("Should send multiple expressions");
 
     // Wait for output and check that BOTH results are visible
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1454,18 +1575,26 @@ fn test_pty_bracketed_paste_with_auto_match() {
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
     terminal.send(&pasted).expect("Should send bracketed paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after paste");
 
     // Verify the value is correct (if parentheses were duplicated, this would fail)
     terminal.send_line("x").expect("Should send x");
-    terminal.clear_and_expect("[1] 1").expect("x should be 1, not error from extra bracket");
+    terminal
+        .clear_and_expect("[1] 1")
+        .expect("x should be 1, not error from extra bracket");
 
     // Test pasting a function call with multiple brackets
     let content = "y <- sum(c(1, 2, 3))";
     let pasted = format!("{}{}{}\n", paste_start, content, paste_end);
 
-    terminal.send(&pasted).expect("Should send nested brackets paste");
-    terminal.clear_and_expect("> ").expect("Should show prompt after nested paste");
+    terminal
+        .send(&pasted)
+        .expect("Should send nested brackets paste");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should show prompt after nested paste");
 
     terminal.send_line("y").expect("Should send y");
     terminal.clear_and_expect("[1] 6").expect("y should be 6");
@@ -1487,7 +1616,9 @@ fn test_pty_escape_cancels_input() {
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Type some text but don't execute
-    terminal.send("invalid_var").expect("Should send partial input");
+    terminal
+        .send("invalid_var")
+        .expect("Should send partial input");
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     // Send Ctrl+C to cancel (more reliable than Escape for canceling input)
@@ -1495,15 +1626,23 @@ fn test_pty_escape_cancels_input() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // Should be back at prompt
-    terminal.wait_for_prompt().expect("Should show prompt after cancel");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after cancel");
 
     // Now execute a valid expression
     terminal.send_line("42").expect("Should send 42");
-    terminal.clear_and_expect("[1] 42").expect("Should execute 42");
+    terminal
+        .clear_and_expect("[1] 42")
+        .expect("Should execute 42");
 
     // Verify the partial input was truly discarded
-    terminal.send_line("invalid_var").expect("Should send invalid_var");
-    terminal.expect("Error").expect("Should show error for undefined variable");
+    terminal
+        .send_line("invalid_var")
+        .expect("Should send invalid_var");
+    terminal
+        .expect("Error")
+        .expect("Should show error for undefined variable");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1530,10 +1669,14 @@ fn test_pty_readline() {
     terminal.expect("hello").expect("Should see cat output");
 
     // Should see the readline prompt
-    terminal.expect("input> ").expect("Should see readline prompt");
+    terminal
+        .expect("input> ")
+        .expect("Should see readline prompt");
 
     // Provide input to readline
-    terminal.send_line("user_answer").expect("Should send readline input");
+    terminal
+        .send_line("user_answer")
+        .expect("Should send readline input");
 
     // The readline result should be returned
     terminal
@@ -1567,7 +1710,9 @@ fn test_pty_askpass() {
     terminal
         .send_line("requireNamespace('askpass', quietly = TRUE)")
         .expect("Should check askpass");
-    terminal.expect("TRUE").expect("askpass package should be available");
+    terminal
+        .expect("TRUE")
+        .expect("askpass package should be available");
 
     // Execute askpass::askpass() with a custom prompt
     terminal
@@ -1599,8 +1744,8 @@ fn test_pty_askpass() {
 #[test]
 #[cfg(unix)]
 fn test_pty_shell_mode() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1612,10 +1757,14 @@ fn test_pty_shell_mode() {
 
     // Prompt should now show shell format (e.g., "[bash] $ " or "[sh] $ ")
     // Wait for the shell prompt to appear
-    terminal.expect("] $").expect("Should show shell mode prompt");
+    terminal
+        .expect("] $")
+        .expect("Should show shell mode prompt");
 
     // Execute a shell command
-    terminal.send_line("echo hello").expect("Should send shell command");
+    terminal
+        .send_line("echo hello")
+        .expect("Should send shell command");
     terminal.expect("hello").expect("Should see shell output");
 
     // Return to R mode
@@ -1638,8 +1787,8 @@ fn test_pty_shell_mode() {
 #[test]
 #[cfg(unix)]
 fn test_pty_system_command() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1658,7 +1807,9 @@ fn test_pty_system_command() {
 
     // Verify we're still in R mode by executing R code
     terminal.send_line("100").expect("Should send R expression");
-    terminal.clear_and_expect("[1] 100").expect("Should evaluate R code");
+    terminal
+        .clear_and_expect("[1] 100")
+        .expect("Should evaluate R code");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1669,8 +1820,8 @@ fn test_pty_system_command() {
 #[test]
 #[cfg(unix)]
 fn test_pty_shell_mode_ctrl_c_exit() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1688,7 +1839,9 @@ fn test_pty_shell_mode_ctrl_c_exit() {
 
     // Verify we're back in R mode
     terminal.send_line("200").expect("Should send R expression");
-    terminal.clear_and_expect("[1] 200").expect("Should evaluate R code");
+    terminal
+        .clear_and_expect("[1] 200")
+        .expect("Should evaluate R code");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1702,15 +1855,13 @@ fn test_pty_shell_mode_ctrl_c_exit() {
 #[test]
 #[cfg(unix)]
 fn test_pty_help_browser() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Send :h command to open help browser
-    terminal
-        .send_line(":h")
-        .expect("Should send :h command");
+    terminal.send_line(":h").expect("Should send :h command");
 
     // Wait for browser to appear - it should show the header
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1719,7 +1870,9 @@ fn test_pty_help_browser() {
         .expect("Should show help browser header");
 
     // Press Esc to exit the browser
-    terminal.send("\x1b").expect("Should send Esc to exit browser");
+    terminal
+        .send("\x1b")
+        .expect("Should send Esc to exit browser");
 
     // Wait for prompt to return
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1742,8 +1895,8 @@ fn test_pty_help_browser() {
 #[test]
 #[cfg(unix)]
 fn test_pty_history_schema_pager() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1781,8 +1934,8 @@ fn test_pty_history_schema_pager() {
 #[test]
 #[cfg(unix)]
 fn test_pty_history_schema_pager_copy() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1825,8 +1978,8 @@ fn test_pty_history_schema_pager_copy() {
 #[test]
 #[cfg(unix)]
 fn test_pty_history_schema_pager_mouse_scroll() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1886,16 +2039,25 @@ fn test_pty_history_schema_pager_mouse_scroll() {
 ///
 /// This is a regression test for the bug where clearing the prompt used the
 /// stripped line count instead of the original line count.
+///
+/// Requires Air CLI for autoformat functionality.
 #[test]
 #[cfg(unix)]
 fn test_pty_reprex_paste_strips_output_lines() {
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    if !common::has_air_cli() {
+        eprintln!("Skipping test: Air CLI not available");
+        return;
+    }
+
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
     // Enable autoformat and reprex mode
-    terminal.send_line(":autoformat").expect("Should send :autoformat");
+    terminal
+        .send_line(":autoformat")
+        .expect("Should send :autoformat");
     terminal
         .clear_and_expect("Autoformat enabled")
         .expect("Should show autoformat message");
@@ -1920,8 +2082,12 @@ fn test_pty_reprex_paste_strips_output_lines() {
 
     // Wait for execution to complete and verify both expressions were executed
     // The #> lines should be stripped, so we should see [1] 42 and [1] 43 from R
-    terminal.clear_and_expect("[1] 42").expect("First expression should output 42");
-    terminal.expect("[1] 43").expect("Second expression should output 43");
+    terminal
+        .clear_and_expect("[1] 42")
+        .expect("First expression should output 42");
+    terminal
+        .expect("[1] 43")
+        .expect("Second expression should output 43");
 
     // Verify the variables were assigned correctly
     terminal.send_line("x").expect("Should send x");
@@ -1943,8 +2109,8 @@ fn test_pty_reprex_paste_strips_output_lines() {
 fn test_pty_ctrl_d_with_content_does_not_exit() {
     use common::Terminal;
 
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -1958,13 +2124,17 @@ fn test_pty_ctrl_d_with_content_does_not_exit() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // Cancel the current input with Ctrl+C
-    terminal.send_interrupt().expect("Should send Ctrl+C to cancel");
+    terminal
+        .send_interrupt()
+        .expect("Should send Ctrl+C to cancel");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Execute a command to verify REPL is still functional after Ctrl+D
     terminal.clear_buffer().expect("Should clear buffer");
     terminal.send_line("42").expect("Should send 42");
-    terminal.expect("[1] 42").expect("REPL should still be running after Ctrl+D with content");
+    terminal
+        .expect("[1] 42")
+        .expect("REPL should still be running after Ctrl+D with content");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -1986,8 +2156,8 @@ fn test_pty_ctrl_d_with_content_does_not_exit() {
 fn test_pty_history_menu_replaces_buffer() {
     use common::Terminal;
 
-    let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
+    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
+        .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -2122,7 +2292,9 @@ fn test_pty_backtick_does_not_crash() {
         .expect("Should show R error about zero-length variable name");
 
     // The prompt should return, indicating no crash occurred
-    terminal.wait_for_prompt().expect("Should show prompt after error (no crash)");
+    terminal
+        .wait_for_prompt()
+        .expect("Should show prompt after error (no crash)");
 
     // Verify we can still interact with the REPL
     terminal.send_line("1 + 1").expect("Should send expression");
@@ -2164,7 +2336,9 @@ fn test_pty_multiline_raw_string_input() {
         .expect("Should show continuation prompt for incomplete raw string");
 
     // Complete the raw string with closing delimiter
-    terminal.send("world)\"").expect("Should send closing delimiter");
+    terminal
+        .send("world)\"")
+        .expect("Should send closing delimiter");
     terminal.send("\r").expect("Should send Enter");
 
     // Wait for prompt (assignment doesn't produce output)
@@ -2230,7 +2404,9 @@ fn test_pty_raw_string_with_auto_match() {
 #[test]
 fn test_r_event_processing_api() {
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["-e", r#"
+        .args([
+            "-e",
+            r#"
             # Create a simple plot (opens graphics device)
             # On non-interactive systems, this may use a null device
             invisible(plot(1:3, main = "Event Processing Test"))
@@ -2240,7 +2416,8 @@ fn test_r_event_processing_api() {
 
             # Verify R is still responsive
             42
-        "#])
+        "#,
+        ])
         .output()
         .expect("Failed to run arf -e with plot");
 
@@ -2301,7 +2478,9 @@ fn test_pty_menu_prompt() {
         .expect("menu should return selected index");
 
     // Verify we return to normal R prompt
-    terminal.wait_for_prompt().expect("Should return to normal prompt");
+    terminal
+        .wait_for_prompt()
+        .expect("Should return to normal prompt");
 
     // Normal R command should work
     terminal.send_line("1 + 1").expect("Should send R command");

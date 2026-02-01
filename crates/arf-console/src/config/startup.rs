@@ -68,7 +68,7 @@ pub enum RSourceMode {
 /// Describes how R was resolved at startup.
 ///
 /// This is used to display session info and determine if features like `:switch` are available.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum RSourceStatus {
     /// R was resolved via rig.
     Rig {
@@ -76,6 +76,7 @@ pub enum RSourceStatus {
         version: String,
     },
     /// R was found from PATH (auto mode, rig not available).
+    #[default]
     Path,
     /// R was specified via explicit path in config.
     ExplicitPath {
@@ -99,11 +100,5 @@ impl RSourceStatus {
             RSourceStatus::Path => "PATH".to_string(),
             RSourceStatus::ExplicitPath { path } => format!("path ({})", path.display()),
         }
-    }
-}
-
-impl Default for RSourceStatus {
-    fn default() -> Self {
-        RSourceStatus::Path
     }
 }

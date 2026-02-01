@@ -58,15 +58,15 @@ impl Default for PathCompletionOptions {
 /// Expand tilde to home directory.
 /// Returns normalized path with forward slashes for R compatibility.
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with('~') {
-        if let Some(home) = dirs::home_dir() {
-            // Normalize home path to use forward slashes (important for Windows)
-            let home_str = normalize_separators(&home.to_string_lossy());
-            if path == "~" {
-                return home_str;
-            } else if let Some(rest) = path.strip_prefix("~/") {
-                return format!("{}/{}", home_str, rest);
-            }
+    if path.starts_with('~')
+        && let Some(home) = dirs::home_dir()
+    {
+        // Normalize home path to use forward slashes (important for Windows)
+        let home_str = normalize_separators(&home.to_string_lossy());
+        if path == "~" {
+            return home_str;
+        } else if let Some(rest) = path.strip_prefix("~/") {
+            return format!("{}/{}", home_str, rest);
         }
     }
     // Also normalize input path in case it contains backslashes
@@ -235,16 +235,8 @@ pub fn complete_path(
     }
 
     // Sort by score (descending), then alphabetically
-    completions.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    hidden_completions.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    completions.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    hidden_completions.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
 
     // Append hidden files at the end
     completions.append(&mut hidden_completions);
@@ -318,19 +310,35 @@ mod tests {
         // Tilde with slash should expand
         let expanded = expand_tilde("~/Documents");
         if let Some(home) = dirs::home_dir() {
-            assert!(expanded.starts_with(&home.to_string_lossy().to_string()));
+            // Compare with normalized home path (forward slashes)
+            let home_normalized = normalize_separators(&home.to_string_lossy());
+            assert!(expanded.starts_with(&home_normalized));
             assert!(expanded.ends_with("Documents"));
         }
 
         // Just tilde
         let expanded = expand_tilde("~");
         if let Some(home) = dirs::home_dir() {
-            assert_eq!(expanded, home.to_string_lossy().to_string());
+            let home_normalized = normalize_separators(&home.to_string_lossy());
+            assert_eq!(expanded, home_normalized);
         }
 
-        // No tilde - unchanged
-        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+        // Relative path - unchanged on all platforms
         assert_eq!(expand_tilde("./foo"), "./foo");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_expand_tilde_unix_paths() {
+        // Unix absolute paths - unchanged
+        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_expand_tilde_windows_paths() {
+        // Windows absolute paths - backslashes normalized to forward slashes
+        assert_eq!(expand_tilde("C:\\Users"), "C:/Users");
     }
 
     #[test]
@@ -494,7 +502,10 @@ mod tests {
         );
 
         // Mixed separators should all become forward slashes
-        assert_eq!(normalize_separators(r"C:\Users/foo\bar"), "C:/Users/foo/bar");
+        assert_eq!(
+            normalize_separators(r"C:\Users/foo\bar"),
+            "C:/Users/foo/bar"
+        );
     }
 
     #[test]

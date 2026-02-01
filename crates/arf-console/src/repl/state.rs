@@ -148,7 +148,11 @@ impl PromptRuntimeConfig {
             let shell_format = self.prompt_formatter.format(&self.shell_template);
             let cont_format = self.prompt_formatter.format(&self.cont_template);
             RPrompt::new(shell_format, cont_format)
-                .with_colors(self.shell_color, self.continuation_color, self.mode_indicator_color)
+                .with_colors(
+                    self.shell_color,
+                    self.continuation_color,
+                    self.mode_indicator_color,
+                )
                 .with_vi_symbol(self.vi_config.symbol.clone())
                 .with_vi_colors(self.vi_colors.clone())
         } else {
@@ -166,7 +170,11 @@ impl PromptRuntimeConfig {
 
             RPrompt::new(main_format, cont_format)
                 .with_mode_indicator(mode_indicator, self.mode_indicator_position)
-                .with_colors(prompt_color, self.continuation_color, self.mode_indicator_color)
+                .with_colors(
+                    prompt_color,
+                    self.continuation_color,
+                    self.mode_indicator_color,
+                )
                 .with_vi_symbol(self.vi_config.symbol.clone())
                 .with_vi_colors(self.vi_colors.clone())
         }
@@ -211,11 +219,7 @@ impl PromptRuntimeConfig {
                 c => Style::new().fg(c),
             };
 
-            format!(
-                "{}{}",
-                status_style.paint(symbol),
-                prompt_style.prefix()
-            )
+            format!("{}{}", status_style.paint(symbol), prompt_style.prefix())
         };
 
         template.replace("{status}", &colored_symbol)
@@ -247,7 +251,11 @@ impl PromptRuntimeConfig {
         let mode_indicator = self.current_mode_indicator();
         RPrompt::new(cont_format.clone(), cont_format)
             .with_mode_indicator(mode_indicator, self.mode_indicator_position)
-            .with_colors(self.continuation_color, self.continuation_color, self.mode_indicator_color)
+            .with_colors(
+                self.continuation_color,
+                self.continuation_color,
+                self.mode_indicator_color,
+            )
     }
 
     fn current_mode_indicator(&self) -> Option<String> {
@@ -567,9 +575,14 @@ mod tests {
         }
 
         // Verify the prompt contains the temp directory path
+        // Some systems resolve symlinks differently, so we also accept absolute paths
+        #[cfg(unix)]
+        let is_absolute_path = rendered2.starts_with("/");
+        #[cfg(windows)]
+        let is_absolute_path = rendered2.len() >= 3 && rendered2.chars().nth(1) == Some(':');
+
         assert!(
-            rendered2.contains(&temp_dir.to_string_lossy().to_string())
-                || rendered2.starts_with("/"), // Some systems resolve symlinks differently
+            rendered2.contains(&temp_dir.to_string_lossy().to_string()) || is_absolute_path,
             "Prompt should contain temp dir path, got: {}",
             rendered2
         );
@@ -802,7 +815,10 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
-            SpinnerConfig { frames: String::new(), color: Color::Default }, // Disabled
+            SpinnerConfig {
+                frames: String::new(),
+                color: Color::Default,
+            }, // Disabled
             ViConfig::default(),
             ViColorConfig::default(),
         );

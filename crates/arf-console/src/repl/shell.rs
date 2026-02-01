@@ -83,7 +83,11 @@ pub fn restart_process(version: Option<&str>) {
         // Validate the version exists before restarting
         match rig::resolve_version(ver) {
             Ok(resolved) => {
-                log::info!("Switching to R version {} ({})", resolved.version, resolved.r_home);
+                log::info!(
+                    "Switching to R version {} ({})",
+                    resolved.version,
+                    resolved.r_home
+                );
             }
             Err(e) => {
                 arf_eprintln!("Error: {}", e);
@@ -105,12 +109,12 @@ pub fn restart_process(version: Option<&str>) {
     // Also filter out any existing --with-r-version argument if we're switching versions
     let mut args: Vec<String> = std::env::args().skip(1).collect();
 
-    if version.is_some() {
+    if let Some(v) = &version {
         // Remove existing --with-r-version arguments
         args = filter_r_version_args(args);
         // Add the new version
         args.push("--with-r-version".to_string());
-        args.push(version.unwrap().to_string());
+        args.push(v.to_string());
     }
 
     // Clear R-related environment variables so the new process can set them fresh.

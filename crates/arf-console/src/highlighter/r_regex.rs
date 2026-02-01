@@ -11,8 +11,8 @@
 use crate::config::RColorConfig;
 use nu_ansi_term::{Color, Style};
 use once_cell::sync::Lazy;
-use regex::Regex;
 use reedline::{Highlighter, StyledText};
+use regex::Regex;
 use std::collections::HashSet;
 
 /// Token types for R syntax highlighting.
@@ -144,12 +144,12 @@ static PATTERNS: Lazy<Vec<(Regex, TokenType)>> = Lazy::new(|| {
             Regex::new(r#"^"([^"\\]|\\.)*""#).unwrap(),
             TokenType::String,
         ),
+        (Regex::new(r"^'([^'\\]|\\.)*'").unwrap(), TokenType::String),
+        // Unclosed strings (highlight to end of line)
         (
-            Regex::new(r"^'([^'\\]|\\.)*'").unwrap(),
+            Regex::new(r#"^"([^"\\]|\\.)*$"#).unwrap(),
             TokenType::String,
         ),
-        // Unclosed strings (highlight to end of line)
-        (Regex::new(r#"^"([^"\\]|\\.)*$"#).unwrap(), TokenType::String),
         (Regex::new(r"^'([^'\\]|\\.)*$").unwrap(), TokenType::String),
         // Special R symbols: ... and ..1, ..2, etc.
         (Regex::new(r"^\.\.\.").unwrap(), TokenType::Constant),
@@ -207,7 +207,10 @@ static PATTERNS: Lazy<Vec<(Regex, TokenType)>> = Lazy::new(|| {
         ),
         // Single dot followed by nothing or non-word char is not an identifier
         // But a lone `.` is valid in R (used in formulas like y ~ .)
-        (Regex::new(r"^\.(?:[^0-9\w]|$)").unwrap(), TokenType::Identifier),
+        (
+            Regex::new(r"^\.(?:[^0-9\w]|$)").unwrap(),
+            TokenType::Identifier,
+        ),
     ]
 });
 
@@ -233,26 +236,27 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         let mut matched = false;
 
         for (pattern, token_type) in PATTERNS.iter() {
-            if let Some(m) = pattern.find(remaining) {
-                if m.start() == 0 && !m.is_empty() {
-                    let text = &remaining[..m.len()];
+            if let Some(m) = pattern.find(remaining)
+                && m.start() == 0
+                && !m.is_empty()
+            {
+                let text = &remaining[..m.len()];
 
-                    // Reclassify identifiers as keywords/constants if applicable
-                    let final_type = if *token_type == TokenType::Identifier {
-                        classify_identifier(text)
-                    } else {
-                        *token_type
-                    };
+                // Reclassify identifiers as keywords/constants if applicable
+                let final_type = if *token_type == TokenType::Identifier {
+                    classify_identifier(text)
+                } else {
+                    *token_type
+                };
 
-                    tokens.push(Token {
-                        start: pos,
-                        end: pos + m.len(),
-                        token_type: final_type,
-                    });
-                    pos += m.len();
-                    matched = true;
-                    break;
-                }
+                tokens.push(Token {
+                    start: pos,
+                    end: pos + m.len(),
+                    token_type: final_type,
+                });
+                pos += m.len();
+                matched = true;
+                break;
             }
         }
 
@@ -377,16 +381,7 @@ mod tests {
 
     #[test]
     fn test_tokenize_numbers() {
-        let cases = vec![
-            "42",
-            "3.14",
-            "1e-5",
-            "0xFF",
-            "1L",
-            "2i",
-            ".5",
-            "1.5e+10",
-        ];
+        let cases = vec!["42", "3.14", "1e-5", "0xFF", "1L", "2i", ".5", "1.5e+10"];
         for case in cases {
             let tokens = tokenize(case);
             assert_eq!(
@@ -407,7 +402,12 @@ mod tests {
             .filter(|t| t.token_type == TokenType::Operator)
             .map(|t| &input[t.start..t.end])
             .collect();
-        assert_eq!(operators, vec!["<-", "->", "|>", "%>%", "::", ":::", "==", "!=", "<=", ">=", "&&", "||"]);
+        assert_eq!(
+            operators,
+            vec![
+                "<-", "->", "|>", "%>%", "::", ":::", "==", "!=", "<=", ">=", "&&", "||"
+            ]
+        );
     }
 
     #[test]
@@ -606,11 +606,12 @@ mod tests {
         // Bug: `1+1` should tokenize as: 1, +, 1 (not: 1, +1)
         let input = "1+1";
         let tokens = tokenize(input);
-        let token_texts: Vec<_> = tokens
-            .iter()
-            .map(|t| &input[t.start..t.end])
-            .collect();
-        assert_eq!(token_texts, vec!["1", "+", "1"], "Operator should be separate token");
+        let token_texts: Vec<_> = tokens.iter().map(|t| &input[t.start..t.end]).collect();
+        assert_eq!(
+            token_texts,
+            vec!["1", "+", "1"],
+            "Operator should be separate token"
+        );
 
         // Verify types
         assert_eq!(tokens[0].token_type, TokenType::Number);
@@ -632,10 +633,7 @@ mod tests {
 
         for (input, expected) in cases {
             let tokens = tokenize(input);
-            let token_texts: Vec<_> = tokens
-                .iter()
-                .map(|t| &input[t.start..t.end])
-                .collect();
+            let token_texts: Vec<_> = tokens.iter().map(|t| &input[t.start..t.end]).collect();
             assert_eq!(token_texts, expected, "Failed for input: {}", input);
         }
     }
@@ -646,10 +644,7 @@ mod tests {
         // This matches tree-sitter-r behavior where - is a unary operator
         let input = "-1";
         let tokens = tokenize(input);
-        let token_texts: Vec<_> = tokens
-            .iter()
-            .map(|t| &input[t.start..t.end])
-            .collect();
+        let token_texts: Vec<_> = tokens.iter().map(|t| &input[t.start..t.end]).collect();
         assert_eq!(token_texts, vec!["-", "1"]);
         assert_eq!(tokens[0].token_type, TokenType::Operator);
         assert_eq!(tokens[1].token_type, TokenType::Number);

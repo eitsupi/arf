@@ -11,5 +11,5 @@ mod sys;
 
 pub use error::*;
 pub use functions::*;
-pub use types::*;
 pub use sys::*;
+pub use types::*;

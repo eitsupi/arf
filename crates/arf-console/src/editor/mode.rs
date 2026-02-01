@@ -623,10 +623,8 @@ impl<E: EditMode> ConditionalEditMode<E> {
         let state = self.state.lock().unwrap();
 
         for rule in &self.rules {
-            if (rule.match_event)(&event) {
-                if !rule.condition.check(&state) {
-                    return rule.fallback_event.clone();
-                }
+            if (rule.match_event)(&event) && !rule.condition.check(&state) {
+                return rule.fallback_event.clone();
             }
         }
 
@@ -651,46 +649,43 @@ impl<E: EditMode> ConditionalEditMode<E> {
         }
 
         match event {
-            ReedlineEvent::Edit(commands) if commands.len() == 1 => {
-                match &commands[0] {
-                    EditCommand::MoveWordLeft { select } => {
-                        let target = token_left_position(&state.buffer, state.cursor_pos);
-                        Some(Self::create_move_event(state.cursor_pos, target, *select))
-                    }
-                    EditCommand::MoveWordRight { select } => {
-                        let target = token_right_position(&state.buffer, state.cursor_pos);
-                        Some(Self::create_move_event(state.cursor_pos, target, *select))
-                    }
-                    _ => None,
+            ReedlineEvent::Edit(commands) if commands.len() == 1 => match &commands[0] {
+                EditCommand::MoveWordLeft { select } => {
+                    let target = token_left_position(&state.buffer, state.cursor_pos);
+                    Some(Self::create_move_event(state.cursor_pos, target, *select))
                 }
-            }
+                EditCommand::MoveWordRight { select } => {
+                    let target = token_right_position(&state.buffer, state.cursor_pos);
+                    Some(Self::create_move_event(state.cursor_pos, target, *select))
+                }
+                _ => None,
+            },
             // Handle UntilFound containing word movement (e.g., Ctrl+Right with hint completion)
             ReedlineEvent::UntilFound(events) => {
                 // Check if any of the events is a word movement
                 for (i, e) in events.iter().enumerate() {
-                    if let ReedlineEvent::Edit(commands) = e {
-                        if commands.len() == 1 {
-                            if let EditCommand::MoveWordRight { select } = &commands[0] {
-                                // Replace the word movement event with tree-sitter version
-                                let target =
-                                    token_right_position(&state.buffer, state.cursor_pos);
-                                let move_event =
-                                    Self::create_move_event(state.cursor_pos, target, *select);
+                    if let ReedlineEvent::Edit(commands) = e
+                        && commands.len() == 1
+                    {
+                        if let EditCommand::MoveWordRight { select } = &commands[0] {
+                            // Replace the word movement event with tree-sitter version
+                            let target = token_right_position(&state.buffer, state.cursor_pos);
+                            let move_event =
+                                Self::create_move_event(state.cursor_pos, target, *select);
 
-                                // Rebuild UntilFound with the replacement
-                                let mut new_events = events.clone();
-                                new_events[i] = move_event;
-                                return Some(ReedlineEvent::UntilFound(new_events));
-                            }
-                            if let EditCommand::MoveWordLeft { select } = &commands[0] {
-                                let target = token_left_position(&state.buffer, state.cursor_pos);
-                                let move_event =
-                                    Self::create_move_event(state.cursor_pos, target, *select);
+                            // Rebuild UntilFound with the replacement
+                            let mut new_events = events.clone();
+                            new_events[i] = move_event;
+                            return Some(ReedlineEvent::UntilFound(new_events));
+                        }
+                        if let EditCommand::MoveWordLeft { select } = &commands[0] {
+                            let target = token_left_position(&state.buffer, state.cursor_pos);
+                            let move_event =
+                                Self::create_move_event(state.cursor_pos, target, *select);
 
-                                let mut new_events = events.clone();
-                                new_events[i] = move_event;
-                                return Some(ReedlineEvent::UntilFound(new_events));
-                            }
+                            let mut new_events = events.clone();
+                            new_events[i] = move_event;
+                            return Some(ReedlineEvent::UntilFound(new_events));
                         }
                     }
                 }
@@ -710,17 +705,13 @@ impl<E: EditMode> ConditionalEditMode<E> {
             // Move left
             let diff = current - target;
             let commands: Vec<EditCommand> =
-                std::iter::repeat(EditCommand::MoveLeft { select })
-                    .take(diff)
-                    .collect();
+                std::iter::repeat_n(EditCommand::MoveLeft { select }, diff).collect();
             ReedlineEvent::Edit(commands)
         } else {
             // Move right
             let diff = target - current;
             let commands: Vec<EditCommand> =
-                std::iter::repeat(EditCommand::MoveRight { select })
-                    .take(diff)
-                    .collect();
+                std::iter::repeat_n(EditCommand::MoveRight { select }, diff).collect();
             ReedlineEvent::Edit(commands)
         }
     }
@@ -777,14 +768,12 @@ impl<E: EditMode> EditMode for ConditionalEditMode<E> {
 /// which should trigger auto-completion when enabled.
 fn is_character_insert(event: &ReedlineEvent) -> bool {
     match event {
-        ReedlineEvent::Edit(commands) => {
-            commands.iter().any(|cmd| {
-                matches!(
-                    cmd,
-                    EditCommand::InsertChar(_) | EditCommand::InsertString(_)
-                )
-            })
-        }
+        ReedlineEvent::Edit(commands) => commands.iter().any(|cmd| {
+            matches!(
+                cmd,
+                EditCommand::InsertChar(_) | EditCommand::InsertString(_)
+            )
+        }),
         ReedlineEvent::Multiple(events) => events.iter().any(is_character_insert),
         _ => false,
     }
@@ -1828,10 +1817,7 @@ mod tests {
         assert!(!(rule.match_event)(&delete_event));
 
         // Should not match multiple commands
-        let multiple_event = ReedlineEvent::Edit(vec![
-            EditCommand::Backspace,
-            EditCommand::Delete,
-        ]);
+        let multiple_event = ReedlineEvent::Edit(vec![EditCommand::Backspace, EditCommand::Delete]);
         assert!(!(rule.match_event)(&multiple_event));
     }
 
@@ -1904,7 +1890,14 @@ mod tests {
 
     #[test]
     fn test_bracket_delete_all_pair_types() {
-        let pairs = [("()", 1), ("[]", 1), ("{}", 1), (r#""""#, 1), ("''", 1), ("``", 1)];
+        let pairs = [
+            ("()", 1),
+            ("[]", 1),
+            ("{}", 1),
+            (r#""""#, 1),
+            ("''", 1),
+            ("``", 1),
+        ];
 
         for (pair, cursor_pos) in pairs {
             let mut state = EditorState::new();
@@ -1924,7 +1917,11 @@ mod tests {
                 EditCommand::Delete,
             ]));
 
-            assert_eq!(state.buffer, "", "Buffer should be empty after deleting {}", pair);
+            assert_eq!(
+                state.buffer, "",
+                "Buffer should be empty after deleting {}",
+                pair
+            );
         }
     }
 
@@ -2748,12 +2745,11 @@ mod tests {
         let rules = create_skip_over_rules();
 
         // First 3 rules are for brackets: `)`, `]`, `}`
-        for (i, close_char) in [')' , ']', '}'].iter().enumerate() {
+        for (i, close_char) in [')', ']', '}'].iter().enumerate() {
             let rule = &rules[i];
 
             // Should match InsertChar(close_char)
-            let insert_char_event =
-                ReedlineEvent::Edit(vec![EditCommand::InsertChar(*close_char)]);
+            let insert_char_event = ReedlineEvent::Edit(vec![EditCommand::InsertChar(*close_char)]);
             assert!(
                 (rule.match_event)(&insert_char_event),
                 "Rule {} should match InsertChar('{}')",

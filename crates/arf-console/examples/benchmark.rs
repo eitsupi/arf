@@ -23,7 +23,12 @@ impl BenchmarkResult {
         let avg = times.iter().sum::<f64>() / times.len() as f64;
         let min = times.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = times.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Self { times, avg, min, max }
+        Self {
+            times,
+            avg,
+            min,
+            max,
+        }
     }
 }
 
@@ -63,7 +68,13 @@ fn print_result(name: &str, result: &BenchmarkResult) {
 }
 
 /// Measure startup time for all tools
-fn measure_startup_all(runs: usize) -> (Option<BenchmarkResult>, Option<BenchmarkResult>, Option<BenchmarkResult>) {
+fn measure_startup_all(
+    runs: usize,
+) -> (
+    Option<BenchmarkResult>,
+    Option<BenchmarkResult>,
+    Option<BenchmarkResult>,
+) {
     println!("=== Startup Time Benchmark ===\n");
 
     let arf_result = measure_startup("./target/release/arf", &[], "q()\n", runs);
@@ -116,7 +127,15 @@ fn measure_startup_all(runs: usize) -> (Option<BenchmarkResult>, Option<Benchmar
 /// Get RSS memory of process tree in MB using ps command
 fn get_memory_tree(pid: u32) -> Option<f64> {
     let output = Command::new("ps")
-        .args(["--no-headers", "-o", "rss", "--ppid", &pid.to_string(), "-p", &pid.to_string()])
+        .args([
+            "--no-headers",
+            "-o",
+            "rss",
+            "--ppid",
+            &pid.to_string(),
+            "-p",
+            &pid.to_string(),
+        ])
         .output()
         .ok()?;
 
@@ -191,7 +210,11 @@ fn measure_memory_radian() -> Option<MemoryResult> {
 }
 
 /// Measure memory usage for all tools
-fn measure_memory_all() -> (Option<MemoryResult>, Option<MemoryResult>, Option<MemoryResult>) {
+fn measure_memory_all() -> (
+    Option<MemoryResult>,
+    Option<MemoryResult>,
+    Option<MemoryResult>,
+) {
     println!("=== Memory Usage Benchmark ===\n");
 
     let arf_result = measure_memory_arf();
@@ -233,15 +256,15 @@ fn measure_memory_all() -> (Option<MemoryResult>, Option<MemoryResult>, Option<M
         println!("radian:  {:.1} MB", radian.memory_mb);
     }
 
-    if let (Some(arf), Some(radian)) = (&arf_result, &radian_result) {
-        if arf.memory_mb < radian.memory_mb {
-            let diff = radian.memory_mb - arf.memory_mb;
-            println!(
-                "arf uses {:.1} MB ({:.0}%) less memory than radian",
-                diff,
-                diff / radian.memory_mb * 100.0
-            );
-        }
+    if let (Some(arf), Some(radian)) = (&arf_result, &radian_result)
+        && arf.memory_mb < radian.memory_mb
+    {
+        let diff = radian.memory_mb - arf.memory_mb;
+        println!(
+            "arf uses {:.1} MB ({:.0}%) less memory than radian",
+            diff,
+            diff / radian.memory_mb * 100.0
+        );
     }
     println!();
 
@@ -252,7 +275,10 @@ fn measure_memory_all() -> (Option<MemoryResult>, Option<MemoryResult>, Option<M
 const R_COMMANDS: &[(&str, &str)] = &[
     ("1+1", "Simple arithmetic"),
     ("sum(1:1000000)", "Sum 1M numbers"),
-    ("x <- rnorm(100000); mean(x)", "Generate & mean 100K randoms"),
+    (
+        "x <- rnorm(100000); mean(x)",
+        "Generate & mean 100K randoms",
+    ),
 ];
 
 /// Command execution result for multiple R commands
@@ -343,7 +369,13 @@ fn measure_commands_radian(runs: usize) -> Option<CommandResults> {
 }
 
 /// Measure command execution for all tools
-fn measure_commands_all(runs: usize) -> (Option<CommandResults>, Option<CommandResults>, Option<CommandResults>) {
+fn measure_commands_all(
+    runs: usize,
+) -> (
+    Option<CommandResults>,
+    Option<CommandResults>,
+    Option<CommandResults>,
+) {
     println!("=== R Command Execution Benchmark ===\n");
     println!("(Includes startup time + command execution)\n");
 
@@ -401,15 +433,39 @@ fn main() {
     println!("| Metric | arf | R | radian |");
     println!("|--------|-----|---|--------|");
 
-    let arf_startup_str = arf_startup.as_ref().map(|r| format!("{:.3}s", r.avg)).unwrap_or_else(|| "N/A".to_string());
-    let r_startup_str = r_startup.as_ref().map(|r| format!("{:.3}s", r.avg)).unwrap_or_else(|| "N/A".to_string());
-    let radian_startup_str = radian_startup.as_ref().map(|r| format!("{:.3}s", r.avg)).unwrap_or_else(|| "N/A".to_string());
-    println!("| Startup time | {} | {} | {} |", arf_startup_str, r_startup_str, radian_startup_str);
+    let arf_startup_str = arf_startup
+        .as_ref()
+        .map(|r| format!("{:.3}s", r.avg))
+        .unwrap_or_else(|| "N/A".to_string());
+    let r_startup_str = r_startup
+        .as_ref()
+        .map(|r| format!("{:.3}s", r.avg))
+        .unwrap_or_else(|| "N/A".to_string());
+    let radian_startup_str = radian_startup
+        .as_ref()
+        .map(|r| format!("{:.3}s", r.avg))
+        .unwrap_or_else(|| "N/A".to_string());
+    println!(
+        "| Startup time | {} | {} | {} |",
+        arf_startup_str, r_startup_str, radian_startup_str
+    );
 
-    let arf_memory_str = arf_memory.as_ref().map(|r| format!("{:.1} MB", r.memory_mb)).unwrap_or_else(|| "N/A".to_string());
-    let r_memory_str = r_memory.as_ref().map(|r| format!("{:.1} MB", r.memory_mb)).unwrap_or_else(|| "N/A".to_string());
-    let radian_memory_str = radian_memory.as_ref().map(|r| format!("{:.1} MB", r.memory_mb)).unwrap_or_else(|| "N/A".to_string());
-    println!("| Memory (RSS) | {} | {} | {} |", arf_memory_str, r_memory_str, radian_memory_str);
+    let arf_memory_str = arf_memory
+        .as_ref()
+        .map(|r| format!("{:.1} MB", r.memory_mb))
+        .unwrap_or_else(|| "N/A".to_string());
+    let r_memory_str = r_memory
+        .as_ref()
+        .map(|r| format!("{:.1} MB", r.memory_mb))
+        .unwrap_or_else(|| "N/A".to_string());
+    let radian_memory_str = radian_memory
+        .as_ref()
+        .map(|r| format!("{:.1} MB", r.memory_mb))
+        .unwrap_or_else(|| "N/A".to_string());
+    println!(
+        "| Memory (RSS) | {} | {} | {} |",
+        arf_memory_str, r_memory_str, radian_memory_str
+    );
 
     // Print command execution results
     for (i, (_, desc)) in R_COMMANDS.iter().enumerate() {
@@ -429,6 +485,9 @@ fn main() {
             .and_then(|c| c.results.get(i))
             .map(|(_, avg)| format!("{:.3}s", avg))
             .unwrap_or_else(|| "N/A".to_string());
-        println!("| {} | {} | {} | {} |", short_desc, arf_cmd_str, r_cmd_str, radian_cmd_str);
+        println!(
+            "| {} | {} | {} | {} |",
+            short_desc, arf_cmd_str, r_cmd_str, radian_cmd_str
+        );
     }
 }

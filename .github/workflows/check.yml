@@ -1,0 +1,78 @@
+name: Check
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/check.yml
+      - crates/**
+      - Cargo.*
+      - "!**/*.md"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/check.yml
+      - crates/**
+      - Cargo.*
+      - "!**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run cargo fmt
+        run: |
+          rustup component add rustfmt
+          cargo fmt \
+            --all \
+            --check
+
+  cargo-clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+      - name: Run cargo clippy
+        run: |
+          rustup component add clippy
+          cargo clippy \
+            --all-targets \
+            --all-features \
+            --locked \
+            -- \
+            -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Air CLI
+        uses: posit-dev/setup-air@v1
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+      - name: Install R
+        uses: r-lib/actions/setup-r@v2
+      - name: Install R packages for tests
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: crates/arf-console/tests/r-deps
+          dependencies: '"hard"'
+      - name: Run tests
+        run: cargo test
