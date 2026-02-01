@@ -72,9 +72,7 @@ impl FuzzyHistory {
         // Apply fuzzy matching
         let mut scored: Vec<(HistoryItem, u32)> = candidates
             .into_iter()
-            .filter_map(|item| {
-                fuzzy_match(pattern, &item.command_line).map(|m| (item, m.score))
-            })
+            .filter_map(|item| fuzzy_match(pattern, &item.command_line).map(|m| (item, m.score)))
             .collect();
 
         // Sort by score (descending)
@@ -122,15 +120,15 @@ impl History for FuzzyHistory {
 
     fn search(&self, query: SearchQuery) -> Result<Vec<HistoryItem>> {
         // Check if this is a substring search that we should make fuzzy
-        if self.fuzzy_enabled {
-            if let Some(ref cmd_search) = query.filter.command_line {
-                // Check if it's a Substring search (used by Ctrl+R)
-                if let reedline::CommandLineSearch::Substring(pattern) = cmd_search {
-                    if !pattern.is_empty() {
-                        let pattern = pattern.clone();
-                        return self.fuzzy_search(query, &pattern);
-                    }
-                }
+        if self.fuzzy_enabled
+            && let Some(ref cmd_search) = query.filter.command_line
+        {
+            // Check if it's a Substring search (used by Ctrl+R)
+            if let reedline::CommandLineSearch::Substring(pattern) = cmd_search
+                && !pattern.is_empty()
+            {
+                let pattern = pattern.clone();
+                return self.fuzzy_search(query, &pattern);
             }
         }
 

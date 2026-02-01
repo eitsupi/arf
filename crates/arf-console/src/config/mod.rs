@@ -12,11 +12,12 @@ mod startup;
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig};
 pub use completion::CompletionConfig;
 pub use editor::EditorConfig;
+pub use experimental::SpinnerConfig;
 pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
-#[allow(unused_imports)] // StatusSymbol is part of public API for programmatic StatusConfig construction
+#[allow(unused_imports)]
+// StatusSymbol is part of public API for programmatic StatusConfig construction
 pub use prompt::{Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol};
-pub use experimental::SpinnerConfig;
 pub use reprex::ReprexConfig;
 pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
 
@@ -31,6 +32,7 @@ const APP_NAME: &str = "arf";
 /// Main configuration structure.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     pub startup: StartupConfig,
     pub editor: EditorConfig,
@@ -41,21 +43,6 @@ pub struct Config {
     pub colors: ColorsConfig,
     #[serde(default)]
     pub experimental: ExperimentalConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            startup: StartupConfig::default(),
-            editor: EditorConfig::default(),
-            prompt: PromptConfig::default(),
-            completion: CompletionConfig::default(),
-            history: HistoryConfig::default(),
-            reprex: ReprexConfig::default(),
-            colors: ColorsConfig::default(),
-            experimental: ExperimentalConfig::default(),
-        }
-    }
 }
 
 /// Get the XDG config directory for this application.
@@ -217,7 +204,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert!(config.editor.auto_match, "auto_match should be enabled by default");
+        assert!(
+            config.editor.auto_match,
+            "auto_match should be enabled by default"
+        );
         assert_eq!(config.editor.mode, "emacs");
         assert!(matches!(
             config.startup.r_source,
@@ -300,9 +290,18 @@ mode = "emacs"
         let ctrl_shift_m: KeyCombination = "ctrl-shift-m".parse().unwrap();
         let alt_eq: KeyCombination = "alt-=".parse().unwrap();
 
-        assert_eq!(config.editor.key_map.get(&alt_hyphen), Some(&" <- ".to_string()));
-        assert_eq!(config.editor.key_map.get(&ctrl_shift_m), Some(&" |> ".to_string()));
-        assert_eq!(config.editor.key_map.get(&alt_eq), Some(&" == ".to_string()));
+        assert_eq!(
+            config.editor.key_map.get(&alt_hyphen),
+            Some(&" <- ".to_string())
+        );
+        assert_eq!(
+            config.editor.key_map.get(&ctrl_shift_m),
+            Some(&" |> ".to_string())
+        );
+        assert_eq!(
+            config.editor.key_map.get(&alt_eq),
+            Some(&" == ".to_string())
+        );
     }
 
     #[test]
@@ -312,7 +311,10 @@ mode = "emacs"
         let alt_hyphen: KeyCombination = "alt-hyphen".parse().unwrap();
         let alt_p: KeyCombination = "alt-p".parse().unwrap();
 
-        assert_eq!(config.editor.key_map.get(&alt_hyphen), Some(&" <- ".to_string()));
+        assert_eq!(
+            config.editor.key_map.get(&alt_hyphen),
+            Some(&" <- ".to_string())
+        );
         assert_eq!(config.editor.key_map.get(&alt_p), Some(&" |> ".to_string()));
     }
 
@@ -435,10 +437,13 @@ show_banner = false
         let config_str = generate_default_config();
 
         // Should have Tombi Schema Document Directive on first line
-        assert!(config_str.starts_with("#:schema https://raw.githubusercontent.com/eitsupi/arf/main/artifacts/arf.schema.json"));
+        assert!(config_str.starts_with(
+            "#:schema https://raw.githubusercontent.com/eitsupi/arf/main/artifacts/arf.schema.json"
+        ));
 
         // Should be valid TOML
-        let parsed: Config = toml::from_str(&config_str).expect("Generated config should be valid TOML");
+        let parsed: Config =
+            toml::from_str(&config_str).expect("Generated config should be valid TOML");
 
         // Should have default values
         assert!(matches!(
@@ -454,18 +459,42 @@ show_banner = false
         let config_str = generate_default_config();
 
         // Should have [startup] section with r_source and show_banner
-        assert!(config_str.contains("[startup]"), "Should have [startup] section");
-        assert!(config_str.contains("r_source = "), "Should have r_source in startup section");
-        assert!(config_str.contains("show_banner = "), "Should have show_banner in startup section");
+        assert!(
+            config_str.contains("[startup]"),
+            "Should have [startup] section"
+        );
+        assert!(
+            config_str.contains("r_source = "),
+            "Should have r_source in startup section"
+        );
+        assert!(
+            config_str.contains("show_banner = "),
+            "Should have show_banner in startup section"
+        );
 
         // Should NOT have old sections
-        assert!(!config_str.contains("[general]"), "Should NOT have [general] section");
-        assert!(!config_str.contains("[shortcuts]"), "Should NOT have [shortcuts] section");
-        assert!(!config_str.contains("[formatter]"), "Should NOT have [formatter] section");
+        assert!(
+            !config_str.contains("[general]"),
+            "Should NOT have [general] section"
+        );
+        assert!(
+            !config_str.contains("[shortcuts]"),
+            "Should NOT have [shortcuts] section"
+        );
+        assert!(
+            !config_str.contains("[formatter]"),
+            "Should NOT have [formatter] section"
+        );
 
         // Should have new sections
-        assert!(config_str.contains("[editor]"), "Should have [editor] section");
-        assert!(config_str.contains("[reprex]"), "Should have [reprex] section");
+        assert!(
+            config_str.contains("[editor]"),
+            "Should have [editor] section"
+        );
+        assert!(
+            config_str.contains("[reprex]"),
+            "Should have [reprex] section"
+        );
     }
 
     mod schema_tests {
@@ -484,8 +513,7 @@ show_banner = false
 
             // If the artifact file exists, verify it matches the generated schema
             if path.exists() {
-                let contents = std::fs::read_to_string(&path)
-                    .expect("Failed to read schema file");
+                let contents = std::fs::read_to_string(&path).expect("Failed to read schema file");
                 assert_eq!(
                     schema, contents,
                     "Schema file is out of date. Run the generate_schema_file test to update."
@@ -509,10 +537,22 @@ show_banner = false
                 serde_json::from_str(&schema).expect("Schema should be valid JSON");
 
             // Verify it has expected top-level fields
-            assert!(parsed.get("$schema").is_some(), "Schema should have $schema field");
-            assert!(parsed.get("title").is_some(), "Schema should have title field");
-            assert!(parsed.get("type").is_some(), "Schema should have type field");
-            assert!(parsed.get("properties").is_some(), "Schema should have properties field");
+            assert!(
+                parsed.get("$schema").is_some(),
+                "Schema should have $schema field"
+            );
+            assert!(
+                parsed.get("title").is_some(),
+                "Schema should have title field"
+            );
+            assert!(
+                parsed.get("type").is_some(),
+                "Schema should have type field"
+            );
+            assert!(
+                parsed.get("properties").is_some(),
+                "Schema should have properties field"
+            );
         }
 
         #[test]
@@ -521,24 +561,59 @@ show_banner = false
             let parsed: serde_json::Value =
                 serde_json::from_str(&schema).expect("Schema should be valid JSON");
 
-            let properties = parsed.get("properties").expect("Schema should have properties");
+            let properties = parsed
+                .get("properties")
+                .expect("Schema should have properties");
 
             // Should have startup section (contains r_version and show_banner)
-            assert!(properties.get("startup").is_some(), "Schema should have startup section");
+            assert!(
+                properties.get("startup").is_some(),
+                "Schema should have startup section"
+            );
 
             // Should have other sections
-            assert!(properties.get("editor").is_some(), "Schema should have editor section");
-            assert!(properties.get("prompt").is_some(), "Schema should have prompt section");
-            assert!(properties.get("completion").is_some(), "Schema should have completion section");
-            assert!(properties.get("reprex").is_some(), "Schema should have reprex section");
-            assert!(properties.get("experimental").is_some(), "Schema should have experimental section");
+            assert!(
+                properties.get("editor").is_some(),
+                "Schema should have editor section"
+            );
+            assert!(
+                properties.get("prompt").is_some(),
+                "Schema should have prompt section"
+            );
+            assert!(
+                properties.get("completion").is_some(),
+                "Schema should have completion section"
+            );
+            assert!(
+                properties.get("reprex").is_some(),
+                "Schema should have reprex section"
+            );
+            assert!(
+                properties.get("experimental").is_some(),
+                "Schema should have experimental section"
+            );
 
             // Should NOT have legacy sections or top-level fields that moved to startup
-            assert!(properties.get("general").is_none(), "Schema should NOT have general section");
-            assert!(properties.get("r_version").is_none(), "r_version should be in startup section, not top-level");
-            assert!(properties.get("show_banner").is_none(), "show_banner should be in startup section, not top-level");
-            assert!(properties.get("shortcuts").is_none(), "Schema should NOT have shortcuts section");
-            assert!(properties.get("formatter").is_none(), "Schema should NOT have formatter section");
+            assert!(
+                properties.get("general").is_none(),
+                "Schema should NOT have general section"
+            );
+            assert!(
+                properties.get("r_version").is_none(),
+                "r_version should be in startup section, not top-level"
+            );
+            assert!(
+                properties.get("show_banner").is_none(),
+                "show_banner should be in startup section, not top-level"
+            );
+            assert!(
+                properties.get("shortcuts").is_none(),
+                "Schema should NOT have shortcuts section"
+            );
+            assert!(
+                properties.get("formatter").is_none(),
+                "Schema should NOT have formatter section"
+            );
         }
     }
 }

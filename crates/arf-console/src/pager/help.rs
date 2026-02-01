@@ -12,8 +12,9 @@
 //! retrieving the help database were learned from felp's `fuzzyhelp()` function.
 
 use crate::fuzzy::fuzzy_match;
+use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
 use crossterm::{
-    cursor,
+    ExecutableCommand, cursor,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
         MouseEventKind,
@@ -24,9 +25,7 @@ use crossterm::{
         self, BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen,
         LeaveAlternateScreen,
     },
-    ExecutableCommand,
 };
-use arf_harp::help::{get_help_text, get_help_topics, HelpTopic};
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
@@ -102,11 +101,7 @@ impl HelpBrowser {
     fn update_filter(&mut self) {
         if self.query.is_empty() {
             // Show all topics sorted by package then topic
-            self.filtered = self
-                .topics
-                .iter()
-                .map(|t| (t.clone(), 0))
-                .collect();
+            self.filtered = self.topics.iter().map(|t| (t.clone(), 0)).collect();
             // Limit to avoid memory issues
             self.filtered.truncate(MAX_FILTERED_RESULTS);
         } else {
@@ -168,11 +163,18 @@ impl HelpBrowser {
                         // This is important on Windows where release events are sent
                         // (e.g., Enter release from the command that launched the browser)
                         if key.kind != KeyEventKind::Press {
-                            log::debug!("help_browser: ignoring non-press key event: {:?}", key.kind);
+                            log::debug!(
+                                "help_browser: ignoring non-press key event: {:?}",
+                                key.kind
+                            );
                             continue;
                         }
                         needs_redraw = true;
-                        log::debug!("help_browser: key event: code={:?}, modifiers={:?}", key.code, key.modifiers);
+                        log::debug!(
+                            "help_browser: key event: code={:?}, modifiers={:?}",
+                            key.code,
+                            key.modifiers
+                        );
                         match (key.code, key.modifiers) {
                             // Exit
                             (KeyCode::Esc, _)
@@ -414,18 +416,29 @@ impl HelpBrowser {
                     let title_truncated = is_truncated(&topic.title, title_width);
 
                     if name_truncated || title_truncated {
-                        let (scrolled_name, _) = scroll_display_str(&name, name_width, self.text_scroll_pos);
-                        let (scrolled_title, _) = scroll_display_str(&topic.title, title_width, self.text_scroll_pos);
+                        let (scrolled_name, _) =
+                            scroll_display_str(&name, name_width, self.text_scroll_pos);
+                        let (scrolled_title, _) =
+                            scroll_display_str(&topic.title, title_width, self.text_scroll_pos);
                         (scrolled_name, scrolled_title)
                     } else {
                         (name.clone(), topic.title.clone())
                     }
                 } else {
-                    (truncate_str(&name, name_width), truncate_str(&topic.title, title_width))
+                    (
+                        truncate_str(&name, name_width),
+                        truncate_str(&topic.title, title_width),
+                    )
                 };
 
                 // Build line and pad to full width
-                let content = format!("{}{:<nw$} {}", prefix, display_name, display_title, nw = name_width);
+                let content = format!(
+                    "{}{:<nw$} {}",
+                    prefix,
+                    display_name,
+                    display_title,
+                    nw = name_width
+                );
                 let line = pad_line(&content);
 
                 if idx == self.selected {
@@ -433,9 +446,18 @@ impl HelpBrowser {
                 } else {
                     // Apply dark_grey only to the title portion for non-selected items
                     let name_part = format!("{}{:<nw$} ", prefix, display_name, nw = name_width);
-                    let title_part = truncate_str(&display_title, width.saturating_sub(name_part.chars().count()));
-                    let padding_len = width.saturating_sub(name_part.chars().count() + title_part.chars().count());
-                    print!("\r{}{}{}\n", name_part, title_part.dark_grey(), " ".repeat(padding_len));
+                    let title_part = truncate_str(
+                        &display_title,
+                        width.saturating_sub(name_part.chars().count()),
+                    );
+                    let padding_len = width
+                        .saturating_sub(name_part.chars().count() + title_part.chars().count());
+                    print!(
+                        "\r{}{}{}\n",
+                        name_part,
+                        title_part.dark_grey(),
+                        " ".repeat(padding_len)
+                    );
                 }
             } else {
                 println!("\r{}", " ".repeat(width));
@@ -550,7 +572,11 @@ fn scroll_display_str(s: &str, max_chars: usize, scroll_pos: usize) -> (String, 
         // In the middle: show "…" at both ends
         // We have max_chars total, minus 2 for ellipses = max_chars - 2 visible chars
         let visible_chars = max_chars.saturating_sub(2);
-        let middle_part: String = s.chars().skip(effective_scroll).take(visible_chars).collect();
+        let middle_part: String = s
+            .chars()
+            .skip(effective_scroll)
+            .take(visible_chars)
+            .collect();
         (format!("…{}…", middle_part), max_scroll)
     }
 }
@@ -559,7 +585,7 @@ fn scroll_display_str(s: &str, max_chars: usize, scroll_pos: usize) -> (String, 
 /// Returns (name_width, title_width) based on terminal columns.
 fn calculate_layout(cols: usize) -> (usize, usize) {
     let prefix_width = 3; // " > " or "   "
-    let spacing = 1;      // space between name and title
+    let spacing = 1; // space between name and title
     let name_width = (cols / 3).max(20); // ~1/3 of screen for name, min 20
     let title_width = cols.saturating_sub(prefix_width + name_width + spacing + 1);
     (name_width, title_width)
@@ -688,9 +714,9 @@ fn section_type(section_name: Option<&str>) -> HelpSection {
 /// similar to less. It stays within the alternate screen that the help
 /// browser is already using.
 fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
+    use super::{PagerAction, PagerConfig, PagerContent, run};
     use crate::config::RColorConfig;
     use crate::highlighter::RTreeSitterHighlighter;
-    use super::{run, PagerAction, PagerConfig, PagerContent};
     use reedline::Highlighter;
 
     /// Help content with syntax highlighting for code sections.
@@ -712,7 +738,11 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
             let mut current_section = HelpSection::Prose;
             for line in &lines {
                 if let Some(section_name) = parse_section_header(line) {
-                    log::debug!("help_pager: found section header '{}' -> {:?}", section_name, section_type(Some(section_name)));
+                    log::debug!(
+                        "help_pager: found section header '{}' -> {:?}",
+                        section_name,
+                        section_type(Some(section_name))
+                    );
                     current_section = section_type(Some(section_name));
                     // The header line itself is prose
                     sections.push(HelpSection::Prose);
@@ -722,9 +752,19 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
             }
 
             // Debug: count sections
-            let usage_count = sections.iter().filter(|s| **s == HelpSection::Usage).count();
-            let examples_count = sections.iter().filter(|s| **s == HelpSection::Examples).count();
-            log::debug!("help_pager: {} usage lines, {} examples lines", usage_count, examples_count);
+            let usage_count = sections
+                .iter()
+                .filter(|s| **s == HelpSection::Usage)
+                .count();
+            let examples_count = sections
+                .iter()
+                .filter(|s| **s == HelpSection::Examples)
+                .count();
+            log::debug!(
+                "help_pager: {} usage lines, {} examples lines",
+                usage_count,
+                examples_count
+            );
 
             HelpContent {
                 lines,
@@ -932,14 +972,12 @@ mod tests {
 
     #[test]
     fn test_fuzzy_search_topics_empty_query() {
-        let topics = vec![
-            HelpTopic {
-                package: "base".to_string(),
-                topic: "print".to_string(),
-                title: "Print Values".to_string(),
-                entry_type: "help".to_string(),
-            },
-        ];
+        let topics = vec![HelpTopic {
+            package: "base".to_string(),
+            topic: "print".to_string(),
+            title: "Print Values".to_string(),
+            entry_type: "help".to_string(),
+        }];
 
         // Empty query should match everything
         let results = fuzzy_search_topics(&topics, "");
@@ -948,14 +986,12 @@ mod tests {
 
     #[test]
     fn test_fuzzy_search_topics_no_match() {
-        let topics = vec![
-            HelpTopic {
-                package: "base".to_string(),
-                topic: "print".to_string(),
-                title: "Print Values".to_string(),
-                entry_type: "help".to_string(),
-            },
-        ];
+        let topics = vec![HelpTopic {
+            package: "base".to_string(),
+            topic: "print".to_string(),
+            title: "Print Values".to_string(),
+            entry_type: "help".to_string(),
+        }];
 
         let results = fuzzy_search_topics(&topics, "xyz123");
         assert!(results.is_empty());
@@ -1035,12 +1071,18 @@ mod tests {
 
     #[test]
     fn test_parse_section_header_description() {
-        assert_eq!(parse_section_header("_D_e_s_c_r_i_p_t_i_o_n:"), Some("Description"));
+        assert_eq!(
+            parse_section_header("_D_e_s_c_r_i_p_t_i_o_n:"),
+            Some("Description")
+        );
     }
 
     #[test]
     fn test_parse_section_header_arguments() {
-        assert_eq!(parse_section_header("_A_r_g_u_m_e_n_t_s:"), Some("Arguments"));
+        assert_eq!(
+            parse_section_header("_A_r_g_u_m_e_n_t_s:"),
+            Some("Arguments")
+        );
     }
 
     #[test]
@@ -1059,7 +1101,10 @@ mod tests {
     #[test]
     fn test_parse_section_header_with_whitespace() {
         // Headers may have leading whitespace in actual help output
-        assert_eq!(parse_section_header("   _E_x_a_m_p_l_e_s:"), Some("Examples"));
+        assert_eq!(
+            parse_section_header("   _E_x_a_m_p_l_e_s:"),
+            Some("Examples")
+        );
     }
 
     #[test]

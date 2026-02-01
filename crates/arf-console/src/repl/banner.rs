@@ -15,10 +15,7 @@ use crate::editor::prompt::get_r_version;
 pub fn format_banner(config: &Config, r_initialized: bool) -> String {
     let mut lines = Vec::new();
 
-    lines.push(format!(
-        "# arf console v{}",
-        env!("CARGO_PKG_VERSION")
-    ));
+    lines.push(format!("# arf console v{}", env!("CARGO_PKG_VERSION")));
     lines.push(format!("# Edit mode: {}", config.editor.mode));
 
     if config.reprex.enabled {

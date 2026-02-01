@@ -4,8 +4,8 @@
 //! It's used by both the command completer and history search.
 
 use nucleo_matcher::{
-    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
     Config, Matcher, Utf32Str,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 
 /// Result of a fuzzy match including score and matched indices.

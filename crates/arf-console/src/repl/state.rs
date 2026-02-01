@@ -139,8 +139,11 @@ impl PromptRuntimeConfig {
             // Expand placeholders (including {cwd}) dynamically each time
             let shell_format = self.prompt_formatter.format(&self.shell_template);
             let cont_format = self.prompt_formatter.format(&self.cont_template);
-            RPrompt::new(shell_format, cont_format)
-                .with_colors(self.shell_color, self.continuation_color, self.mode_indicator_color)
+            RPrompt::new(shell_format, cont_format).with_colors(
+                self.shell_color,
+                self.continuation_color,
+                self.mode_indicator_color,
+            )
         } else {
             // In R mode, use main_template with optional mode indicator
             // Expand placeholders (including {cwd}) dynamically each time
@@ -156,7 +159,11 @@ impl PromptRuntimeConfig {
 
             RPrompt::new(main_format, cont_format)
                 .with_mode_indicator(mode_indicator, self.mode_indicator_position)
-                .with_colors(prompt_color, self.continuation_color, self.mode_indicator_color)
+                .with_colors(
+                    prompt_color,
+                    self.continuation_color,
+                    self.mode_indicator_color,
+                )
         }
     }
 
@@ -199,11 +206,7 @@ impl PromptRuntimeConfig {
                 c => Style::new().fg(c),
             };
 
-            format!(
-                "{}{}",
-                status_style.paint(symbol),
-                prompt_style.prefix()
-            )
+            format!("{}{}", status_style.paint(symbol), prompt_style.prefix())
         };
 
         template.replace("{status}", &colored_symbol)
@@ -235,7 +238,11 @@ impl PromptRuntimeConfig {
         let mode_indicator = self.current_mode_indicator();
         RPrompt::new(cont_format.clone(), cont_format)
             .with_mode_indicator(mode_indicator, self.mode_indicator_position)
-            .with_colors(self.continuation_color, self.continuation_color, self.mode_indicator_color)
+            .with_colors(
+                self.continuation_color,
+                self.continuation_color,
+                self.mode_indicator_color,
+            )
     }
 
     fn current_mode_indicator(&self) -> Option<String> {
@@ -781,7 +788,10 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
-            SpinnerConfig { frames: String::new(), color: Color::Default }, // Disabled
+            SpinnerConfig {
+                frames: String::new(),
+                color: Color::Default,
+            }, // Disabled
         );
         // Should not panic when spinner is disabled
         config.start_spinner();

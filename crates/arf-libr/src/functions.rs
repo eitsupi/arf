@@ -65,8 +65,10 @@ pub struct RLibrary {
     pub integer: unsafe extern "C" fn(SEXP) -> *mut c_int,
 
     // Top-level execution (for safe error handling)
-    pub r_toplevelexec:
-        unsafe extern "C" fn(Option<unsafe extern "C" fn(*mut std::ffi::c_void)>, *mut std::ffi::c_void) -> Rboolean,
+    pub r_toplevelexec: unsafe extern "C" fn(
+        Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+        *mut std::ffi::c_void,
+    ) -> Rboolean,
 
     // Eval (without error handling - use inside R_ToplevelExec)
     pub rf_eval: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
@@ -112,7 +114,8 @@ pub struct RLibrary {
     #[cfg(windows)]
     pub cmdlineoptions: unsafe extern "C" fn(c_int, *mut *mut c_char),
     #[cfg(windows)]
-    pub r_common_command_line: unsafe extern "C" fn(*mut c_int, *mut *mut c_char, *mut crate::types::Rstart),
+    pub r_common_command_line:
+        unsafe extern "C" fn(*mut c_int, *mut *mut c_char, *mut crate::types::Rstart),
 
     // Windows readconsolecfg (from R.dll, not Rgraphapp.dll)
     #[cfg(windows)]
@@ -177,9 +180,9 @@ impl RLibrary {
 
             #[cfg(windows)]
             let library = {
-                use libloading::os::windows::Library as WinLibrary;
                 use libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
                 use libloading::os::windows::LOAD_LIBRARY_SEARCH_SYSTEM32;
+                use libloading::os::windows::Library as WinLibrary;
 
                 // Preload supporting DLLs before loading R.dll.
                 // These must be loaded first so they're in the "Loaded-module list"
@@ -328,9 +331,17 @@ impl RLibrary {
             #[cfg(unix)]
             load_ptr!(ptr_r_readconsole, b"ptr_R_ReadConsole\0", ReadConsoleFunc);
             #[cfg(unix)]
-            load_ptr!(ptr_r_writeconsoleex, b"ptr_R_WriteConsoleEx\0", WriteConsoleExFunc);
+            load_ptr!(
+                ptr_r_writeconsoleex,
+                b"ptr_R_WriteConsoleEx\0",
+                WriteConsoleExFunc
+            );
             #[cfg(unix)]
-            load_ptr!(ptr_r_writeconsole, b"ptr_R_WriteConsole\0", Option<unsafe extern "C" fn(*const c_char, c_int)>);
+            load_ptr!(
+                ptr_r_writeconsole,
+                b"ptr_R_WriteConsole\0",
+                Option<unsafe extern "C" fn(*const c_char, c_int)>
+            );
 
             // Load console file pointers (Unix only)
             #[cfg(unix)]
@@ -340,7 +351,11 @@ impl RLibrary {
 
             // Load suicide callback pointer (Unix only)
             #[cfg(unix)]
-            load_ptr!(ptr_r_suicide, b"ptr_R_Suicide\0", Option<unsafe extern "C-unwind" fn(*const c_char)>);
+            load_ptr!(
+                ptr_r_suicide,
+                b"ptr_R_Suicide\0",
+                Option<unsafe extern "C-unwind" fn(*const c_char)>
+            );
 
             // Load Windows-specific initialization functions
             #[cfg(windows)]
@@ -359,18 +374,19 @@ impl RLibrary {
             #[cfg(windows)]
             let (ga_initapp, ga_peekevent) = {
                 // Find Rgraphapp.dll in the same directory as R.dll
-                let rgraphapp_path = library_path
-                    .parent()
-                    .map(|p| p.join("Rgraphapp.dll"));
+                let rgraphapp_path = library_path.parent().map(|p| p.join("Rgraphapp.dll"));
 
-                log::info!("[WINDOWS] Looking for Rgraphapp.dll at: {:?}", rgraphapp_path);
+                log::info!(
+                    "[WINDOWS] Looking for Rgraphapp.dll at: {:?}",
+                    rgraphapp_path
+                );
 
                 if let Some(ref path) = rgraphapp_path {
                     if path.exists() {
                         log::info!("[WINDOWS] Rgraphapp.dll exists, loading...");
-                        use libloading::os::windows::Library as WinLibrary;
                         use libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
                         use libloading::os::windows::LOAD_LIBRARY_SEARCH_SYSTEM32;
+                        use libloading::os::windows::Library as WinLibrary;
                         let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32;
 
                         match WinLibrary::load_with_flags(path, flags) {
@@ -378,17 +394,36 @@ impl RLibrary {
                                 log::info!("[WINDOWS] Rgraphapp.dll loaded successfully");
                                 let graphapp_lib = Library::from(graphapp_lib);
 
-                                let ga_initapp: Option<unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int> = graphapp_lib
-                                    .get::<unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int>(b"GA_initapp\0")
+                                let ga_initapp: Option<
+                                    unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int,
+                                > = graphapp_lib
+                                    .get::<unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int>(
+                                        b"GA_initapp\0",
+                                    )
                                     .ok()
                                     .map(|s| *s);
-                                log::info!("[WINDOWS] GA_initapp: {}", if ga_initapp.is_some() { "found" } else { "not found" });
+                                log::info!(
+                                    "[WINDOWS] GA_initapp: {}",
+                                    if ga_initapp.is_some() {
+                                        "found"
+                                    } else {
+                                        "not found"
+                                    }
+                                );
 
-                                let ga_peekevent: Option<unsafe extern "C" fn() -> c_int> = graphapp_lib
-                                    .get::<unsafe extern "C" fn() -> c_int>(b"GA_peekevent\0")
-                                    .ok()
-                                    .map(|s| *s);
-                                log::info!("[WINDOWS] GA_peekevent: {}", if ga_peekevent.is_some() { "found" } else { "not found" });
+                                let ga_peekevent: Option<unsafe extern "C" fn() -> c_int> =
+                                    graphapp_lib
+                                        .get::<unsafe extern "C" fn() -> c_int>(b"GA_peekevent\0")
+                                        .ok()
+                                        .map(|s| *s);
+                                log::info!(
+                                    "[WINDOWS] GA_peekevent: {}",
+                                    if ga_peekevent.is_some() {
+                                        "found"
+                                    } else {
+                                        "not found"
+                                    }
+                                );
 
                                 // Leak the library so it stays loaded
                                 std::mem::forget(graphapp_lib);
@@ -461,7 +496,11 @@ impl RLibrary {
                 .map(|s| s.into_raw().into_raw() as *mut *mut std::ffi::c_void)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
-            load_ptr!(ptr_r_polledevents, b"R_PolledEvents\0", Option<unsafe extern "C" fn()>);
+            load_ptr!(
+                ptr_r_polledevents,
+                b"R_PolledEvents\0",
+                Option<unsafe extern "C" fn()>
+            );
 
             Ok(RLibrary {
                 _library: library,

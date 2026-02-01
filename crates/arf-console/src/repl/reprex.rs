@@ -1,6 +1,9 @@
 //! Reprex mode utilities.
 
-use crossterm::{cursor, terminal::{self, ClearType}, ExecutableCommand};
+use crossterm::{
+    ExecutableCommand, cursor,
+    terminal::{self, ClearType},
+};
 use std::io::{self, Write};
 
 /// Strip reprex output comment lines from input.

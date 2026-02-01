@@ -25,7 +25,7 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
-use arf_libr::{r_library, r_nil_value, SEXP};
+use arf_libr::{SEXP, r_library, r_nil_value};
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;

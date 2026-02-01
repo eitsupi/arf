@@ -3,7 +3,7 @@
 use crate::external::rig;
 use clap::builder::PossibleValuesParser;
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use std::io;
 use std::path::PathBuf;
 
@@ -58,7 +58,6 @@ pub struct Cli {
 
     // R-compatible flags (passed to R, for vscode-R and radian compatibility)
     // Hidden from short help (-h) but shown in long help (--help).
-
     /// Start R in vanilla mode (no init files, no save/restore)
     #[arg(long = "vanilla")]
     pub vanilla: bool,

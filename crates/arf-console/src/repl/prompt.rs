@@ -46,7 +46,12 @@ impl RPrompt {
         self
     }
 
-    pub fn with_colors(mut self, prompt: Color, continuation: Color, mode_indicator: Color) -> Self {
+    pub fn with_colors(
+        mut self,
+        prompt: Color,
+        continuation: Color,
+        mode_indicator: Color,
+    ) -> Self {
         self.prompt_color = prompt;
         self.continuation_color = continuation;
         self.mode_indicator_color = mode_indicator;
@@ -120,7 +125,10 @@ impl Prompt for RPrompt {
             PromptHistorySearchStatus::Passing => "",
             PromptHistorySearchStatus::Failing => "failing ",
         };
-        Cow::Owned(format!("({}reverse-search: {}) ", prefix, history_search.term))
+        Cow::Owned(format!(
+            "({}reverse-search: {}) ",
+            prefix, history_search.term
+        ))
     }
 }
 

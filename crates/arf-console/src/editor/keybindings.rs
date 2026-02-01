@@ -1,8 +1,8 @@
 //! Keyboard shortcut configuration.
 
 use crate::editor::mode::{
-    ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef,
-    create_auto_match_rules, create_bracket_delete_rules, create_skip_over_rules,
+    ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef, create_auto_match_rules,
+    create_bracket_delete_rules, create_skip_over_rules,
 };
 use crokey::KeyCombination;
 use reedline::{EditCommand, EditMode, KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
@@ -140,7 +140,11 @@ pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
         // - US: '(' = Shift+9, '{' = Shift+[
         // - French AZERTY: '(' = 5 (no shift), '{' = AltGr+4
         // By binding both variants, we handle all common layouts.
-        keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(open_char), open_event.clone());
+        keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Char(open_char),
+            open_event.clone(),
+        );
         keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(open_char), open_event);
 
         // Closing char: just insert the character (skip-over rules will handle
@@ -148,7 +152,11 @@ pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
         // Only bind for non-quote pairs (quotes use same char for open/close).
         if open_char != close_char {
             let close_event = ReedlineEvent::Edit(vec![EditCommand::InsertChar(close_char)]);
-            keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(close_char), close_event.clone());
+            keybindings.add_binding(
+                KeyModifiers::NONE,
+                KeyCode::Char(close_char),
+                close_event.clone(),
+            );
             keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(close_char), close_event);
         }
     }

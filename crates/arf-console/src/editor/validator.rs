@@ -148,7 +148,10 @@ impl RValidator {
         // Check if string starts with quote followed by raw string delimiter
         // The string node starts with ", so check the char after "
         let after_quote = source.get(string_start + 1).copied();
-        let is_raw_delimiter = matches!(after_quote, Some(b'(') | Some(b'[') | Some(b'{') | Some(b'-'));
+        let is_raw_delimiter = matches!(
+            after_quote,
+            Some(b'(') | Some(b'[') | Some(b'{') | Some(b'-')
+        );
 
         if is_raw_delimiter {
             // This looks like a misparsed raw string
@@ -173,24 +176,24 @@ impl Validator for RValidator {
         // Synchronize editor state with actual buffer content.
         // This helps detect when reedline has modified the buffer without
         // going through our parse_event (e.g., Enter in default mode).
-        if let Some(ref state_ref) = self.editor_state {
-            if let Ok(mut state) = state_ref.lock() {
-                if line.is_empty() {
-                    // Empty buffer means new prompt - reset state completely.
-                    // This is the only safe time to clear uncertain.
-                    state.reset();
-                } else if state.buffer != line {
-                    // Buffer differs - sync and mark uncertain since we don't
-                    // know the cursor position.
-                    state.buffer = line.to_string();
-                    state.buffer_len = line.chars().count();
-                    state.uncertain = true;
-                }
-                // Note: We don't clear uncertain for non-empty matching buffers,
-                // because reedline may add a newline AFTER this validator returns
-                // (when validation is Incomplete). Clearing uncertain would
-                // leave us with stale state thinking it's accurate.
+        if let Some(ref state_ref) = self.editor_state
+            && let Ok(mut state) = state_ref.lock()
+        {
+            if line.is_empty() {
+                // Empty buffer means new prompt - reset state completely.
+                // This is the only safe time to clear uncertain.
+                state.reset();
+            } else if state.buffer != line {
+                // Buffer differs - sync and mark uncertain since we don't
+                // know the cursor position.
+                state.buffer = line.to_string();
+                state.buffer_len = line.chars().count();
+                state.uncertain = true;
             }
+            // Note: We don't clear uncertain for non-empty matching buffers,
+            // because reedline may add a newline AFTER this validator returns
+            // (when validation is Incomplete). Clearing uncertain would
+            // leave us with stale state thinking it's accurate.
         }
 
         let escaped = escape_for_debug(line);
@@ -208,7 +211,10 @@ impl Validator for RValidator {
         let tree = match parser.parse(source, None) {
             Some(tree) => tree,
             None => {
-                debug_log(&format!("[Validator] {:?} -> Complete (parse failed)", escaped));
+                debug_log(&format!(
+                    "[Validator] {:?} -> Complete (parse failed)",
+                    escaped
+                ));
                 return ValidationResult::Complete;
             }
         };
@@ -223,7 +229,10 @@ impl Validator for RValidator {
 
         // Check for incomplete raw strings that tree-sitter misparses
         if self.is_misparsed_raw_string(&root, source) {
-            debug_log(&format!("[Validator] {:?} -> Incomplete (misparsed raw string)", escaped));
+            debug_log(&format!(
+                "[Validator] {:?} -> Incomplete (misparsed raw string)",
+                escaped
+            ));
             return ValidationResult::Incomplete;
         }
 
@@ -237,7 +246,11 @@ impl Validator for RValidator {
         debug_log(&format!(
             "[Validator] {:?} -> {}",
             escaped,
-            if is_incomplete { "Incomplete" } else { "Complete" }
+            if is_incomplete {
+                "Incomplete"
+            } else {
+                "Complete"
+            }
         ));
 
         result
@@ -276,7 +289,12 @@ fn debug_log(msg: &str) {
         .append(true)
         .open(path)
     {
-        let _ = writeln!(f, "[{}] {}", chrono::Local::now().format("%H:%M:%S%.3f"), msg);
+        let _ = writeln!(
+            f,
+            "[{}] {}",
+            chrono::Local::now().format("%H:%M:%S%.3f"),
+            msg
+        );
     }
 }
 
@@ -384,19 +402,30 @@ mod tests {
         assert!(is_incomplete(validator.validate(r#"r"(hello"#)));
         // Raw string with content that looks like it could be closed but isn't
         assert!(is_incomplete(validator.validate(concat!(r#"r"(')"#, "\n"))));
-        assert!(is_incomplete(validator.validate(concat!(r#"r"(')"#, "\n\n"))));
+        assert!(is_incomplete(
+            validator.validate(concat!(r#"r"(')"#, "\n\n"))
+        ));
 
         // Raw strings with quotes inside (reported issue)
         // r"( on first line, then quotes on second line - all should be incomplete
-        assert!(is_incomplete(validator.validate(concat!(r#"r"("#, "\n", r#"""#))));   // one quote
-        assert!(is_incomplete(validator.validate(concat!(r#"r"("#, "\n", r#""""#))));  // two quotes
-        assert!(is_incomplete(validator.validate(concat!(r#"r"("#, "\nhello", r#"""#)))); // text + quote
+        assert!(is_incomplete(
+            validator.validate(concat!(r#"r"("#, "\n", r#"""#))
+        )); // one quote
+        assert!(is_incomplete(
+            validator.validate(concat!(r#"r"("#, "\n", r#""""#))
+        )); // two quotes
+        assert!(is_incomplete(
+            validator.validate(concat!(r#"r"("#, "\nhello", r#"""#))
+        )); // text + quote
 
         // Complete: r"( followed by )" closes it
-        assert!(is_complete(validator.validate(concat!(r#"r"("#, "\n", r#")""#))));
-        assert!(is_complete(validator.validate(concat!(r#"r"(""#, "\n", r#")""#))));
+        assert!(is_complete(
+            validator.validate(concat!(r#"r"("#, "\n", r#")""#))
+        ));
+        assert!(is_complete(
+            validator.validate(concat!(r#"r"(""#, "\n", r#")""#))
+        ));
     }
-
 
     #[test]
     fn test_validator_multiline() {

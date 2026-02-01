@@ -17,14 +17,14 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigAction, HistoryAction};
 use config::{
-    config_file_path, ensure_directories, init_config, load_config, load_config_from_path,
-    RSource, RSourceMode, RSourceStatus,
+    RSource, RSourceMode, RSourceStatus, config_file_path, ensure_directories, init_config,
+    load_config, load_config_from_path,
 };
 use repl::Repl;
 use std::fs;
-use std::process::ExitCode;
 #[cfg(windows)]
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 fn main() -> ExitCode {
     match run() {
@@ -116,11 +116,16 @@ fn run() -> Result<()> {
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
-    if config.reprex.autoformat && !cli.auto_format && !external::formatter::is_formatter_available() {
+    if config.reprex.autoformat
+        && !cli.auto_format
+        && !external::formatter::is_formatter_available()
+    {
         eprintln!(
             "Warning: Auto-format is enabled in config but Air CLI ('air' command) not found in PATH."
         );
-        eprintln!("         Auto-format has been disabled. Install Air CLI from https://github.com/posit-dev/air");
+        eprintln!(
+            "         Auto-format has been disabled. Install Air CLI from https://github.com/posit-dev/air"
+        );
         config.reprex.autoformat = false;
     }
 
@@ -190,8 +195,9 @@ fn handle_config_command(action: &ConfigAction) -> Result<()> {
 
 fn handle_history_command(action: &HistoryAction) -> Result<()> {
     match action {
-        HistoryAction::Schema => pager::history_schema::print_schema()
-            .context("Failed to display history schema"),
+        HistoryAction::Schema => {
+            pager::history_schema::print_schema().context("Failed to display history schema")
+        }
     }
 }
 
@@ -418,7 +424,11 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
 
     match external::rig::resolve_version(version_spec) {
         Ok(resolved) => {
-            log::info!("Using R version {} from {}", resolved.version, resolved.r_home);
+            log::info!(
+                "Using R version {} from {}",
+                resolved.version,
+                resolved.r_home
+            );
             // SAFETY: We're single-threaded at this point during startup
             unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
             Ok(RSourceStatus::Rig {
