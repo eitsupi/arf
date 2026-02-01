@@ -45,14 +45,9 @@ use std::time::{Duration, Instant};
 /// Default timeout for waiting on terminal output (in milliseconds).
 const DEFAULT_TIMEOUT_MS: u64 = 15000;
 
-/// Delay after spawning process to allow initialization (milliseconds).
-/// Windows ConPTY needs more time to initialize than Unix PTY.
-const SPAWN_DELAY_MS: u64 = 300;
-
 /// Default terminal size.
-/// Using larger size (like radian's 40x120) for better stability.
-const DEFAULT_ROWS: u16 = 40;
-const DEFAULT_COLS: u16 = 120;
+const DEFAULT_ROWS: u16 = 24;
+const DEFAULT_COLS: u16 = 80;
 
 /// Screen state snapshot for assertions.
 #[derive(Clone)]
@@ -264,10 +259,6 @@ impl Terminal {
             }
         });
 
-        // Give the process time to initialize.
-        // This is especially important on Windows where ConPTY needs more time.
-        thread::sleep(Duration::from_millis(SPAWN_DELAY_MS));
-
         Ok(Terminal {
             state,
             pty_writer,
@@ -347,68 +338,10 @@ impl Terminal {
         ))
     }
 
-    /// Wait for the prompt to appear using screen-based matching.
-    /// Looks for "> " or a line ending with ">" which matches R prompts
-    /// (e.g., "R 4.5.2>", "r>", "r> [I]" for vi mode).
-    ///
-    /// This uses vt100-parsed screen content which correctly handles ANSI escape sequences
-    /// on all platforms including Windows.
+    /// Wait for the prompt to appear.
+    /// Looks for "> " which matches both "r> " and "R {version}> " prompts.
     pub fn wait_for_prompt(&mut self) -> Result<(), String> {
-        let timeout = Duration::from_millis(DEFAULT_TIMEOUT_MS);
-        let start = Instant::now();
-
-        while start.elapsed() < timeout {
-            {
-                let state = self.state.lock().map_err(|e| e.to_string())?;
-                if !state.running {
-                    // Check screen content before giving up
-                    if Self::screen_has_prompt(&state.screen.lines) {
-                        return Ok(());
-                    }
-                    let screen_content: String = state.screen.lines.join("\n");
-                    return Err(format!(
-                        "Process exited before finding prompt. Screen:\n{}",
-                        screen_content
-                    ));
-                }
-                // Check all lines in screen
-                if Self::screen_has_prompt(&state.screen.lines) {
-                    return Ok(());
-                }
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        // Timeout - get final screen for error message
-        let screen_content = self
-            .state
-            .lock()
-            .map(|s| s.screen.lines.join("\n"))
-            .unwrap_or_default();
-        Err(format!(
-            "Timeout waiting for prompt on screen. Screen content:\n{}",
-            screen_content
-        ))
-    }
-
-    /// Check if any line in the screen contains a prompt pattern.
-    /// Matches lines that:
-    /// - Contain "> " (prompt followed by space, for vi mode like "r> [I]")
-    /// - End with ">" (prompt at end of line, like "R 4.5.2>")
-    fn screen_has_prompt(lines: &[String]) -> bool {
-        for line in lines {
-            let trimmed = line.trim_end();
-            // Check for "> " pattern (vi mode or prompt with trailing space)
-            if trimmed.contains("> ") {
-                return true;
-            }
-            // Check for line ending with ">" (default prompt without trailing space in screen)
-            if trimmed.ends_with('>') {
-                return true;
-            }
-        }
-        false
+        self.expect("> ")
     }
 
     /// Clear the output buffer and wait for new output matching pattern.
@@ -422,7 +355,7 @@ impl Terminal {
             state.output_buffer.clear();
         }
 
-        // Now wait for the pattern in raw buffer
+        // Now wait for the pattern
         self.expect(pattern)
     }
 
