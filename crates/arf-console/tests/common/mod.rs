@@ -36,9 +36,14 @@ use std::time::{Duration, Instant};
 /// Default timeout for waiting on terminal output (in milliseconds).
 const DEFAULT_TIMEOUT_MS: u64 = 15000;
 
+/// Delay after spawning process to allow initialization (milliseconds).
+/// Windows ConPTY needs more time to initialize than Unix PTY.
+const SPAWN_DELAY_MS: u64 = 300;
+
 /// Default terminal size.
-const DEFAULT_ROWS: u16 = 24;
-const DEFAULT_COLS: u16 = 80;
+/// Using larger size (like radian's 40x120) for better stability.
+const DEFAULT_ROWS: u16 = 40;
+const DEFAULT_COLS: u16 = 120;
 
 /// Screen state snapshot for assertions.
 #[derive(Clone)]
@@ -249,6 +254,10 @@ impl Terminal {
                 }
             }
         });
+
+        // Give the process time to initialize.
+        // This is especially important on Windows where ConPTY needs more time.
+        thread::sleep(Duration::from_millis(SPAWN_DELAY_MS));
 
         Ok(Terminal {
             state,
