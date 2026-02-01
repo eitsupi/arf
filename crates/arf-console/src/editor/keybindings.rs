@@ -6,7 +6,7 @@ use crate::editor::mode::{
 };
 use crokey::KeyCombination;
 use reedline::{EditCommand, EditMode, KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Add common keybindings to an existing keybinding set.
 ///
@@ -168,7 +168,7 @@ pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
 /// Example: "alt-hyphen" = " <- ", "alt-p" = " |> "
 pub fn add_key_map_keybindings(
     keybindings: &mut Keybindings,
-    key_map: &HashMap<KeyCombination, String>,
+    key_map: &BTreeMap<KeyCombination, String>,
 ) {
     use crossterm::event::KeyEvent;
 
