@@ -215,18 +215,25 @@ fn handle_history_import(
 ) -> Result<()> {
     use history::import::{
         default_arf_path, default_r_history_path, default_radian_path, import_entries,
-        parse_arf_history, parse_r_history, parse_radian_history,
+        import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
     };
     use reedline::SqliteBackedHistory;
+
+    // Load config to get effective history directory (respects config and CLI overrides)
+    let config = load_config();
+    let history_dir = config
+        .history
+        .dir
+        .clone()
+        .or_else(config::history_dir)
+        .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
 
     // Determine source file path
     let source_path = match (source, file) {
         (_, Some(path)) => path.clone(),
         (ImportSource::Radian, None) => default_radian_path(),
         (ImportSource::R, None) => default_r_history_path(),
-        (ImportSource::Arf, None) => {
-            default_arf_path().context("Could not determine default arf history path")?
-        }
+        (ImportSource::Arf, None) => default_arf_path(&history_dir),
     };
 
     // Check if source file exists
@@ -248,45 +255,53 @@ fn handle_history_import(
 
     println!("Found {} entries to import", entries.len());
 
-    // Determine target database paths
-    let history_dir = config::history_dir().context("Could not determine history directory")?;
+    // In dry-run mode, simulate the import without opening databases
+    // This avoids unnecessary SQLite initialization and potential file creation
+    if dry_run {
+        let result = import_entries_dry_run(&entries);
+
+        println!("\n[Dry run] Would import:");
+        if let Some(h) = hostname {
+            println!("  Hostname:       {}", h);
+        }
+        println!("  R commands:     {}", result.r_imported);
+        println!("  Shell commands: {}", result.shell_imported);
+        println!("  Skipped:        {}", result.skipped);
+
+        if !result.warnings.is_empty() {
+            println!("\nWarnings:");
+            for warning in result.warnings.iter().take(10) {
+                println!("  - {}", warning);
+            }
+            if result.warnings.len() > 10 {
+                println!("  ... and {} more warnings", result.warnings.len() - 10);
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Determine target database paths (using history_dir resolved from config earlier)
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 
-    // Open target databases (use in-memory for dry-run to avoid creating files)
-    let (r_history, shell_history) = if dry_run {
-        (
-            SqliteBackedHistory::in_memory()
-                .context("Failed to create in-memory R history database")?,
-            SqliteBackedHistory::in_memory()
-                .context("Failed to create in-memory shell history database")?,
-        )
-    } else {
-        config::ensure_directories()?;
-        println!("Target databases:");
-        println!("  R:     {}", r_path.display());
-        println!("  Shell: {}", shell_path.display());
-        (
-            SqliteBackedHistory::with_file(r_path, None, None)
-                .context("Failed to open R history database")?,
-            SqliteBackedHistory::with_file(shell_path, None, None)
-                .context("Failed to open shell history database")?,
-        )
-    };
+    // Ensure directories exist and open target databases
+    config::ensure_directories()?;
+    println!("Target databases:");
+    println!("  R:     {}", r_path.display());
+    println!("  Shell: {}", shell_path.display());
 
     let mut targets = history::import::ImportTargets {
-        r_history,
-        shell_history,
+        r_history: SqliteBackedHistory::with_file(r_path, None, None)
+            .context("Failed to open R history database")?,
+        shell_history: SqliteBackedHistory::with_file(shell_path, None, None)
+            .context("Failed to open shell history database")?,
     };
 
-    // Import entries (or simulate in dry-run mode)
-    let result = import_entries(&mut targets, entries, dry_run, hostname)?;
+    // Import entries
+    let result = import_entries(&mut targets, entries, false, hostname)?;
 
-    if dry_run {
-        println!("\n[Dry run] Would import:");
-    } else {
-        println!("\nImport complete:");
-    }
+    println!("\nImport complete:");
     if let Some(h) = hostname {
         println!("  Hostname:       {}", h);
     }

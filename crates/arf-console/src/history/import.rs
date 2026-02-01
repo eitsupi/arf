@@ -84,12 +84,13 @@ pub fn default_r_history_path() -> PathBuf {
     PathBuf::from(".Rhistory")
 }
 
-/// Get the default arf history database path.
+/// Get the default arf history database path for a given history directory.
 ///
-/// Returns the path to the R history database in arf's history directory,
-/// matching the location used by `config::history_dir()`.
-pub fn default_arf_path() -> Option<PathBuf> {
-    crate::config::history_dir().map(|d| d.join("r.db"))
+/// This helper simply appends `r.db` to the provided, resolved history
+/// directory. Callers are responsible for resolving the history directory
+/// based on configuration (XDG defaults, arf.toml, CLI overrides, etc.).
+pub fn default_arf_path(history_dir: &Path) -> PathBuf {
+    history_dir.join("r.db")
 }
 
 /// Parse a radian history file.
@@ -178,10 +179,12 @@ pub fn parse_r_history(path: &Path) -> Result<Vec<ImportEntry>> {
 
     for line_result in reader.lines() {
         let line = line_result.with_context(|| "Failed to read line from R history")?;
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
+        // Only trim line endings, preserve leading whitespace (e.g., indented code)
+        let content = line.trim_end();
+        // Skip empty/whitespace-only lines
+        if !content.trim().is_empty() {
             entries.push(ImportEntry {
-                command: trimmed.to_string(),
+                command: content.to_string(),
                 timestamp: None,
                 mode: Some("r".to_string()),
             });
@@ -254,6 +257,38 @@ fn classify_mode(mode: Option<&str>) -> Option<bool> {
         None => Some(false),                       // Default to R database
         Some(_) => None,                           // Unknown mode - skip
     }
+}
+
+/// Simulate importing entries without accessing databases.
+///
+/// Uses the same classification logic as `import_entries` to provide
+/// accurate counts and warnings for `--dry-run` mode.
+pub fn import_entries_dry_run(entries: &[ImportEntry]) -> ImportResult {
+    let mut result = ImportResult::default();
+
+    for entry in entries {
+        if entry.command.trim().is_empty() {
+            result.skipped += 1;
+            continue;
+        }
+
+        // Classify mode and skip unknown modes
+        match classify_mode(entry.mode.as_deref()) {
+            Some(true) => result.shell_imported += 1,
+            Some(false) => result.r_imported += 1,
+            None => {
+                let mode = entry.mode.as_deref().unwrap_or("?");
+                let cmd_preview: String = entry.command.chars().take(30).collect();
+                result.warnings.push(format!(
+                    "Skipped unknown mode '{}': {}...",
+                    mode, cmd_preview
+                ));
+                result.skipped += 1;
+            }
+        }
+    }
+
+    result
 }
 
 /// Import entries into arf history databases, routing by mode.
@@ -426,6 +461,20 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_r_history_preserves_leading_whitespace() {
+        let mut file = NamedTempFile::new().unwrap();
+        // Simulate indented code that might appear in .Rhistory
+        writeln!(file, "if (TRUE) {{").unwrap();
+        writeln!(file, r#"  print("indented")"#).unwrap();
+        writeln!(file, "}}").unwrap();
+
+        let entries = parse_r_history(file.path()).unwrap();
+        assert_eq!(entries.len(), 3);
+        // Leading whitespace should be preserved
+        assert_eq!(entries[1].command, r#"  print("indented")"#);
+    }
+
+    #[test]
     fn test_default_paths() {
         // These just verify the functions don't panic
         let radian_path = default_radian_path();
@@ -580,11 +629,6 @@ mod tests {
 
     #[test]
     fn test_import_entries_dry_run() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let mut targets = create_test_targets(&temp_dir);
-
         // Create mixed mode entries
         let entries = vec![
             ImportEntry {
@@ -597,13 +641,26 @@ mod tests {
                 timestamp: None,
                 mode: Some("shell".to_string()),
             },
+            ImportEntry {
+                command: "unknown_mode".to_string(),
+                timestamp: None,
+                mode: Some("python".to_string()), // Unknown mode
+            },
+            ImportEntry {
+                command: "   ".to_string(), // Whitespace-only, should be skipped
+                timestamp: None,
+                mode: Some("r".to_string()),
+            },
         ];
 
-        let result = import_entries(&mut targets, entries, true, None).unwrap();
+        // import_entries_dry_run doesn't need database handles
+        let result = import_entries_dry_run(&entries);
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 1);
-        assert_eq!(result.skipped, 0);
+        assert_eq!(result.skipped, 2); // unknown mode + whitespace-only
+        assert_eq!(result.warnings.len(), 1); // warning for unknown mode
+        assert!(result.warnings[0].contains("python"));
     }
 
     #[test]
@@ -714,7 +771,13 @@ mod tests {
 
     #[test]
     fn test_parse_arf_history_not_found() {
-        let result = parse_arf_history(std::path::Path::new("/nonexistent/path/history.db"));
+        use tempfile::TempDir;
+
+        // Use TempDir to guarantee a non-existent file path
+        let temp_dir = TempDir::new().unwrap();
+        let missing_path = temp_dir.path().join("nonexistent.db");
+
+        let result = parse_arf_history(&missing_path);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"));
