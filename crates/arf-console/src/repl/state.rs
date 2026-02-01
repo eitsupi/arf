@@ -86,7 +86,7 @@ pub struct PromptRuntimeConfig {
     /// Vi mode configuration (symbols).
     vi_config: ViConfig,
     /// Vi mode colors for prompt indicator.
-    vi_color: ViColorConfig,
+    vi_colors: ViColorConfig,
 }
 
 impl PromptRuntimeConfig {
@@ -109,7 +109,7 @@ impl PromptRuntimeConfig {
         status_colors: StatusColorConfig,
         spinner_config: SpinnerConfig,
         vi_config: ViConfig,
-        vi_color: ViColorConfig,
+        vi_colors: ViColorConfig,
     ) -> Self {
         // Initialize spinner in arf-libr
         arf_libr::set_spinner_frames(&spinner_config.frames);
@@ -137,7 +137,7 @@ impl PromptRuntimeConfig {
             last_command_failed: false,
             spinner_config,
             vi_config,
-            vi_color,
+            vi_colors,
         }
     }
 
@@ -150,7 +150,7 @@ impl PromptRuntimeConfig {
             RPrompt::new(shell_format, cont_format)
                 .with_colors(self.shell_color, self.continuation_color, self.mode_indicator_color)
                 .with_vi_symbol(self.vi_config.symbol.clone())
-                .with_vi_color(self.vi_color.clone())
+                .with_vi_colors(self.vi_colors.clone())
         } else {
             // In R mode, use main_template with optional mode indicator
             // Expand placeholders (including {cwd}) dynamically each time
@@ -168,7 +168,7 @@ impl PromptRuntimeConfig {
                 .with_mode_indicator(mode_indicator, self.mode_indicator_position)
                 .with_colors(prompt_color, self.continuation_color, self.mode_indicator_color)
                 .with_vi_symbol(self.vi_config.symbol.clone())
-                .with_vi_color(self.vi_color.clone())
+                .with_vi_colors(self.vi_colors.clone())
         }
     }
 

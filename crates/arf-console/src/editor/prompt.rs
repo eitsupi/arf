@@ -12,6 +12,7 @@ use std::env;
 use std::path::Path;
 
 /// Vi editing mode for prompt display.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViMode {
     /// Insert mode (typing text).
@@ -84,6 +85,7 @@ impl PromptFormatter {
     /// - `template` - The format string with placeholders
     /// - `vi_mode` - Current vi mode (None for Emacs mode)
     /// - `vi_symbol` - Symbols to use for insert/normal mode
+    #[allow(dead_code)]
     pub fn format_with_vi(
         &self,
         template: &str,

@@ -25,7 +25,7 @@ pub struct RPrompt {
     /// Vi mode symbols for the prompt indicator.
     vi_symbol: ViSymbol,
     /// Vi mode colors for the prompt indicator.
-    vi_color: ViColorConfig,
+    vi_colors: ViColorConfig,
 }
 
 impl RPrompt {
@@ -39,7 +39,7 @@ impl RPrompt {
             continuation_color: Color::Default,
             mode_indicator_color: Color::Default,
             vi_symbol: ViSymbol::default(),
-            vi_color: ViColorConfig::default(),
+            vi_colors: ViColorConfig::default(),
         }
     }
 
@@ -65,8 +65,8 @@ impl RPrompt {
         self
     }
 
-    pub fn with_vi_color(mut self, vi_color: ViColorConfig) -> Self {
-        self.vi_color = vi_color;
+    pub fn with_vi_colors(mut self, vi_colors: ViColorConfig) -> Self {
+        self.vi_colors = vi_colors;
         self
     }
 }
@@ -82,7 +82,7 @@ impl Clone for RPrompt {
             continuation_color: self.continuation_color,
             mode_indicator_color: self.mode_indicator_color,
             vi_symbol: self.vi_symbol.clone(),
-            vi_color: self.vi_color.clone(),
+            vi_colors: self.vi_colors.clone(),
         }
     }
 }
@@ -124,13 +124,13 @@ impl Prompt for RPrompt {
     fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
         let (symbol, color) = match edit_mode {
             PromptEditMode::Vi(PromptViMode::Insert) => {
-                (&self.vi_symbol.insert, self.vi_color.insert)
+                (&self.vi_symbol.insert, self.vi_colors.insert)
             }
             PromptEditMode::Vi(PromptViMode::Normal) => {
-                (&self.vi_symbol.normal, self.vi_color.normal)
+                (&self.vi_symbol.normal, self.vi_colors.normal)
             }
             // Emacs, Default, or any other non-vi modes
-            _ => (&self.vi_symbol.non_vi, self.vi_color.non_vi),
+            _ => (&self.vi_symbol.non_vi, self.vi_colors.non_vi),
         };
 
         if symbol.is_empty() {
