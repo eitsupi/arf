@@ -2555,7 +2555,7 @@ symbol = {{ insert = "[I]", normal = "[N]" }}
     assert!(
         prompt_line_after_esc
             .as_ref()
-            .map_or(false, |l| l.contains("[N]")),
+            .is_some_and(|l| l.contains("[N]")),
         "After Escape, prompt should show [N] for normal mode, got: {:?}",
         prompt_line_after_esc
     );
@@ -2572,7 +2572,7 @@ symbol = {{ insert = "[I]", normal = "[N]" }}
     assert!(
         prompt_line_after_i
             .as_ref()
-            .map_or(false, |l| l.contains("[I]")),
+            .is_some_and(|l| l.contains("[I]")),
         "After 'i', prompt should show [I] for insert mode, got: {:?}",
         prompt_line_after_i
     );
