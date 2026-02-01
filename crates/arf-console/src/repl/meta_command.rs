@@ -418,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
     fn test_process_meta_command_info() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -430,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
     fn test_process_meta_command_info_with_config_path() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
