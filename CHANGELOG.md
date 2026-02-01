@@ -2,16 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)
+- Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
+
 ## [0.2.0-beta.1] - 2026-02-01
+
+### Added
+
+- Vi mode indicator support for prompts via `prompt.mode_indicator` config (#23)
 
 ### Changed
 
 - **BREAKING:** Configuration structure reorganized - the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization.
-  - `reprex.enabled` → `startup.mode.reprex`
-  - `reprex.autoformat` → `startup.mode.autoformat`
-  - `reprex.comment` → `mode.reprex.comment`
 
 #### Migration Guide
+
+The `[reprex]` section mapping:
+
+- `reprex.enabled` → `startup.mode.reprex`
+- `reprex.autoformat` → `startup.mode.autoformat`
+- `reprex.comment` → `mode.reprex.comment`
 
 If you have a custom configuration file, update your `[reprex]` section as follows:
 
@@ -36,6 +48,10 @@ autoformat = false
 [mode.reprex]
 comment = "#> "
 ```
+
+### Fixed
+
+- Windows: Manually source `.Rprofile` etc. after R initialization (#20)
 
 ## [0.1.1] - 2026-01-31
 
