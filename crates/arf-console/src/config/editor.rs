@@ -35,7 +35,7 @@ fn serialize_key_map_sorted<S>(
 where
     S: serde::Serializer,
 {
-    // Convert to BTreeMap<String, String> for sorted serialization
+    // Convert to BTreeMap<String, &String> for sorted serialization
     let sorted: BTreeMap<String, &String> = map.iter().map(|(k, v)| (k.to_string(), v)).collect();
     sorted.serialize(serializer)
 }
