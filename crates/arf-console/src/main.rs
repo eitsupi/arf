@@ -15,7 +15,7 @@ mod traps;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, HistoryAction};
+use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource};
 use config::{
     RSource, RSourceMode, RSourceStatus, config_file_path, ensure_directories, init_config,
     load_config, load_config_from_path,
@@ -56,7 +56,7 @@ fn run() -> Result<()> {
             return handle_config_command(action);
         }
         Some(Commands::History { action }) => {
-            return handle_history_command(action);
+            return handle_history_command(action, cli.config.as_ref(), cli.history_dir.as_ref());
         }
         None => {}
     }
@@ -193,12 +193,187 @@ fn handle_config_command(action: &ConfigAction) -> Result<()> {
     }
 }
 
-fn handle_history_command(action: &HistoryAction) -> Result<()> {
+fn handle_history_command(
+    action: &HistoryAction,
+    config_path: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::PathBuf>,
+) -> Result<()> {
     match action {
         HistoryAction::Schema => {
             pager::history_schema::print_schema().context("Failed to display history schema")
         }
+        HistoryAction::Import {
+            from,
+            file,
+            hostname,
+            dry_run,
+        } => handle_history_import(
+            *from,
+            file.as_ref(),
+            hostname.as_deref(),
+            *dry_run,
+            config_path,
+            cli_history_dir,
+        ),
     }
+}
+
+fn handle_history_import(
+    source: ImportSource,
+    file: Option<&std::path::PathBuf>,
+    hostname: Option<&str>,
+    dry_run: bool,
+    config_path: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::PathBuf>,
+) -> Result<()> {
+    use history::import::{
+        default_r_history_path, default_radian_path, import_entries, import_entries_dry_run,
+        parse_arf_history, parse_r_history, parse_radian_history,
+    };
+    use reedline::SqliteBackedHistory;
+
+    // Load config (respecting --config flag if provided)
+    let config = if let Some(path) = config_path {
+        load_config_from_path(path)
+    } else {
+        load_config()
+    };
+
+    // Resolve effective history directory (CLI --history-dir takes precedence)
+    // This is optional for --dry-run mode, which doesn't need the target directory
+    let history_dir = cli_history_dir
+        .cloned()
+        .or(config.history.dir.clone())
+        .or_else(config::history_dir);
+
+    // Determine source file path
+    // Note: --from arf requires --file to avoid self-import (source = target)
+    let source_path = match (source, file) {
+        (_, Some(path)) => path.clone(),
+        (ImportSource::Radian, None) => default_radian_path(),
+        (ImportSource::R, None) => default_r_history_path(),
+        (ImportSource::Arf, None) => {
+            anyhow::bail!(
+                "The --file option is required when importing from arf format.\n\
+                 Example: arf history import --from arf --file /path/to/backup/r.db"
+            );
+        }
+    };
+
+    // Check if source file exists
+    if !source_path.exists() {
+        anyhow::bail!(
+            "Source history file not found: {}\nSpecify the path with --file",
+            source_path.display()
+        );
+    }
+
+    println!("Importing from: {}", source_path.display());
+
+    // Parse entries from source
+    let entries = match source {
+        ImportSource::Radian => parse_radian_history(&source_path)?,
+        ImportSource::R => parse_r_history(&source_path)?,
+        ImportSource::Arf => parse_arf_history(&source_path)?,
+    };
+
+    println!("Found {} entries to import", entries.len());
+
+    // In dry-run mode, simulate the import without opening databases
+    // This avoids unnecessary SQLite initialization and potential file creation
+    if dry_run {
+        let result = import_entries_dry_run(&entries);
+
+        println!("\n[Dry run] Would import:");
+        if let Some(h) = hostname {
+            println!("  Hostname:       {}", h);
+        }
+        println!("  R commands:     {}", result.r_imported);
+        println!("  Shell commands: {}", result.shell_imported);
+        println!("  Skipped:        {}", result.skipped);
+
+        if !result.warnings.is_empty() {
+            println!("\nWarnings:");
+            for warning in result.warnings.iter().take(10) {
+                println!("  - {}", warning);
+            }
+            if result.warnings.len() > 10 {
+                println!("  ... and {} more warnings", result.warnings.len() - 10);
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Determine target database paths (require history_dir for actual import)
+    let history_dir =
+        history_dir.ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
+    let r_path = history_dir.join("r.db");
+    let shell_path = history_dir.join("shell.db");
+
+    // Prevent self-import when using `--from arf` with `--file` pointing at the
+    // same database as the target, which would duplicate history entries.
+    if matches!(source, ImportSource::Arf)
+        && let Ok(source_canon) = fs::canonicalize(&source_path)
+    {
+        if fs::canonicalize(&r_path).is_ok_and(|r_canon| source_canon == r_canon) {
+            anyhow::bail!(
+                "Refusing to import from '{}' into itself (R history database). \
+                 Please specify a different --file or history directory.",
+                source_path.display()
+            );
+        }
+        if fs::canonicalize(&shell_path).is_ok_and(|shell_canon| source_canon == shell_canon) {
+            anyhow::bail!(
+                "Refusing to import from '{}' into itself (shell history database). \
+                 Please specify a different --file or history directory.",
+                source_path.display()
+            );
+        }
+    }
+
+    // Ensure the history directory exists (config::ensure_directories only creates XDG base dirs,
+    // not the history subdirectory or custom --history-dir paths)
+    fs::create_dir_all(&history_dir).with_context(|| {
+        format!(
+            "Failed to create history directory: {}",
+            history_dir.display()
+        )
+    })?;
+
+    println!("Target databases:");
+    println!("  R:     {}", r_path.display());
+    println!("  Shell: {}", shell_path.display());
+
+    let mut targets = history::import::ImportTargets {
+        r_history: SqliteBackedHistory::with_file(r_path, None, None)
+            .context("Failed to open R history database")?,
+        shell_history: SqliteBackedHistory::with_file(shell_path, None, None)
+            .context("Failed to open shell history database")?,
+    };
+
+    // Import entries
+    let result = import_entries(&mut targets, entries, hostname)?;
+
+    println!("\nImport complete:");
+    if let Some(h) = hostname {
+        println!("  Hostname:       {}", h);
+    }
+    println!("  R commands:     {}", result.r_imported);
+    println!("  Shell commands: {}", result.shell_imported);
+    println!("  Skipped:        {}", result.skipped);
+
+    if !result.warnings.is_empty() {
+        println!("\nWarnings:");
+        for warning in result.warnings.iter().take(10) {
+            println!("  - {}", warning);
+        }
+        if result.warnings.len() > 10 {
+            println!("  ... and {} more warnings", result.warnings.len() - 10);
+        }
+    }
+
+    Ok(())
 }
 
 /// Run in script execution mode (non-interactive).

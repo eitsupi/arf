@@ -235,6 +235,60 @@ on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 | `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
 | `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
 
+### History import
+
+> [!CAUTION]
+> This feature is experimental and has not been thoroughly tested. Always back up your history files before importing. The import format and behavior may change in future versions.
+
+Import command history from radian, R's native `.Rhistory`, or another arf database into arf's SQLite history:
+
+```sh
+# Preview what would be imported (dry run)
+arf history import --from radian --dry-run
+
+# Import from radian (default: ~/.radian_history)
+arf history import --from radian
+
+# Import from R's native history
+arf history import --from r --file .Rhistory
+
+# Import from another arf database
+arf history import --from arf --file /path/to/r.db
+
+# Import with custom hostname (to distinguish from native entries)
+arf history import --from radian --hostname "radian-import"
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--from` | Source format: `radian`, `r`, or `arf` (required) |
+| `--file` | Path to source file (required for `arf`, defaults to standard locations for others) |
+| `--hostname` | Custom hostname to mark imported entries |
+| `--dry-run` | Preview without importing |
+
+**Supported sources:**
+
+| Source | Description | Timestamps | Multiline | Mode routing |
+|--------|-------------|:----------:|:---------:|:------------:|
+| `radian` | `~/.radian_history` | Preserved | Preserved | By `# mode:` |
+| `r` | `.Rhistory` or `R_HISTFILE` | - | - | → `r.db` |
+| `arf` | SQLite database (`--file` required) | Preserved | Preserved | By filename |
+
+**Mode routing:**
+
+- **radian**: Routes by `# mode:` header (r/browse → `r.db`, shell → `shell.db`)
+- **arf**: Routes by filename (`shell.db` → `shell.db`, others → `r.db`). To import both R and shell history, run the command twice with each database file.
+- **r**: All commands go to `r.db` (no mode information)
+
+Entries with unknown modes are skipped with a warning.
+
+**Notes:**
+
+- Importing the same file multiple times will create duplicate entries. Use `--dry-run` first to preview what would be imported.
+- Self-import is detected and rejected when importing from an arf database to the same target file.
+
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`

@@ -96,6 +96,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
             [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import history from another source (experimental)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -104,12 +105,25 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
             break
         }
+        'arf;history;import' {
+            [CompletionResult]::new('--from', '--from', [CompletionResultType]::ParameterName, 'Source format to import from')
+            [CompletionResult]::new('--file', '--file', [CompletionResultType]::ParameterName, 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db')
+            [CompletionResult]::new('--hostname', '--hostname', [CompletionResultType]::ParameterName, 'Override hostname for imported entries. Marks entries to distinguish them from native arf history')
+            [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Perform a dry run without actually importing')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'arf;history;help' {
             [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import history from another source (experimental)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
         'arf;history;help;schema' {
+            break
+        }
+        'arf;history;help;import' {
             break
         }
         'arf;history;help;help' {
@@ -134,9 +148,13 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         }
         'arf;help;history' {
             [CompletionResult]::new('schema', 'schema', [CompletionResultType]::ParameterValue, 'Display history database schema and example R code')
+            [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import history from another source (experimental)')
             break
         }
         'arf;help;history;schema' {
+            break
+        }
+        'arf;help;history;import' {
             break
         }
         'arf;help;help' {

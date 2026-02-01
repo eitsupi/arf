@@ -161,6 +161,40 @@ pub enum Commands {
 pub enum HistoryAction {
     /// Display history database schema and example R code
     Schema,
+    /// Import history from another source (experimental)
+    ///
+    /// Import command history from radian, R's native .Rhistory, or another arf database.
+    /// This is an experimental feature and the format may change in future versions.
+    Import {
+        /// Source format to import from
+        #[arg(long, value_enum)]
+        from: ImportSource,
+
+        /// Path to the history file/database to import.
+        /// Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        file: Option<PathBuf>,
+
+        /// Override hostname for imported entries.
+        /// Marks entries to distinguish them from native arf history
+        #[arg(long)]
+        hostname: Option<String>,
+
+        /// Perform a dry run without actually importing
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// Source format for history import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ImportSource {
+    /// radian history file (~/.radian_history)
+    Radian,
+    /// R native history file (.Rhistory)
+    R,
+    /// Another arf SQLite history database
+    Arf,
 }
 
 #[derive(Subcommand, Debug)]
@@ -285,6 +319,19 @@ impl Cli {
         generate(shell, &mut cmd, "arf", &mut buf);
         String::from_utf8(buf).expect("Completions should be valid UTF-8")
     }
+
+    /// Generate help output for a subcommand path for testing.
+    #[cfg(test)]
+    fn generate_help_string(subcommand_path: &[&str]) -> String {
+        let mut cmd = Cli::command();
+        for &name in subcommand_path {
+            cmd = cmd
+                .find_subcommand(name)
+                .expect("Subcommand not found")
+                .clone();
+        }
+        cmd.render_long_help().to_string()
+    }
 }
 
 #[cfg(test)]
@@ -313,5 +360,11 @@ mod tests {
     fn test_completions_powershell_snapshot() {
         let completions = Cli::generate_completions_string(Shell::PowerShell);
         insta::assert_snapshot!("completions_powershell", completions);
+    }
+
+    #[test]
+    fn test_help_history_import_snapshot() {
+        let help = Cli::generate_help_string(&["history", "import"]);
+        insta::assert_snapshot!("help_history_import", help);
     }
 }

@@ -1,0 +1,30 @@
+---
+source: crates/arf-console/src/cli.rs
+expression: help
+---
+Import history from another source (experimental)
+
+Import command history from radian, R's native .Rhistory, or another arf database. This is an experimental feature and the format may change in future versions.
+
+Usage: import [OPTIONS] --from <FROM>
+
+Options:
+      --from <FROM>
+          Source format to import from
+
+          Possible values:
+          - radian: radian history file (~/.radian_history)
+          - r:      R native history file (.Rhistory)
+          - arf:    Another arf SQLite history database
+
+      --file <FILE>
+          Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db
+
+      --hostname <HOSTNAME>
+          Override hostname for imported entries. Marks entries to distinguish them from native arf history
+
+      --dry-run
+          Perform a dry run without actually importing
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -180,6 +180,119 @@ fn test_history_schema_piped_no_colors() {
     );
 }
 
+/// Test `arf history import --from arf` rejects self-import for r.db (source == target).
+#[test]
+fn test_history_import_rejects_self_import_r_db() {
+    use reedline::SqliteBackedHistory;
+    use tempfile::TempDir;
+
+    // Create a temporary history directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let history_dir = temp_dir.path();
+
+    // Create an r.db file using reedline's SqliteBackedHistory
+    let r_db_path = history_dir.join("r.db");
+    let _db = SqliteBackedHistory::with_file(r_db_path.clone(), None, None)
+        .expect("Failed to create r.db");
+    drop(_db); // Close the database
+
+    // Try to import from r.db into the same directory's r.db
+    // Note: --history-dir is a top-level option, must come before subcommand
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "--history-dir",
+            history_dir.to_str().unwrap(),
+            "history",
+            "import",
+            "--from",
+            "arf",
+            "--file",
+            r_db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf history import");
+
+    // Should fail with self-import error
+    assert!(
+        !output.status.success(),
+        "Self-import should fail, but succeeded"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Refusing to import") && stderr.contains("into itself"),
+        "Error should mention refusing self-import, got: {}",
+        stderr
+    );
+}
+
+/// Test `arf history import --from arf` rejects self-import for shell.db (source == target).
+#[test]
+fn test_history_import_rejects_self_import_shell_db() {
+    use reedline::SqliteBackedHistory;
+    use tempfile::TempDir;
+
+    // Create a temporary history directory
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let history_dir = temp_dir.path();
+
+    // Create a shell.db file using reedline's SqliteBackedHistory
+    let shell_db_path = history_dir.join("shell.db");
+    let _db = SqliteBackedHistory::with_file(shell_db_path.clone(), None, None)
+        .expect("Failed to create shell.db");
+    drop(_db); // Close the database
+
+    // Try to import from shell.db into the same directory's shell.db
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "--history-dir",
+            history_dir.to_str().unwrap(),
+            "history",
+            "import",
+            "--from",
+            "arf",
+            "--file",
+            shell_db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf history import");
+
+    // Should fail with self-import error
+    assert!(
+        !output.status.success(),
+        "Self-import of shell.db should fail, but succeeded"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Refusing to import") && stderr.contains("into itself"),
+        "Error should mention refusing self-import for shell.db, got: {}",
+        stderr
+    );
+}
+
+/// Test `arf history import --from arf` requires --file option.
+#[test]
+fn test_history_import_arf_requires_file() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["history", "import", "--from", "arf"])
+        .output()
+        .expect("Failed to run arf history import");
+
+    // Should fail because --file is required for arf format
+    assert!(
+        !output.status.success(),
+        "Import from arf without --file should fail"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--file") && stderr.contains("required"),
+        "Error should mention --file is required, got: {}",
+        stderr
+    );
+}
+
 // ============================================================================
 // Script Execution Mode Tests (-e flag)
 // ============================================================================
