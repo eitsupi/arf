@@ -248,38 +248,6 @@ fn handle_history_import(
 
     println!("Found {} entries to import", entries.len());
 
-    if dry_run {
-        // Count by mode
-        let r_count = entries
-            .iter()
-            .filter(|e| e.mode.as_deref() != Some("shell"))
-            .count();
-        let shell_count = entries.len() - r_count;
-
-        println!("\n[Dry run] Would import:");
-        println!("  R commands:     {}", r_count);
-        println!("  Shell commands: {}", shell_count);
-
-        if !entries.is_empty() {
-            println!("\nSample entries:");
-            for (i, entry) in entries.iter().take(5).enumerate() {
-                let cmd_preview: String = entry.command.chars().take(60).collect();
-                let ellipsis = if entry.command.len() > 60 { "..." } else { "" };
-                let mode_label = match entry.mode.as_deref() {
-                    Some("shell") => "shell",
-                    Some("r") => "r",
-                    Some("browse") => "r/browse",
-                    _ => "r",
-                };
-                println!("  {}. [{}] {}{}", i + 1, mode_label, cmd_preview, ellipsis);
-            }
-            if entries.len() > 5 {
-                println!("  ... and {} more", entries.len() - 5);
-            }
-        }
-        return Ok(());
-    }
-
     // Determine target database paths
     let history_dir = config::history_dir().context("Could not determine history directory")?;
     config::ensure_directories()?;
@@ -287,9 +255,11 @@ fn handle_history_import(
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 
-    println!("Target databases:");
-    println!("  R:     {}", r_path.display());
-    println!("  Shell: {}", shell_path.display());
+    if !dry_run {
+        println!("Target databases:");
+        println!("  R:     {}", r_path.display());
+        println!("  Shell: {}", shell_path.display());
+    }
 
     // Open target databases
     let r_history = SqliteBackedHistory::with_file(r_path, None, None)
@@ -302,10 +272,14 @@ fn handle_history_import(
         shell_history,
     };
 
-    // Import entries
-    let result = import_entries(&mut targets, entries, false, hostname)?;
+    // Import entries (or simulate in dry-run mode)
+    let result = import_entries(&mut targets, entries, dry_run, hostname)?;
 
-    println!("\nImport complete:");
+    if dry_run {
+        println!("\n[Dry run] Would import:");
+    } else {
+        println!("\nImport complete:");
+    }
     if let Some(h) = hostname {
         println!("  Hostname:       {}", h);
     }

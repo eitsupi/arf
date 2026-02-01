@@ -143,7 +143,7 @@ _arguments "${_arguments_options[@]}" : \
 r\:"R native history file (.Rhistory)"
 arf\:"Another arf SQLite history database"))' \
 '--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=XDG data dir]:FILE:_files' \
-'--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_default' \
+'--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_hosts' \
 '--dry-run[Perform a dry run without actually importing]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \

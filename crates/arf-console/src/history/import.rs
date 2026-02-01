@@ -130,6 +130,8 @@ pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
         } else if line.starts_with("# mode: ") {
             current_mode = Some(line.trim_start_matches("# mode: ").trim().to_string());
         } else if let Some(content) = line.strip_prefix('+') {
+            // Handle CRLF line endings - strip trailing \r
+            let content = content.strip_suffix('\r').unwrap_or(content);
             current_lines.push(content.to_string());
         } else if line.trim().is_empty() {
             // Empty line can separate entries
@@ -189,7 +191,7 @@ pub fn parse_r_history(path: &Path) -> Result<Vec<ImportEntry>> {
 /// Copy entries from another arf SQLite history database.
 ///
 /// The mode is inferred from the filename:
-/// - Files ending with `shell.db` are treated as shell history
+/// - Files named `shell.db` are treated as shell history
 /// - All other files are treated as R history
 pub fn parse_arf_history(path: &Path) -> Result<Vec<ImportEntry>> {
     use reedline::History;
@@ -209,7 +211,7 @@ pub fn parse_arf_history(path: &Path) -> Result<Vec<ImportEntry>> {
         Some("r".to_string())
     };
 
-    // Open source database in read-only mode
+    // Open source history database
     let source = SqliteBackedHistory::with_file(path.to_path_buf(), None, None)
         .with_context(|| format!("Failed to open arf history database: {}", path.display()))?;
 

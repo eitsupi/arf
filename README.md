@@ -221,12 +221,12 @@ on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 | `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
 | `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
 
-### History import from radian/R
+### History import
 
 > [!CAUTION]
 > This feature is experimental and has not been thoroughly tested. Always back up your history files before importing. The import format and behavior may change in future versions.
 
-Import command history from radian or R's native `.Rhistory` file into arf's SQLite database:
+Import command history from radian, R's native `.Rhistory`, or another arf database into arf's SQLite history:
 
 ```sh
 # Preview what would be imported (dry run)
