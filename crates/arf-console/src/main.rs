@@ -240,11 +240,11 @@ fn handle_history_import(
     };
 
     // Resolve effective history directory (CLI --history-dir takes precedence)
+    // This is optional for --dry-run mode, which doesn't need the target directory
     let history_dir = cli_history_dir
         .cloned()
         .or(config.history.dir.clone())
-        .or_else(config::history_dir)
-        .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
+        .or_else(config::history_dir);
 
     // Determine source file path
     // Note: --from arf requires --file to avoid self-import (source = target)
@@ -305,7 +305,9 @@ fn handle_history_import(
         return Ok(());
     }
 
-    // Determine target database paths (using history_dir resolved from config earlier)
+    // Determine target database paths (require history_dir for actual import)
+    let history_dir =
+        history_dir.ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
     let r_path = history_dir.join("r.db");
     let shell_path = history_dir.join("shell.db");
 

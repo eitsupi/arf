@@ -177,7 +177,7 @@ pub enum HistoryAction {
 
         /// Override hostname for imported entries.
         /// Marks entries to distinguish them from native arf history
-        #[arg(long, value_hint = ValueHint::Hostname)]
+        #[arg(long)]
         hostname: Option<String>,
 
         /// Perform a dry run without actually importing
