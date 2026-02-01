@@ -330,41 +330,31 @@ impl Terminal {
     }
 
     /// Wait for the prompt to appear using screen-based matching.
-    /// Looks for "> " on the current line which matches both "r> " and "R {version}> " prompts.
+    /// Looks for "> " or a line ending with ">" which matches R prompts
+    /// (e.g., "R 4.5.2>", "r>", "r> [I]" for vi mode).
     ///
     /// This uses vt100-parsed screen content which correctly handles ANSI escape sequences
     /// on all platforms including Windows.
     pub fn wait_for_prompt(&mut self) -> Result<(), String> {
-        self.expect_screen("> ")
-    }
-
-    /// Wait for a pattern to appear in the vt100-parsed screen content.
-    ///
-    /// Unlike `expect()` which searches the raw output buffer (including ANSI codes),
-    /// this method searches the interpreted screen content from vt100, making it
-    /// work correctly on Windows where ANSI sequences would break pattern matching.
-    pub fn expect_screen(&mut self, pattern: &str) -> Result<(), String> {
         let timeout = Duration::from_millis(DEFAULT_TIMEOUT_MS);
         let start = Instant::now();
 
         while start.elapsed() < timeout {
-            // Check if still running
             {
                 let state = self.state.lock().map_err(|e| e.to_string())?;
                 if !state.running {
                     // Check screen content before giving up
-                    let screen_content: String = state.screen.lines.join("\n");
-                    if screen_content.contains(pattern) {
+                    if Self::screen_has_prompt(&state.screen.lines) {
                         return Ok(());
                     }
+                    let screen_content: String = state.screen.lines.join("\n");
                     return Err(format!(
-                        "Process exited before finding pattern '{}' on screen. Screen:\n{}",
-                        pattern, screen_content
+                        "Process exited before finding prompt. Screen:\n{}",
+                        screen_content
                     ));
                 }
                 // Check all lines in screen
-                let screen_content: String = state.screen.lines.join("\n");
-                if screen_content.contains(pattern) {
+                if Self::screen_has_prompt(&state.screen.lines) {
                     return Ok(());
                 }
             }
@@ -379,9 +369,28 @@ impl Terminal {
             .map(|s| s.screen.lines.join("\n"))
             .unwrap_or_default();
         Err(format!(
-            "Timeout waiting for pattern '{}' on screen. Screen content:\n{}",
-            pattern, screen_content
+            "Timeout waiting for prompt on screen. Screen content:\n{}",
+            screen_content
         ))
+    }
+
+    /// Check if any line in the screen contains a prompt pattern.
+    /// Matches lines that:
+    /// - Contain "> " (prompt followed by space, for vi mode like "r> [I]")
+    /// - End with ">" (prompt at end of line, like "R 4.5.2>")
+    fn screen_has_prompt(lines: &[String]) -> bool {
+        for line in lines {
+            let trimmed = line.trim_end();
+            // Check for "> " pattern (vi mode or prompt with trailing space)
+            if trimmed.contains("> ") {
+                return true;
+            }
+            // Check for line ending with ">" (default prompt without trailing space in screen)
+            if trimmed.ends_with('>') {
+                return true;
+            }
+        }
+        false
     }
 
     /// Clear the output buffer and wait for new output matching pattern.
