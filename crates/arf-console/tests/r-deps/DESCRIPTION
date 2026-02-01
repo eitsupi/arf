@@ -1,0 +1,5 @@
+Package: r-test-deps
+Description: R package dependencies for testing
+Version: 0.0.0.9000
+Imports:
+    dplyr

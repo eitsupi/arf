@@ -318,19 +318,35 @@ mod tests {
         // Tilde with slash should expand
         let expanded = expand_tilde("~/Documents");
         if let Some(home) = dirs::home_dir() {
-            assert!(expanded.starts_with(&home.to_string_lossy().to_string()));
+            // Compare with normalized home path (forward slashes)
+            let home_normalized = normalize_separators(&home.to_string_lossy());
+            assert!(expanded.starts_with(&home_normalized));
             assert!(expanded.ends_with("Documents"));
         }
 
         // Just tilde
         let expanded = expand_tilde("~");
         if let Some(home) = dirs::home_dir() {
-            assert_eq!(expanded, home.to_string_lossy().to_string());
+            let home_normalized = normalize_separators(&home.to_string_lossy());
+            assert_eq!(expanded, home_normalized);
         }
 
-        // No tilde - unchanged
-        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+        // Relative path - unchanged on all platforms
         assert_eq!(expand_tilde("./foo"), "./foo");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_expand_tilde_unix_paths() {
+        // Unix absolute paths - unchanged
+        assert_eq!(expand_tilde("/usr/bin"), "/usr/bin");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_expand_tilde_windows_paths() {
+        // Windows absolute paths - backslashes normalized to forward slashes
+        assert_eq!(expand_tilde("C:\\Users"), "C:/Users");
     }
 
     #[test]

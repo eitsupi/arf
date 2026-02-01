@@ -47,7 +47,6 @@ embed-resource = "3"
 [dev-dependencies]
 insta.workspace = true
 regex.workspace = true
-rexpect.workspace = true
 tempfile.workspace = true
 portable-pty.workspace = true
 vt100.workspace = true

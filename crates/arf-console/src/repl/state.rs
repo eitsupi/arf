@@ -549,9 +549,14 @@ mod tests {
         }
 
         // Verify the prompt contains the temp directory path
+        // Some systems resolve symlinks differently, so we also accept absolute paths
+        #[cfg(unix)]
+        let is_absolute_path = rendered2.starts_with("/");
+        #[cfg(windows)]
+        let is_absolute_path = rendered2.len() >= 3 && rendered2.chars().nth(1) == Some(':');
+
         assert!(
-            rendered2.contains(&temp_dir.to_string_lossy().to_string())
-                || rendered2.starts_with("/"), // Some systems resolve symlinks differently
+            rendered2.contains(&temp_dir.to_string_lossy().to_string()) || is_absolute_path,
             "Prompt should contain temp dir path, got: {}",
             rendered2
         );

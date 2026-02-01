@@ -5,6 +5,10 @@
 //! The PTY tests use a custom terminal emulator based on vt100-rust that properly
 //! responds to cursor position queries (CSI 6n) from reedline, enabling full
 //! interactive testing of arf.
+//!
+//! Note: Currently disabled on Windows due to PTY handling issues.
+
+#![cfg(unix)]
 
 mod common;
 
@@ -880,9 +884,15 @@ fn test_pty_history_exit_status() {
 /// This test verifies that errors from packages like dplyr that use rlang's
 /// condition system (which may output to stdout instead of stderr) are still
 /// correctly detected and tracked in history.
+///
+/// Requires dplyr to be installed.
 #[test]
 #[cfg(unix)]
 fn test_pty_rlang_error_detection() {
+    if !common::has_dplyr() {
+        eprintln!("Skipping test: dplyr not available");
+        return;
+    }
     use reedline::{History, SearchDirection, SearchQuery, SqliteBackedHistory};
 
     // Create a temporary directory for history
@@ -1886,9 +1896,16 @@ fn test_pty_history_schema_pager_mouse_scroll() {
 ///
 /// This is a regression test for the bug where clearing the prompt used the
 /// stripped line count instead of the original line count.
+///
+/// Requires Air CLI for autoformat functionality.
 #[test]
 #[cfg(unix)]
 fn test_pty_reprex_paste_strips_output_lines() {
+    if !common::has_air_cli() {
+        eprintln!("Skipping test: Air CLI not available");
+        return;
+    }
+
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"]).expect("Failed to spawn arf");
 
