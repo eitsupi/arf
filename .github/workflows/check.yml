@@ -6,6 +6,7 @@ on:
       - .github/workflows/check.yml
       - crates/**
       - Cargo.*
+      - "!**/*.md"
   push:
     branches:
       - main
@@ -13,6 +14,8 @@ on:
       - .github/workflows/check.yml
       - crates/**
       - Cargo.*
+      - "!**/*.md"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
