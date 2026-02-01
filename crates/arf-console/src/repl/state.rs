@@ -2,7 +2,7 @@
 
 use crate::config::{
     HistoryForgetConfig, Indicators, ModeIndicatorPosition, RSourceStatus, SpinnerConfig,
-    StatusColorConfig, StatusConfig,
+    StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
 };
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
@@ -83,6 +83,10 @@ pub struct PromptRuntimeConfig {
     last_command_failed: bool,
     /// Spinner configuration for busy indicator.
     spinner_config: SpinnerConfig,
+    /// Vi mode configuration (symbols).
+    vi_config: ViConfig,
+    /// Vi mode colors for prompt indicator.
+    vi_colors: ViColorConfig,
 }
 
 impl PromptRuntimeConfig {
@@ -104,6 +108,8 @@ impl PromptRuntimeConfig {
         status_config: StatusConfig,
         status_colors: StatusColorConfig,
         spinner_config: SpinnerConfig,
+        vi_config: ViConfig,
+        vi_colors: ViColorConfig,
     ) -> Self {
         // Initialize spinner in arf-libr
         arf_libr::set_spinner_frames(&spinner_config.frames);
@@ -130,6 +136,8 @@ impl PromptRuntimeConfig {
             status_colors,
             last_command_failed: false,
             spinner_config,
+            vi_config,
+            vi_colors,
         }
     }
 
@@ -139,11 +147,14 @@ impl PromptRuntimeConfig {
             // Expand placeholders (including {cwd}) dynamically each time
             let shell_format = self.prompt_formatter.format(&self.shell_template);
             let cont_format = self.prompt_formatter.format(&self.cont_template);
-            RPrompt::new(shell_format, cont_format).with_colors(
-                self.shell_color,
-                self.continuation_color,
-                self.mode_indicator_color,
-            )
+            RPrompt::new(shell_format, cont_format)
+                .with_colors(
+                    self.shell_color,
+                    self.continuation_color,
+                    self.mode_indicator_color,
+                )
+                .with_vi_symbol(self.vi_config.symbol.clone())
+                .with_vi_colors(self.vi_colors.clone())
         } else {
             // In R mode, use main_template with optional mode indicator
             // Expand placeholders (including {cwd}) dynamically each time
@@ -164,6 +175,8 @@ impl PromptRuntimeConfig {
                     self.continuation_color,
                     self.mode_indicator_color,
                 )
+                .with_vi_symbol(self.vi_config.symbol.clone())
+                .with_vi_colors(self.vi_colors.clone())
         }
     }
 
@@ -357,6 +370,8 @@ mod tests {
             StatusConfig::default(),
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         )
     }
 
@@ -487,6 +502,8 @@ mod tests {
             StatusConfig::default(),
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         let prompt = config.build_main_prompt();
@@ -527,6 +544,8 @@ mod tests {
             StatusConfig::default(),
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         // Get the current directory
@@ -596,6 +615,8 @@ mod tests {
             status_config,
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         // Initially no error - empty status symbol
@@ -652,6 +673,8 @@ mod tests {
             status_config,
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         // With empty symbols, status placeholder should expand to empty string
@@ -692,6 +715,8 @@ mod tests {
             status_config,
             StatusColorConfig::default(),
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         // Prompt stays the same regardless of status
@@ -734,6 +759,8 @@ mod tests {
             status_config,
             status_colors,
             SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
 
         // On success, prompt should use success color (Green)
@@ -792,6 +819,8 @@ mod tests {
                 frames: String::new(),
                 color: Color::Default,
             }, // Disabled
+            ViConfig::default(),
+            ViColorConfig::default(),
         );
         // Should not panic when spinner is disabled
         config.start_spinner();

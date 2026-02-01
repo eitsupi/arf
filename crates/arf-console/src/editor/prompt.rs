@@ -5,6 +5,10 @@
 //! - `{cwd}` - Current working directory (full path)
 //! - `{cwd_short}` - Current working directory (basename only)
 //! - `{shell}` - Shell name from $SHELL (e.g., "bash", "zsh")
+//! - `{status}` - Command status indicator (success/error)
+//!
+//! Note: Vi mode indicator is handled separately via `render_prompt_indicator()`,
+//! not as a placeholder. See `[prompt.vi.symbol]` in config.
 
 use std::env;
 use std::path::Path;

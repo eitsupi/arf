@@ -5,11 +5,11 @@ mod completion;
 mod editor;
 mod experimental;
 mod history;
-mod prompt;
+pub(crate) mod prompt;
 mod reprex;
 mod startup;
 
-pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig};
+pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
 pub use completion::CompletionConfig;
 pub use editor::EditorConfig;
 pub use experimental::SpinnerConfig;
@@ -17,7 +17,9 @@ pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
-pub use prompt::{Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol};
+pub use prompt::{
+    Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
+};
 pub use reprex::ReprexConfig;
 pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
 

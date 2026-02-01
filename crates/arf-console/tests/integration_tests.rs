@@ -2488,3 +2488,94 @@ fn test_pty_menu_prompt() {
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Test vi mode indicator is displayed correctly at the end of the prompt.
+///
+/// The vi mode indicator is shown via `render_prompt_indicator()` which ensures
+/// it's always synchronized with the actual editing mode (unlike a placeholder
+/// approach which would be 1 render cycle behind).
+#[test]
+fn test_pty_vi_mode_indicator() {
+    use common::Terminal;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // Create a config file with vi mode and vi symbol configuration
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[editor]
+mode = "vi"
+
+[prompt]
+format = "r> "
+
+[prompt.vi]
+symbol = {{ insert = "[I]", normal = "[N]" }}
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Check initial prompt shows insert mode indicator (at end of prompt line)
+    let screen = terminal.screen().expect("Should get screen");
+    terminal.dump_screen().ok();
+
+    // Find the prompt line - should contain "r> " followed by "[I]"
+    let prompt_line = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+    assert!(prompt_line.is_some(), "Should find prompt line with 'r> '");
+    let prompt_line = prompt_line.unwrap();
+    assert!(
+        prompt_line.contains("[I]"),
+        "Initial prompt should show [I] for insert mode (at end of prompt), got: {}",
+        prompt_line
+    );
+
+    // Press Escape to switch to normal mode
+    terminal.send("\x1b").expect("Should send Escape");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Check prompt after Escape - should immediately show [N]
+    let screen = terminal.screen().expect("Should get screen after Escape");
+    eprintln!("=== After Escape ===");
+    terminal.dump_screen().ok();
+
+    let prompt_line_after_esc = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+    assert!(
+        prompt_line_after_esc
+            .as_ref()
+            .is_some_and(|l| l.contains("[N]")),
+        "After Escape, prompt should show [N] for normal mode, got: {:?}",
+        prompt_line_after_esc
+    );
+
+    // Press 'i' to go back to insert mode
+    terminal.send("i").expect("Should send i");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let screen = terminal.screen().expect("Should get screen after i");
+    eprintln!("=== After pressing 'i' (back to insert) ===");
+    terminal.dump_screen().ok();
+
+    let prompt_line_after_i = screen.lines.iter().find(|l| l.contains("r> ")).cloned();
+    assert!(
+        prompt_line_after_i
+            .as_ref()
+            .is_some_and(|l| l.contains("[I]")),
+        "After 'i', prompt should show [I] for insert mode, got: {:?}",
+        prompt_line_after_i
+    );
+
+    terminal.quit().expect("Should quit cleanly");
+}

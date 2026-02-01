@@ -20,6 +20,8 @@ pub struct PromptConfig {
     pub indicators: Indicators,
     /// Command status indicator configuration.
     pub status: StatusConfig,
+    /// Vi mode indicator configuration.
+    pub vi: ViConfig,
 }
 
 impl Default for PromptConfig {
@@ -31,6 +33,7 @@ impl Default for PromptConfig {
             mode_indicator: ModeIndicatorPosition::default(),
             indicators: Indicators::default(),
             status: StatusConfig::default(),
+            vi: ViConfig::default(),
         }
     }
 }
@@ -77,6 +80,38 @@ pub struct StatusConfig {
     /// Also change entire prompt color based on status.
     /// When true, the prompt color is overridden with status colors.
     pub override_prompt_color: bool,
+}
+
+/// Symbols displayed in the prompt to indicate vi editing mode.
+///
+/// Example: `symbol = { insert = "> ", normal = ": ", non_vi = "> " }`
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub(crate) struct ViSymbol {
+    /// Symbol shown in vi insert mode (default: "").
+    #[serde(default)]
+    pub insert: String,
+    /// Symbol shown in vi normal mode (default: "").
+    #[serde(default)]
+    pub normal: String,
+    /// Symbol shown in non-vi modes like Emacs (default: "").
+    /// Use this to maintain consistent prompt appearance across all editor modes.
+    #[serde(default)]
+    pub non_vi: String,
+}
+
+/// Vi mode indicator configuration.
+///
+/// Controls symbols shown via `render_prompt_indicator()` for different editing modes.
+/// Symbols appear at the end of the prompt line (after the main prompt text).
+/// This is the same approach used by nushell, due to reedline's fixed render order.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub struct ViConfig {
+    /// Symbols to display for insert/normal mode.
+    /// Example: `symbol = { insert = "[I] ", normal = "[N] " }`
+    #[serde(default)]
+    pub symbol: ViSymbol,
 }
 
 /// Position of the mode indicator relative to the prompt.
