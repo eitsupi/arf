@@ -788,7 +788,12 @@ impl HistoryBrowser {
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
         println!("\r{}", "─".repeat(width).dark_grey());
 
-        // Footer with keybindings or feedback message
+        // Footer line 1: filter syntax help
+        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        let syntax_help = "  Filters: host:<name>  cwd:<path>  exit:<N>  (text = fuzzy search)";
+        println!("\r{}", pad_line(syntax_help).dark_grey());
+
+        // Footer line 2: keybindings or feedback message
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
         if self.show_delete_dialog {
             let dialog_msg = format!(
@@ -799,7 +804,7 @@ impl HistoryBrowser {
         } else if let Some(ref msg) = self.feedback_message {
             println!("\r{}", pad_line(&format!("  {}", msg)));
         } else {
-            let footer = "  Space toggle | d delete | y copy | Enter copy+exit | q exit";
+            let footer = "  Space select | d delete | y copy | Enter copy+exit | q quit";
             println!("\r{}", pad_line(footer).dark_grey());
         }
 
@@ -869,8 +874,8 @@ fn calculate_layout(cols: usize) -> (usize, usize) {
 /// Calculate the number of visible result rows.
 fn visible_result_rows() -> usize {
     let (_, rows) = terminal::size().unwrap_or((80, 24));
-    // Reserve: header(1) + filter(1) + separator(1) + footer_separator(1) + footer(1) = 5
-    rows.saturating_sub(5).max(3) as usize
+    // Reserve: header(1) + filter(1) + separator(1) + footer_separator(1) + footer(2) = 6
+    rows.saturating_sub(6).max(3) as usize
 }
 
 /// Convert a multiline string to a single line for display.
