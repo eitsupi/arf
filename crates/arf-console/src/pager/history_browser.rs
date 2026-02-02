@@ -477,7 +477,7 @@ impl HistoryBrowser {
                             }
 
                             // Toggle selection
-                            (KeyCode::Char(' '), KeyModifiers::NONE) => {
+                            (KeyCode::Tab, _) => {
                                 self.toggle_selection();
                             }
 
@@ -790,7 +790,7 @@ impl HistoryBrowser {
 
         // Footer line 1: filter syntax help
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-        let syntax_help = "  Filters: host:<name>  cwd:<path>  exit:<N>  (text = fuzzy search)";
+        let syntax_help = "  Filter: host:<name> cwd:<path> exit:<N> <text>  (space = AND)";
         println!("\r{}", pad_line(syntax_help).dark_grey());
 
         // Footer line 2: keybindings or feedback message
@@ -804,7 +804,7 @@ impl HistoryBrowser {
         } else if let Some(ref msg) = self.feedback_message {
             println!("\r{}", pad_line(&format!("  {}", msg)));
         } else {
-            let footer = "  Space select | d delete | y copy | Enter copy+exit | q quit";
+            let footer = "  Tab select | d delete | y copy | Enter copy+exit | q exit";
             println!("\r{}", pad_line(footer).dark_grey());
         }
 
