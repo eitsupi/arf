@@ -232,6 +232,9 @@ impl MetaCommandCompleter {
                 if cmd == "history" && subcmd == "clear" {
                     // Complete with clear targets (r, shell, all)
                     self.complete_history_clear_targets(pos, "")
+                } else if cmd == "history" && subcmd == "browse" {
+                    // Complete with browse targets (r, shell)
+                    self.complete_history_browse_targets(pos, "")
                 } else {
                     vec![]
                 }
@@ -243,6 +246,8 @@ impl MetaCommandCompleter {
                 let partial = parts[2];
                 if cmd == "history" && subcmd == "clear" {
                     self.complete_history_clear_targets(pos, partial)
+                } else if cmd == "history" && subcmd == "browse" {
+                    self.complete_history_browse_targets(pos, partial)
                 } else {
                     vec![]
                 }
@@ -334,9 +339,10 @@ impl MetaCommandCompleter {
         suggestions
     }
 
-    /// Complete history subcommands (clear, schema).
+    /// Complete history subcommands (browse, clear, schema).
     fn complete_history_subcommands(&self, pos: usize, partial: &str) -> Vec<Suggestion> {
         let subcommands = [
+            ("browse", "Browse and manage command history"),
             ("clear", "Clear command history"),
             ("schema", "Display database schema and R examples"),
         ];
@@ -373,6 +379,39 @@ impl MetaCommandCompleter {
             ("r", "Clear R mode history"),
             ("shell", "Clear shell mode history"),
             ("all", "Clear all history"),
+        ];
+
+        let match_len = partial.len();
+        targets
+            .iter()
+            .filter(|(name, _)| name.starts_with(partial))
+            .map(|(name, desc)| {
+                let indices = if match_len > 0 {
+                    Some((0..match_len).collect())
+                } else {
+                    None
+                };
+                Suggestion {
+                    value: name.to_string(),
+                    description: Some(desc.to_string()),
+                    extra: None,
+                    span: Span {
+                        start: pos - match_len,
+                        end: pos,
+                    },
+                    append_whitespace: false,
+                    style: None,
+                    match_indices: indices,
+                }
+            })
+            .collect()
+    }
+
+    /// Complete history browse targets (r, shell).
+    fn complete_history_browse_targets(&self, pos: usize, partial: &str) -> Vec<Suggestion> {
+        let targets = [
+            ("r", "Browse R mode history"),
+            ("shell", "Browse shell mode history"),
         ];
 
         let match_len = partial.len();

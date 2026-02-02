@@ -2,7 +2,7 @@
 
 use crate::config::RSourceStatus;
 use crate::external::formatter;
-use crate::pager::{display_session_info, run_help_browser};
+use crate::pager::{HistoryDbMode, display_session_info, run_help_browser, run_history_browser};
 use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
 
@@ -149,6 +149,15 @@ pub fn process_meta_command(
         "history" => {
             let subcmd = parts.get(1).copied().unwrap_or("");
             match subcmd {
+                "browse" => {
+                    let target = parts.get(2).copied().unwrap_or("");
+                    process_history_browse(
+                        r_history_path,
+                        shell_history_path,
+                        target,
+                        prompt_config.is_shell_enabled(),
+                    )
+                }
                 "clear" => {
                     let target = parts.get(2).copied().unwrap_or("");
                     process_history_clear(
@@ -166,6 +175,7 @@ pub fn process_meta_command(
                 }
                 "" => {
                     arf_println!("Usage: :history <subcommand>");
+                    println!("#   browse - Browse and manage command history");
                     println!("#   clear  - Clear command history");
                     println!("#   schema - Display database schema and R examples");
                     Some(MetaCommandResult::Handled)
@@ -223,6 +233,45 @@ pub fn process_meta_command(
             Some(MetaCommandResult::Handled)
         }
         _ => Some(MetaCommandResult::Unknown(cmd.to_string())),
+    }
+}
+
+/// Process :history browse command.
+fn process_history_browse(
+    r_history_path: &Option<PathBuf>,
+    shell_history_path: &Option<PathBuf>,
+    target: &str,
+    is_shell_mode: bool,
+) -> Option<MetaCommandResult> {
+    // Determine which database to browse
+    let (mode, path) = match target {
+        "" => {
+            // Default: browse based on current mode
+            if is_shell_mode {
+                (HistoryDbMode::Shell, shell_history_path.as_ref())
+            } else {
+                (HistoryDbMode::R, r_history_path.as_ref())
+            }
+        }
+        "r" | "R" => (HistoryDbMode::R, r_history_path.as_ref()),
+        "shell" => (HistoryDbMode::Shell, shell_history_path.as_ref()),
+        _ => {
+            arf_println!("Unknown target: {}. Use r or shell.", target);
+            return Some(MetaCommandResult::Handled);
+        }
+    };
+
+    let Some(db_path) = path else {
+        arf_println!("History is disabled for {} mode.", mode.display_name());
+        return Some(MetaCommandResult::Handled);
+    };
+
+    match run_history_browser(db_path, mode) {
+        Ok(_) => Some(MetaCommandResult::Handled),
+        Err(e) => {
+            arf_println!("Error: {}", e);
+            Some(MetaCommandResult::Handled)
+        }
     }
 }
 

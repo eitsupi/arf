@@ -1,13 +1,15 @@
 //! Pager-based UI components.
 //!
 //! This module provides pager functionality for displaying scrollable content,
-//! help browser, and history schema viewer.
+//! help browser, history browser, and history schema viewer.
 
 mod help;
+pub mod history_browser;
 pub mod history_schema;
 pub mod session_info;
 
 pub use help::run_help_browser;
+pub use history_browser::{HistoryDbMode, run_history_browser};
 pub use session_info::display_session_info;
 
 use base64::{Engine, engine::general_purpose};

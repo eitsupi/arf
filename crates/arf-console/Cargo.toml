@@ -34,6 +34,7 @@ regex.workspace = true
 once_cell.workspace = true
 nucleo-matcher.workspace = true
 gethostname.workspace = true
+rusqlite.workspace = true
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 libc.workspace = true
