@@ -28,7 +28,6 @@ use reedline::{
     default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::io;
 
 use crate::editor::keybindings::{
@@ -327,7 +326,7 @@ impl Repl {
                 shell_history_path,
                 r_source_status: self.r_source_status.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
-                failed_commands_queue: VecDeque::new(),
+                sponge_queue: state::SpongeQueue::new(),
             });
         });
 
@@ -353,16 +352,16 @@ impl Repl {
             arf_libr::run_r_mainloop();
         }
 
-        // Sponge cleanup on exit: purge failed commands beyond the delay limit.
+        // Sponge cleanup on exit: purge all remaining failed commands in the queue.
         // Note: R's q() may terminate the process before this cleanup completes,
         // so the most recent failed command might remain in history.
         // The main value of sponge is purging OLD failed commands during the session.
         REPL_STATE.with(|state| {
             if let Some(ref mut repl_state) = *state.borrow_mut()
                 && repl_state.forget_config.enabled
-                && !repl_state.failed_commands_queue.is_empty()
+                && !repl_state.sponge_queue.is_empty()
             {
-                while let Some(id_to_delete) = repl_state.failed_commands_queue.pop_back() {
+                for id_to_delete in repl_state.sponge_queue.drain_failed_ids() {
                     let _ = repl_state.line_editor.history_mut().delete(id_to_delete);
                 }
                 let _ = repl_state.line_editor.sync_history();
@@ -688,20 +687,23 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     item
                 });
 
-                // Sponge feature: track failed commands and purge old ones
+                // Sponge feature: track all commands and purge old failed ones.
+                // See SpongeQueue for the algorithm details.
                 if state.forget_config.enabled {
-                    // Always track failed commands
-                    if had_error && let Some(id) = captured_id.get() {
-                        state.failed_commands_queue.push_front(id);
-                    }
+                    // Determine effective delay: use configured delay normally,
+                    // or usize::MAX for on_exit_only (defer all deletions until exit)
+                    let effective_delay = if state.forget_config.on_exit_only {
+                        usize::MAX
+                    } else {
+                        state.forget_config.delay
+                    };
 
-                    // Purge old failed commands immediately unless on_exit_only is set
-                    if !state.forget_config.on_exit_only {
-                        while state.failed_commands_queue.len() > state.forget_config.delay {
-                            if let Some(id_to_delete) = state.failed_commands_queue.pop_back() {
-                                let _ = state.line_editor.history_mut().delete(id_to_delete);
-                            }
-                        }
+                    if let Some(id_to_delete) = state.sponge_queue.record_command(
+                        had_error,
+                        captured_id.get(),
+                        effective_delay,
+                    ) {
+                        let _ = state.line_editor.history_mut().delete(id_to_delete);
                     }
                 }
                 had_error
@@ -926,4 +928,166 @@ fn setup_history(line_editor: Reedline, history_path: Option<std::path::PathBuf>
     }
 
     line_editor
+}
+
+#[cfg(test)]
+mod sponge_tests {
+    use super::state::SpongeQueue;
+    use reedline::HistoryItemId;
+
+    /// Helper to create a HistoryItemId for testing.
+    fn make_id(id: i64) -> HistoryItemId {
+        HistoryItemId::new(id)
+    }
+
+    /// Helper to run a sequence of commands through SpongeQueue and collect deleted IDs.
+    fn run_commands(commands: &[(bool, i64)], delay: usize) -> Vec<HistoryItemId> {
+        let mut queue = SpongeQueue::new();
+        let mut deleted = Vec::new();
+
+        for &(is_failure, id) in commands {
+            let history_id = Some(make_id(id));
+            if let Some(id_to_delete) = queue.record_command(is_failure, history_id, delay) {
+                deleted.push(id_to_delete);
+            }
+        }
+
+        deleted
+    }
+
+    #[test]
+    fn test_sponge_delay_keeps_recent_failures() {
+        // With delay=2, failed commands should remain accessible for 2 more commands
+        // Command sequence: fail(1), success, success -> fail(1) should be deleted
+        let commands = vec![
+            (true, 1),  // Failed command with ID 1
+            (false, 2), // Success
+            (false, 3), // Success -> now queue has 3 entries, purge oldest
+        ];
+
+        let deleted = run_commands(&commands, 2);
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0], make_id(1));
+    }
+
+    #[test]
+    fn test_sponge_delay_zero_deletes_immediately() {
+        // With delay=0, failed commands are deleted immediately
+        let commands = vec![
+            (true, 1), // Failed -> immediately deleted (queue > 0)
+        ];
+
+        let deleted = run_commands(&commands, 0);
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0], make_id(1));
+    }
+
+    #[test]
+    fn test_sponge_success_does_not_delete() {
+        // Successful commands never cause deletions directly
+        let commands = vec![
+            (false, 1), // Success
+            (false, 2), // Success
+            (false, 3), // Success -> purges None entries
+        ];
+
+        let deleted = run_commands(&commands, 2);
+        assert!(deleted.is_empty(), "No failures to delete");
+    }
+
+    #[test]
+    fn test_sponge_multiple_failures_fifo() {
+        // Multiple failures should be deleted in FIFO order
+        // delay=2: keep 2 entries, delete older ones
+        let commands = vec![
+            (true, 1),  // fail(1) -> queue: [Some(1)]
+            (true, 2),  // fail(2) -> queue: [Some(2), Some(1)]
+            (true, 3),  // fail(3) -> queue: [Some(3), Some(2), Some(1)] -> delete 1
+            (false, 4), // success -> queue: [None, Some(3), Some(2)] -> delete 2
+        ];
+
+        let deleted = run_commands(&commands, 2);
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0], make_id(1)); // First to be deleted
+        assert_eq!(deleted[1], make_id(2)); // Second to be deleted
+    }
+
+    #[test]
+    fn test_sponge_interleaved_success_failure() {
+        // Interleaved success/failure pattern
+        // delay=3
+        let commands = vec![
+            (true, 1),  // fail -> [Some(1)]
+            (false, 2), // ok   -> [None, Some(1)]
+            (true, 3),  // fail -> [Some(3), None, Some(1)]
+            (false, 4), // ok   -> [None, Some(3), None, Some(1)] -> delete 1
+            (false, 5), // ok   -> [None, None, Some(3), None] -> delete None (no-op)
+        ];
+
+        let deleted = run_commands(&commands, 3);
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0], make_id(1));
+    }
+
+    #[test]
+    fn test_sponge_large_delay_no_deletion() {
+        // With a large delay, nothing gets deleted during the session
+        let commands = vec![(true, 1), (true, 2), (true, 3), (false, 4), (false, 5)];
+
+        let deleted = run_commands(&commands, 100);
+        assert!(deleted.is_empty(), "Delay is larger than command count");
+    }
+
+    #[test]
+    fn test_sponge_delay_one_keeps_one_command() {
+        // delay=1 means keep only the most recent command in queue
+        let commands = vec![
+            (true, 1),  // fail -> [Some(1)]
+            (false, 2), // ok   -> [None, Some(1)] -> delete 1
+            (true, 3),  // fail -> [Some(3), None] -> delete None (no-op)
+            (true, 4),  // fail -> [Some(4), Some(3)] -> delete 3
+        ];
+
+        let deleted = run_commands(&commands, 1);
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0], make_id(1));
+        assert_eq!(deleted[1], make_id(3));
+    }
+
+    #[test]
+    fn test_sponge_realistic_scenario() {
+        // Realistic scenario: user typos a command, then fixes it
+        // With delay=2, they can use up-arrow to see the failed command for 2 commands
+        let commands = vec![
+            (true, 100),  // typo: "gti status" -> [Some(100)]
+            (false, 101), // fix: "git status" -> [None, Some(100)]
+            (false, 102), // continue: "git add ." -> [None, None, Some(100)] -> delete 100
+        ];
+
+        let deleted = run_commands(&commands, 2);
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0], make_id(100));
+    }
+
+    #[test]
+    fn test_sponge_drain_failed_ids() {
+        // Test drain_failed_ids for exit cleanup
+        let mut queue = SpongeQueue::new();
+
+        // Add some commands with a large delay (no immediate deletion)
+        queue.record_command(true, Some(make_id(1)), 100);
+        queue.record_command(false, Some(make_id(2)), 100);
+        queue.record_command(true, Some(make_id(3)), 100);
+        queue.record_command(false, Some(make_id(4)), 100);
+
+        // Drain should return only the failed command IDs
+        let drained: Vec<_> = queue.drain_failed_ids().collect();
+        assert_eq!(drained.len(), 2);
+        // drain_failed_ids returns in FIFO order (oldest first)
+        assert_eq!(drained[0], make_id(1));
+        assert_eq!(drained[1], make_id(3));
+
+        // Queue should be empty after drain
+        assert!(queue.is_empty());
+    }
 }
