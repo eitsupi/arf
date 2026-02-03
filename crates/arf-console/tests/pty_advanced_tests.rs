@@ -91,8 +91,6 @@ fn test_pty_reprex_paste_strips_output_lines() {
 #[test]
 #[cfg(unix)]
 fn test_pty_ctrl_d_with_content_does_not_exit() {
-    use common::Terminal;
-
     let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
         .expect("Failed to spawn arf");
 
@@ -138,8 +136,6 @@ fn test_pty_ctrl_d_with_content_does_not_exit() {
 #[test]
 #[cfg(unix)]
 fn test_pty_history_menu_replaces_buffer() {
-    use common::Terminal;
-
     let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
         .expect("Failed to spawn arf");
 
@@ -202,8 +198,6 @@ fn test_pty_history_menu_replaces_buffer() {
 #[test]
 #[cfg(unix)]
 fn test_pty_history_menu_with_auto_match_pair() {
-    use common::Terminal;
-
     // Enable auto-match (default) to trigger the bug scenario
     let mut terminal =
         Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
@@ -258,8 +252,6 @@ fn test_pty_history_menu_with_auto_match_pair() {
 #[test]
 #[cfg(unix)]
 fn test_pty_backtick_does_not_crash() {
-    use common::Terminal;
-
     let mut terminal =
         Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
 
@@ -484,7 +476,6 @@ fn test_pty_menu_prompt() {
 #[test]
 #[cfg(unix)]
 fn test_pty_vi_mode_indicator() {
-    use common::Terminal;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
