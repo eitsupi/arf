@@ -20,7 +20,10 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
     if display_width(s) <= max_width {
         return s.to_string();
     }
-    if max_width <= 1 {
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
         return "…".to_string();
     }
 
@@ -56,6 +59,10 @@ pub fn exceeds_width(s: &str, max_width: usize) -> bool {
 /// * At `scroll_pos >= max_scroll`: end shown, `…` at start.
 /// * In between: `…` on both sides.
 pub fn scroll_display(s: &str, max_width: usize, scroll_pos: usize) -> (String, usize) {
+    if max_width == 0 {
+        return (String::new(), 0);
+    }
+
     let total = display_width(s);
 
     if total <= max_width {
@@ -70,8 +77,9 @@ pub fn scroll_display(s: &str, max_width: usize, scroll_pos: usize) -> (String, 
 
     if eff == 0 {
         // Beginning: show first (max_width-1) cols + '…'
-        let (text, _) = take_columns(s, max_width - 1);
-        (format!("{}…", text), max_scroll)
+        let (text, actual_vis) = take_columns(s, max_width - 1);
+        let right_pad = (max_width - 1).saturating_sub(actual_vis);
+        (format!("{}{}…", text, " ".repeat(right_pad)), max_scroll)
     } else if eff >= max_scroll {
         // End: '…' + last (max_width-1) cols
         let skip_cols = total.saturating_sub(max_width - 1);
@@ -217,7 +225,11 @@ mod tests {
     #[test]
     fn truncate_edge_min() {
         assert_eq!(truncate_to_width("hello", 1), "…");
-        assert_eq!(truncate_to_width("hello", 0), "…");
+    }
+
+    #[test]
+    fn truncate_zero_width() {
+        assert_eq!(truncate_to_width("hello", 0), "");
     }
 
     #[test]
@@ -392,5 +404,29 @@ mod tests {
         // "🎉🎊🎁" = 6 cols (each emoji 2 cols), max_width = 3
         // target = 2 content cols → 🎉(2) fits, 🎊 would need 4 → stop → "🎉…"
         assert_eq!(truncate_to_width("🎉🎊🎁", 3), "🎉…");
+    }
+
+    // ── edge cases from PR #39 review ────────────────────────────────
+
+    #[test]
+    fn scroll_zero_width() {
+        // max_width==0 must not panic and should return empty string
+        let (r, m) = scroll_display("hello world", 0, 0);
+        assert_eq!(r, "");
+        assert_eq!(m, 0);
+    }
+
+    #[test]
+    fn scroll_start_cjk_boundary_padding() {
+        // "日本語テスト" = 12 cols, max_width = 5
+        // eff==0 branch: take_columns(s, 4) → 日(2)+本(2)=4, actual_vis=4
+        // Result: "日本…" = 5 cols — no padding needed here
+        let (r, _) = scroll_display("日本語テスト", 5, 0);
+        assert_eq!(display_width(&r), 5);
+        // max_width = 4: take_columns(s, 3) → 日(2), actual_vis=2, pad 1
+        // Result: "日 …" = 4 cols
+        let (r2, _) = scroll_display("日本語テスト", 4, 0);
+        assert_eq!(display_width(&r2), 4);
+        assert_eq!(r2, "日 …");
     }
 }
