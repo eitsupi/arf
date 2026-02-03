@@ -48,10 +48,24 @@ pub(crate) const SCROLL_INTERVAL_MS: u64 = 150;
 /// Pause duration at the start of scroll animation (in ms).
 pub(crate) const SCROLL_PAUSE_MS: u64 = 1000;
 
+/// RAII guard that restores terminal state on drop, ensuring cleanup even on panic.
+struct AlternateScreenGuard;
+
+impl Drop for AlternateScreenGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = stdout.execute(DisableMouseCapture);
+        let _ = stdout.execute(cursor::Show);
+        let _ = stdout.execute(LeaveAlternateScreen);
+    }
+}
+
 /// Run a closure inside an alternate screen with mouse capture and raw mode.
 ///
 /// Handles setup (`EnterAlternateScreen`, `EnableMouseCapture`,
-/// `enable_raw_mode`) and guaranteed teardown regardless of the closure result.
+/// `enable_raw_mode`) and guaranteed teardown via an RAII drop guard,
+/// ensuring the terminal is restored even if the closure panics.
 pub fn with_alternate_screen<R, F>(f: F) -> io::Result<R>
 where
     F: FnOnce() -> io::Result<R>,
@@ -61,14 +75,8 @@ where
     stdout.execute(EnableMouseCapture)?;
     terminal::enable_raw_mode()?;
 
-    let result = f();
-
-    terminal::disable_raw_mode()?;
-    stdout.execute(DisableMouseCapture)?;
-    stdout.execute(cursor::Show)?;
-    stdout.execute(LeaveAlternateScreen)?;
-
-    result
+    let _guard = AlternateScreenGuard;
+    f()
 }
 
 /// Manages text scroll animation state for long items in a list view.
