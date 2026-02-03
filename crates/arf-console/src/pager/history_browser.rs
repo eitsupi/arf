@@ -323,9 +323,9 @@ impl HistoryBrowser {
         // sets journal_mode=wal and runs DDL (CREATE TABLE IF NOT EXISTS), which
         // conflicts with the main REPL's active WAL connection to the same database.
         let db = Connection::open(&self.db_path)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(|e| io::Error::other(e))?;
         db.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(|e| io::Error::other(e))?;
 
         // Batch delete in a single statement
         let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
@@ -334,7 +334,7 @@ impl HistoryBrowser {
             placeholders.join(", ")
         );
         db.execute(&sql, params_from_iter(&ids_to_delete))
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(|e| io::Error::other(e))?;
 
         // Remove deleted entries from our list
         let feedback = format!("Deleted {} entries", ids_to_delete.len());
@@ -840,7 +840,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
         db_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(|e| io::Error::other(e))?;
 
     let mut stmt = db
         .prepare(
@@ -849,7 +849,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
              ORDER BY id DESC
              LIMIT ?",
         )
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(|e| io::Error::other(e))?;
 
     let items = stmt
         .query_map([MAX_ENTRIES], |row| {
@@ -869,9 +869,9 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
                 more_info: None,
             })
         })
-        .map_err(|e| io::Error::other(e.to_string()))?
+        .map_err(|e| io::Error::other(e))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(|e| io::Error::other(e))?;
 
     Ok(items)
 }
