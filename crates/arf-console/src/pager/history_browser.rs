@@ -4,7 +4,9 @@
 //! and batch-deleting command history entries stored in SQLite.
 
 use super::copy_to_clipboard;
-use super::text_utils::{display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width};
+use super::text_utils::{
+    display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
+};
 use crate::fuzzy::fuzzy_match;
 use chrono::TimeZone;
 use crossterm::{
@@ -888,10 +890,7 @@ impl HistoryBrowser {
                 let display_host = truncate_to_width(host, host_width);
 
                 // Build prefix (all ASCII, so byte len == display width)
-                let prefix = format!(
-                    "{}{} {}  ",
-                    cursor_marker, checkbox, timestamp
-                );
+                let prefix = format!("{}{} {}  ", cursor_marker, checkbox, timestamp);
                 let padded_cmd = pad_to_width(&display_cmd, cmd_width);
 
                 if is_current {
@@ -906,9 +905,8 @@ impl HistoryBrowser {
                     // Style hostname as dark grey
                     let base_part = format!("{}{} ", prefix, padded_cmd);
                     let host_str = display_host.to_string();
-                    let padding_len = width.saturating_sub(
-                        display_width(&base_part) + display_width(&host_str),
-                    );
+                    let padding_len =
+                        width.saturating_sub(display_width(&base_part) + display_width(&host_str));
                     print!(
                         "\r{}{}{}\n",
                         base_part,

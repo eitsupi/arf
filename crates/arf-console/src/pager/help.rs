@@ -11,7 +11,9 @@
 //! The concept of fuzzy help search and the use of `utils::hsearch_db()` for
 //! retrieving the help database were learned from felp's `fuzzyhelp()` function.
 
-use super::text_utils::{display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width};
+use super::text_utils::{
+    display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
+};
 use crate::fuzzy::fuzzy_match;
 use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
 use crossterm::{
