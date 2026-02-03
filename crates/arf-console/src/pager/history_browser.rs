@@ -514,10 +514,10 @@ impl HistoryBrowser {
                                     self.move_page_down();
                                 }
                                 // Alt+Home/End: list navigation
-                                (KeyCode::Home, KeyModifiers::ALT) => {
+                                (KeyCode::Home, m) if m.contains(KeyModifiers::ALT) => {
                                     self.move_to_top();
                                 }
-                                (KeyCode::End, KeyModifiers::ALT) => {
+                                (KeyCode::End, m) if m.contains(KeyModifiers::ALT) => {
                                     self.move_to_bottom();
                                 }
                                 // Plain Home/End: move cursor within filter input
