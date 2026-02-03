@@ -376,7 +376,6 @@ impl HelpBrowser {
         let (cols, _rows) = terminal::size().unwrap_or((80, 24));
         let width = cols as usize;
 
-
         // Header
         let header = format!("─ Help Search [{} topics] ─", self.filtered.len());
         let padded_header = format!("{:─<width$}", header, width = width);

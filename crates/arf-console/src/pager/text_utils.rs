@@ -75,18 +75,39 @@ pub fn scroll_display(s: &str, max_width: usize, scroll_pos: usize) -> (String, 
     } else if eff >= max_scroll {
         // End: '…' + last (max_width-1) cols
         let skip_cols = total.saturating_sub(max_width - 1);
-        let remainder = skip_columns(s, skip_cols);
-        (format!("…{}", remainder), max_scroll)
+        let (remainder, actual_skipped) = skip_columns(s, skip_cols);
+        // If a wide char straddled the boundary, pad to maintain exact width
+        let overshoot = actual_skipped.saturating_sub(skip_cols);
+        (
+            format!("…{}{}", " ".repeat(overshoot), remainder),
+            max_scroll,
+        )
     } else {
         // Middle: '…' + (max_width-2) cols + '…'
         let inner_cols = max_width.saturating_sub(2);
-        let after_skip = skip_columns(s, eff);
-        let (visible, _) = take_columns(&after_skip, inner_cols);
-        (format!("…{}…", visible), max_scroll)
+        let (after_skip, actual_skipped) = skip_columns(s, eff);
+        // Compensate for wide-char overshoot: pad left, reduce content
+        let overshoot = actual_skipped.saturating_sub(eff);
+        let content_cols = inner_cols.saturating_sub(overshoot);
+        let (visible, actual_vis) = take_columns(&after_skip, content_cols);
+        let right_pad = inner_cols.saturating_sub(overshoot + actual_vis);
+        (
+            format!(
+                "…{}{}{}…",
+                " ".repeat(overshoot),
+                visible,
+                " ".repeat(right_pad)
+            ),
+            max_scroll,
+        )
     }
 }
 
 /// Pad (or truncate) a string to exactly `width` display columns.
+///
+/// When the string is wider than `width`, it is silently truncated
+/// **without** an ellipsis.  Callers that want ellipsis on overflow
+/// should call [`truncate_to_width`] first.
 pub fn pad_to_width(s: &str, width: usize) -> String {
     let w = display_width(s);
     if w >= width {
@@ -123,16 +144,21 @@ fn take_columns(s: &str, cols: usize) -> (String, usize) {
     (s[..end].to_string(), col)
 }
 
-/// Skip `cols` display columns from the front and return the remainder.
-fn skip_columns(s: &str, cols: usize) -> String {
+/// Skip `cols` display columns from the front and return the remainder
+/// along with the actual number of columns skipped.
+///
+/// If a wide character straddles the boundary, it is included in the skip
+/// (we advance to the next character boundary at or beyond `cols`), so
+/// `actual_skipped` may be greater than `cols` by up to 1.
+fn skip_columns(s: &str, cols: usize) -> (String, usize) {
     let mut col = 0;
     for (i, ch) in s.char_indices() {
         if col >= cols {
-            return s[i..].to_string();
+            return (s[i..].to_string(), col);
         }
         col += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
     }
-    String::new()
+    (String::new(), col)
 }
 
 #[cfg(test)]
@@ -305,12 +331,71 @@ mod tests {
 
     #[test]
     fn skip_columns_basic() {
-        assert_eq!(skip_columns("hello world", 6), "world");
+        let (s, actual) = skip_columns("hello world", 6);
+        assert_eq!(s, "world");
+        assert_eq!(actual, 6);
     }
 
     #[test]
     fn skip_columns_cjk() {
         // skip 4 cols from "日本語テスト" → skip 日(2)+本(2), remainder = "語テスト"
-        assert_eq!(skip_columns("日本語テスト", 4), "語テスト");
+        let (s, actual) = skip_columns("日本語テスト", 4);
+        assert_eq!(s, "語テスト");
+        assert_eq!(actual, 4);
+    }
+
+    #[test]
+    fn skip_columns_cjk_odd_boundary() {
+        // skip 3 cols from all-wide text: 日(2) → col=2 < 3, 本(2) → col=4 >= 3
+        // Overshoot: asked for 3, actually skipped 4
+        let (s, actual) = skip_columns("日本語テスト", 3);
+        assert_eq!(s, "語テスト");
+        assert_eq!(actual, 4);
+    }
+
+    // ── scroll_display overshoot compensation ──────────────────────────
+
+    #[test]
+    fn scroll_cjk_middle_odd_pos() {
+        // "日本語テスト" = 12 cols, max_width = 8
+        // max_scroll = 12 - 7 = 5
+        // eff = 3 (odd): skip_columns skips 4 (overshoot=1)
+        // inner_cols = 8-2 = 6, content_cols = 6-1 = 5
+        // after_skip = "語テスト" (8 cols), take 5 → "語テ" (4 cols) + right_pad=1
+        // Result: "… 語テ …" with exact width = 1+1+4+1+1 = 8
+        let (r, _) = scroll_display("日本語テスト", 8, 3);
+        assert_eq!(display_width(&r), 8);
+        assert!(r.starts_with('…'));
+        assert!(r.ends_with('…'));
+    }
+
+    #[test]
+    fn scroll_cjk_end_odd_boundary() {
+        // "日本語テスト" = 12 cols, max_width = 8
+        // End: skip_cols = 12 - 7 = 5 (odd for all-wide text → overshoot)
+        // Result must still be exactly 8 cols wide
+        let (r, _) = scroll_display("日本語テスト", 8, 100);
+        assert_eq!(display_width(&r), 8);
+        assert!(r.starts_with('…'));
+    }
+
+    // ── emoji ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn emoji_display_width() {
+        // Common emoji: width depends on unicode-width version.
+        // Document and pin the expected behavior for regression detection.
+        // Most single-codepoint emoji are width 2 in unicode-width 0.2.
+        let w = display_width("🎉");
+        assert!(w == 1 || w == 2, "emoji width should be 1 or 2, got {}", w);
+    }
+
+    #[test]
+    fn truncate_emoji() {
+        // "🎉🎊🎁" — each emoji is at least 1 col
+        let result = truncate_to_width("🎉🎊🎁", 3);
+        // Must fit within 3 cols and end with '…'
+        assert!(display_width(&result) <= 3);
+        assert!(result.ends_with('…'));
     }
 }
