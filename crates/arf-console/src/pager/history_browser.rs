@@ -159,6 +159,10 @@ struct HistoryBrowser {
     prev_cursor: usize,
     /// Whether we're showing the delete confirmation dialog.
     show_delete_dialog: bool,
+    /// Whether filter input mode is active.
+    /// When true, all character input goes to the filter text.
+    /// When false, single-char keybindings (q, d, y, etc.) work as navigation/commands.
+    filter_active: bool,
 }
 
 impl HistoryBrowser {
@@ -188,6 +192,7 @@ impl HistoryBrowser {
             text_scroll_start: Instant::now(),
             prev_cursor: 0,
             show_delete_dialog: false,
+            filter_active: false,
         }
     }
 
@@ -421,148 +426,103 @@ impl HistoryBrowser {
                             continue;
                         }
 
-                        match (key.code, key.modifiers) {
-                            // Exit
-                            (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
-                                return Ok(HistoryBrowserResult::Cancelled);
-                            }
-                            (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                                return Ok(HistoryBrowserResult::Cancelled);
-                            }
-
-                            // Navigation - up
-                            (KeyCode::Up, _)
-                            | (KeyCode::Char('k'), KeyModifiers::NONE)
-                            | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                                if self.cursor > 0 {
-                                    self.cursor -= 1;
-                                    if self.cursor < self.scroll_offset {
-                                        self.scroll_offset = self.cursor;
-                                    }
+                        if self.filter_active {
+                            // Filter mode: all char input goes to filter text
+                            match (key.code, key.modifiers) {
+                                // Confirm filter and return to normal mode
+                                (KeyCode::Enter, _) => {
+                                    self.filter_active = false;
                                 }
-                            }
 
-                            // Navigation - down
-                            (KeyCode::Down, _)
-                            | (KeyCode::Char('j'), KeyModifiers::NONE)
-                            | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                let visible_rows = visible_result_rows();
-                                if self.cursor + 1 < self.filtered.len() {
-                                    self.cursor += 1;
-                                    if self.cursor >= self.scroll_offset + visible_rows {
-                                        self.scroll_offset = self.cursor - visible_rows + 1;
-                                    }
-                                }
-                            }
-
-                            // Page up
-                            (KeyCode::PageUp, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                                let page_size = visible_result_rows();
-                                self.cursor = self.cursor.saturating_sub(page_size);
-                                self.scroll_offset = self.scroll_offset.saturating_sub(page_size);
-                            }
-
-                            // Page down
-                            (KeyCode::PageDown, _)
-                            | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                                let page_size = visible_result_rows();
-                                let max_cursor = self.filtered.len().saturating_sub(1);
-                                self.cursor = (self.cursor + page_size).min(max_cursor);
-                                let max_scroll = self.filtered.len().saturating_sub(page_size);
-                                self.scroll_offset =
-                                    (self.scroll_offset + page_size).min(max_scroll);
-                            }
-
-                            // Home / go to top
-                            (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                                self.cursor = 0;
-                                self.scroll_offset = 0;
-                            }
-
-                            // End / go to bottom
-                            (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
-                                if !self.filtered.is_empty() {
-                                    self.cursor = self.filtered.len() - 1;
-                                    let visible_rows = visible_result_rows();
-                                    if self.cursor >= visible_rows {
-                                        self.scroll_offset = self.cursor - visible_rows + 1;
-                                    }
-                                }
-                            }
-
-                            // Toggle selection
-                            (KeyCode::Tab, _) => {
-                                self.toggle_selection();
-                            }
-
-                            // Select all visible
-                            (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
-                                self.select_all_visible();
-                            }
-
-                            // Unselect all
-                            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                                self.unselect_all();
-                            }
-
-                            // Delete selected (show confirmation)
-                            (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                                if self.selected_count > 0 {
-                                    self.show_delete_dialog = true;
-                                } else {
-                                    self.feedback_message = Some("No items selected".to_string());
-                                }
-                            }
-
-                            // Copy and exit
-                            (KeyCode::Enter, _) => {
-                                if let Some(cmd) = self.current_command() {
-                                    let cmd = cmd.to_string();
-                                    if copy_to_clipboard(&cmd).is_ok() {
-                                        return Ok(HistoryBrowserResult::Copied(cmd));
-                                    } else {
-                                        self.feedback_message = Some("Failed to copy".to_string());
-                                    }
-                                }
-                            }
-
-                            // Copy and stay
-                            (KeyCode::Char('y'), KeyModifiers::NONE) => {
-                                if let Some(cmd) = self.current_command() {
-                                    if copy_to_clipboard(cmd).is_ok() {
-                                        self.feedback_message =
-                                            Some("Copied to clipboard".to_string());
-                                    } else {
-                                        self.feedback_message = Some("Failed to copy".to_string());
-                                    }
-                                }
-                            }
-
-                            // Filter input - backspace
-                            (KeyCode::Backspace, _) => {
-                                if self.filter.cursor_pos > 0 {
-                                    let byte_pos = self
-                                        .filter
-                                        .raw_query
-                                        .char_indices()
-                                        .nth(self.filter.cursor_pos - 1)
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(0);
-                                    self.filter.raw_query.remove(byte_pos);
-                                    self.filter.cursor_pos -= 1;
-                                    self.filter.update(
-                                        &self.filter.raw_query.clone(),
-                                        self.filter.cursor_pos,
-                                    );
+                                // Clear filter and return to normal mode
+                                (KeyCode::Esc, _) => {
+                                    self.filter.update("", 0);
                                     self.update_filter();
+                                    self.filter_active = false;
                                 }
-                            }
 
-                            // Filter input - delete
-                            (KeyCode::Delete, _) => {
-                                let query_len = self.filter.raw_query.chars().count();
-                                if self.filter.cursor_pos < query_len {
+                                // Ctrl+C exits the browser entirely
+                                (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                    return Ok(HistoryBrowserResult::Cancelled);
+                                }
+
+                                // Navigation still works in filter mode
+                                (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                                    if self.cursor > 0 {
+                                        self.cursor -= 1;
+                                        if self.cursor < self.scroll_offset {
+                                            self.scroll_offset = self.cursor;
+                                        }
+                                    }
+                                }
+                                (KeyCode::Down, _)
+                                | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                    let visible_rows = visible_result_rows();
+                                    if self.cursor + 1 < self.filtered.len() {
+                                        self.cursor += 1;
+                                        if self.cursor >= self.scroll_offset + visible_rows {
+                                            self.scroll_offset =
+                                                self.cursor - visible_rows + 1;
+                                        }
+                                    }
+                                }
+
+                                // Backspace
+                                (KeyCode::Backspace, _) => {
+                                    if self.filter.cursor_pos > 0 {
+                                        let byte_pos = self
+                                            .filter
+                                            .raw_query
+                                            .char_indices()
+                                            .nth(self.filter.cursor_pos - 1)
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(0);
+                                        self.filter.raw_query.remove(byte_pos);
+                                        self.filter.cursor_pos -= 1;
+                                        self.filter.update(
+                                            &self.filter.raw_query.clone(),
+                                            self.filter.cursor_pos,
+                                        );
+                                        self.update_filter();
+                                    }
+                                }
+
+                                // Delete
+                                (KeyCode::Delete, _) => {
+                                    let query_len = self.filter.raw_query.chars().count();
+                                    if self.filter.cursor_pos < query_len {
+                                        let byte_pos = self
+                                            .filter
+                                            .raw_query
+                                            .char_indices()
+                                            .nth(self.filter.cursor_pos)
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(self.filter.raw_query.len());
+                                        self.filter.raw_query.remove(byte_pos);
+                                        self.filter.update(
+                                            &self.filter.raw_query.clone(),
+                                            self.filter.cursor_pos,
+                                        );
+                                        self.update_filter();
+                                    }
+                                }
+
+                                // Cursor movement
+                                (KeyCode::Left, KeyModifiers::NONE) => {
+                                    if self.filter.cursor_pos > 0 {
+                                        self.filter.cursor_pos -= 1;
+                                    }
+                                }
+                                (KeyCode::Right, KeyModifiers::NONE) => {
+                                    let query_len = self.filter.raw_query.chars().count();
+                                    if self.filter.cursor_pos < query_len {
+                                        self.filter.cursor_pos += 1;
+                                    }
+                                }
+
+                                // Character input
+                                (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                                     let byte_pos = self
                                         .filter
                                         .raw_query
@@ -570,45 +530,155 @@ impl HistoryBrowser {
                                         .nth(self.filter.cursor_pos)
                                         .map(|(i, _)| i)
                                         .unwrap_or(self.filter.raw_query.len());
-                                    self.filter.raw_query.remove(byte_pos);
+                                    self.filter.raw_query.insert(byte_pos, c);
+                                    self.filter.cursor_pos += 1;
                                     self.filter.update(
                                         &self.filter.raw_query.clone(),
                                         self.filter.cursor_pos,
                                     );
                                     self.update_filter();
                                 }
-                            }
 
-                            // Filter cursor movement
-                            (KeyCode::Left, KeyModifiers::NONE) => {
-                                if self.filter.cursor_pos > 0 {
-                                    self.filter.cursor_pos -= 1;
+                                _ => {}
+                            }
+                        } else {
+                            // Normal mode: single-char keybindings work
+                            match (key.code, key.modifiers) {
+                                // Exit
+                                (KeyCode::Esc, _)
+                                | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+                                    return Ok(HistoryBrowserResult::Cancelled);
                                 }
-                            }
-                            (KeyCode::Right, KeyModifiers::NONE) => {
-                                let query_len = self.filter.raw_query.chars().count();
-                                if self.filter.cursor_pos < query_len {
-                                    self.filter.cursor_pos += 1;
+                                (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                    return Ok(HistoryBrowserResult::Cancelled);
                                 }
-                            }
 
-                            // Character input for filter
-                            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                let byte_pos = self
-                                    .filter
-                                    .raw_query
-                                    .char_indices()
-                                    .nth(self.filter.cursor_pos)
-                                    .map(|(i, _)| i)
-                                    .unwrap_or(self.filter.raw_query.len());
-                                self.filter.raw_query.insert(byte_pos, c);
-                                self.filter.cursor_pos += 1;
-                                self.filter
-                                    .update(&self.filter.raw_query.clone(), self.filter.cursor_pos);
-                                self.update_filter();
-                            }
+                                // Enter filter mode
+                                (KeyCode::Char('/'), KeyModifiers::NONE) => {
+                                    self.filter_active = true;
+                                }
 
-                            _ => {}
+                                // Navigation - up
+                                (KeyCode::Up, _)
+                                | (KeyCode::Char('k'), KeyModifiers::NONE)
+                                | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                                    if self.cursor > 0 {
+                                        self.cursor -= 1;
+                                        if self.cursor < self.scroll_offset {
+                                            self.scroll_offset = self.cursor;
+                                        }
+                                    }
+                                }
+
+                                // Navigation - down
+                                (KeyCode::Down, _)
+                                | (KeyCode::Char('j'), KeyModifiers::NONE)
+                                | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                    let visible_rows = visible_result_rows();
+                                    if self.cursor + 1 < self.filtered.len() {
+                                        self.cursor += 1;
+                                        if self.cursor >= self.scroll_offset + visible_rows {
+                                            self.scroll_offset =
+                                                self.cursor - visible_rows + 1;
+                                        }
+                                    }
+                                }
+
+                                // Page up
+                                (KeyCode::PageUp, _)
+                                | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
+                                    let page_size = visible_result_rows();
+                                    self.cursor = self.cursor.saturating_sub(page_size);
+                                    self.scroll_offset =
+                                        self.scroll_offset.saturating_sub(page_size);
+                                }
+
+                                // Page down
+                                (KeyCode::PageDown, _)
+                                | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                                    let page_size = visible_result_rows();
+                                    let max_cursor = self.filtered.len().saturating_sub(1);
+                                    self.cursor = (self.cursor + page_size).min(max_cursor);
+                                    let max_scroll =
+                                        self.filtered.len().saturating_sub(page_size);
+                                    self.scroll_offset =
+                                        (self.scroll_offset + page_size).min(max_scroll);
+                                }
+
+                                // Home / go to top
+                                (KeyCode::Home, _)
+                                | (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                                    self.cursor = 0;
+                                    self.scroll_offset = 0;
+                                }
+
+                                // End / go to bottom
+                                (KeyCode::End, _)
+                                | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
+                                    if !self.filtered.is_empty() {
+                                        self.cursor = self.filtered.len() - 1;
+                                        let visible_rows = visible_result_rows();
+                                        if self.cursor >= visible_rows {
+                                            self.scroll_offset =
+                                                self.cursor - visible_rows + 1;
+                                        }
+                                    }
+                                }
+
+                                // Toggle selection
+                                (KeyCode::Tab, _) => {
+                                    self.toggle_selection();
+                                }
+
+                                // Select all visible
+                                (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                                    self.select_all_visible();
+                                }
+
+                                // Unselect all
+                                (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                                    self.unselect_all();
+                                }
+
+                                // Delete selected (show confirmation)
+                                (KeyCode::Char('d'), KeyModifiers::NONE) => {
+                                    if self.selected_count > 0 {
+                                        self.show_delete_dialog = true;
+                                    } else {
+                                        self.feedback_message =
+                                            Some("No items selected".to_string());
+                                    }
+                                }
+
+                                // Copy and exit
+                                (KeyCode::Enter, _) => {
+                                    if let Some(cmd) = self.current_command() {
+                                        let cmd = cmd.to_string();
+                                        if copy_to_clipboard(&cmd).is_ok() {
+                                            return Ok(HistoryBrowserResult::Copied(cmd));
+                                        } else {
+                                            self.feedback_message =
+                                                Some("Failed to copy".to_string());
+                                        }
+                                    }
+                                }
+
+                                // Copy and stay
+                                (KeyCode::Char('y'), KeyModifiers::NONE) => {
+                                    if let Some(cmd) = self.current_command() {
+                                        if copy_to_clipboard(cmd).is_ok() {
+                                            self.feedback_message =
+                                                Some("Copied to clipboard".to_string());
+                                        } else {
+                                            self.feedback_message =
+                                                Some("Failed to copy".to_string());
+                                        }
+                                    }
+                                }
+
+                                _ => {}
+                            }
                         }
                     }
                     Event::Mouse(mouse) => match mouse.kind {
@@ -702,21 +772,31 @@ impl HistoryBrowser {
         println!("\r{}", padded_header.dark_grey());
 
         // Filter input
-        let before_cursor: String = self
-            .filter
-            .raw_query
-            .chars()
-            .take(self.filter.cursor_pos)
-            .collect();
-        let after_cursor: String = self
-            .filter
-            .raw_query
-            .chars()
-            .skip(self.filter.cursor_pos)
-            .collect();
-        let filter_line = format!("  Filter: {}_{}", before_cursor, after_cursor);
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-        println!("\r{}", pad_line(&filter_line));
+        if self.filter_active {
+            // Show cursor in filter mode
+            let before_cursor: String = self
+                .filter
+                .raw_query
+                .chars()
+                .take(self.filter.cursor_pos)
+                .collect();
+            let after_cursor: String = self
+                .filter
+                .raw_query
+                .chars()
+                .skip(self.filter.cursor_pos)
+                .collect();
+            let filter_line = format!("  Filter: {}_{}", before_cursor, after_cursor);
+            println!("\r{}", pad_line(&filter_line));
+        } else if self.filter.raw_query.is_empty() {
+            // No filter text, show placeholder
+            println!("\r{}", pad_line("  Filter: (press / to filter)").dark_grey());
+        } else {
+            // Show filter text without cursor
+            let filter_line = format!("  Filter: {}", self.filter.raw_query);
+            println!("\r{}", pad_line(&filter_line));
+        }
 
         // Separator
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
@@ -819,7 +899,11 @@ impl HistoryBrowser {
         } else if let Some(ref msg) = self.feedback_message {
             println!("\r{}", pad_line(&format!("  {}", msg)));
         } else {
-            let footer = "  Tab select | d delete | y copy | Enter copy+exit | q exit";
+            let footer = if self.filter_active {
+                "  Enter confirm | Esc clear | ↑↓ navigate"
+            } else {
+                "  / filter | Tab select | d delete | y copy | Enter copy+exit | q exit"
+            };
             println!("\r{}", pad_line(footer).dark_grey());
         }
 
