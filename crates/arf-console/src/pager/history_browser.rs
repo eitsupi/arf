@@ -844,7 +844,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
 
     let mut stmt = db
         .prepare(
-            "SELECT id, command_line, start_timestamp, session_id, hostname, cwd, duration_ms, exit_status
+            "SELECT id, command_line, start_timestamp, hostname, cwd, duration_ms, exit_status
              FROM history
              ORDER BY id DESC
              LIMIT ?",
@@ -859,13 +859,13 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
                 start_timestamp: row
                     .get::<_, Option<i64>>(2)?
                     .and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single()),
-                session_id: None, // Not needed for browsing
-                hostname: row.get(4)?,
-                cwd: row.get(5)?,
+                session_id: None,
+                hostname: row.get(3)?,
+                cwd: row.get(4)?,
                 duration: row
-                    .get::<_, Option<i64>>(6)?
+                    .get::<_, Option<i64>>(5)?
                     .map(|ms| std::time::Duration::from_millis(ms as u64)),
-                exit_status: row.get(7)?,
+                exit_status: row.get(6)?,
                 more_info: None,
             })
         })
