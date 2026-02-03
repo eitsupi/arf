@@ -327,10 +327,9 @@ impl HistoryBrowser {
         // We intentionally avoid SqliteBackedHistory::with_file() here because it
         // sets journal_mode=wal and runs DDL (CREATE TABLE IF NOT EXISTS), which
         // conflicts with the main REPL's active WAL connection to the same database.
-        let db = Connection::open(&self.db_path)
-            .map_err(|e| io::Error::other(e))?;
+        let db = Connection::open(&self.db_path).map_err(io::Error::other)?;
         db.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| io::Error::other(e))?;
+            .map_err(io::Error::other)?;
 
         // Batch delete in a single statement
         let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
@@ -339,7 +338,7 @@ impl HistoryBrowser {
             placeholders.join(", ")
         );
         db.execute(&sql, params_from_iter(&ids_to_delete))
-            .map_err(|e| io::Error::other(e))?;
+            .map_err(io::Error::other)?;
 
         // Remove deleted entries from our list
         let feedback = format!("Deleted {} entries", ids_to_delete.len());
@@ -616,8 +615,7 @@ impl HistoryBrowser {
                             // Normal mode: single-char keybindings work
                             match (key.code, key.modifiers) {
                                 // Exit
-                                (KeyCode::Esc, _)
-                                | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+                                (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
                                     return Ok(HistoryBrowserResult::Cancelled);
                                 }
                                 (KeyCode::Char('c'), KeyModifiers::CONTROL)
@@ -657,14 +655,12 @@ impl HistoryBrowser {
                                 }
 
                                 // Home / go to top
-                                (KeyCode::Home, _)
-                                | (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                                (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
                                     self.move_to_top();
                                 }
 
                                 // End / go to bottom
-                                (KeyCode::End, _)
-                                | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
+                                (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                                     self.move_to_bottom();
                                 }
 
@@ -822,7 +818,10 @@ impl HistoryBrowser {
             println!("\r{}", pad_line(&filter_line));
         } else if self.filter.raw_query.is_empty() {
             // No filter text, show placeholder
-            println!("\r{}", pad_line("  Filter: (press / to filter)").dark_grey());
+            println!(
+                "\r{}",
+                pad_line("  Filter: (press / to filter)").dark_grey()
+            );
         } else {
             // Show filter text without cursor
             let filter_line = format!("  Filter: {}", self.filter.raw_query);
@@ -951,11 +950,8 @@ impl HistoryBrowser {
 /// errors when browsing history while the REPL is actively using the database.
 fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
     // Open in read-only mode to avoid WAL conflicts
-    let db = Connection::open_with_flags(
-        db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| io::Error::other(e))?;
+    let db = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(io::Error::other)?;
 
     let mut stmt = db
         .prepare(
@@ -964,7 +960,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
              ORDER BY id DESC
              LIMIT ?",
         )
-        .map_err(|e| io::Error::other(e))?;
+        .map_err(io::Error::other)?;
 
     let items = stmt
         .query_map([MAX_ENTRIES], |row| {
@@ -984,9 +980,9 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
                 more_info: None,
             })
         })
-        .map_err(|e| io::Error::other(e))?
+        .map_err(io::Error::other)?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| io::Error::other(e))?;
+        .map_err(io::Error::other)?;
 
     Ok(items)
 }
@@ -1245,11 +1241,7 @@ mod tests {
 
     #[test]
     fn test_delete_selected_removes_from_db_and_entries() {
-        let (_dir, db_path) = create_test_db(&[
-            ("cmd_a", None),
-            ("cmd_b", None),
-            ("cmd_c", None),
-        ]);
+        let (_dir, db_path) = create_test_db(&[("cmd_a", None), ("cmd_b", None), ("cmd_c", None)]);
 
         let entries = load_history(&db_path).unwrap();
         let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
@@ -1289,10 +1281,7 @@ mod tests {
 
     #[test]
     fn test_delete_selected_all_entries() {
-        let (_dir, db_path) = create_test_db(&[
-            ("cmd_a", None),
-            ("cmd_b", None),
-        ]);
+        let (_dir, db_path) = create_test_db(&[("cmd_a", None), ("cmd_b", None)]);
         let entries = load_history(&db_path).unwrap();
         let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
 
