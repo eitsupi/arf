@@ -716,7 +716,9 @@ impl HistoryBrowser {
                                 self.scroll_offset -= 1;
                                 // Keep cursor visible
                                 let visible_rows = visible_result_rows();
-                                if self.cursor >= self.scroll_offset + visible_rows {
+                                if visible_rows > 0
+                                    && self.cursor >= self.scroll_offset + visible_rows
+                                {
                                     self.cursor = self.scroll_offset + visible_rows - 1;
                                 }
                                 needs_redraw = true;
@@ -789,8 +791,9 @@ impl HistoryBrowser {
         };
 
         // Header with mode and entry count
-        let selected_info = if self.selected_count() > 0 {
-            format!(" [{} selected]", self.selected_count())
+        let selected_count = self.selected_count();
+        let selected_info = if selected_count > 0 {
+            format!(" [{} selected]", selected_count)
         } else {
             String::new()
         };
@@ -929,7 +932,7 @@ impl HistoryBrowser {
         if self.show_delete_dialog {
             let dialog_msg = format!(
                 "  Delete {} selected entries? (Enter=confirm, Esc=cancel)",
-                self.selected_count()
+                selected_count
             );
             println!("\r{}", pad_line(&dialog_msg).yellow().bold());
         } else if let Some(ref msg) = self.feedback_message {

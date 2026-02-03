@@ -271,9 +271,10 @@ fn process_history_browse(
 
     match run_history_browser(db_path, mode) {
         Ok(HistoryBrowserResult::Copied(cmd)) => {
-            // Truncate long commands for display
-            let display = if cmd.len() > 60 {
-                format!("{}...", &cmd[..57])
+            // Truncate long commands for display (UTF-8 safe)
+            let display = if cmd.chars().count() > 60 {
+                let truncated: String = cmd.chars().take(57).collect();
+                format!("{}...", truncated)
             } else {
                 cmd
             };
