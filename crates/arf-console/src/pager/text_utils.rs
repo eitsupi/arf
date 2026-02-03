@@ -414,6 +414,10 @@ mod tests {
         let (r, m) = scroll_display("hello world", 0, 0);
         assert_eq!(r, "");
         assert_eq!(m, 0);
+        // Non-zero scroll_pos should also be caught by the early guard
+        let (r2, m2) = scroll_display("hello world", 0, 5);
+        assert_eq!(r2, "");
+        assert_eq!(m2, 0);
     }
 
     #[test]
@@ -422,7 +426,7 @@ mod tests {
         // eff==0 branch: take_columns(s, 4) → 日(2)+本(2)=4, actual_vis=4
         // Result: "日本…" = 5 cols — no padding needed here
         let (r, _) = scroll_display("日本語テスト", 5, 0);
-        assert_eq!(display_width(&r), 5);
+        assert_eq!(r, "日本…");
         // max_width = 4: take_columns(s, 3) → 日(2), actual_vis=2, pad 1
         // Result: "日 …" = 4 cols
         let (r2, _) = scroll_display("日本語テスト", 4, 0);
