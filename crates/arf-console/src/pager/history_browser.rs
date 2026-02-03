@@ -513,11 +513,20 @@ impl HistoryBrowser {
                                 (KeyCode::PageDown, _) => {
                                     self.move_page_down();
                                 }
-                                (KeyCode::Home, _) => {
+                                // Alt+Home/End: list navigation
+                                (KeyCode::Home, KeyModifiers::ALT) => {
                                     self.move_to_top();
                                 }
-                                (KeyCode::End, _) => {
+                                (KeyCode::End, KeyModifiers::ALT) => {
                                     self.move_to_bottom();
+                                }
+                                // Plain Home/End: move cursor within filter input
+                                (KeyCode::Home, _) => {
+                                    self.filter.cursor_pos = 0;
+                                }
+                                (KeyCode::End, _) => {
+                                    self.filter.cursor_pos =
+                                        self.filter.raw_query.chars().count();
                                 }
                                 (KeyCode::Tab, _) => {
                                     self.toggle_selection();
