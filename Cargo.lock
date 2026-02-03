@@ -112,6 +112,7 @@ dependencies = [
  "toml",
  "tree-sitter",
  "tree-sitter-r",
+ "unicode-width",
  "vt100",
 ]
 
