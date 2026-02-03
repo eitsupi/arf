@@ -540,8 +540,7 @@ impl HistoryBrowser {
                                     self.filter.cursor_pos = 0;
                                 }
                                 (KeyCode::End, _) => {
-                                    self.filter.cursor_pos =
-                                        self.filter.raw_query.chars().count();
+                                    self.filter.cursor_pos = self.filter.raw_query.chars().count();
                                 }
                                 (KeyCode::Tab, _) => {
                                     self.toggle_selection();
@@ -555,18 +554,17 @@ impl HistoryBrowser {
 
                                 // Backspace
                                 (KeyCode::Backspace, _) => {
-                                    if self.filter.cursor_pos > 0 {
-                                        if let Some((byte_pos, _)) = self
+                                    if self.filter.cursor_pos > 0
+                                        && let Some((byte_pos, _)) = self
                                             .filter
                                             .raw_query
                                             .char_indices()
                                             .nth(self.filter.cursor_pos - 1)
-                                        {
-                                            self.filter.raw_query.remove(byte_pos);
-                                            self.filter.cursor_pos -= 1;
-                                            self.filter.reparse();
-                                            self.update_filter();
-                                        }
+                                    {
+                                        self.filter.raw_query.remove(byte_pos);
+                                        self.filter.cursor_pos -= 1;
+                                        self.filter.reparse();
+                                        self.update_filter();
                                     }
                                 }
 
