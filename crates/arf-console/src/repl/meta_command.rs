@@ -4,7 +4,7 @@ use crate::config::RSourceStatus;
 use crate::external::formatter;
 use crate::pager::{
     HistoryBrowserResult, HistoryDbMode, display_session_info, run_help_browser,
-    run_history_browser,
+    run_history_browser, text_utils,
 };
 use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
@@ -271,13 +271,8 @@ fn process_history_browse(
 
     match run_history_browser(db_path, mode) {
         Ok(HistoryBrowserResult::Copied(cmd)) => {
-            // Truncate long commands for display (UTF-8 safe)
-            let display = if cmd.chars().count() > 60 {
-                let truncated: String = cmd.chars().take(57).collect();
-                format!("{}...", truncated)
-            } else {
-                cmd
-            };
+            // Truncate long commands for display (display-width aware)
+            let display = text_utils::truncate_to_width(&cmd, 60);
             arf_println!("Copied: {}", display);
             Some(MetaCommandResult::Handled)
         }
