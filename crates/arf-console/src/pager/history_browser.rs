@@ -284,7 +284,7 @@ impl HistoryBrowser {
             if entry.selected {
                 self.cached_selected_count += 1;
             } else {
-                self.cached_selected_count -= 1;
+                self.cached_selected_count = self.cached_selected_count.saturating_sub(1);
             }
         }
     }
