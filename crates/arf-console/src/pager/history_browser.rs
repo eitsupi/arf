@@ -19,8 +19,8 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
-use reedline::{History, HistoryItem, HistoryItemId, SqliteBackedHistory};
-use rusqlite::{Connection, OpenFlags};
+use reedline::{HistoryItem, HistoryItemId};
+use rusqlite::{Connection, OpenFlags, params_from_iter};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -299,28 +299,42 @@ impl HistoryBrowser {
     }
 
     /// Delete all selected items from the database.
+    ///
+    /// Opens a separate read-write connection and executes a single batch DELETE
+    /// inside a transaction. This avoids using `SqliteBackedHistory::with_file()`
+    /// which would create a competing WAL connection alongside the main REPL's
+    /// history connection, risking cache inconsistency and database corruption.
     fn delete_selected(&mut self) -> io::Result<()> {
         // Collect IDs to delete
-        let ids_to_delete: Vec<HistoryItemId> = self
+        let ids_to_delete: Vec<i64> = self
             .entries
             .iter()
             .filter(|e| e.selected)
             .filter_map(|e| e.item.id)
+            .map(|id| id.0)
             .collect();
 
         if ids_to_delete.is_empty() {
             return Ok(());
         }
 
-        // Open database and delete
-        let mut history = SqliteBackedHistory::with_file(self.db_path.clone(), None, None)
+        // Open a direct connection for the delete operation only.
+        // We intentionally avoid SqliteBackedHistory::with_file() here because it
+        // sets journal_mode=wal and runs DDL (CREATE TABLE IF NOT EXISTS), which
+        // conflicts with the main REPL's active WAL connection to the same database.
+        let db = Connection::open(&self.db_path)
             .map_err(|e| io::Error::other(e.to_string()))?;
 
-        for id in &ids_to_delete {
-            history
-                .delete(*id)
-                .map_err(|e| io::Error::other(e.to_string()))?;
-        }
+        // Batch delete in a single transaction for atomicity and performance
+        let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM history WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        db.execute(&sql, params_from_iter(&ids_to_delete))
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
+        let deleted_count = ids_to_delete.len();
 
         // Remove deleted entries from our list
         self.entries.retain(|e| !e.selected);
@@ -334,7 +348,7 @@ impl HistoryBrowser {
             self.cursor = self.filtered.len() - 1;
         }
 
-        self.feedback_message = Some(format!("Deleted {} entries", ids_to_delete.len()));
+        self.feedback_message = Some(format!("Deleted {} entries", deleted_count));
         Ok(())
     }
 
@@ -1052,6 +1066,126 @@ mod tests {
     fn test_db_mode_display_name() {
         assert_eq!(HistoryDbMode::R.display_name(), "R");
         assert_eq!(HistoryDbMode::Shell.display_name(), "Shell");
+    }
+
+    /// Create a temporary history database with test entries.
+    /// Returns the temp dir (must be kept alive) and the db path.
+    fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_history.db");
+        let db = Connection::open(&db_path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command_line TEXT NOT NULL,
+                start_timestamp INTEGER,
+                session_id INTEGER,
+                hostname TEXT,
+                cwd TEXT,
+                duration_ms INTEGER,
+                exit_status INTEGER,
+                more_info TEXT
+            ) STRICT;",
+        )
+        .unwrap();
+        for (cmd, hostname) in entries {
+            db.execute(
+                "INSERT INTO history (command_line, hostname) VALUES (?, ?)",
+                rusqlite::params![cmd, hostname],
+            )
+            .unwrap();
+        }
+        (dir, db_path)
+    }
+
+    #[test]
+    fn test_load_history_returns_entries_in_desc_order() {
+        let (_dir, db_path) = create_test_db(&[
+            ("first_cmd", Some("host1")),
+            ("second_cmd", Some("host2")),
+            ("third_cmd", None),
+        ]);
+
+        let items = load_history(&db_path).unwrap();
+        assert_eq!(items.len(), 3);
+        // Descending order by id
+        assert_eq!(items[0].command_line, "third_cmd");
+        assert_eq!(items[1].command_line, "second_cmd");
+        assert_eq!(items[2].command_line, "first_cmd");
+        // Hostname preserved
+        assert_eq!(items[1].hostname.as_deref(), Some("host2"));
+        assert!(items[0].hostname.is_none());
+    }
+
+    #[test]
+    fn test_load_history_empty_db() {
+        let (_dir, db_path) = create_test_db(&[]);
+        let items = load_history(&db_path).unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_delete_selected_removes_from_db_and_entries() {
+        let (_dir, db_path) = create_test_db(&[
+            ("cmd_a", None),
+            ("cmd_b", None),
+            ("cmd_c", None),
+        ]);
+
+        let entries = load_history(&db_path).unwrap();
+        let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+
+        // Select the first item (cmd_c, id=3) and the third item (cmd_a, id=1)
+        browser.cursor = 0;
+        browser.toggle_selection();
+        browser.cursor = 2;
+        browser.toggle_selection();
+        assert_eq!(browser.selected_count, 2);
+
+        browser.delete_selected().unwrap();
+
+        // Only cmd_b should remain in the browser
+        assert_eq!(browser.entries.len(), 1);
+        assert_eq!(browser.entries[0].item.command_line, "cmd_b");
+        assert_eq!(browser.selected_count, 0);
+
+        // Verify database state
+        let remaining = load_history(&db_path).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].command_line, "cmd_b");
+    }
+
+    #[test]
+    fn test_delete_selected_no_selection_is_noop() {
+        let (_dir, db_path) = create_test_db(&[("cmd_a", None)]);
+        let entries = load_history(&db_path).unwrap();
+        let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+
+        browser.delete_selected().unwrap();
+
+        assert_eq!(browser.entries.len(), 1);
+        let remaining = load_history(&db_path).unwrap();
+        assert_eq!(remaining.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_selected_all_entries() {
+        let (_dir, db_path) = create_test_db(&[
+            ("cmd_a", None),
+            ("cmd_b", None),
+        ]);
+        let entries = load_history(&db_path).unwrap();
+        let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+
+        browser.select_all_visible();
+        assert_eq!(browser.selected_count, 2);
+
+        browser.delete_selected().unwrap();
+
+        assert!(browser.entries.is_empty());
+        assert!(browser.filtered.is_empty());
+        let remaining = load_history(&db_path).unwrap();
+        assert!(remaining.is_empty());
     }
 
     #[test]
