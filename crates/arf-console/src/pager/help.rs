@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn test_truncate_to_width_edge_cases() {
         assert_eq!(truncate_to_width("Hi", 1), "…");
-        assert_eq!(truncate_to_width("Hi", 0), "…");
+        assert_eq!(truncate_to_width("Hi", 0), "");
         assert_eq!(truncate_to_width("", 5), "");
     }
 
