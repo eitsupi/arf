@@ -467,6 +467,7 @@ impl HistoryBrowser {
 
             if event::poll(poll_timeout)? {
                 let ev = event::read()?;
+                log::debug!("history_browser: received event: {:?}", ev);
                 match ev {
                     Event::Key(key) => {
                         if key.kind != KeyEventKind::Press {
@@ -731,29 +732,12 @@ impl HistoryBrowser {
                     }
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            if self.scroll_offset > 0 {
-                                self.scroll_offset -= 1;
-                                // Keep cursor visible
-                                let visible_rows = visible_result_rows();
-                                if visible_rows > 0
-                                    && self.cursor >= self.scroll_offset + visible_rows
-                                {
-                                    self.cursor = self.scroll_offset + visible_rows - 1;
-                                }
-                                needs_redraw = true;
-                            }
+                            needs_redraw = true;
+                            self.move_cursor_up();
                         }
                         MouseEventKind::ScrollDown => {
-                            let max_scroll =
-                                self.filtered.len().saturating_sub(visible_result_rows());
-                            if self.scroll_offset < max_scroll {
-                                self.scroll_offset += 1;
-                                // Keep cursor visible
-                                if self.cursor < self.scroll_offset {
-                                    self.cursor = self.scroll_offset;
-                                }
-                                needs_redraw = true;
-                            }
+                            needs_redraw = true;
+                            self.move_cursor_down();
                         }
                         _ => {}
                     },
