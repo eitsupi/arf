@@ -14,32 +14,21 @@
 use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
+use super::{TextScrollState, with_alternate_screen};
 use crate::fuzzy::fuzzy_match;
 use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
 use crossterm::{
     ExecutableCommand, cursor,
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseEventKind,
-    },
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     queue,
     style::Stylize,
-    terminal::{
-        self, BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen,
-        LeaveAlternateScreen,
-    },
+    terminal::{self, BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Maximum number of results to keep in filtered list.
 const MAX_FILTERED_RESULTS: usize = 500;
-
-/// Animation scroll speed in milliseconds per character.
-const SCROLL_INTERVAL_MS: u64 = 150;
-
-/// Pause duration at the start and end of scroll animation (in ms).
-const SCROLL_PAUSE_MS: u64 = 1000;
 
 /// Run the interactive help browser.
 ///
@@ -76,12 +65,8 @@ struct HelpBrowser {
     filtered: Vec<(HelpTopic, u32)>,
     selected: usize,
     scroll_offset: usize,
-    /// Current horizontal scroll position for the selected item's text animation.
-    text_scroll_pos: usize,
-    /// Time when the text scroll animation started (for pause timing).
-    text_scroll_start: Instant,
-    /// Previously selected index to detect selection changes.
-    prev_selected: usize,
+    /// Scroll animation state for the selected item's long text.
+    text_scroll: TextScrollState,
 }
 
 impl HelpBrowser {
@@ -93,9 +78,7 @@ impl HelpBrowser {
             filtered: Vec::new(),
             selected: 0,
             scroll_offset: 0,
-            text_scroll_pos: 0,
-            text_scroll_start: Instant::now(),
-            prev_selected: 0,
+            text_scroll: TextScrollState::new(),
         };
         browser.update_filter();
         browser
@@ -120,24 +103,7 @@ impl HelpBrowser {
     }
 
     fn run(&mut self) -> io::Result<()> {
-        let mut stdout = io::stdout();
-
-        // Enter alternate screen buffer (like less/vim)
-        stdout.execute(EnterAlternateScreen)?;
-        // Enable mouse capture to handle mouse events properly
-        // Without this, some terminals send mouse events that cause flickering
-        stdout.execute(EnableMouseCapture)?;
-        terminal::enable_raw_mode()?;
-
-        let result = self.run_inner();
-
-        // Always restore terminal state
-        terminal::disable_raw_mode()?;
-        stdout.execute(DisableMouseCapture)?;
-        stdout.execute(cursor::Show)?;
-        stdout.execute(LeaveAlternateScreen)?;
-
-        result
+        with_alternate_screen(|| self.run_inner())
     }
 
     fn run_inner(&mut self) -> io::Result<()> {
@@ -337,33 +303,8 @@ impl HelpBrowser {
     }
 
     /// Update the text scroll animation state.
-    /// Returns true if the state changed and a redraw is needed.
     fn update_text_scroll(&mut self) -> bool {
-        // Reset scroll when selection changes
-        if self.selected != self.prev_selected {
-            self.prev_selected = self.selected;
-            self.text_scroll_pos = 0;
-            self.text_scroll_start = Instant::now();
-            return true;
-        }
-
-        let elapsed = self.text_scroll_start.elapsed();
-
-        // Initial pause before scrolling starts
-        if elapsed < Duration::from_millis(SCROLL_PAUSE_MS) {
-            return false;
-        }
-
-        // Calculate how many characters to scroll based on elapsed time
-        let scroll_time = elapsed - Duration::from_millis(SCROLL_PAUSE_MS);
-        let new_pos = (scroll_time.as_millis() / SCROLL_INTERVAL_MS as u128) as usize;
-
-        if new_pos != self.text_scroll_pos {
-            self.text_scroll_pos = new_pos;
-            true
-        } else {
-            false
-        }
+        self.text_scroll.update(self.selected)
     }
 
     fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
@@ -410,9 +351,9 @@ impl HelpBrowser {
 
                     if name_truncated || title_truncated {
                         let (scrolled_name, _) =
-                            scroll_display(&name, name_width, self.text_scroll_pos);
+                            scroll_display(&name, name_width, self.text_scroll.scroll_pos);
                         let (scrolled_title, _) =
-                            scroll_display(&topic.title, title_width, self.text_scroll_pos);
+                            scroll_display(&topic.title, title_width, self.text_scroll.scroll_pos);
                         (scrolled_name, scrolled_title)
                     } else {
                         (name.clone(), topic.title.clone())

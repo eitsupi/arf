@@ -7,35 +7,24 @@ use super::copy_to_clipboard;
 use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
+use super::{TextScrollState, with_alternate_screen};
 use crate::fuzzy::fuzzy_match;
 use chrono::TimeZone;
 use crossterm::{
     ExecutableCommand, cursor,
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseEventKind,
-    },
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     queue,
     style::Stylize,
-    terminal::{
-        self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
-        LeaveAlternateScreen,
-    },
+    terminal::{self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate},
 };
 use reedline::{HistoryItem, HistoryItemId};
 use rusqlite::{Connection, OpenFlags, params_from_iter};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Maximum number of history entries to load from database.
 const MAX_ENTRIES: i64 = 10000;
-
-/// Animation scroll speed in milliseconds per character.
-const SCROLL_INTERVAL_MS: u64 = 150;
-
-/// Pause duration at the start and end of scroll animation (in ms).
-const SCROLL_PAUSE_MS: u64 = 1000;
 
 /// Database mode for history browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,12 +140,8 @@ struct HistoryBrowser {
     db_mode: HistoryDbMode,
     /// Path to the history database.
     db_path: PathBuf,
-    /// Current horizontal scroll position for text animation.
-    text_scroll_pos: usize,
-    /// Time when the text scroll animation started.
-    text_scroll_start: Instant,
-    /// Previously selected cursor position.
-    prev_cursor: usize,
+    /// Scroll animation state for the selected item's long text.
+    text_scroll: TextScrollState,
     /// Whether we're showing the delete confirmation dialog.
     show_delete_dialog: bool,
     /// Whether filter input mode is active.
@@ -189,9 +174,7 @@ impl HistoryBrowser {
             feedback_message: None,
             db_mode,
             db_path,
-            text_scroll_pos: 0,
-            text_scroll_start: Instant::now(),
-            prev_cursor: 0,
+            text_scroll: TextScrollState::new(),
             show_delete_dialog: false,
             filter_active: false,
             cached_selected_count: 0,
@@ -433,20 +416,7 @@ impl HistoryBrowser {
 
     /// Run the browser and return the result.
     fn run(&mut self) -> io::Result<HistoryBrowserResult> {
-        let mut stdout = io::stdout();
-
-        stdout.execute(EnterAlternateScreen)?;
-        stdout.execute(EnableMouseCapture)?;
-        terminal::enable_raw_mode()?;
-
-        let result = self.run_inner();
-
-        terminal::disable_raw_mode()?;
-        stdout.execute(DisableMouseCapture)?;
-        stdout.execute(cursor::Show)?;
-        stdout.execute(LeaveAlternateScreen)?;
-
-        result
+        with_alternate_screen(|| self.run_inner())
     }
 
     fn run_inner(&mut self) -> io::Result<HistoryBrowserResult> {
@@ -467,6 +437,7 @@ impl HistoryBrowser {
 
             if event::poll(poll_timeout)? {
                 let ev = event::read()?;
+                log::trace!("history_browser: received event: {:?}", ev);
                 match ev {
                     Event::Key(key) => {
                         if key.kind != KeyEventKind::Press {
@@ -731,29 +702,12 @@ impl HistoryBrowser {
                     }
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            if self.scroll_offset > 0 {
-                                self.scroll_offset -= 1;
-                                // Keep cursor visible
-                                let visible_rows = visible_result_rows();
-                                if visible_rows > 0
-                                    && self.cursor >= self.scroll_offset + visible_rows
-                                {
-                                    self.cursor = self.scroll_offset + visible_rows - 1;
-                                }
-                                needs_redraw = true;
-                            }
+                            needs_redraw = true;
+                            self.move_cursor_up();
                         }
                         MouseEventKind::ScrollDown => {
-                            let max_scroll =
-                                self.filtered.len().saturating_sub(visible_result_rows());
-                            if self.scroll_offset < max_scroll {
-                                self.scroll_offset += 1;
-                                // Keep cursor visible
-                                if self.cursor < self.scroll_offset {
-                                    self.cursor = self.scroll_offset;
-                                }
-                                needs_redraw = true;
-                            }
+                            needs_redraw = true;
+                            self.move_cursor_down();
                         }
                         _ => {}
                     },
@@ -768,28 +722,7 @@ impl HistoryBrowser {
 
     /// Update the text scroll animation state.
     fn update_text_scroll(&mut self) -> bool {
-        if self.cursor != self.prev_cursor {
-            self.prev_cursor = self.cursor;
-            self.text_scroll_pos = 0;
-            self.text_scroll_start = Instant::now();
-            return true;
-        }
-
-        let elapsed = self.text_scroll_start.elapsed();
-
-        if elapsed < Duration::from_millis(SCROLL_PAUSE_MS) {
-            return false;
-        }
-
-        let scroll_time = elapsed - Duration::from_millis(SCROLL_PAUSE_MS);
-        let new_pos = (scroll_time.as_millis() / SCROLL_INTERVAL_MS as u128) as usize;
-
-        if new_pos != self.text_scroll_pos {
-            self.text_scroll_pos = new_pos;
-            true
-        } else {
-            false
-        }
+        self.text_scroll.update(self.cursor)
     }
 
     fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
@@ -879,7 +812,8 @@ impl HistoryBrowser {
                 // Convert multiline commands to single line for display
                 let cmd = flatten_multiline(&entry.item.command_line);
                 let display_cmd = if is_current && exceeds_width(&cmd, cmd_width) {
-                    let (scrolled, _) = scroll_display(&cmd, cmd_width, self.text_scroll_pos);
+                    let (scrolled, _) =
+                        scroll_display(&cmd, cmd_width, self.text_scroll.scroll_pos);
                     scrolled
                 } else {
                     truncate_to_width(&cmd, cmd_width)
