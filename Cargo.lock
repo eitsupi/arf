@@ -103,6 +103,7 @@ dependencies = [
  "portable-pty",
  "reedline",
  "regex",
+ "rusqlite",
  "schemars",
  "semver",
  "serde",

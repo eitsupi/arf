@@ -2186,6 +2186,178 @@ fn test_pty_history_schema_pager_mouse_scroll() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Test that history persists across sessions.
+///
+/// This test verifies:
+/// 1. Commands executed in session 1 are saved to history
+/// 2. Session 2 can see history from session 1 in the browser
+///
+/// This is a regression test to ensure history is properly persisted.
+#[test]
+#[cfg(unix)]
+fn test_pty_history_browser_persists_across_sessions() {
+    // Create a temporary directory for history
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let history_dir = temp_dir.path().to_string_lossy().to_string();
+
+    // Session 1: Execute commands and exit
+    {
+        let mut terminal = Terminal::spawn_with_args(&[
+            "--no-auto-match",
+            "--no-completion",
+            "--history-dir",
+            &history_dir,
+        ])
+        .expect("Failed to spawn arf (session 1)");
+
+        terminal.wait_for_prompt().expect("Should show prompt");
+
+        // Execute a distinctive command that we can search for later
+        terminal
+            .send_line("unique_test_value_12345 <- 999")
+            .expect("Should send assignment");
+        terminal
+            .clear_and_expect("unique_test_value_12345")
+            .expect("Should see variable name");
+
+        terminal.wait_for_prompt().expect("Should show prompt");
+
+        // Exit cleanly to ensure history is flushed
+        terminal.quit().expect("Should quit cleanly (session 1)");
+    }
+
+    // Session 2: Open history browser and verify session 1's command is visible
+    {
+        let mut terminal = Terminal::spawn_with_args(&[
+            "--no-auto-match",
+            "--no-completion",
+            "--history-dir",
+            &history_dir,
+        ])
+        .expect("Failed to spawn arf (session 2)");
+
+        terminal.wait_for_prompt().expect("Should show prompt");
+
+        // Open history browser
+        terminal
+            .send_line(":history browse")
+            .expect("Should send :history browse");
+
+        terminal
+            .expect("History Browser")
+            .expect("Should show history browser header");
+
+        // Verify the command from session 1 is visible
+        terminal
+            .expect("unique_test_value_12345")
+            .expect("Should see command from session 1 in history browser");
+
+        // Exit browser and wait for prompt to return
+        terminal.send("q").expect("Should send q to exit browser");
+        terminal
+            .clear_and_expect("> ")
+            .expect("Should return to prompt after browser exit");
+
+        terminal.quit().expect("Should quit cleanly (session 2)");
+    }
+}
+
+/// Test history browser with :history browse command.
+///
+/// This test verifies:
+/// 1. The history browser opens with the correct header
+/// 2. Navigation and UI work correctly
+/// 3. The browser can be exited with 'q'
+/// 4. After closing browser, history can be written and browser reopened
+///    (regression test for WAL database corruption issue)
+#[test]
+#[cfg(unix)]
+fn test_pty_history_browser() {
+    // Create a temporary directory for history
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let history_dir = temp_dir.path().to_string_lossy().to_string();
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--no-auto-match",
+        "--no-completion",
+        "--history-dir",
+        &history_dir,
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // First, add some history entries by running commands
+    terminal
+        .send_line("1 + 1")
+        .expect("Should send R expression");
+    terminal
+        .clear_and_expect("[1] 2")
+        .expect("Should evaluate R code");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    terminal
+        .send_line("print('hello')")
+        .expect("Should send print command");
+    terminal
+        .clear_and_expect("[1] \"hello\"")
+        .expect("Should print hello");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Open history browser (first time)
+    terminal
+        .send_line(":history browse")
+        .expect("Should send :history browse");
+
+    terminal
+        .expect("History Browser")
+        .expect("Should show history browser header");
+
+    // Should show [R] mode indicator
+    terminal
+        .expect("[R]")
+        .expect("Should show R mode indicator");
+
+    // Press 'q' to exit the browser and wait for prompt to return
+    terminal.send("q").expect("Should send q to exit browser");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should return to prompt after browser exit");
+
+    // Execute another command (this writes to history database)
+    terminal.send_line("42").expect("Should send R expression");
+    terminal
+        .clear_and_expect("[1] 42")
+        .expect("Should evaluate R code after browser exit");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Open history browser again (regression test for WAL corruption)
+    // This previously failed with "database disk image is malformed" error
+    terminal
+        .send_line(":history browse")
+        .expect("Should send :history browse again");
+
+    terminal
+        .expect("History Browser")
+        .expect("Should show history browser header on second open");
+
+    // Exit browser and wait for prompt to return
+    terminal.send("q").expect("Should send q to exit browser");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should return to prompt after second browser exit");
+
+    // Verify we're back at prompt and can still execute commands
+    terminal.send_line("99").expect("Should send R expression");
+    terminal
+        .clear_and_expect("[1] 99")
+        .expect("Should evaluate R code after second browser exit");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Test reprex mode paste - stripping #> output lines from pasted reprex output.
 ///
 /// When pasting reprex output in reprex mode, lines starting with #> should be
