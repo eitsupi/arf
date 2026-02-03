@@ -69,6 +69,11 @@ pub fn scroll_display(s: &str, max_width: usize, scroll_pos: usize) -> (String, 
         return (s.to_string(), 0);
     }
 
+    // With only 1 column there is no room to show content; always show '…'.
+    if max_width == 1 {
+        return ("…".to_string(), total);
+    }
+
     // max_scroll = how many columns we can shift before reaching the end.
     // At position 0 we show (max_width - 1) content cols + trailing '…'.
     // At max_scroll we show leading '…' + (max_width - 1) content cols.
@@ -94,8 +99,9 @@ pub fn scroll_display(s: &str, max_width: usize, scroll_pos: usize) -> (String, 
         // Middle: '…' + (max_width-2) cols + '…'
         let inner_cols = max_width.saturating_sub(2);
         let (after_skip, actual_skipped) = skip_columns(s, eff);
-        // Compensate for wide-char overshoot: pad left, reduce content
-        let overshoot = actual_skipped.saturating_sub(eff);
+        // Compensate for wide-char overshoot: pad left, reduce content.
+        // Clamp overshoot to inner_cols so we never exceed max_width.
+        let overshoot = actual_skipped.saturating_sub(eff).min(inner_cols);
         let content_cols = inner_cols.saturating_sub(overshoot);
         let (visible, actual_vis) = take_columns(&after_skip, content_cols);
         let right_pad = inner_cols.saturating_sub(overshoot + actual_vis);
@@ -418,6 +424,34 @@ mod tests {
         let (r2, m2) = scroll_display("hello world", 0, 5);
         assert_eq!(r2, "");
         assert_eq!(m2, 0);
+    }
+
+    #[test]
+    fn scroll_width_one() {
+        // max_width==1: only room for '…' at every scroll position
+        let (r, m) = scroll_display("hello world", 1, 0);
+        assert_eq!(r, "…");
+        assert_eq!(display_width(&r), 1);
+        assert_eq!(m, 11); // total = 11
+
+        let (r2, _) = scroll_display("hello world", 1, 5);
+        assert_eq!(r2, "…");
+        assert_eq!(display_width(&r2), 1);
+    }
+
+    #[test]
+    fn scroll_width_two_cjk() {
+        // max_width==2 with CJK: middle branch must not exceed 2 cols
+        // "日本語" = 6 cols, max_width=2
+        // Start: take_columns(s, 1) → ("", 0), pad 1 → " …" = 2 cols
+        let (r, _) = scroll_display("日本語", 2, 0);
+        assert_eq!(display_width(&r), 2);
+        // Middle: inner_cols=0, overshoot clamped to 0 → "……" = 2 cols
+        let (r2, _) = scroll_display("日本語", 2, 1);
+        assert_eq!(display_width(&r2), 2);
+        // End: "…" + last 1 col → CJK can't fit in 1 col → "… " = 2 cols
+        let (r3, _) = scroll_display("日本語", 2, 100);
+        assert_eq!(display_width(&r3), 2);
     }
 
     #[test]

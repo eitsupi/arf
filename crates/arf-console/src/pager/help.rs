@@ -455,16 +455,10 @@ impl HelpBrowser {
         // Footer
         println!("\r{}", "─".repeat(width).dark_grey());
 
-        let footer = format!(
-            "  {} {} {} {} {} {}",
-            "↑↓".dark_grey(),
-            "navigate".dark_grey(),
-            "Tab/Enter".dark_grey(),
-            "select".dark_grey(),
-            "Esc".dark_grey(),
-            "exit".dark_grey()
-        );
-        println!("\r{}", pad_to_width(&footer, width));
+        // Build plain text first, pad it, then apply style.
+        // pad_to_width is not ANSI-aware, so styling must come after padding.
+        let footer_plain = "  ↑↓ navigate Tab/Enter select Esc exit";
+        println!("\r{}", pad_to_width(footer_plain, width).dark_grey());
 
         // End synchronized update
         queue!(stdout, EndSynchronizedUpdate)?;
