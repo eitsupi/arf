@@ -812,7 +812,8 @@ impl HistoryBrowser {
                 // Convert multiline commands to single line for display
                 let cmd = flatten_multiline(&entry.item.command_line);
                 let display_cmd = if is_current && exceeds_width(&cmd, cmd_width) {
-                    let (scrolled, _) = scroll_display(&cmd, cmd_width, self.text_scroll.scroll_pos);
+                    let (scrolled, _) =
+                        scroll_display(&cmd, cmd_width, self.text_scroll.scroll_pos);
                     scrolled
                 } else {
                     truncate_to_width(&cmd, cmd_width)
