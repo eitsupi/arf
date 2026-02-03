@@ -445,12 +445,15 @@ mod tests {
         // "日本語" = 6 cols, max_width=2
         // Start: take_columns(s, 1) → ("", 0), pad 1 → " …" = 2 cols
         let (r, _) = scroll_display("日本語", 2, 0);
+        assert_eq!(r, " …");
         assert_eq!(display_width(&r), 2);
         // Middle: inner_cols=0, overshoot clamped to 0 → "……" = 2 cols
         let (r2, _) = scroll_display("日本語", 2, 1);
+        assert_eq!(r2, "……");
         assert_eq!(display_width(&r2), 2);
         // End: "…" + last 1 col → CJK can't fit in 1 col → "… " = 2 cols
         let (r3, _) = scroll_display("日本語", 2, 100);
+        assert_eq!(r3, "… ");
         assert_eq!(display_width(&r3), 2);
     }
 
