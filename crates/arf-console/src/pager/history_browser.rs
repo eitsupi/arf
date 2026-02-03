@@ -337,7 +337,7 @@ impl HistoryBrowser {
             .map_err(|e| io::Error::other(e.to_string()))?;
 
         // Remove deleted entries from our list
-        let deleted_count = ids_to_delete.len();
+        let feedback = format!("Deleted {} entries", ids_to_delete.len());
         self.entries.retain(|e| !e.selected);
         self.selected_count = 0;
 
@@ -349,7 +349,7 @@ impl HistoryBrowser {
             self.cursor = self.filtered.len() - 1;
         }
 
-        self.feedback_message = Some(format!("Deleted {} entries", deleted_count));
+        self.feedback_message = Some(feedback);
         Ok(())
     }
 
