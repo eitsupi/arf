@@ -38,6 +38,7 @@ rusqlite.workspace = true
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 libc.workspace = true
+unicode-width.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true

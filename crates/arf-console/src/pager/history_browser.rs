@@ -4,6 +4,7 @@
 //! and batch-deleting command history entries stored in SQLite.
 
 use super::copy_to_clipboard;
+use super::text_utils::{display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width};
 use crate::fuzzy::fuzzy_match;
 use chrono::TimeZone;
 use crossterm::{
@@ -797,15 +798,6 @@ impl HistoryBrowser {
         let (cols, _rows) = terminal::size().unwrap_or((80, 24));
         let width = cols as usize;
 
-        let pad_line = |s: &str| -> String {
-            let char_count = s.chars().count();
-            if char_count >= width {
-                s.chars().take(width).collect()
-            } else {
-                format!("{}{}", s, " ".repeat(width - char_count))
-            }
-        };
-
         // Header with mode and entry count
         let selected_count = self.selected_count();
         let selected_info = if selected_count > 0 {
@@ -840,17 +832,17 @@ impl HistoryBrowser {
                 .skip(self.filter.cursor_pos)
                 .collect();
             let filter_line = format!("  Filter: {}_{}", before_cursor, after_cursor);
-            println!("\r{}", pad_line(&filter_line));
+            println!("\r{}", pad_to_width(&filter_line, width));
         } else if self.filter.raw_query.is_empty() {
             // No filter text, show placeholder
             println!(
                 "\r{}",
-                pad_line("  Filter: (press / to filter)").dark_grey()
+                pad_to_width("  Filter: (press / to filter)", width).dark_grey()
             );
         } else {
             // Show filter text without cursor
             let filter_line = format!("  Filter: {}", self.filter.raw_query);
-            println!("\r{}", pad_line(&filter_line));
+            println!("\r{}", pad_to_width(&filter_line, width));
         }
 
         // Separator
@@ -884,48 +876,43 @@ impl HistoryBrowser {
                 // Command text with scrolling for selected item
                 // Convert multiline commands to single line for display
                 let cmd = flatten_multiline(&entry.item.command_line);
-                let display_cmd = if is_current && is_truncated(&cmd, cmd_width) {
-                    let (scrolled, _) = scroll_display_str(&cmd, cmd_width, self.text_scroll_pos);
+                let display_cmd = if is_current && exceeds_width(&cmd, cmd_width) {
+                    let (scrolled, _) = scroll_display(&cmd, cmd_width, self.text_scroll_pos);
                     scrolled
                 } else {
-                    truncate_str(&cmd, cmd_width)
+                    truncate_to_width(&cmd, cmd_width)
                 };
 
                 // Hostname (truncated)
                 let host = entry.item.hostname.as_deref().unwrap_or("");
-                let display_host = truncate_str(host, host_width);
+                let display_host = truncate_to_width(host, host_width);
 
-                let content = format!(
-                    "{}{} {}  {:<cw$} {}",
-                    cursor_marker,
-                    checkbox,
-                    timestamp,
-                    display_cmd,
-                    display_host,
-                    cw = cmd_width
+                // Build prefix (all ASCII, so byte len == display width)
+                let prefix = format!(
+                    "{}{} {}  ",
+                    cursor_marker, checkbox, timestamp
                 );
-                let line = pad_line(&content);
+                let padded_cmd = pad_to_width(&display_cmd, cmd_width);
 
                 if is_current {
+                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let line = pad_to_width(&content, width);
                     println!("\r{}", line.reverse());
                 } else if entry.selected {
+                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let line = pad_to_width(&content, width);
                     println!("\r{}", line.yellow());
                 } else {
                     // Style hostname as dark grey
-                    let base_len = cursor_marker.len()
-                        + checkbox.len()
-                        + 1
-                        + timestamp.len()
-                        + 2
-                        + cmd_width
-                        + 1;
-                    let base_part: String = content.chars().take(base_len).collect();
-                    let host_part: String = content.chars().skip(base_len).collect();
-                    let padding_len = width.saturating_sub(base_len + host_part.chars().count());
+                    let base_part = format!("{}{} ", prefix, padded_cmd);
+                    let host_str = display_host.to_string();
+                    let padding_len = width.saturating_sub(
+                        display_width(&base_part) + display_width(&host_str),
+                    );
                     print!(
                         "\r{}{}{}\n",
                         base_part,
-                        host_part.dark_grey(),
+                        host_str.dark_grey(),
                         " ".repeat(padding_len)
                     );
                 }
@@ -941,7 +928,7 @@ impl HistoryBrowser {
         // Footer line 1: filter syntax help
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
         let syntax_help = "  Filter: host:<name> cwd:<path> exit:<N> <text>  (space = AND)";
-        println!("\r{}", pad_line(syntax_help).dark_grey());
+        println!("\r{}", pad_to_width(syntax_help, width).dark_grey());
 
         // Footer line 2: keybindings or feedback message
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
@@ -950,16 +937,16 @@ impl HistoryBrowser {
                 "  Delete {} selected entries? (Enter=confirm, Esc=cancel)",
                 selected_count
             );
-            println!("\r{}", pad_line(&dialog_msg).yellow().bold());
+            println!("\r{}", pad_to_width(&dialog_msg, width).yellow().bold());
         } else if let Some(ref msg) = self.feedback_message {
-            println!("\r{}", pad_line(&format!("  {}", msg)));
+            println!("\r{}", pad_to_width(&format!("  {}", msg), width));
         } else {
             let footer = if self.filter_active {
                 "  Enter confirm | Esc clear | ↑↓/PgUp/PgDn navigate | Tab select"
             } else {
                 "  / filter | Space/Tab select | d delete | y copy | Enter copy+exit | q exit"
             };
-            println!("\r{}", pad_line(footer).dark_grey());
+            println!("\r{}", pad_to_width(footer, width).dark_grey());
         }
 
         queue!(stdout, EndSynchronizedUpdate)?;
@@ -1037,53 +1024,6 @@ fn flatten_multiline(s: &str) -> String {
         s.replace('\n', "↵")
     } else {
         s.to_string()
-    }
-}
-
-/// Truncate a string to a maximum character count.
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else if max_chars <= 1 {
-        "…".to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars - 1).collect();
-        format!("{}…", truncated)
-    }
-}
-
-/// Check if a string would be truncated.
-fn is_truncated(s: &str, max_chars: usize) -> bool {
-    s.chars().count() > max_chars
-}
-
-/// Display a scrolling window of text.
-fn scroll_display_str(s: &str, max_chars: usize, scroll_pos: usize) -> (String, usize) {
-    let char_count = s.chars().count();
-
-    if char_count <= max_chars {
-        return (s.to_string(), 0);
-    }
-
-    let max_scroll = char_count.saturating_sub(max_chars - 1);
-    let effective_scroll = scroll_pos.min(max_scroll);
-
-    if effective_scroll == 0 {
-        let truncated: String = s.chars().take(max_chars - 1).collect();
-        (format!("{}…", truncated), max_scroll)
-    } else if effective_scroll >= max_scroll {
-        let start_idx = char_count.saturating_sub(max_chars - 1);
-        let end_part: String = s.chars().skip(start_idx).collect();
-        (format!("…{}", end_part), max_scroll)
-    } else {
-        let visible_chars = max_chars.saturating_sub(2);
-        let middle_part: String = s
-            .chars()
-            .skip(effective_scroll)
-            .take(visible_chars)
-            .collect();
-        (format!("…{}…", middle_part), max_scroll)
     }
 }
 
@@ -1172,31 +1112,31 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_str() {
-        assert_eq!(truncate_str("hello", 10), "hello");
-        assert_eq!(truncate_str("hello world", 8), "hello w…");
-        assert_eq!(truncate_str("hi", 1), "…");
+    fn test_truncate_to_width() {
+        assert_eq!(truncate_to_width("hello", 10), "hello");
+        assert_eq!(truncate_to_width("hello world", 8), "hello w…");
+        assert_eq!(truncate_to_width("hi", 1), "…");
     }
 
     #[test]
-    fn test_is_truncated() {
-        assert!(!is_truncated("hello", 10));
-        assert!(is_truncated("hello world", 8));
+    fn test_exceeds_width() {
+        assert!(!exceeds_width("hello", 10));
+        assert!(exceeds_width("hello world", 8));
     }
 
     #[test]
-    fn test_scroll_display_str() {
+    fn test_scroll_display() {
         // Text that fits
-        let (result, max) = scroll_display_str("hello", 10, 0);
+        let (result, max) = scroll_display("hello", 10, 0);
         assert_eq!(result, "hello");
         assert_eq!(max, 0);
 
         // Text at start
-        let (result, _) = scroll_display_str("hello world", 8, 0);
+        let (result, _) = scroll_display("hello world", 8, 0);
         assert_eq!(result, "hello w…");
 
         // Text at end
-        let (result, _) = scroll_display_str("hello world", 8, 100);
+        let (result, _) = scroll_display("hello world", 8, 100);
         assert_eq!(result, "…o world");
     }
 

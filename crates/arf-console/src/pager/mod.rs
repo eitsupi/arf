@@ -7,6 +7,7 @@ mod help;
 pub mod history_browser;
 pub mod history_schema;
 pub mod session_info;
+pub(crate) mod text_utils;
 
 pub use help::run_help_browser;
 pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};

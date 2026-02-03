@@ -11,6 +11,7 @@
 //! The concept of fuzzy help search and the use of `utils::hsearch_db()` for
 //! retrieving the help database were learned from felp's `fuzzyhelp()` function.
 
+use super::text_utils::{display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width};
 use crate::fuzzy::fuzzy_match;
 use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
 use crossterm::{
@@ -375,15 +376,6 @@ impl HelpBrowser {
         let (cols, _rows) = terminal::size().unwrap_or((80, 24));
         let width = cols as usize;
 
-        // Helper to pad line to full width (avoids need for Clear)
-        let pad_line = |s: &str| -> String {
-            let char_count = s.chars().count();
-            if char_count >= width {
-                s.chars().take(width).collect()
-            } else {
-                format!("{}{}", s, " ".repeat(width - char_count))
-            }
-        };
 
         // Header
         let header = format!("─ Help Search [{} topics] ─", self.filtered.len());
@@ -394,7 +386,7 @@ impl HelpBrowser {
         let before_cursor: String = self.query.chars().take(self.cursor_pos).collect();
         let after_cursor: String = self.query.chars().skip(self.cursor_pos).collect();
         let query_line = format!("  Filter: {}_{}", before_cursor, after_cursor);
-        println!("\r{}", pad_line(&query_line));
+        println!("\r{}", pad_to_width(&query_line, width));
 
         // Separator
         println!("\r{}", "─".repeat(width).dark_grey());
@@ -412,46 +404,41 @@ impl HelpBrowser {
 
                 // For selected item, use scrolling display if text is truncated
                 let (display_name, display_title) = if idx == self.selected {
-                    let name_truncated = is_truncated(&name, name_width);
-                    let title_truncated = is_truncated(&topic.title, title_width);
+                    let name_truncated = exceeds_width(&name, name_width);
+                    let title_truncated = exceeds_width(&topic.title, title_width);
 
                     if name_truncated || title_truncated {
                         let (scrolled_name, _) =
-                            scroll_display_str(&name, name_width, self.text_scroll_pos);
+                            scroll_display(&name, name_width, self.text_scroll_pos);
                         let (scrolled_title, _) =
-                            scroll_display_str(&topic.title, title_width, self.text_scroll_pos);
+                            scroll_display(&topic.title, title_width, self.text_scroll_pos);
                         (scrolled_name, scrolled_title)
                     } else {
                         (name.clone(), topic.title.clone())
                     }
                 } else {
                     (
-                        truncate_str(&name, name_width),
-                        truncate_str(&topic.title, title_width),
+                        truncate_to_width(&name, name_width),
+                        truncate_to_width(&topic.title, title_width),
                     )
                 };
 
-                // Build line and pad to full width
-                let content = format!(
-                    "{}{:<nw$} {}",
-                    prefix,
-                    display_name,
-                    display_title,
-                    nw = name_width
-                );
-                let line = pad_line(&content);
+                // Build line with display-width-aware padding
+                let padded_name = pad_to_width(&display_name, name_width);
+                let content = format!("{}{} {}", prefix, padded_name, display_title);
+                let line = pad_to_width(&content, width);
 
                 if idx == self.selected {
                     println!("\r{}", line.reverse());
                 } else {
                     // Apply dark_grey only to the title portion for non-selected items
-                    let name_part = format!("{}{:<nw$} ", prefix, display_name, nw = name_width);
-                    let title_part = truncate_str(
+                    let name_part = format!("{}{} ", prefix, padded_name);
+                    let title_part = truncate_to_width(
                         &display_title,
-                        width.saturating_sub(name_part.chars().count()),
+                        width.saturating_sub(display_width(&name_part)),
                     );
                     let padding_len = width
-                        .saturating_sub(name_part.chars().count() + title_part.chars().count());
+                        .saturating_sub(display_width(&name_part) + display_width(&title_part));
                     print!(
                         "\r{}{}{}\n",
                         name_part,
@@ -476,7 +463,7 @@ impl HelpBrowser {
             "Esc".dark_grey(),
             "exit".dark_grey()
         );
-        println!("\r{}", pad_line(&footer));
+        println!("\r{}", pad_to_width(&footer, width));
 
         // End synchronized update
         queue!(stdout, EndSynchronizedUpdate)?;
@@ -514,71 +501,6 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
     results.truncate(MAX_FILTERED_RESULTS);
 
     results
-}
-
-/// Truncate a string to a maximum character count, adding ellipsis if needed.
-/// This is Unicode-safe (counts characters, not bytes).
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else if max_chars <= 1 {
-        "…".to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars - 1).collect();
-        format!("{}…", truncated)
-    }
-}
-
-/// Returns whether a string is truncated at the given width.
-fn is_truncated(s: &str, max_chars: usize) -> bool {
-    s.chars().count() > max_chars
-}
-
-/// Display a scrolling window of text for animation.
-///
-/// Returns the text to display at the given scroll position.
-/// - When `scroll_pos` is 0: shows the beginning with "…" at end (if truncated)
-/// - As `scroll_pos` increases: shifts right, showing "…" at start
-/// - Stops scrolling when the full text has been revealed
-///
-/// Returns `(displayed_string, max_scroll_pos)` where `max_scroll_pos` is the
-/// maximum scroll position (the point at which the end of the text is visible).
-fn scroll_display_str(s: &str, max_chars: usize, scroll_pos: usize) -> (String, usize) {
-    let char_count = s.chars().count();
-
-    // If text fits, no scrolling needed
-    if char_count <= max_chars {
-        return (s.to_string(), 0);
-    }
-
-    // How many extra characters beyond display width
-    // We need max_chars - 1 for the ellipsis at start when scrolling
-    let max_scroll = char_count.saturating_sub(max_chars - 1);
-
-    // Clamp scroll position
-    let effective_scroll = scroll_pos.min(max_scroll);
-
-    if effective_scroll == 0 {
-        // At the start: show beginning with "…" at end
-        let truncated: String = s.chars().take(max_chars - 1).collect();
-        (format!("{}…", truncated), max_scroll)
-    } else if effective_scroll >= max_scroll {
-        // At the end: show end with "…" at start
-        let start_idx = char_count.saturating_sub(max_chars - 1);
-        let end_part: String = s.chars().skip(start_idx).collect();
-        (format!("…{}", end_part), max_scroll)
-    } else {
-        // In the middle: show "…" at both ends
-        // We have max_chars total, minus 2 for ellipses = max_chars - 2 visible chars
-        let visible_chars = max_chars.saturating_sub(2);
-        let middle_part: String = s
-            .chars()
-            .skip(effective_scroll)
-            .take(visible_chars)
-            .collect();
-        (format!("…{}…", middle_part), max_scroll)
-    }
 }
 
 /// Calculate layout widths for the help browser display.
@@ -789,7 +711,7 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
                 let code_part = line.trim_start();
 
                 if code_part.is_empty() {
-                    return truncate_for_width(line, width);
+                    return truncate_to_width(line, width);
                 }
 
                 // Highlight the code part
@@ -803,7 +725,7 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
                 // For now, return as-is (most help lines are reasonably short)
                 result
             } else {
-                truncate_for_width(line, width)
+                truncate_to_width(line, width)
             }
         }
     }
@@ -836,19 +758,6 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
     };
 
     run(&mut content, &config)
-}
-
-/// Truncate a string to fit within a given width.
-fn truncate_for_width(s: &str, width: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= width {
-        s.to_string()
-    } else if width <= 1 {
-        "…".to_string()
-    } else {
-        let truncated: String = s.chars().take(width - 1).collect();
-        format!("{}…", truncated)
-    }
 }
 
 /// Convert reedline::StyledText to an ANSI-escaped string.
@@ -885,31 +794,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_truncate_str_no_truncation() {
-        assert_eq!(truncate_str("Hello", 10), "Hello");
-        assert_eq!(truncate_str("Hello", 5), "Hello");
+    fn test_truncate_to_width_no_truncation() {
+        assert_eq!(truncate_to_width("Hello", 10), "Hello");
+        assert_eq!(truncate_to_width("Hello", 5), "Hello");
     }
 
     #[test]
-    fn test_truncate_str_with_truncation() {
-        assert_eq!(truncate_str("Hello World", 8), "Hello W…");
-        assert_eq!(truncate_str("Hello World", 6), "Hello…");
+    fn test_truncate_to_width_with_truncation() {
+        assert_eq!(truncate_to_width("Hello World", 8), "Hello W…");
+        assert_eq!(truncate_to_width("Hello World", 6), "Hello…");
     }
 
     #[test]
-    fn test_truncate_str_edge_cases() {
-        assert_eq!(truncate_str("Hi", 1), "…");
-        assert_eq!(truncate_str("Hi", 0), "…");
-        assert_eq!(truncate_str("", 5), "");
+    fn test_truncate_to_width_edge_cases() {
+        assert_eq!(truncate_to_width("Hi", 1), "…");
+        assert_eq!(truncate_to_width("Hi", 0), "…");
+        assert_eq!(truncate_to_width("", 5), "");
     }
 
     #[test]
-    fn test_truncate_str_unicode() {
-        // Japanese characters (each is one char but multiple bytes)
-        assert_eq!(truncate_str("日本語テスト", 4), "日本語…");
-        assert_eq!(truncate_str("日本語", 10), "日本語");
-        // Emoji
-        assert_eq!(truncate_str("🎉🎊🎁", 2), "🎉…");
+    fn test_truncate_to_width_unicode() {
+        // Japanese characters (each is 2 display columns)
+        // "日本語テスト" = 12 cols, max 7 → "日本語…" (6+1=7)
+        assert_eq!(truncate_to_width("日本語テスト", 7), "日本語…");
+        assert_eq!(truncate_to_width("日本語", 10), "日本語");
     }
 
     #[test]
@@ -998,62 +906,52 @@ mod tests {
     }
 
     #[test]
-    fn test_is_truncated() {
-        assert!(!is_truncated("Hello", 10));
-        assert!(!is_truncated("Hello", 5));
-        assert!(is_truncated("Hello World", 8));
-        assert!(is_truncated("Hello", 4));
+    fn test_exceeds_width() {
+        assert!(!exceeds_width("Hello", 10));
+        assert!(!exceeds_width("Hello", 5));
+        assert!(exceeds_width("Hello World", 8));
+        assert!(exceeds_width("Hello", 4));
     }
 
     #[test]
-    fn test_scroll_display_str_no_truncation() {
-        // Text that fits should return as-is with max_scroll = 0
-        let (result, max_scroll) = scroll_display_str("Hello", 10, 0);
+    fn test_scroll_display_no_truncation() {
+        let (result, max_scroll) = scroll_display("Hello", 10, 0);
         assert_eq!(result, "Hello");
         assert_eq!(max_scroll, 0);
     }
 
     #[test]
-    fn test_scroll_display_str_at_start() {
-        // "Hello World" (11 chars) with max_chars = 8
-        // At scroll_pos = 0: show first 7 chars + "…"
-        let (result, max_scroll) = scroll_display_str("Hello World", 8, 0);
+    fn test_scroll_display_at_start() {
+        // "Hello World" (11 cols) with max_width = 8
+        let (result, max_scroll) = scroll_display("Hello World", 8, 0);
         assert_eq!(result, "Hello W…");
-        // max_scroll = 11 - (8 - 1) = 4
+        // max_scroll = 11 - 7 = 4
         assert_eq!(max_scroll, 4);
     }
 
     #[test]
-    fn test_scroll_display_str_at_end() {
-        // "Hello World" (11 chars) with max_chars = 8
-        // max_scroll = 11 - 7 = 4, so scroll_pos=10 is clamped to 4
-        // start_idx = 11 - 7 = 4, so we show chars 4..11 = "o World"
-        // Result: "…" + "o World" = "…o World"
-        let (result, _) = scroll_display_str("Hello World", 8, 10);
+    fn test_scroll_display_at_end() {
+        let (result, _) = scroll_display("Hello World", 8, 10);
         assert_eq!(result, "…o World");
     }
 
     #[test]
-    fn test_scroll_display_str_in_middle() {
-        // "Hello World" (11 chars) with max_chars = 8
-        // At scroll_pos = 2 (middle): "…" + 6 chars + "…"
-        let (result, _) = scroll_display_str("Hello World", 8, 2);
+    fn test_scroll_display_in_middle() {
+        let (result, _) = scroll_display("Hello World", 8, 2);
         assert_eq!(result, "…llo Wo…");
     }
 
     #[test]
-    fn test_scroll_display_str_unicode() {
-        // Japanese: "日本語テスト" (6 chars)
-        // max_chars = 4, scroll_pos = 0: first 3 + "…"
-        let (result, max_scroll) = scroll_display_str("日本語テスト", 4, 0);
+    fn test_scroll_display_unicode() {
+        // "日本語テスト" = 12 display cols
+        // max_width = 7, scroll_pos = 0: first 6 cols + "…"
+        let (result, max_scroll) = scroll_display("日本語テスト", 7, 0);
         assert_eq!(result, "日本語…");
-        // max_scroll = 6 - (4 - 1) = 3
-        assert_eq!(max_scroll, 3);
+        // max_scroll = 12 - 6 = 6
+        assert_eq!(max_scroll, 6);
 
-        // At the end: scroll_pos=10 clamped to 3
-        // start_idx = 6 - 3 = 3, chars from index 3 = "テスト"
-        // Result: "…" + "テスト" = "…テスト"
-        let (result, _) = scroll_display_str("日本語テスト", 4, 10);
+        // At the end: show last 6 cols = "テスト"
+        let (result, _) = scroll_display("日本語テスト", 7, 100);
         assert_eq!(result, "…テスト");
     }
 
