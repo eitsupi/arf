@@ -300,10 +300,10 @@ impl HistoryBrowser {
 
     /// Delete all selected items from the database.
     ///
-    /// Opens a separate read-write connection and executes a single batch DELETE
-    /// inside a transaction. This avoids using `SqliteBackedHistory::with_file()`
-    /// which would create a competing WAL connection alongside the main REPL's
-    /// history connection, risking cache inconsistency and database corruption.
+    /// Opens a separate read-write connection and executes a single batch DELETE.
+    /// This avoids using `SqliteBackedHistory::with_file()` which would create a
+    /// competing WAL connection alongside the main REPL's history connection,
+    /// risking cache inconsistency and database corruption.
     fn delete_selected(&mut self) -> io::Result<()> {
         // Collect IDs to delete
         let ids_to_delete: Vec<i64> = self
@@ -324,8 +324,10 @@ impl HistoryBrowser {
         // conflicts with the main REPL's active WAL connection to the same database.
         let db = Connection::open(&self.db_path)
             .map_err(|e| io::Error::other(e.to_string()))?;
+        db.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
-        // Batch delete in a single transaction for atomicity and performance
+        // Batch delete in a single statement
         let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
         let sql = format!(
             "DELETE FROM history WHERE id IN ({})",
@@ -334,9 +336,8 @@ impl HistoryBrowser {
         db.execute(&sql, params_from_iter(&ids_to_delete))
             .map_err(|e| io::Error::other(e.to_string()))?;
 
-        let deleted_count = ids_to_delete.len();
-
         // Remove deleted entries from our list
+        let deleted_count = ids_to_delete.len();
         self.entries.retain(|e| !e.selected);
         self.selected_count = 0;
 
@@ -1070,6 +1071,9 @@ mod tests {
 
     /// Create a temporary history database with test entries.
     /// Returns the temp dir (must be kept alive) and the db path.
+    ///
+    /// NOTE: The schema here must match reedline's `SqliteBackedHistory` table
+    /// definition. If reedline changes its schema, this helper must be updated.
     fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_history.db");
