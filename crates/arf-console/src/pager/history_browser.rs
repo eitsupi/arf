@@ -660,6 +660,12 @@ impl HistoryBrowser {
                                     self.toggle_selection();
                                 }
 
+                                // Toggle selection and move down
+                                (KeyCode::Char(' '), KeyModifiers::NONE) => {
+                                    self.toggle_selection();
+                                    self.move_cursor_down();
+                                }
+
                                 // Select all visible
                                 (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
                                     self.select_all_visible();
@@ -941,7 +947,7 @@ impl HistoryBrowser {
             let footer = if self.filter_active {
                 "  Enter confirm | Esc clear | ↑↓/PgUp/PgDn navigate | Tab select"
             } else {
-                "  / filter | Tab select | d delete | y copy | Enter copy+exit | q exit"
+                "  / filter | Space/Tab select | d delete | y copy | Enter copy+exit | q exit"
             };
             println!("\r{}", pad_line(footer).dark_grey());
         }
