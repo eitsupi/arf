@@ -381,6 +381,9 @@ impl HistoryBrowser {
 
     /// Move cursor up by one page.
     fn move_page_up(&mut self) {
+        if self.filtered.is_empty() {
+            return;
+        }
         let page_size = visible_result_rows();
         self.cursor = self.cursor.saturating_sub(page_size);
         self.scroll_offset = self.scroll_offset.saturating_sub(page_size);
@@ -388,8 +391,11 @@ impl HistoryBrowser {
 
     /// Move cursor down by one page.
     fn move_page_down(&mut self) {
+        if self.filtered.is_empty() {
+            return;
+        }
         let page_size = visible_result_rows();
-        let max_cursor = self.filtered.len().saturating_sub(1);
+        let max_cursor = self.filtered.len() - 1;
         self.cursor = (self.cursor + page_size).min(max_cursor);
         let max_scroll = self.filtered.len().saturating_sub(page_size);
         self.scroll_offset = (self.scroll_offset + page_size).min(max_scroll);
@@ -509,12 +515,12 @@ impl HistoryBrowser {
                                 | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                                     self.move_cursor_down();
                                 }
-                                (KeyCode::PageUp, _)
-                                | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
+                                // PageUp/PageDown only (no Ctrl+B/F which conflict
+                                // with Emacs cursor movement in text input context)
+                                (KeyCode::PageUp, _) => {
                                     self.move_page_up();
                                 }
-                                (KeyCode::PageDown, _)
-                                | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                                (KeyCode::PageDown, _) => {
                                     self.move_page_down();
                                 }
                                 (KeyCode::Home, _) => {
