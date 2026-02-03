@@ -437,7 +437,7 @@ impl HistoryBrowser {
 
             if event::poll(poll_timeout)? {
                 let ev = event::read()?;
-                log::debug!("history_browser: received event: {:?}", ev);
+                log::trace!("history_browser: received event: {:?}", ev);
                 match ev {
                     Event::Key(key) => {
                         if key.kind != KeyEventKind::Press {

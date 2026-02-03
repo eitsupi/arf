@@ -70,12 +70,16 @@ pub fn with_alternate_screen<R, F>(f: F) -> io::Result<R>
 where
     F: FnOnce() -> io::Result<R>,
 {
+    // Create the guard *before* setup so that any failure mid-setup still
+    // tears down whatever was already enabled (the individual restore calls
+    // are no-ops / harmless when the corresponding setup never ran).
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
+    let _guard = AlternateScreenGuard;
+
     stdout.execute(EnableMouseCapture)?;
     terminal::enable_raw_mode()?;
 
-    let _guard = AlternateScreenGuard;
     f()
 }
 
