@@ -556,31 +556,28 @@ impl HistoryBrowser {
                                 // Backspace
                                 (KeyCode::Backspace, _) => {
                                     if self.filter.cursor_pos > 0 {
-                                        let byte_pos = self
+                                        if let Some((byte_pos, _)) = self
                                             .filter
                                             .raw_query
                                             .char_indices()
                                             .nth(self.filter.cursor_pos - 1)
-                                            .map(|(i, _)| i)
-                                            .unwrap_or(0);
-                                        self.filter.raw_query.remove(byte_pos);
-                                        self.filter.cursor_pos -= 1;
-                                        self.filter.reparse();
-                                        self.update_filter();
+                                        {
+                                            self.filter.raw_query.remove(byte_pos);
+                                            self.filter.cursor_pos -= 1;
+                                            self.filter.reparse();
+                                            self.update_filter();
+                                        }
                                     }
                                 }
 
                                 // Delete
                                 (KeyCode::Delete, _) => {
-                                    let query_len = self.filter.raw_query.chars().count();
-                                    if self.filter.cursor_pos < query_len {
-                                        let byte_pos = self
-                                            .filter
-                                            .raw_query
-                                            .char_indices()
-                                            .nth(self.filter.cursor_pos)
-                                            .map(|(i, _)| i)
-                                            .unwrap_or(self.filter.raw_query.len());
+                                    if let Some((byte_pos, _)) = self
+                                        .filter
+                                        .raw_query
+                                        .char_indices()
+                                        .nth(self.filter.cursor_pos)
+                                    {
                                         self.filter.raw_query.remove(byte_pos);
                                         self.filter.reparse();
                                         self.update_filter();
