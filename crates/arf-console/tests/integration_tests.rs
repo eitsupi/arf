@@ -2226,9 +2226,6 @@ fn test_pty_history_browser_persists_across_sessions() {
         terminal.quit().expect("Should quit cleanly (session 1)");
     }
 
-    // Give time for history to be written
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
     // Session 2: Open history browser and verify session 1's command is visible
     {
         let mut terminal = Terminal::spawn_with_args(&[
@@ -2246,7 +2243,6 @@ fn test_pty_history_browser_persists_across_sessions() {
             .send_line(":history browse")
             .expect("Should send :history browse");
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
         terminal
             .expect("History Browser")
             .expect("Should show history browser header");
@@ -2256,10 +2252,11 @@ fn test_pty_history_browser_persists_across_sessions() {
             .expect("unique_test_value_12345")
             .expect("Should see command from session 1 in history browser");
 
-        // Exit browser
+        // Exit browser and wait for prompt to return
         terminal.send("q").expect("Should send q to exit browser");
-
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        terminal
+            .clear_and_expect("> ")
+            .expect("Should return to prompt after browser exit");
 
         terminal.quit().expect("Should quit cleanly (session 2)");
     }
@@ -2313,8 +2310,6 @@ fn test_pty_history_browser() {
         .send_line(":history browse")
         .expect("Should send :history browse");
 
-    // Wait for browser to appear
-    std::thread::sleep(std::time::Duration::from_millis(500));
     terminal
         .expect("History Browser")
         .expect("Should show history browser header");
@@ -2324,11 +2319,11 @@ fn test_pty_history_browser() {
         .expect("[R]")
         .expect("Should show R mode indicator");
 
-    // Press 'q' to exit the browser
+    // Press 'q' to exit the browser and wait for prompt to return
     terminal.send("q").expect("Should send q to exit browser");
-
-    // Wait for prompt to return
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should return to prompt after browser exit");
 
     // Execute another command (this writes to history database)
     terminal.send_line("42").expect("Should send R expression");
@@ -2344,15 +2339,15 @@ fn test_pty_history_browser() {
         .send_line(":history browse")
         .expect("Should send :history browse again");
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
     terminal
         .expect("History Browser")
         .expect("Should show history browser header on second open");
 
-    // Exit browser
+    // Exit browser and wait for prompt to return
     terminal.send("q").expect("Should send q to exit browser");
-
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should return to prompt after second browser exit");
 
     // Verify we're back at prompt and can still execute commands
     terminal.send_line("99").expect("Should send R expression");
