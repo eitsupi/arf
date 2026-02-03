@@ -111,11 +111,10 @@ impl HistoryFilter {
         filter
     }
 
-    /// Update the filter with a new raw query.
-    fn update(&mut self, query: &str, cursor_pos: usize) {
-        let parsed = Self::parse(query);
-        self.raw_query = query.to_string();
-        self.cursor_pos = cursor_pos;
+    /// Re-parse prefix filters from the current raw_query.
+    /// Call this after modifying `raw_query` or `cursor_pos` in-place.
+    fn reparse(&mut self) {
+        let parsed = Self::parse(&self.raw_query);
         self.hostname = parsed.hostname;
         self.cwd_prefix = parsed.cwd_prefix;
         self.exit_status = parsed.exit_status;
@@ -500,7 +499,9 @@ impl HistoryBrowser {
 
                                 // Clear filter and return to normal mode
                                 (KeyCode::Esc, _) => {
-                                    self.filter.update("", 0);
+                                    self.filter.raw_query.clear();
+                                    self.filter.cursor_pos = 0;
+                                    self.filter.reparse();
                                     self.update_filter();
                                     self.filter_active = false;
                                 }
@@ -564,10 +565,7 @@ impl HistoryBrowser {
                                             .unwrap_or(0);
                                         self.filter.raw_query.remove(byte_pos);
                                         self.filter.cursor_pos -= 1;
-                                        self.filter.update(
-                                            &self.filter.raw_query.clone(),
-                                            self.filter.cursor_pos,
-                                        );
+                                        self.filter.reparse();
                                         self.update_filter();
                                     }
                                 }
@@ -584,10 +582,7 @@ impl HistoryBrowser {
                                             .map(|(i, _)| i)
                                             .unwrap_or(self.filter.raw_query.len());
                                         self.filter.raw_query.remove(byte_pos);
-                                        self.filter.update(
-                                            &self.filter.raw_query.clone(),
-                                            self.filter.cursor_pos,
-                                        );
+                                        self.filter.reparse();
                                         self.update_filter();
                                     }
                                 }
@@ -616,10 +611,7 @@ impl HistoryBrowser {
                                         .unwrap_or(self.filter.raw_query.len());
                                     self.filter.raw_query.insert(byte_pos, c);
                                     self.filter.cursor_pos += 1;
-                                    self.filter.update(
-                                        &self.filter.raw_query.clone(),
-                                        self.filter.cursor_pos,
-                                    );
+                                    self.filter.reparse();
                                     self.update_filter();
                                 }
 
