@@ -364,9 +364,8 @@ mod tests {
         // after_skip = "語テスト" (8 cols), take 5 → "語テ" (4 cols) + right_pad=1
         // Result: "… 語テ …" with exact width = 1+1+4+1+1 = 8
         let (r, _) = scroll_display("日本語テスト", 8, 3);
+        assert_eq!(r, "…\u{0020}語テ\u{0020}…");
         assert_eq!(display_width(&r), 8);
-        assert!(r.starts_with('…'));
-        assert!(r.ends_with('…'));
     }
 
     #[test]
@@ -383,19 +382,15 @@ mod tests {
 
     #[test]
     fn emoji_display_width() {
-        // Common emoji: width depends on unicode-width version.
-        // Document and pin the expected behavior for regression detection.
-        // Most single-codepoint emoji are width 2 in unicode-width 0.2.
-        let w = display_width("🎉");
-        assert!(w == 1 || w == 2, "emoji width should be 1 or 2, got {}", w);
+        // Pin the expected width for unicode-width 0.2: single-codepoint emoji = 2 cols.
+        // If this fails after a unicode-width upgrade, update the expectation.
+        assert_eq!(display_width("🎉"), 2);
     }
 
     #[test]
     fn truncate_emoji() {
-        // "🎉🎊🎁" — each emoji is at least 1 col
-        let result = truncate_to_width("🎉🎊🎁", 3);
-        // Must fit within 3 cols and end with '…'
-        assert!(display_width(&result) <= 3);
-        assert!(result.ends_with('…'));
+        // "🎉🎊🎁" = 6 cols (each emoji 2 cols), max_width = 3
+        // target = 2 content cols → 🎉(2) fits, 🎊 would need 4 → stop → "🎉…"
+        assert_eq!(truncate_to_width("🎉🎊🎁", 3), "🎉…");
     }
 }
