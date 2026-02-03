@@ -28,7 +28,7 @@ use crossterm::{
     },
 };
 use std::io::{self, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Result of handling a key event in the pager.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +40,85 @@ pub enum PagerAction {
     Exit,
     /// Request a redraw.
     Redraw,
+}
+
+/// Animation scroll speed in milliseconds per character.
+pub(crate) const SCROLL_INTERVAL_MS: u64 = 150;
+
+/// Pause duration at the start of scroll animation (in ms).
+pub(crate) const SCROLL_PAUSE_MS: u64 = 1000;
+
+/// Run a closure inside an alternate screen with mouse capture and raw mode.
+///
+/// Handles setup (`EnterAlternateScreen`, `EnableMouseCapture`,
+/// `enable_raw_mode`) and guaranteed teardown regardless of the closure result.
+pub fn with_alternate_screen<R, F>(f: F) -> io::Result<R>
+where
+    F: FnOnce() -> io::Result<R>,
+{
+    let mut stdout = io::stdout();
+    stdout.execute(EnterAlternateScreen)?;
+    stdout.execute(EnableMouseCapture)?;
+    terminal::enable_raw_mode()?;
+
+    let result = f();
+
+    terminal::disable_raw_mode()?;
+    stdout.execute(DisableMouseCapture)?;
+    stdout.execute(cursor::Show)?;
+    stdout.execute(LeaveAlternateScreen)?;
+
+    result
+}
+
+/// Manages text scroll animation state for long items in a list view.
+///
+/// Call [`update`](Self::update) each frame with the current cursor index.
+/// When the cursor stays on the same item, the animation ticks forward
+/// after an initial pause, returning `true` when a redraw is needed.
+pub(crate) struct TextScrollState {
+    /// Current horizontal scroll position in display columns.
+    pub scroll_pos: usize,
+    prev_cursor: usize,
+    scroll_start: Instant,
+}
+
+impl TextScrollState {
+    pub fn new() -> Self {
+        Self {
+            scroll_pos: 0,
+            prev_cursor: usize::MAX,
+            scroll_start: Instant::now(),
+        }
+    }
+
+    /// Advance the animation. Returns `true` if the display changed.
+    ///
+    /// `current_cursor` is the index of the currently highlighted item.
+    pub fn update(&mut self, current_cursor: usize) -> bool {
+        if current_cursor != self.prev_cursor {
+            self.prev_cursor = current_cursor;
+            self.scroll_pos = 0;
+            self.scroll_start = Instant::now();
+            return true;
+        }
+
+        let elapsed = self.scroll_start.elapsed();
+
+        if elapsed < Duration::from_millis(SCROLL_PAUSE_MS) {
+            return false;
+        }
+
+        let scroll_time = elapsed - Duration::from_millis(SCROLL_PAUSE_MS);
+        let new_pos = (scroll_time.as_millis() / SCROLL_INTERVAL_MS as u128) as usize;
+
+        if new_pos != self.scroll_pos {
+            self.scroll_pos = new_pos;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Configuration for the pager.
@@ -92,24 +171,11 @@ pub trait PagerContent {
 
 /// Run the pager with the given content and configuration.
 pub fn run<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Result<()> {
-    let mut stdout = io::stdout();
-
     if config.manage_alternate_screen {
-        stdout.execute(EnterAlternateScreen)?;
-        stdout.execute(EnableMouseCapture)?;
-        terminal::enable_raw_mode()?;
+        with_alternate_screen(|| run_inner(content, config))
+    } else {
+        run_inner(content, config)
     }
-
-    let result = run_inner(content, config);
-
-    if config.manage_alternate_screen {
-        terminal::disable_raw_mode()?;
-        stdout.execute(DisableMouseCapture)?;
-        stdout.execute(cursor::Show)?;
-        stdout.execute(LeaveAlternateScreen)?;
-    }
-
-    result
 }
 
 /// Inner pager loop.
