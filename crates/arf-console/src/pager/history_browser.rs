@@ -161,6 +161,8 @@ struct HistoryBrowser {
     /// When true, all character input goes to the filter text.
     /// When false, single-char keybindings (q, d, y, etc.) work as navigation/commands.
     filter_active: bool,
+    /// Cached count of selected entries (maintained by toggle/select/unselect/delete).
+    cached_selected_count: usize,
 }
 
 impl HistoryBrowser {
@@ -190,6 +192,7 @@ impl HistoryBrowser {
             prev_cursor: 0,
             show_delete_dialog: false,
             filter_active: false,
+            cached_selected_count: 0,
         }
     }
 
@@ -269,22 +272,31 @@ impl HistoryBrowser {
         self.scroll_offset = 0;
     }
 
-    /// Count of currently selected items.
+    /// Count of currently selected items (cached).
     fn selected_count(&self) -> usize {
-        self.entries.iter().filter(|e| e.selected).count()
+        self.cached_selected_count
     }
 
     /// Toggle selection for the item at cursor.
     fn toggle_selection(&mut self) {
         if let Some(&(idx, _)) = self.filtered.get(self.cursor) {
-            self.entries[idx].selected = !self.entries[idx].selected;
+            let entry = &mut self.entries[idx];
+            entry.selected = !entry.selected;
+            if entry.selected {
+                self.cached_selected_count += 1;
+            } else {
+                self.cached_selected_count -= 1;
+            }
         }
     }
 
     /// Select all visible (filtered) items.
     fn select_all_visible(&mut self) {
         for &(idx, _) in &self.filtered {
-            self.entries[idx].selected = true;
+            if !self.entries[idx].selected {
+                self.entries[idx].selected = true;
+                self.cached_selected_count += 1;
+            }
         }
     }
 
@@ -293,6 +305,7 @@ impl HistoryBrowser {
         for entry in &mut self.entries {
             entry.selected = false;
         }
+        self.cached_selected_count = 0;
     }
 
     /// Delete all selected items from the database.
@@ -335,6 +348,7 @@ impl HistoryBrowser {
         // Remove deleted entries from our list
         let feedback = format!("Deleted {} entries", ids_to_delete.len());
         self.entries.retain(|e| !e.selected);
+        self.cached_selected_count = 0;
 
         // Rebuild filtered list
         self.update_filter();
