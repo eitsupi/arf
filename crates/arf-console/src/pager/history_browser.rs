@@ -838,7 +838,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
     // Open in read-only mode to avoid WAL conflicts
     let db = Connection::open_with_flags(
         db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .map_err(|e| io::Error::other(e.to_string()))?;
 
