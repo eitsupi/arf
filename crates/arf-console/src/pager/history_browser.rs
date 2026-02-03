@@ -358,6 +358,60 @@ impl HistoryBrowser {
         Ok(())
     }
 
+    /// Move cursor up by one row.
+    fn move_cursor_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            if self.cursor < self.scroll_offset {
+                self.scroll_offset = self.cursor;
+            }
+        }
+    }
+
+    /// Move cursor down by one row.
+    fn move_cursor_down(&mut self) {
+        let visible_rows = visible_result_rows();
+        if self.cursor + 1 < self.filtered.len() {
+            self.cursor += 1;
+            if self.cursor >= self.scroll_offset + visible_rows {
+                self.scroll_offset = self.cursor - visible_rows + 1;
+            }
+        }
+    }
+
+    /// Move cursor up by one page.
+    fn move_page_up(&mut self) {
+        let page_size = visible_result_rows();
+        self.cursor = self.cursor.saturating_sub(page_size);
+        self.scroll_offset = self.scroll_offset.saturating_sub(page_size);
+    }
+
+    /// Move cursor down by one page.
+    fn move_page_down(&mut self) {
+        let page_size = visible_result_rows();
+        let max_cursor = self.filtered.len().saturating_sub(1);
+        self.cursor = (self.cursor + page_size).min(max_cursor);
+        let max_scroll = self.filtered.len().saturating_sub(page_size);
+        self.scroll_offset = (self.scroll_offset + page_size).min(max_scroll);
+    }
+
+    /// Move cursor to the first entry.
+    fn move_to_top(&mut self) {
+        self.cursor = 0;
+        self.scroll_offset = 0;
+    }
+
+    /// Move cursor to the last entry.
+    fn move_to_bottom(&mut self) {
+        if !self.filtered.is_empty() {
+            self.cursor = self.filtered.len() - 1;
+            let visible_rows = visible_result_rows();
+            if self.cursor >= visible_rows {
+                self.scroll_offset = self.cursor - visible_rows + 1;
+            }
+        }
+    }
+
     /// Get the command line at the current cursor position.
     fn current_command(&self) -> Option<&str> {
         self.filtered
@@ -449,23 +503,34 @@ impl HistoryBrowser {
 
                                 // Navigation still works in filter mode
                                 (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                                    if self.cursor > 0 {
-                                        self.cursor -= 1;
-                                        if self.cursor < self.scroll_offset {
-                                            self.scroll_offset = self.cursor;
-                                        }
-                                    }
+                                    self.move_cursor_up();
                                 }
                                 (KeyCode::Down, _)
                                 | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                    let visible_rows = visible_result_rows();
-                                    if self.cursor + 1 < self.filtered.len() {
-                                        self.cursor += 1;
-                                        if self.cursor >= self.scroll_offset + visible_rows {
-                                            self.scroll_offset =
-                                                self.cursor - visible_rows + 1;
-                                        }
-                                    }
+                                    self.move_cursor_down();
+                                }
+                                (KeyCode::PageUp, _)
+                                | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
+                                    self.move_page_up();
+                                }
+                                (KeyCode::PageDown, _)
+                                | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                                    self.move_page_down();
+                                }
+                                (KeyCode::Home, _) => {
+                                    self.move_to_top();
+                                }
+                                (KeyCode::End, _) => {
+                                    self.move_to_bottom();
+                                }
+                                (KeyCode::Tab, _) => {
+                                    self.toggle_selection();
+                                }
+                                (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                                    self.select_all_visible();
+                                }
+                                (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                                    self.unselect_all();
                                 }
 
                                 // Backspace
@@ -563,67 +628,38 @@ impl HistoryBrowser {
                                 (KeyCode::Up, _)
                                 | (KeyCode::Char('k'), KeyModifiers::NONE)
                                 | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                                    if self.cursor > 0 {
-                                        self.cursor -= 1;
-                                        if self.cursor < self.scroll_offset {
-                                            self.scroll_offset = self.cursor;
-                                        }
-                                    }
+                                    self.move_cursor_up();
                                 }
 
                                 // Navigation - down
                                 (KeyCode::Down, _)
                                 | (KeyCode::Char('j'), KeyModifiers::NONE)
                                 | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                    let visible_rows = visible_result_rows();
-                                    if self.cursor + 1 < self.filtered.len() {
-                                        self.cursor += 1;
-                                        if self.cursor >= self.scroll_offset + visible_rows {
-                                            self.scroll_offset =
-                                                self.cursor - visible_rows + 1;
-                                        }
-                                    }
+                                    self.move_cursor_down();
                                 }
 
                                 // Page up
                                 (KeyCode::PageUp, _)
                                 | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                                    let page_size = visible_result_rows();
-                                    self.cursor = self.cursor.saturating_sub(page_size);
-                                    self.scroll_offset =
-                                        self.scroll_offset.saturating_sub(page_size);
+                                    self.move_page_up();
                                 }
 
                                 // Page down
                                 (KeyCode::PageDown, _)
                                 | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                                    let page_size = visible_result_rows();
-                                    let max_cursor = self.filtered.len().saturating_sub(1);
-                                    self.cursor = (self.cursor + page_size).min(max_cursor);
-                                    let max_scroll =
-                                        self.filtered.len().saturating_sub(page_size);
-                                    self.scroll_offset =
-                                        (self.scroll_offset + page_size).min(max_scroll);
+                                    self.move_page_down();
                                 }
 
                                 // Home / go to top
                                 (KeyCode::Home, _)
                                 | (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                                    self.cursor = 0;
-                                    self.scroll_offset = 0;
+                                    self.move_to_top();
                                 }
 
                                 // End / go to bottom
                                 (KeyCode::End, _)
                                 | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
-                                    if !self.filtered.is_empty() {
-                                        self.cursor = self.filtered.len() - 1;
-                                        let visible_rows = visible_result_rows();
-                                        if self.cursor >= visible_rows {
-                                            self.scroll_offset =
-                                                self.cursor - visible_rows + 1;
-                                        }
-                                    }
+                                    self.move_to_bottom();
                                 }
 
                                 // Toggle selection
@@ -684,22 +720,11 @@ impl HistoryBrowser {
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::ScrollUp => {
                             needs_redraw = true;
-                            if self.cursor > 0 {
-                                self.cursor -= 1;
-                                if self.cursor < self.scroll_offset {
-                                    self.scroll_offset = self.cursor;
-                                }
-                            }
+                            self.move_cursor_up();
                         }
                         MouseEventKind::ScrollDown => {
                             needs_redraw = true;
-                            let visible_rows = visible_result_rows();
-                            if self.cursor + 1 < self.filtered.len() {
-                                self.cursor += 1;
-                                if self.cursor >= self.scroll_offset + visible_rows {
-                                    self.scroll_offset = self.cursor - visible_rows + 1;
-                                }
-                            }
+                            self.move_cursor_down();
                         }
                         _ => {}
                     },
@@ -900,7 +925,7 @@ impl HistoryBrowser {
             println!("\r{}", pad_line(&format!("  {}", msg)));
         } else {
             let footer = if self.filter_active {
-                "  Enter confirm | Esc clear | ↑↓ navigate"
+                "  Enter confirm | Esc clear | ↑↓/PgUp/PgDn navigate | Tab select"
             } else {
                 "  / filter | Tab select | d delete | y copy | Enter copy+exit | q exit"
             };
