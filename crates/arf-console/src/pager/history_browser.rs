@@ -143,8 +143,6 @@ struct HistoryBrowser {
     cursor: usize,
     /// Scroll offset for the list.
     scroll_offset: usize,
-    /// Number of selected items.
-    selected_count: usize,
     /// Feedback message to display.
     feedback_message: Option<String>,
     /// Database mode (R or Shell).
@@ -184,7 +182,6 @@ impl HistoryBrowser {
             filter: HistoryFilter::default(),
             cursor: 0,
             scroll_offset: 0,
-            selected_count: 0,
             feedback_message: None,
             db_mode,
             db_path,
@@ -272,26 +269,22 @@ impl HistoryBrowser {
         self.scroll_offset = 0;
     }
 
+    /// Count of currently selected items.
+    fn selected_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.selected).count()
+    }
+
     /// Toggle selection for the item at cursor.
     fn toggle_selection(&mut self) {
         if let Some(&(idx, _)) = self.filtered.get(self.cursor) {
-            let was_selected = self.entries[idx].selected;
-            self.entries[idx].selected = !was_selected;
-            if was_selected {
-                self.selected_count = self.selected_count.saturating_sub(1);
-            } else {
-                self.selected_count += 1;
-            }
+            self.entries[idx].selected = !self.entries[idx].selected;
         }
     }
 
-    /// Select all visible items.
+    /// Select all visible (filtered) items.
     fn select_all_visible(&mut self) {
         for &(idx, _) in &self.filtered {
-            if !self.entries[idx].selected {
-                self.entries[idx].selected = true;
-                self.selected_count += 1;
-            }
+            self.entries[idx].selected = true;
         }
     }
 
@@ -300,7 +293,6 @@ impl HistoryBrowser {
         for entry in &mut self.entries {
             entry.selected = false;
         }
-        self.selected_count = 0;
     }
 
     /// Delete all selected items from the database.
@@ -343,7 +335,6 @@ impl HistoryBrowser {
         // Remove deleted entries from our list
         let feedback = format!("Deleted {} entries", ids_to_delete.len());
         self.entries.retain(|e| !e.selected);
-        self.selected_count = 0;
 
         // Rebuild filtered list
         self.update_filter();
@@ -681,7 +672,7 @@ impl HistoryBrowser {
 
                                 // Delete selected (show confirmation)
                                 (KeyCode::Char('d'), KeyModifiers::NONE) => {
-                                    if self.selected_count > 0 {
+                                    if self.selected_count() > 0 {
                                         self.show_delete_dialog = true;
                                     } else {
                                         self.feedback_message =
@@ -721,12 +712,27 @@ impl HistoryBrowser {
                     }
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            needs_redraw = true;
-                            self.move_cursor_up();
+                            if self.scroll_offset > 0 {
+                                self.scroll_offset -= 1;
+                                // Keep cursor visible
+                                let visible_rows = visible_result_rows();
+                                if self.cursor >= self.scroll_offset + visible_rows {
+                                    self.cursor = self.scroll_offset + visible_rows - 1;
+                                }
+                                needs_redraw = true;
+                            }
                         }
                         MouseEventKind::ScrollDown => {
-                            needs_redraw = true;
-                            self.move_cursor_down();
+                            let max_scroll =
+                                self.filtered.len().saturating_sub(visible_result_rows());
+                            if self.scroll_offset < max_scroll {
+                                self.scroll_offset += 1;
+                                // Keep cursor visible
+                                if self.cursor < self.scroll_offset {
+                                    self.cursor = self.scroll_offset;
+                                }
+                                needs_redraw = true;
+                            }
                         }
                         _ => {}
                     },
@@ -783,8 +789,8 @@ impl HistoryBrowser {
         };
 
         // Header with mode and entry count
-        let selected_info = if self.selected_count > 0 {
-            format!(" [{} selected]", self.selected_count)
+        let selected_info = if self.selected_count() > 0 {
+            format!(" [{} selected]", self.selected_count())
         } else {
             String::new()
         };
@@ -923,7 +929,7 @@ impl HistoryBrowser {
         if self.show_delete_dialog {
             let dialog_msg = format!(
                 "  Delete {} selected entries? (Enter=confirm, Esc=cancel)",
-                self.selected_count
+                self.selected_count()
             );
             println!("\r{}", pad_line(&dialog_msg).yellow().bold());
         } else if let Some(ref msg) = self.feedback_message {
@@ -975,7 +981,8 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
                 cwd: row.get(4)?,
                 duration: row
                     .get::<_, Option<i64>>(5)?
-                    .map(|ms| std::time::Duration::from_millis(ms as u64)),
+                    .and_then(|ms| u64::try_from(ms).ok())
+                    .map(std::time::Duration::from_millis),
                 exit_status: row.get(6)?,
                 more_info: None,
             })
@@ -1251,14 +1258,14 @@ mod tests {
         browser.toggle_selection();
         browser.cursor = 2;
         browser.toggle_selection();
-        assert_eq!(browser.selected_count, 2);
+        assert_eq!(browser.selected_count(), 2);
 
         browser.delete_selected().unwrap();
 
         // Only cmd_b should remain in the browser
         assert_eq!(browser.entries.len(), 1);
         assert_eq!(browser.entries[0].item.command_line, "cmd_b");
-        assert_eq!(browser.selected_count, 0);
+        assert_eq!(browser.selected_count(), 0);
 
         // Verify database state
         let remaining = load_history(&db_path).unwrap();
@@ -1286,7 +1293,7 @@ mod tests {
         let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
 
         browser.select_all_visible();
-        assert_eq!(browser.selected_count, 2);
+        assert_eq!(browser.selected_count(), 2);
 
         browser.delete_selected().unwrap();
 

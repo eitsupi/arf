@@ -9,7 +9,7 @@ pub mod history_schema;
 pub mod session_info;
 
 pub use help::run_help_browser;
-pub use history_browser::{HistoryDbMode, run_history_browser};
+pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};
 pub use session_info::display_session_info;
 
 use base64::{Engine, engine::general_purpose};
