@@ -270,16 +270,14 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                 }
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        if scroll_offset > 0 {
-                            scroll_offset -= 1;
-                            needs_redraw = true;
-                        }
+                        needs_redraw = true;
+                        scroll_offset = scroll_offset.saturating_sub(1);
                     }
                     MouseEventKind::ScrollDown => {
+                        needs_redraw = true;
                         let max_offset = max_scroll_offset(content.line_count());
                         if scroll_offset < max_offset {
                             scroll_offset += 1;
-                            needs_redraw = true;
                         }
                     }
                     _ => {}
