@@ -288,6 +288,9 @@ impl DedupSet {
         let mut command_timestamps = HashSet::new();
         let mut commands = HashSet::new();
 
+        // INVARIANT: `commands` must contain every command_line that appears
+        // in `command_timestamps`, because `is_duplicate` uses `commands` as
+        // a fast-path filter for both timestamped and non-timestamped lookups.
         for item in items {
             commands.insert(item.command_line.clone());
             if let Some(ts) = item.start_timestamp {
@@ -1516,5 +1519,50 @@ mod tests {
             reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
         let shell_items = targets.shell_history.search(shell_query).unwrap();
         assert_eq!(shell_items.len(), 1);
+    }
+
+    #[test]
+    fn test_import_dry_run_with_partial_dedup() {
+        // Regression test: dry-run dedup should work when only one database
+        // has a dedup set (e.g., r.db exists but shell.db doesn't).
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut targets = create_test_targets(&temp_dir);
+
+        // Pre-populate only the R database
+        let entries = vec![ImportEntry {
+            command: "library(dplyr)".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+        }];
+        import_entries(&mut targets, entries, None, false).unwrap();
+
+        // Build dedup set only for R (simulating shell.db not existing)
+        let r_dedup = DedupSet::from_history(&targets.r_history).unwrap();
+
+        let entries = vec![
+            ImportEntry {
+                command: "library(dplyr)".to_string(), // duplicate in R
+                timestamp: None,
+                mode: Some("r".to_string()),
+            },
+            ImportEntry {
+                command: "print(1)".to_string(), // new R entry
+                timestamp: None,
+                mode: Some("r".to_string()),
+            },
+            ImportEntry {
+                command: "ls -la".to_string(), // shell entry, no dedup set
+                timestamp: None,
+                mode: Some("shell".to_string()),
+            },
+        ];
+
+        // Pass R dedup but None for shell
+        let result = import_entries_dry_run(&entries, Some(&r_dedup), None);
+        assert_eq!(result.r_imported, 1); // only "print(1)"
+        assert_eq!(result.shell_imported, 1); // "ls -la" not checked (no shell dedup)
+        assert_eq!(result.duplicates_skipped, 1); // "library(dplyr)"
     }
 }
