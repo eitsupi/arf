@@ -18,7 +18,7 @@ autoformat = false
 [editor]
 mode = "emacs"
 auto_match = true
-autosuggestion = true
+auto_suggestions = true
 
 [editor.key_map]
 Alt-Hyphen = " <- "
@@ -51,7 +51,7 @@ enabled = true
 timeout_ms = 50
 debounce_ms = 100
 max_height = 10
-function_paren_check_limit = 50
+auto_paren_limit = 50
 
 [history]
 menu_max_height = 15

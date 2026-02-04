@@ -4,6 +4,81 @@ use nu_ansi_term::Color;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Generate a JSON Schema for a Color property.
+///
+/// Colors can be:
+/// - A named string: "Red", "LightBlue", "DarkGray", "Default", etc.
+/// - A 256-color object: `{ Fixed: 99 }`
+/// - An RGB object: `{ Rgb: [255, 0, 0] }`
+///
+/// Usage:
+/// - `color_prop!("description")` — without default
+/// - `color_prop!("description", default = "Cyan")` — with default value
+macro_rules! color_prop {
+    ($desc:expr) => {{ $crate::config::colors::make_color_schema($desc, None) }};
+    ($desc:expr, default = $default:expr) => {{ $crate::config::colors::make_color_schema($desc, Some($default)) }};
+}
+
+/// Build a color property schema. Used by the `color_prop!` macro.
+///
+/// This is a function (not a macro) so that the oneOf definition exists in
+/// one place only, avoiding duplication across macro arms.
+#[doc(hidden)]
+pub fn make_color_schema(description: &str, default: Option<&str>) -> schemars::Schema {
+    let one_of = schemars::json_schema!({
+        "oneOf": [
+            {
+                "type": "string",
+                "enum": [
+                    "Default", "Black", "Red", "Green", "Yellow", "Blue",
+                    "Purple", "Magenta", "Cyan", "White",
+                    "DarkGray", "LightGray",
+                    "LightRed", "LightGreen", "LightYellow", "LightBlue",
+                    "LightPurple", "LightMagenta", "LightCyan"
+                ]
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
+                },
+                "required": ["Fixed"],
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "Rgb": {
+                        "type": "array",
+                        "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                        "minItems": 3,
+                        "maxItems": 3
+                    }
+                },
+                "required": ["Rgb"],
+                "additionalProperties": false
+            }
+        ]
+    });
+
+    // Insert description and optional default into the schema object.
+    let mut schema = one_of;
+    schema.insert(
+        "description".to_string(),
+        serde_json::Value::String(description.to_string()),
+    );
+    if let Some(default_val) = default {
+        schema.insert(
+            "default".to_string(),
+            serde_json::Value::String(default_val.to_string()),
+        );
+    }
+    schema
+}
+
+// Re-export the macro for use in sibling modules (e.g., experimental.rs).
+pub(crate) use color_prop;
+
 /// Color configuration for syntax highlighting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -33,46 +108,46 @@ impl JsonSchema for ColorsConfig {
                     "type": "object",
                     "description": "Colors for R syntax tokens",
                     "properties": {
-                        "comment": { "description": "Color for comments" },
-                        "string": { "description": "Color for string literals" },
-                        "number": { "description": "Color for numeric literals" },
-                        "keyword": { "description": "Color for keywords" },
-                        "constant": { "description": "Color for constants (TRUE, FALSE, NULL, NA, etc.)" },
-                        "operator": { "description": "Color for operators" },
-                        "punctuation": { "description": "Color for punctuation" },
-                        "identifier": { "description": "Color for identifiers" }
+                        "comment": color_prop!("Color for comments"),
+                        "string": color_prop!("Color for string literals"),
+                        "number": color_prop!("Color for numeric literals"),
+                        "keyword": color_prop!("Color for keywords"),
+                        "constant": color_prop!("Color for constants (TRUE, FALSE, NULL, NA, etc.)"),
+                        "operator": color_prop!("Color for operators"),
+                        "punctuation": color_prop!("Color for punctuation"),
+                        "identifier": color_prop!("Color for identifiers")
                     }
                 },
                 "meta": {
                     "type": "object",
                     "description": "Colors for meta commands",
                     "properties": {
-                        "command": { "description": "Color for meta command lines" }
+                        "command": color_prop!("Color for meta command lines")
                     }
                 },
                 "prompt": {
                     "type": "object",
                     "description": "Colors for prompts",
                     "properties": {
-                        "main": { "description": "Color for the main R prompt" },
-                        "continuation": { "description": "Color for the continuation prompt" },
-                        "shell": { "description": "Color for the shell mode prompt" },
-                        "indicator": { "description": "Color for the mode indicator text" },
+                        "main": color_prop!("Color for the main R prompt"),
+                        "continuation": color_prop!("Color for the continuation prompt"),
+                        "shell": color_prop!("Color for the shell mode prompt"),
+                        "indicator": color_prop!("Color for the mode indicator text"),
                         "status": {
                             "type": "object",
                             "description": "Colors for command status indicator",
                             "properties": {
-                                "success": { "description": "Color for success status" },
-                                "error": { "description": "Color for error status" }
+                                "success": color_prop!("Color for success status"),
+                                "error": color_prop!("Color for error status")
                             }
                         },
                         "vi": {
                             "type": "object",
                             "description": "Colors for vi mode indicator",
                             "properties": {
-                                "insert": { "description": "Color for vi insert mode" },
-                                "normal": { "description": "Color for vi normal mode" },
-                                "non_vi": { "description": "Color for non-vi modes (Emacs, etc.)" }
+                                "insert": color_prop!("Color for vi insert mode"),
+                                "normal": color_prop!("Color for vi normal mode"),
+                                "non_vi": color_prop!("Color for non-vi modes (Emacs, etc.)")
                             }
                         }
                     }

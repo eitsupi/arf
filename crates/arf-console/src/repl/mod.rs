@@ -9,7 +9,7 @@ pub(crate) mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
-use crate::config::{Config, ModeIndicatorPosition, RSourceStatus, history_dir};
+use crate::config::{Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir};
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
@@ -176,8 +176,8 @@ impl Repl {
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        line_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 if self.config.editor.auto_match {
@@ -192,8 +192,7 @@ impl Repl {
                     self.config.experimental.completion_min_chars,
                 ))
             }
-            _ => {
-                // Default to Emacs
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 if self.config.editor.auto_match {
@@ -216,7 +215,7 @@ impl Repl {
             let completer = Box::new(CombinedCompleter::with_settings_and_rig(
                 self.config.completion.timeout_ms,
                 self.config.completion.debounce_ms,
-                self.config.completion.function_paren_check_limit,
+                self.config.completion.auto_paren_limit,
                 self.r_source_status.rig_enabled(),
             ));
             line_editor = line_editor.with_completer(completer);
@@ -268,7 +267,7 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
@@ -386,8 +385,8 @@ impl Repl {
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        line_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 if self.config.editor.auto_match {
@@ -402,7 +401,7 @@ impl Repl {
                     self.config.experimental.completion_min_chars,
                 ))
             }
-            _ => {
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 if self.config.editor.auto_match {
@@ -421,7 +420,7 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
@@ -551,8 +550,8 @@ impl Repl {
         let mut shell_editor = setup_history(shell_editor, self.shell_history_path());
 
         // Use same edit mode as R editor
-        shell_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        shell_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
@@ -561,7 +560,7 @@ impl Repl {
                     default_vi_normal_keybindings(),
                 )))
             }
-            _ => {
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
@@ -621,7 +620,7 @@ impl Repl {
         )));
 
         // Set up history-based autosuggestion (uses shell history)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 DefaultHinter::default().with_style(Style::new().italic().fg(Color::DarkGray));
             shell_editor = shell_editor.with_hinter(Box::new(hinter));

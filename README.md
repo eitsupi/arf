@@ -147,7 +147,7 @@ autoformat = false      # Requires Air CLI
 [editor]
 mode = "emacs"          # "emacs" or "vi"
 auto_match = true
-autosuggestion = true   # fish/nushell style history suggestions
+auto_suggestions = true # fish/nushell style history suggestions
 
 # Keyboard shortcuts (crokey format)
 [editor.key_map]

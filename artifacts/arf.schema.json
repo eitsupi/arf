@@ -40,9 +40,9 @@
     "completion": {
       "$ref": "#/$defs/CompletionConfig",
       "default": {
+        "auto_paren_limit": 50,
         "debounce_ms": 100,
         "enabled": true,
-        "function_paren_check_limit": 50,
         "max_height": 10,
         "timeout_ms": 50
       }
@@ -51,7 +51,7 @@
       "$ref": "#/$defs/EditorConfig",
       "default": {
         "auto_match": true,
-        "autosuggestion": true,
+        "auto_suggestions": true,
         "key_map": {
           "Alt-Hyphen": " <- ",
           "Alt-p": " |> "
@@ -140,7 +140,66 @@
           "type": "object",
           "properties": {
             "command": {
-              "description": "Color for meta command lines"
+              "description": "Color for meta command lines",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             }
           }
         },
@@ -149,26 +208,380 @@
           "type": "object",
           "properties": {
             "continuation": {
-              "description": "Color for the continuation prompt"
+              "description": "Color for the continuation prompt",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "indicator": {
-              "description": "Color for the mode indicator text"
+              "description": "Color for the mode indicator text",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "main": {
-              "description": "Color for the main R prompt"
+              "description": "Color for the main R prompt",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "shell": {
-              "description": "Color for the shell mode prompt"
+              "description": "Color for the shell mode prompt",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "status": {
               "description": "Colors for command status indicator",
               "type": "object",
               "properties": {
                 "error": {
-                  "description": "Color for error status"
+                  "description": "Color for error status",
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Default",
+                        "Black",
+                        "Red",
+                        "Green",
+                        "Yellow",
+                        "Blue",
+                        "Purple",
+                        "Magenta",
+                        "Cyan",
+                        "White",
+                        "DarkGray",
+                        "LightGray",
+                        "LightRed",
+                        "LightGreen",
+                        "LightYellow",
+                        "LightBlue",
+                        "LightPurple",
+                        "LightMagenta",
+                        "LightCyan"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Fixed": {
+                          "type": "integer",
+                          "maximum": 255,
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Fixed"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Rgb": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "maximum": 255,
+                            "minimum": 0
+                          },
+                          "maxItems": 3,
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Rgb"
+                      ]
+                    }
+                  ]
                 },
                 "success": {
-                  "description": "Color for success status"
+                  "description": "Color for success status",
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Default",
+                        "Black",
+                        "Red",
+                        "Green",
+                        "Yellow",
+                        "Blue",
+                        "Purple",
+                        "Magenta",
+                        "Cyan",
+                        "White",
+                        "DarkGray",
+                        "LightGray",
+                        "LightRed",
+                        "LightGreen",
+                        "LightYellow",
+                        "LightBlue",
+                        "LightPurple",
+                        "LightMagenta",
+                        "LightCyan"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Fixed": {
+                          "type": "integer",
+                          "maximum": 255,
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Fixed"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Rgb": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "maximum": 255,
+                            "minimum": 0
+                          },
+                          "maxItems": 3,
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Rgb"
+                      ]
+                    }
+                  ]
                 }
               }
             },
@@ -177,13 +590,190 @@
               "type": "object",
               "properties": {
                 "insert": {
-                  "description": "Color for vi insert mode"
+                  "description": "Color for vi insert mode",
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Default",
+                        "Black",
+                        "Red",
+                        "Green",
+                        "Yellow",
+                        "Blue",
+                        "Purple",
+                        "Magenta",
+                        "Cyan",
+                        "White",
+                        "DarkGray",
+                        "LightGray",
+                        "LightRed",
+                        "LightGreen",
+                        "LightYellow",
+                        "LightBlue",
+                        "LightPurple",
+                        "LightMagenta",
+                        "LightCyan"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Fixed": {
+                          "type": "integer",
+                          "maximum": 255,
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Fixed"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Rgb": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "maximum": 255,
+                            "minimum": 0
+                          },
+                          "maxItems": 3,
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Rgb"
+                      ]
+                    }
+                  ]
                 },
                 "non_vi": {
-                  "description": "Color for non-vi modes (Emacs, etc.)"
+                  "description": "Color for non-vi modes (Emacs, etc.)",
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Default",
+                        "Black",
+                        "Red",
+                        "Green",
+                        "Yellow",
+                        "Blue",
+                        "Purple",
+                        "Magenta",
+                        "Cyan",
+                        "White",
+                        "DarkGray",
+                        "LightGray",
+                        "LightRed",
+                        "LightGreen",
+                        "LightYellow",
+                        "LightBlue",
+                        "LightPurple",
+                        "LightMagenta",
+                        "LightCyan"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Fixed": {
+                          "type": "integer",
+                          "maximum": 255,
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Fixed"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Rgb": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "maximum": 255,
+                            "minimum": 0
+                          },
+                          "maxItems": 3,
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Rgb"
+                      ]
+                    }
+                  ]
                 },
                 "normal": {
-                  "description": "Color for vi normal mode"
+                  "description": "Color for vi normal mode",
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Default",
+                        "Black",
+                        "Red",
+                        "Green",
+                        "Yellow",
+                        "Blue",
+                        "Purple",
+                        "Magenta",
+                        "Cyan",
+                        "White",
+                        "DarkGray",
+                        "LightGray",
+                        "LightRed",
+                        "LightGreen",
+                        "LightYellow",
+                        "LightBlue",
+                        "LightPurple",
+                        "LightMagenta",
+                        "LightCyan"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Fixed": {
+                          "type": "integer",
+                          "maximum": 255,
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Fixed"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Rgb": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "maximum": 255,
+                            "minimum": 0
+                          },
+                          "maxItems": 3,
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "Rgb"
+                      ]
+                    }
+                  ]
                 }
               }
             }
@@ -194,28 +784,500 @@
           "type": "object",
           "properties": {
             "comment": {
-              "description": "Color for comments"
+              "description": "Color for comments",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "constant": {
-              "description": "Color for constants (TRUE, FALSE, NULL, NA, etc.)"
+              "description": "Color for constants (TRUE, FALSE, NULL, NA, etc.)",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "identifier": {
-              "description": "Color for identifiers"
+              "description": "Color for identifiers",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "keyword": {
-              "description": "Color for keywords"
+              "description": "Color for keywords",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "number": {
-              "description": "Color for numeric literals"
+              "description": "Color for numeric literals",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "operator": {
-              "description": "Color for operators"
+              "description": "Color for operators",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "punctuation": {
-              "description": "Color for punctuation"
+              "description": "Color for punctuation",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             },
             "string": {
-              "description": "Color for string literals"
+              "description": "Color for string literals",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
             }
           }
         }
@@ -225,6 +1287,13 @@
       "description": "Completion configuration.",
       "type": "object",
       "properties": {
+        "auto_paren_limit": {
+          "description": "Number of completions to check for function type (for adding parentheses).\nSet to 0 to disable function parenthesis insertion.\nOnly the first N completions are checked to avoid performance issues.",
+          "type": "integer",
+          "format": "uint",
+          "default": 50,
+          "minimum": 0
+        },
         "debounce_ms": {
           "description": "Debounce delay in milliseconds (reuse cached results within this window).",
           "type": "integer",
@@ -236,13 +1305,6 @@
           "description": "Enable completion.",
           "type": "boolean",
           "default": true
-        },
-        "function_paren_check_limit": {
-          "description": "Number of completions to check for function type (for adding parentheses).\nSet to 0 to disable function parenthesis insertion.\nOnly the first N completions are checked to avoid performance issues.",
-          "type": "integer",
-          "format": "uint",
-          "default": 50,
-          "minimum": 0
         },
         "max_height": {
           "description": "Maximum height (rows) for the completion menu.",
@@ -270,7 +1332,7 @@
           "type": "boolean",
           "default": true
         },
-        "autosuggestion": {
+        "auto_suggestions": {
           "description": "Show history-based autosuggestions (fish/nushell style).\nSuggestions appear grayed out and can be accepted with right arrow.",
           "type": "boolean",
           "default": true
@@ -294,10 +1356,25 @@
         },
         "mode": {
           "description": "Editing mode: \"emacs\" or \"vi\".",
-          "type": "string",
+          "$ref": "#/$defs/EditorMode",
           "default": "emacs"
         }
       }
+    },
+    "EditorMode": {
+      "description": "Editing mode for the line editor.",
+      "oneOf": [
+        {
+          "description": "Emacs-style keybindings (default).",
+          "type": "string",
+          "const": "emacs"
+        },
+        {
+          "description": "Vi-style keybindings.",
+          "type": "string",
+          "const": "vi"
+        }
+      ]
     },
     "ExperimentalConfig": {
       "$ref": "#/$defs/ExperimentalConfigSchema"
@@ -539,16 +1616,74 @@
       }
     },
     "SpinnerConfigSchema": {
-      "description": "Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.\n\nThis type is used solely for JSON Schema generation, so that we can still\nprovide a helpful schema while `Color` does not implement `JsonSchema`.",
+      "description": "Spinner configuration for busy indicator during R execution.",
       "type": "object",
       "properties": {
         "color": {
-          "description": "Color for the spinner (e.g., \"Cyan\", \"LightBlue\").",
-          "type": "string",
-          "default": "Cyan"
+          "description": "Color for the spinner.",
+          "default": "Cyan",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "Default",
+                "Black",
+                "Red",
+                "Green",
+                "Yellow",
+                "Blue",
+                "Purple",
+                "Magenta",
+                "Cyan",
+                "White",
+                "DarkGray",
+                "LightGray",
+                "LightRed",
+                "LightGreen",
+                "LightYellow",
+                "LightBlue",
+                "LightPurple",
+                "LightMagenta",
+                "LightCyan"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "Fixed": {
+                  "type": "integer",
+                  "maximum": 255,
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "Fixed"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "Rgb": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "maximum": 255,
+                    "minimum": 0
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "Rgb"
+              ]
+            }
+          ]
         },
         "frames": {
-          "description": "Spinner animation frames as a string where each character is one frame.\nEmpty string disables the spinner.\n\nExample: `frames = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"` (braille dots)\nExample: `frames = \"|/-\\\\\"` (ASCII spinner)",
+          "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner. Example: \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\" (braille dots), \"|/-\\\\\" (ASCII spinner).",
           "type": "string",
           "default": ""
         }

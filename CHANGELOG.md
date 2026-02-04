@@ -2,36 +2,33 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow)
-
-## [0.2.0-rc.1] - 2026-02-01
-
 ### Added
 
 - Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)
 - Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
-
-## [0.2.0-beta.1] - 2026-02-01
-
-### Added
-
 - Vi mode indicator support for prompts via `prompt.mode_indicator` config (#23)
 
 ### Changed
 
+- Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow)
 - **BREAKING:** Configuration structure reorganized - the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization.
+- **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match`
+- **BREAKING:** `completion.function_paren_check_limit` config key renamed to `completion.auto_paren_limit`
+- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"`
+- Improved JSON Schema for color properties with proper `oneOf` typing (named string, `{ Fixed: N }`, `{ Rgb: [r, g, b] }`)
 
 #### Migration Guide
 
-The `[reprex]` section mapping:
+If you have a custom configuration file from 0.1.x, apply the following changes:
 
-- `reprex.enabled` → `startup.mode.reprex`
-- `reprex.autoformat` → `startup.mode.autoformat`
-- `reprex.comment` → `mode.reprex.comment`
-
-If you have a custom configuration file, update your `[reprex]` section as follows:
+| 0.1.x key | 0.2.0 key |
+|-----------|-----------|
+| `reprex.enabled` | `startup.mode.reprex` |
+| `reprex.autoformat` | `startup.mode.autoformat` |
+| `reprex.comment` | `mode.reprex.comment` |
+| `editor.autosuggestion` | `editor.auto_suggestions` |
+| `completion.function_paren_check_limit` | `completion.auto_paren_limit` |
+| `editor.mode = "vim"` | `editor.mode = "vi"` |
 
 **Before (0.1.x):**
 
@@ -40,6 +37,12 @@ If you have a custom configuration file, update your `[reprex]` section as follo
 enabled = false
 comment = "#> "
 autoformat = false
+
+[editor]
+autosuggestion = true
+
+[completion]
+function_paren_check_limit = 50
 ```
 
 **After (0.2.0):**
@@ -53,6 +56,12 @@ autoformat = false
 # Static reprex configuration (not changeable at runtime)
 [mode.reprex]
 comment = "#> "
+
+[editor]
+auto_suggestions = true
+
+[completion]
+auto_paren_limit = 50
 ```
 
 ### Fixed
