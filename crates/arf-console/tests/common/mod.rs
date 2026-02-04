@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Common test utilities for arf integration tests.
 //!
 //! This module provides a PTY-based testing infrastructure that properly handles
