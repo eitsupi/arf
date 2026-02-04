@@ -7,7 +7,7 @@
 - Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow)
 - **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match`
 - **BREAKING:** `completion.function_paren_check_limit` config key renamed to `completion.auto_paren_limit`
-- **BREAKING:** `editor.mode` now only accepts `"emacs"` or `"vi"` (previously accepted any string; `"vim"` alias removed)
+- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"` (the `"vim"` alias is still accepted for backward compatibility)
 - Improved JSON Schema for color properties with proper `oneOf` typing (named string, `{ Fixed: N }`, `{ Rgb: [r, g, b] }`)
 
 ## [0.2.0-rc.1] - 2026-02-01

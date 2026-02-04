@@ -262,5 +262,3 @@ impl Default for ViColorConfig {
     }
 }
 
-// Re-export the macro for use in sibling modules (e.g., experimental.rs).
-pub(crate) use color_prop;

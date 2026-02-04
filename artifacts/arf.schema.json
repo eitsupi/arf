@@ -1620,7 +1620,8 @@
       "type": "object",
       "properties": {
         "color": {
-          "description": "Color for the spinner",
+          "description": "Color for the spinner.",
+          "default": "Cyan",
           "oneOf": [
             {
               "type": "string",
@@ -1682,7 +1683,7 @@
           ]
         },
         "frames": {
-          "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner.",
+          "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner. Example: \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\" (braille dots), \"|/-\\\\\" (ASCII spinner).",
           "type": "string",
           "default": ""
         }

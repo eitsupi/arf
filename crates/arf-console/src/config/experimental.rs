@@ -69,17 +69,52 @@ impl JsonSchema for SpinnerConfigSchema {
     }
 
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        use super::colors::color_prop;
         schemars::json_schema!({
             "type": "object",
             "description": "Spinner configuration for busy indicator during R execution.",
             "properties": {
                 "frames": {
                     "type": "string",
-                    "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner.",
+                    "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner. Example: \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\" (braille dots), \"|/-\\\\\" (ASCII spinner).",
                     "default": ""
                 },
-                "color": color_prop!("Color for the spinner")
+                "color": {
+                    "description": "Color for the spinner.",
+                    "default": "Cyan",
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "enum": [
+                                "Default", "Black", "Red", "Green", "Yellow", "Blue",
+                                "Purple", "Magenta", "Cyan", "White",
+                                "DarkGray", "LightGray",
+                                "LightRed", "LightGreen", "LightYellow", "LightBlue",
+                                "LightPurple", "LightMagenta", "LightCyan"
+                            ]
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
+                            },
+                            "required": ["Fixed"],
+                            "additionalProperties": false
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "Rgb": {
+                                    "type": "array",
+                                    "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                                    "minItems": 3,
+                                    "maxItems": 3
+                                }
+                            },
+                            "required": ["Rgb"],
+                            "additionalProperties": false
+                        }
+                    ]
+                }
             }
         })
     }
