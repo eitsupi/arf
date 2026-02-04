@@ -127,8 +127,8 @@ impl HelpBrowser {
                 needs_redraw = true;
             }
 
+            too_small = check_terminal_too_small(&MIN_SIZE).is_some();
             if needs_redraw {
-                too_small = check_terminal_too_small(&MIN_SIZE).is_some();
                 self.render(&mut stdout)?;
                 needs_redraw = false;
             }
