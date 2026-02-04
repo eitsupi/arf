@@ -354,10 +354,12 @@ symbol = { insert = "● ", normal = "○ " }
 insert = "Green"
 normal = "Yellow"
 
-# Disable vi mode indicator
+# Disable vi mode indicator (set symbols to empty strings)
 [prompt.vi]
 symbol = { insert = "", normal = "" }
 ```
+
+> **Note**: To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
 
 ## Auto-Formatting (Reprex Mode)
 

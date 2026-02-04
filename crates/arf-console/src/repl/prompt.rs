@@ -308,4 +308,39 @@ mod tests {
         );
         assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "");
     }
+
+    #[test]
+    fn test_rprompt_default_vi_symbols_with_colors() {
+        // Use real defaults (non-empty symbols with colors)
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string());
+
+        let insert = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert));
+        assert!(
+            insert.contains("[I] "),
+            "insert indicator should contain '[I] ', got: {:?}",
+            insert
+        );
+        // LightGreen = ANSI escape 92
+        assert!(
+            insert.contains("\x1b[92m"),
+            "insert indicator should contain LightGreen ANSI code, got: {:?}",
+            insert
+        );
+
+        let normal = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal));
+        assert!(
+            normal.contains("[N] "),
+            "normal indicator should contain '[N] ', got: {:?}",
+            normal
+        );
+        // LightYellow = ANSI escape 93
+        assert!(
+            normal.contains("\x1b[93m"),
+            "normal indicator should contain LightYellow ANSI code, got: {:?}",
+            normal
+        );
+
+        // Emacs mode should return empty string (non_vi default is empty)
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "");
+    }
 }
