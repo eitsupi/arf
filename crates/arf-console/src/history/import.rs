@@ -317,9 +317,17 @@ impl DedupSet {
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open history database: {}", path.display()))?;
 
+        // reedline stores start_timestamp as Unix milliseconds (i64) in SQLite.
+        // We read the raw value directly to stay consistent with from_history(),
+        // which converts DateTime<Utc> back to millis via timestamp_millis().
         let mut stmt = db
             .prepare("SELECT command_line, start_timestamp FROM history")
-            .context("Failed to prepare dedup query")?;
+            .with_context(|| {
+                format!(
+                    "Failed to query history table in '{}' (not an arf database?)",
+                    path.display()
+                )
+            })?;
 
         let mut command_timestamps = HashSet::new();
         let mut commands = HashSet::new();
@@ -1609,5 +1617,54 @@ mod tests {
         assert_eq!(result.r_imported, 1); // only "print(1)"
         assert_eq!(result.shell_imported, 1); // "ls -la" not checked (no shell dedup)
         assert_eq!(result.duplicates_skipped, 1); // "library(dplyr)"
+    }
+
+    #[test]
+    fn test_from_db_matches_from_history() {
+        // Verify that from_db (read-only SQLite) and from_history (via reedline)
+        // produce the same dedup set for the same database contents.
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut targets = create_test_targets(&temp_dir);
+
+        let ts1 = Utc::now();
+        let ts2 = ts1 + chrono::Duration::seconds(60);
+
+        let entries = vec![
+            ImportEntry {
+                command: "library(dplyr)".to_string(),
+                timestamp: Some(ts1),
+                mode: Some("r".to_string()),
+            },
+            ImportEntry {
+                command: "print(1)".to_string(),
+                timestamp: Some(ts2),
+                mode: Some("r".to_string()),
+            },
+            ImportEntry {
+                command: "summary(iris)".to_string(),
+                timestamp: None, // no timestamp
+                mode: Some("r".to_string()),
+            },
+        ];
+        import_entries(&mut targets, entries, None, false).unwrap();
+
+        let r_path = temp_dir.path().join("r.db");
+        let from_history = DedupSet::from_history(&targets.r_history).unwrap();
+        let from_db = DedupSet::from_db(&r_path).unwrap();
+
+        // Both should have the same commands set
+        assert_eq!(from_history.commands, from_db.commands);
+        // Both should have the same command_timestamps set
+        assert_eq!(from_history.command_timestamps, from_db.command_timestamps);
+
+        // Verify dedup behavior is identical for both
+        assert!(from_history.is_duplicate("library(dplyr)", Some(&ts1)));
+        assert!(from_db.is_duplicate("library(dplyr)", Some(&ts1)));
+        assert!(!from_history.is_duplicate("new_cmd", None));
+        assert!(!from_db.is_duplicate("new_cmd", None));
+        assert!(from_history.is_duplicate("summary(iris)", None));
+        assert!(from_db.is_duplicate("summary(iris)", None));
     }
 }
