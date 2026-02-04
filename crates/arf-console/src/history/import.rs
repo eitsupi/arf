@@ -1635,6 +1635,47 @@ mod tests {
     }
 
     #[test]
+    fn test_import_skips_notimestamp_when_timestamped_exists() {
+        // Regression test: a no-timestamp import entry should be skipped if
+        // the same command already exists in the DB with any timestamp.
+        // This is documented in lines 265-270.
+        use reedline::History;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut targets = create_test_targets(&temp_dir);
+
+        let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Pre-populate with a timestamped entry
+        let entries = vec![ImportEntry {
+            command: "library(dplyr)".to_string(),
+            timestamp: Some(ts),
+            mode: Some("r".to_string()),
+        }];
+        let result = import_entries(&mut targets, entries, None, true).unwrap();
+        assert_eq!(result.r_imported, 1);
+
+        // Try to import the same command without a timestamp: should be skipped
+        let entries = vec![ImportEntry {
+            command: "library(dplyr)".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+        }];
+        let result = import_entries(&mut targets, entries, None, true).unwrap();
+        assert_eq!(result.r_imported, 0);
+        assert_eq!(result.duplicates_skipped, 1);
+
+        // Verify only the original entry exists
+        let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
+        let items = targets.r_history.search(query).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].start_timestamp.is_some());
+    }
+
+    #[test]
     fn test_from_db_matches_from_history() {
         // Verify that from_db (read-only SQLite) and from_history (via reedline)
         // produce the same dedup set for the same database contents.
