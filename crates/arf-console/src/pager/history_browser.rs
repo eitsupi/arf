@@ -837,9 +837,23 @@ impl HistoryBrowser {
                     truncate_to_width(&cmd, cmd_width)
                 };
 
-                // CWD (truncated)
-                let cwd = entry.item.cwd.as_deref().unwrap_or("");
-                let display_cwd = truncate_to_width(cwd, cwd_width);
+                // CWD (basename only, with scrolling for current row)
+                let cwd_full = entry.item.cwd.as_deref().unwrap_or("");
+                let cwd_short = std::path::Path::new(cwd_full)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(cwd_full);
+                let display_cwd =
+                    if is_current && exceeds_width(cwd_short, cwd_width) {
+                        let (scrolled, _) = scroll_display(
+                            cwd_short,
+                            cwd_width,
+                            self.text_scroll.scroll_pos,
+                        );
+                        scrolled
+                    } else {
+                        truncate_to_width(cwd_short, cwd_width)
+                    };
 
                 // Hostname (truncated)
                 let host = entry.item.hostname.as_deref().unwrap_or("");
