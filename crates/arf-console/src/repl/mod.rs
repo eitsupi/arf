@@ -9,7 +9,7 @@ pub(crate) mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
-use crate::config::{Config, ModeIndicatorPosition, RSourceStatus, history_dir};
+use crate::config::{Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir};
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
@@ -176,8 +176,8 @@ impl Repl {
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        line_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 if self.config.editor.auto_match {
@@ -192,8 +192,7 @@ impl Repl {
                     self.config.experimental.completion_min_chars,
                 ))
             }
-            _ => {
-                // Default to Emacs
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 if self.config.editor.auto_match {
@@ -386,8 +385,8 @@ impl Repl {
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        line_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 if self.config.editor.auto_match {
@@ -402,7 +401,7 @@ impl Repl {
                     self.config.experimental.completion_min_chars,
                 ))
             }
-            _ => {
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 if self.config.editor.auto_match {
@@ -551,8 +550,8 @@ impl Repl {
         let mut shell_editor = setup_history(shell_editor, self.shell_history_path());
 
         // Use same edit mode as R editor
-        shell_editor = match self.config.editor.mode.to_lowercase().as_str() {
-            "vi" | "vim" => {
+        shell_editor = match self.config.editor.mode {
+            EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
@@ -561,7 +560,7 @@ impl Repl {
                     default_vi_normal_keybindings(),
                 )))
             }
-            _ => {
+            EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
                 add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);

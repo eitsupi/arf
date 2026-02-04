@@ -11,7 +11,7 @@ mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
 pub use completion::CompletionConfig;
-pub use editor::EditorConfig;
+pub use editor::{EditorConfig, EditorMode};
 pub use experimental::SpinnerConfig;
 pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
@@ -226,7 +226,7 @@ mod tests {
             config.editor.auto_match,
             "auto_match should be enabled by default"
         );
-        assert_eq!(config.editor.mode, "emacs");
+        assert_eq!(config.editor.mode, EditorMode::Emacs);
         assert!(matches!(
             config.startup.r_source,
             RSource::Mode(RSourceMode::Auto)
@@ -286,7 +286,7 @@ comment = "# "
             RSource::Mode(RSourceMode::Rig)
         ));
         assert!(!config.startup.show_banner);
-        assert_eq!(config.editor.mode, "vi");
+        assert_eq!(config.editor.mode, EditorMode::Vi);
         assert!(!config.editor.auto_match);
         assert_eq!(config.prompt.format, "R> ");
         assert!(config.startup.mode.reprex);
@@ -472,7 +472,7 @@ show_banner = false
             RSource::Mode(RSourceMode::Auto)
         ));
         assert!(parsed.startup.show_banner);
-        assert_eq!(parsed.editor.mode, "emacs");
+        assert_eq!(parsed.editor.mode, EditorMode::Emacs);
     }
 
     #[test]

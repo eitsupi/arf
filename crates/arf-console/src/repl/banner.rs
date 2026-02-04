@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn test_banner_vi_mode() {
         let mut config = Config::default();
-        config.editor.mode = "vi".to_string();
+        config.editor.mode = crate::config::EditorMode::Vi;
         let banner = format_banner(&config, true);
         insta::assert_snapshot!("banner_vi_mode", banner);
     }

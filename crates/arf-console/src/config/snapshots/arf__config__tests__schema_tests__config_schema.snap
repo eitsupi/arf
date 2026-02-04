@@ -298,10 +298,25 @@ expression: schema
         },
         "mode": {
           "description": "Editing mode: \"emacs\" or \"vi\".",
-          "type": "string",
+          "$ref": "#/$defs/EditorMode",
           "default": "emacs"
         }
       }
+    },
+    "EditorMode": {
+      "description": "Editing mode for the line editor.",
+      "oneOf": [
+        {
+          "description": "Emacs-style keybindings (default).",
+          "type": "string",
+          "const": "emacs"
+        },
+        {
+          "description": "Vi/Vim-style keybindings.",
+          "type": "string",
+          "const": "vi"
+        }
+      ]
     },
     "ExperimentalConfig": {
       "$ref": "#/$defs/ExperimentalConfigSchema"

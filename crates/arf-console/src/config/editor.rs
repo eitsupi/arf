@@ -4,13 +4,33 @@ use crokey::KeyCombination;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
+
+/// Editing mode for the line editor.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EditorMode {
+    /// Emacs-style keybindings (default).
+    Emacs,
+    /// Vi/Vim-style keybindings.
+    Vi,
+}
+
+impl fmt::Display for EditorMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EditorMode::Emacs => write!(f, "emacs"),
+            EditorMode::Vi => write!(f, "vi"),
+        }
+    }
+}
 
 /// Editor configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct EditorConfig {
     /// Editing mode: "emacs" or "vi".
-    pub mode: String,
+    pub mode: EditorMode,
     /// Auto-close brackets and quotes.
     pub auto_match: bool,
     /// Show history-based autosuggestions (fish/nushell style).
@@ -54,7 +74,7 @@ fn key_map_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schem
 impl Default for EditorConfig {
     fn default() -> Self {
         EditorConfig {
-            mode: "emacs".to_string(),
+            mode: EditorMode::Emacs,
             auto_match: true,
             auto_suggestions: true,
             key_map: default_key_map(),
