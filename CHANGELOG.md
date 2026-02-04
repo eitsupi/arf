@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
+
 ## [0.2.0-rc.2] - 2026-02-04
 
 ### Added

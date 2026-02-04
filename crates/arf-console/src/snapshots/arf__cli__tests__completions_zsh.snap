@@ -145,6 +145,7 @@ arf\:"Another arf SQLite history database"))' \
 '--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db]:FILE:_files' \
 '--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_default' \
 '--dry-run[Perform a dry run without actually importing]' \
+'--import-duplicates[Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0

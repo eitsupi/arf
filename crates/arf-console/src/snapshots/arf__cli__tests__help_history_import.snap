@@ -26,5 +26,8 @@ Options:
       --dry-run
           Perform a dry run without actually importing
 
+      --import-duplicates
+          Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)
+
   -h, --help
           Print help (see a summary with '-h')

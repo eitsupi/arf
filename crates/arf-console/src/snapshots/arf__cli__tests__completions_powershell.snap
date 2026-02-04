@@ -110,6 +110,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--file', '--file', [CompletionResultType]::ParameterName, 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db')
             [CompletionResult]::new('--hostname', '--hostname', [CompletionResultType]::ParameterName, 'Override hostname for imported entries. Marks entries to distinguish them from native arf history')
             [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Perform a dry run without actually importing')
+            [CompletionResult]::new('--import-duplicates', '--import-duplicates', [CompletionResultType]::ParameterName, 'Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
