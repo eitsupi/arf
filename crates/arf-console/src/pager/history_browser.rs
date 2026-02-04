@@ -7,7 +7,10 @@ use super::copy_to_clipboard;
 use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
-use super::{TextScrollState, with_alternate_screen};
+use super::{
+    MinimumSize, TextScrollState, check_terminal_too_small, render_size_warning,
+    with_alternate_screen,
+};
 use crate::fuzzy::fuzzy_match;
 use chrono::TimeZone;
 use crossterm::{
@@ -25,6 +28,13 @@ use std::time::Duration;
 
 /// Maximum number of history entries to load from database.
 const MAX_ENTRIES: i64 = 10000;
+
+/// Minimum terminal size for the history browser.
+///
+/// Width: at 70 columns the column layout (prefix 29 + cmd 20 + cwd + host + spacing)
+/// fits without overflow. Below that, columns overlap.
+/// Height: 7 lines of chrome + 3 minimum content rows = 10.
+const MIN_SIZE: MinimumSize = MinimumSize { cols: 70, rows: 10 };
 
 /// Database mode for history browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -423,6 +433,7 @@ impl HistoryBrowser {
         let mut stdout = io::stdout();
         let poll_timeout = Duration::from_millis(50);
         let mut needs_redraw = true;
+        let mut too_small;
 
         loop {
             // Update animation state
@@ -430,6 +441,7 @@ impl HistoryBrowser {
                 needs_redraw = true;
             }
 
+            too_small = check_terminal_too_small(&MIN_SIZE).is_some();
             if needs_redraw {
                 self.render(&mut stdout)?;
                 needs_redraw = false;
@@ -445,6 +457,21 @@ impl HistoryBrowser {
                         }
 
                         needs_redraw = true;
+
+                        // When the terminal is too small, only accept exit keys
+                        // to prevent input from leaking into filter or other state.
+                        if too_small {
+                            match (key.code, key.modifiers) {
+                                (KeyCode::Esc, _)
+                                | (KeyCode::Char('q'), KeyModifiers::NONE)
+                                | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                    return Ok(HistoryBrowserResult::Cancelled);
+                                }
+                                _ => continue,
+                            }
+                        }
+
                         self.feedback_message = None;
 
                         // Handle delete confirmation dialog
@@ -726,6 +753,10 @@ impl HistoryBrowser {
     }
 
     fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
+        if let Some((cols, rows)) = check_terminal_too_small(&MIN_SIZE) {
+            return render_size_warning(stdout, cols, rows, &MIN_SIZE);
+        }
+
         queue!(stdout, BeginSynchronizedUpdate)?;
         stdout.execute(cursor::MoveTo(0, 0))?;
         stdout.execute(cursor::Hide)?;
