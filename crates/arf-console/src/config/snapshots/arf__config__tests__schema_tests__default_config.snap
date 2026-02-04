@@ -42,8 +42,8 @@ success = ""
 error = "✗ "
 
 [prompt.vi.symbol]
-insert = ""
-normal = ""
+insert = "[I] "
+normal = "[N] "
 non_vi = ""
 
 [completion]
@@ -84,8 +84,8 @@ success = "LightGreen"
 error = "LightRed"
 
 [colors.prompt.vi]
-insert = "Default"
-normal = "Default"
+insert = "LightGreen"
+normal = "LightYellow"
 non_vi = "Default"
 
 [experimental.history_forget]

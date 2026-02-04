@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow)
+
 ## [0.2.0-rc.1] - 2026-02-01
 
 ### Added

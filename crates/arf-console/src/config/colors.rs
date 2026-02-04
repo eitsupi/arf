@@ -208,8 +208,8 @@ pub struct ViColorConfig {
 impl Default for ViColorConfig {
     fn default() -> Self {
         ViColorConfig {
-            insert: Color::Default,
-            normal: Color::Default,
+            insert: Color::LightGreen,
+            normal: Color::LightYellow,
             non_vi: Color::Default,
         }
     }
