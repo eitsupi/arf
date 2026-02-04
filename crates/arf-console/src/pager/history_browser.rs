@@ -843,25 +843,20 @@ impl HistoryBrowser {
                     .file_name()
                     .and_then(|f| f.to_str())
                     .unwrap_or(cwd_full);
-                let display_cwd =
-                    if is_current && exceeds_width(cwd_short, cwd_width) {
-                        let (scrolled, _) = scroll_display(
-                            cwd_short,
-                            cwd_width,
-                            self.text_scroll.scroll_pos,
-                        );
-                        scrolled
-                    } else {
-                        truncate_to_width(cwd_short, cwd_width)
-                    };
+                let display_cwd = if is_current && exceeds_width(cwd_short, cwd_width) {
+                    let (scrolled, _) =
+                        scroll_display(cwd_short, cwd_width, self.text_scroll.scroll_pos);
+                    scrolled
+                } else {
+                    truncate_to_width(cwd_short, cwd_width)
+                };
 
                 // Hostname (truncated)
                 let host = entry.item.hostname.as_deref().unwrap_or("");
                 let display_host = truncate_to_width(host, host_width);
 
                 // Build prefix base (cursor + checkbox + timestamp, without exit)
-                let prefix_base =
-                    format!("{}{} {} ", cursor_marker, checkbox, timestamp);
+                let prefix_base = format!("{}{} {} ", cursor_marker, checkbox, timestamp);
                 let padded_cmd = pad_to_width(&display_cmd, cmd_width);
                 let padded_cwd = pad_to_width(&display_cwd, cwd_width);
 
@@ -881,12 +876,11 @@ impl HistoryBrowser {
                     println!("\r{}", line.yellow());
                 } else {
                     // Style exit status red if non-zero, cwd and hostname dark grey
-                    let styled_exit =
-                        if matches!(entry.item.exit_status, Some(code) if code != 0) {
-                            format!("{}", exit_str.as_str().red())
-                        } else {
-                            exit_str.clone()
-                        };
+                    let styled_exit = if matches!(entry.item.exit_status, Some(code) if code != 0) {
+                        format!("{}", exit_str.as_str().red())
+                    } else {
+                        exit_str.clone()
+                    };
                     // Padding: prefix_base, exit, cmd, cwd are fixed-width (no ANSI);
                     // only hostname may be shorter than its allocated width.
                     let content_width = display_width(&prefix_base)
@@ -1132,7 +1126,11 @@ mod tests {
         let (cmd, cwd, host) = calculate_layout(200);
         assert!(cmd >= 20);
         assert!(cwd <= 20, "cwd_width should be capped at 20, got {}", cwd);
-        assert!(host <= 15, "host_width should be capped at 15, got {}", host);
+        assert!(
+            host <= 15,
+            "host_width should be capped at 15, got {}",
+            host
+        );
         assert_eq!(29 + cmd + 1 + cwd + 1 + host, 200);
     }
 
@@ -1145,7 +1143,11 @@ mod tests {
         assert!(host >= 5);
         // Total overflows because cmd_width has a minimum of 20
         let total = 29 + cmd + 1 + cwd + 1 + host;
-        assert!(total > 50, "narrow terminal should overflow, total={}", total);
+        assert!(
+            total > 50,
+            "narrow terminal should overflow, total={}",
+            total
+        );
     }
 
     #[test]
@@ -1314,5 +1316,32 @@ mod tests {
 
         // Empty string
         assert_eq!(flatten_multiline(""), "");
+    }
+
+    #[test]
+    fn test_cwd_basename_extraction() {
+        use std::path::Path;
+
+        // Helper matching the logic in render()
+        fn basename(cwd: &str) -> String {
+            Path::new(cwd)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(cwd)
+                .to_string()
+        }
+
+        assert_eq!(basename("/home/user/project"), "project");
+        assert_eq!(
+            basename("/home/user/my-long-directory-name"),
+            "my-long-directory-name"
+        );
+        assert_eq!(basename("/"), "/");
+        assert_eq!(basename(""), "");
+        assert_eq!(basename("/foo/bar/baz"), "baz");
+        // file_name() returns None for "..", so full path is used as fallback
+        assert_eq!(basename("/foo/.."), "/foo/..");
+        // file_name() strips trailing "." and returns the parent component
+        assert_eq!(basename("/foo/."), "foo");
     }
 }
