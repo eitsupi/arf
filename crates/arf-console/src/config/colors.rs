@@ -4,90 +4,80 @@ use nu_ansi_term::Color;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Generate a color property schema with a description.
+/// Generate a JSON Schema for a Color property.
 ///
 /// Colors can be:
 /// - A named string: "Red", "LightBlue", "DarkGray", "Default", etc.
 /// - A 256-color object: `{ Fixed: 99 }`
 /// - An RGB object: `{ Rgb: [255, 0, 0] }`
+///
+/// Usage:
+/// - `color_prop!("description")` — without default
+/// - `color_prop!("description", default = "Cyan")` — with default value
 macro_rules! color_prop {
-    ($desc:expr) => {
-        schemars::json_schema!({
-            "description": $desc,
-            "oneOf": [
-                {
-                    "type": "string",
-                    "enum": [
-                        "Default", "Black", "Red", "Green", "Yellow", "Blue",
-                        "Purple", "Magenta", "Cyan", "White",
-                        "DarkGray", "LightGray",
-                        "LightRed", "LightGreen", "LightYellow", "LightBlue",
-                        "LightPurple", "LightMagenta", "LightCyan"
-                    ]
+    ($desc:expr) => {{
+        $crate::config::colors::make_color_schema($desc, None)
+    }};
+    ($desc:expr, default = $default:expr) => {{
+        $crate::config::colors::make_color_schema($desc, Some($default))
+    }};
+}
+
+/// Build a color property schema. Used by the `color_prop!` macro.
+///
+/// This is a function (not a macro) so that the oneOf definition exists in
+/// one place only, avoiding duplication across macro arms.
+#[doc(hidden)]
+pub fn make_color_schema(description: &str, default: Option<&str>) -> schemars::Schema {
+    let one_of = schemars::json_schema!({
+        "oneOf": [
+            {
+                "type": "string",
+                "enum": [
+                    "Default", "Black", "Red", "Green", "Yellow", "Blue",
+                    "Purple", "Magenta", "Cyan", "White",
+                    "DarkGray", "LightGray",
+                    "LightRed", "LightGreen", "LightYellow", "LightBlue",
+                    "LightPurple", "LightMagenta", "LightCyan"
+                ]
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
                 },
-                {
-                    "type": "object",
-                    "properties": {
-                        "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
-                    },
-                    "required": ["Fixed"],
-                    "additionalProperties": false
+                "required": ["Fixed"],
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "Rgb": {
+                        "type": "array",
+                        "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                        "minItems": 3,
+                        "maxItems": 3
+                    }
                 },
-                {
-                    "type": "object",
-                    "properties": {
-                        "Rgb": {
-                            "type": "array",
-                            "items": { "type": "integer", "minimum": 0, "maximum": 255 },
-                            "minItems": 3,
-                            "maxItems": 3
-                        }
-                    },
-                    "required": ["Rgb"],
-                    "additionalProperties": false
-                }
-            ]
-        })
-    };
-    ($desc:expr, default = $default:expr) => {
-        schemars::json_schema!({
-            "description": $desc,
-            "default": $default,
-            "oneOf": [
-                {
-                    "type": "string",
-                    "enum": [
-                        "Default", "Black", "Red", "Green", "Yellow", "Blue",
-                        "Purple", "Magenta", "Cyan", "White",
-                        "DarkGray", "LightGray",
-                        "LightRed", "LightGreen", "LightYellow", "LightBlue",
-                        "LightPurple", "LightMagenta", "LightCyan"
-                    ]
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
-                    },
-                    "required": ["Fixed"],
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "Rgb": {
-                            "type": "array",
-                            "items": { "type": "integer", "minimum": 0, "maximum": 255 },
-                            "minItems": 3,
-                            "maxItems": 3
-                        }
-                    },
-                    "required": ["Rgb"],
-                    "additionalProperties": false
-                }
-            ]
-        })
-    };
+                "required": ["Rgb"],
+                "additionalProperties": false
+            }
+        ]
+    });
+
+    // Insert description and optional default into the schema object.
+    let mut schema = one_of;
+    schema.insert(
+        "description".to_string(),
+        serde_json::Value::String(description.to_string()),
+    );
+    if let Some(default_val) = default {
+        schema.insert(
+            "default".to_string(),
+            serde_json::Value::String(default_val.to_string()),
+        );
+    }
+    schema
 }
 
 // Re-export the macro for use in sibling modules (e.g., experimental.rs).
