@@ -416,3 +416,63 @@ pub fn copy_to_clipboard(text: &str) -> io::Result<()> {
     let mut writer = BufWriter::new(io::stderr());
     crossterm::execute!(writer, SetClipboard::new(text))
 }
+
+/// Minimum terminal size requirements for a browser UI.
+pub(crate) struct MinimumSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Render a "terminal too small" warning screen.
+///
+/// This is a shared utility for browser UIs that require a minimum terminal size.
+/// It fills the alternate screen with a centered message asking the user to resize.
+pub(crate) fn render_size_warning(stdout: &mut io::Stdout, min: &MinimumSize) -> io::Result<()> {
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    let width = cols as usize;
+    let height = rows as usize;
+
+    queue!(stdout, BeginSynchronizedUpdate)?;
+    stdout.execute(cursor::MoveTo(0, 0))?;
+    stdout.execute(cursor::Hide)?;
+
+    let messages = [
+        "Terminal too small",
+        "",
+        &format!("Current:  {}×{}", cols, rows),
+        &format!("Minimum:  {}×{}", min.cols, min.rows),
+        "",
+        "Please resize your terminal.",
+        "",
+        "Press q or Esc to exit.",
+    ];
+
+    // Center vertically
+    let start_row = height.saturating_sub(messages.len()) / 2;
+
+    for row in 0..height {
+        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        if row >= start_row && row < start_row + messages.len() {
+            let msg = messages[row - start_row];
+            // Center horizontally
+            let padding = width.saturating_sub(msg.len()) / 2;
+            if msg == "Terminal too small" {
+                println!("\r{}{}", " ".repeat(padding), msg.yellow().bold());
+            } else {
+                println!("\r{}{}", " ".repeat(padding), msg);
+            }
+        } else {
+            println!("\r");
+        }
+    }
+
+    queue!(stdout, EndSynchronizedUpdate)?;
+    stdout.flush()?;
+    Ok(())
+}
+
+/// Check whether the terminal meets minimum size requirements.
+pub(crate) fn is_terminal_too_small(min: &MinimumSize) -> bool {
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    cols < min.cols || rows < min.rows
+}

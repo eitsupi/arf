@@ -7,7 +7,9 @@ use super::copy_to_clipboard;
 use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
-use super::{TextScrollState, with_alternate_screen};
+use super::{
+    MinimumSize, TextScrollState, is_terminal_too_small, render_size_warning, with_alternate_screen,
+};
 use crate::fuzzy::fuzzy_match;
 use chrono::TimeZone;
 use crossterm::{
@@ -25,6 +27,13 @@ use std::time::Duration;
 
 /// Maximum number of history entries to load from database.
 const MAX_ENTRIES: i64 = 10000;
+
+/// Minimum terminal size for the history browser.
+///
+/// Width: at 70 columns the column layout (prefix 29 + cmd 20 + cwd + host + spacing)
+/// fits without overflow. Below that, columns overlap.
+/// Height: 7 lines of chrome + 3 minimum content rows = 10.
+const MIN_SIZE: MinimumSize = MinimumSize { cols: 70, rows: 10 };
 
 /// Database mode for history browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -726,6 +735,10 @@ impl HistoryBrowser {
     }
 
     fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
+        if is_terminal_too_small(&MIN_SIZE) {
+            return render_size_warning(stdout, &MIN_SIZE);
+        }
+
         queue!(stdout, BeginSynchronizedUpdate)?;
         stdout.execute(cursor::MoveTo(0, 0))?;
         stdout.execute(cursor::Hide)?;
