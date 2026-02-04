@@ -207,11 +207,13 @@ fn handle_history_command(
             file,
             hostname,
             dry_run,
+            import_duplicates,
         } => handle_history_import(
             *from,
             file.as_ref(),
             hostname.as_deref(),
             *dry_run,
+            !import_duplicates,
             config_path,
             cli_history_dir,
         ),
@@ -223,12 +225,13 @@ fn handle_history_import(
     file: Option<&std::path::PathBuf>,
     hostname: Option<&str>,
     dry_run: bool,
+    skip_duplicates: bool,
     config_path: Option<&std::path::PathBuf>,
     cli_history_dir: Option<&std::path::PathBuf>,
 ) -> Result<()> {
     use history::import::{
-        default_r_history_path, default_radian_path, import_entries, import_entries_dry_run,
-        parse_arf_history, parse_r_history, parse_radian_history,
+        DedupSet, default_r_history_path, default_radian_path, import_entries,
+        import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
     };
     use reedline::SqliteBackedHistory;
 
@@ -240,7 +243,7 @@ fn handle_history_import(
     };
 
     // Resolve effective history directory (CLI --history-dir takes precedence)
-    // This is optional for --dry-run mode, which doesn't need the target directory
+    // Required for actual imports and for dry-run with dedup (needs DB access)
     let history_dir = cli_history_dir
         .cloned()
         .or(config.history.dir.clone())
@@ -279,10 +282,34 @@ fn handle_history_import(
 
     println!("Found {} entries to import", entries.len());
 
-    // In dry-run mode, simulate the import without opening databases
-    // This avoids unnecessary SQLite initialization and potential file creation
+    // In dry-run mode, simulate the import
     if dry_run {
-        let result = import_entries_dry_run(&entries);
+        // Build dedup sets if duplicate skipping is enabled (requires DB access)
+        let dedup = if skip_duplicates {
+            if let Some(ref history_dir) = history_dir {
+                let r_path = history_dir.join("r.db");
+                let shell_path = history_dir.join("shell.db");
+                // Only build dedup sets if the databases exist
+                if r_path.exists() && shell_path.exists() {
+                    let r_hist = SqliteBackedHistory::with_file(r_path, None, None)
+                        .context("Failed to open R history database for dedup")?;
+                    let shell_hist = SqliteBackedHistory::with_file(shell_path, None, None)
+                        .context("Failed to open shell history database for dedup")?;
+                    Some((
+                        DedupSet::from_history(&r_hist)?,
+                        DedupSet::from_history(&shell_hist)?,
+                    ))
+                } else {
+                    None // No existing databases, no duplicates possible
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let result = import_entries_dry_run(&entries, dedup.as_ref().map(|(r, s)| (r, s)));
 
         println!("\n[Dry run] Would import:");
         if let Some(h) = hostname {
@@ -291,6 +318,12 @@ fn handle_history_import(
         println!("  R commands:     {}", result.r_imported);
         println!("  Shell commands: {}", result.shell_imported);
         println!("  Skipped:        {}", result.skipped);
+        if result.duplicates_skipped > 0 {
+            println!(
+                "  Duplicates:     {} (use --import-duplicates to import anyway)",
+                result.duplicates_skipped
+            );
+        }
 
         if !result.warnings.is_empty() {
             println!("\nWarnings:");
@@ -353,7 +386,7 @@ fn handle_history_import(
     };
 
     // Import entries
-    let result = import_entries(&mut targets, entries, hostname)?;
+    let result = import_entries(&mut targets, entries, hostname, skip_duplicates)?;
 
     println!("\nImport complete:");
     if let Some(h) = hostname {
@@ -362,6 +395,12 @@ fn handle_history_import(
     println!("  R commands:     {}", result.r_imported);
     println!("  Shell commands: {}", result.shell_imported);
     println!("  Skipped:        {}", result.skipped);
+    if result.duplicates_skipped > 0 {
+        println!(
+            "  Duplicates:     {} (use --import-duplicates to import anyway)",
+            result.duplicates_skipped
+        );
+    }
 
     if !result.warnings.is_empty() {
         println!("\nWarnings:");

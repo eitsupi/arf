@@ -183,6 +183,12 @@ pub enum HistoryAction {
         /// Perform a dry run without actually importing
         #[arg(long)]
         dry_run: bool,
+
+        /// Import duplicate entries instead of skipping them.
+        /// By default, entries that already exist in the target database
+        /// are skipped (anti-join on command text and timestamp).
+        #[arg(long)]
+        import_duplicates: bool,
     },
 }
 
