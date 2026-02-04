@@ -55,7 +55,7 @@ expression: schema
       "$ref": "#/$defs/EditorConfig",
       "default": {
         "auto_match": true,
-        "autosuggestion": true,
+        "auto_suggestions": true,
         "key_map": {
           "Alt-Hyphen": " <- ",
           "Alt-p": " |> "
@@ -274,7 +274,7 @@ expression: schema
           "type": "boolean",
           "default": true
         },
-        "autosuggestion": {
+        "auto_suggestions": {
           "description": "Show history-based autosuggestions (fish/nushell style).\nSuggestions appear grayed out and can be accepted with right arrow.",
           "type": "boolean",
           "default": true

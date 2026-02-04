@@ -15,7 +15,7 @@ pub struct EditorConfig {
     pub auto_match: bool,
     /// Show history-based autosuggestions (fish/nushell style).
     /// Suggestions appear grayed out and can be accepted with right arrow.
-    pub autosuggestion: bool,
+    pub auto_suggestions: bool,
     /// Keyboard shortcuts that insert text.
     /// Format: "modifier-key" = "text to insert"
     /// Examples: "alt-hyphen" = " <- ", "alt-p" = " |> "
@@ -56,7 +56,7 @@ impl Default for EditorConfig {
         EditorConfig {
             mode: "emacs".to_string(),
             auto_match: true,
-            autosuggestion: true,
+            auto_suggestions: true,
             key_map: default_key_map(),
         }
     }

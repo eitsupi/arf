@@ -268,7 +268,7 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
@@ -421,7 +421,7 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
             line_editor = line_editor.with_hinter(Box::new(hinter));
@@ -621,7 +621,7 @@ impl Repl {
         )));
 
         // Set up history-based autosuggestion (uses shell history)
-        if self.config.editor.autosuggestion {
+        if self.config.editor.auto_suggestions {
             let hinter =
                 DefaultHinter::default().with_style(Style::new().italic().fg(Color::DarkGray));
             shell_editor = shell_editor.with_hinter(Box::new(hinter));
