@@ -284,32 +284,36 @@ fn handle_history_import(
 
     // In dry-run mode, simulate the import
     if dry_run {
-        // Build dedup sets if duplicate skipping is enabled (requires DB access)
-        let dedup = if skip_duplicates {
+        // Build dedup sets if duplicate skipping is enabled (requires DB access).
+        // Each database is checked independently so dedup works even if only
+        // one of the two target databases exists.
+        let (r_dedup, shell_dedup) = if skip_duplicates {
             if let Some(ref history_dir) = history_dir {
                 let r_path = history_dir.join("r.db");
                 let shell_path = history_dir.join("shell.db");
-                // Only build dedup sets if the databases exist
-                if r_path.exists() && shell_path.exists() {
+                let r_dedup = if r_path.exists() {
                     let r_hist = SqliteBackedHistory::with_file(r_path, None, None)
                         .context("Failed to open R history database for dedup")?;
+                    Some(DedupSet::from_history(&r_hist)?)
+                } else {
+                    None
+                };
+                let shell_dedup = if shell_path.exists() {
                     let shell_hist = SqliteBackedHistory::with_file(shell_path, None, None)
                         .context("Failed to open shell history database for dedup")?;
-                    Some((
-                        DedupSet::from_history(&r_hist)?,
-                        DedupSet::from_history(&shell_hist)?,
-                    ))
+                    Some(DedupSet::from_history(&shell_hist)?)
                 } else {
-                    None // No existing databases, no duplicates possible
-                }
+                    None
+                };
+                (r_dedup, shell_dedup)
             } else {
-                None
+                (None, None)
             }
         } else {
-            None
+            (None, None)
         };
 
-        let result = import_entries_dry_run(&entries, dedup.as_ref().map(|(r, s)| (r, s)));
+        let result = import_entries_dry_run(&entries, r_dedup.as_ref(), shell_dedup.as_ref());
 
         println!("\n[Dry run] Would import:");
         if let Some(h) = hostname {

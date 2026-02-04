@@ -261,10 +261,17 @@ fn classify_mode(mode: Option<&str>) -> Option<bool> {
 ///
 /// For entries with timestamps, duplicates are detected by `(command_line, timestamp)`.
 /// For entries without timestamps, duplicates are detected by `command_line` alone.
+///
+/// Note: `commands` intentionally contains **all** command_lines from the database,
+/// including those that also have timestamps. This is because a no-timestamp import
+/// entry (e.g., from `.Rhistory`) should be considered a duplicate if the same command
+/// text already exists in the DB with any timestamp (e.g., from a prior radian import).
+/// The `.Rhistory` import is typically a one-time migration, so this conservative
+/// approach is acceptable.
 pub struct DedupSet {
     /// `(command_line, unix_timestamp)` pairs for matching entries with timestamps.
     command_timestamps: HashSet<(String, i64)>,
-    /// Distinct `command_line` values for matching entries without timestamps.
+    /// All distinct `command_line` values for matching entries without timestamps.
     commands: HashSet<String>,
 }
 
@@ -296,11 +303,16 @@ impl DedupSet {
 
     /// Check if an entry already exists in the set.
     fn is_duplicate(&self, command: &str, timestamp: Option<&DateTime<Utc>>) -> bool {
+        // Fast path: if the command doesn't exist at all, skip the allocation
+        // needed for the (String, i64) HashSet lookup.
+        if !self.commands.contains(command) {
+            return false;
+        }
         if let Some(ts) = timestamp {
             self.command_timestamps
                 .contains(&(command.to_string(), ts.timestamp()))
         } else {
-            self.commands.contains(command)
+            true // command exists in commands set (checked above)
         }
     }
 }
@@ -310,11 +322,14 @@ impl DedupSet {
 /// Uses the same classification logic as `import_entries` to provide
 /// accurate counts and warnings for `--dry-run` mode.
 ///
-/// If dedup sets are provided `(r_dedup, shell_dedup)`, duplicate entries
-/// will be counted in `duplicates_skipped` instead of being "imported".
+/// If dedup sets are provided, duplicate entries will be counted in
+/// `duplicates_skipped` instead of being "imported". Each dedup set
+/// is optional independently, so dedup works even if only one target
+/// database exists.
 pub fn import_entries_dry_run(
     entries: &[ImportEntry],
-    dedup: Option<(&DedupSet, &DedupSet)>,
+    r_dedup: Option<&DedupSet>,
+    shell_dedup: Option<&DedupSet>,
 ) -> ImportResult {
     let mut result = ImportResult::default();
 
@@ -339,13 +354,13 @@ pub fn import_entries_dry_run(
             }
         };
 
-        // Check for duplicates if dedup sets are provided
-        if let Some((r_dedup, shell_dedup)) = dedup {
-            let dedup_set = if is_shell { shell_dedup } else { r_dedup };
-            if dedup_set.is_duplicate(&entry.command, entry.timestamp.as_ref()) {
-                result.duplicates_skipped += 1;
-                continue;
-            }
+        // Check for duplicates if the corresponding dedup set is available
+        let dedup_set = if is_shell { shell_dedup } else { r_dedup };
+        if let Some(dedup) = dedup_set
+            && dedup.is_duplicate(&entry.command, entry.timestamp.as_ref())
+        {
+            result.duplicates_skipped += 1;
+            continue;
         }
 
         if is_shell {
@@ -735,7 +750,7 @@ mod tests {
         ];
 
         // import_entries_dry_run doesn't need database handles
-        let result = import_entries_dry_run(&entries, None);
+        let result = import_entries_dry_run(&entries, None, None);
 
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.shell_imported, 1);
@@ -1444,7 +1459,7 @@ mod tests {
             },
         ];
 
-        let result = import_entries_dry_run(&entries, Some((&r_dedup, &shell_dedup)));
+        let result = import_entries_dry_run(&entries, Some(&r_dedup), Some(&shell_dedup));
         assert_eq!(result.r_imported, 1);
         assert_eq!(result.duplicates_skipped, 1);
     }
