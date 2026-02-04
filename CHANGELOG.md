@@ -28,6 +28,7 @@ If you have a custom configuration file from 0.1.x, apply the following changes:
 | `reprex.comment` | `mode.reprex.comment` |
 | `editor.autosuggestion` | `editor.auto_suggestions` |
 | `completion.function_paren_check_limit` | `completion.auto_paren_limit` |
+| `editor.mode = "vim"` | `editor.mode = "vi"` |
 
 **Before (0.1.x):**
 
