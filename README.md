@@ -50,9 +50,23 @@
 
 ## Installation
 
-### Pre-built Binaries
+Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases). You can install them using one of the following methods:
 
-Download pre-built binaries for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases).
+### Shell Installer (Linux/macOS)
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/latest/download/arf-console-installer.sh | sh
+```
+
+### winget (Windows)
+
+```sh
+winget install arf
+```
+
+### Manual Download
+
+Download the archive for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases) and extract the binary to a directory in your `PATH`.
 
 ### Build from Source
 
