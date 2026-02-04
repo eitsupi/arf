@@ -38,7 +38,8 @@ pub struct ExperimentalConfig {
 ///
 /// This type is used solely for JSON Schema generation, so that we can still
 /// provide a helpful schema while `Color` does not implement `JsonSchema`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+/// The `color` field uses a manual schema via `color_prop!` for proper oneOf typing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct SpinnerConfigSchema {
     /// Spinner animation frames as a string where each character is one frame.
@@ -48,7 +49,7 @@ struct SpinnerConfigSchema {
     /// Example: `frames = "|/-\\"` (ASCII spinner)
     pub frames: String,
 
-    /// Color for the spinner (e.g., "Cyan", "LightBlue").
+    /// Color for the spinner.
     pub color: String,
 }
 
@@ -58,6 +59,29 @@ impl Default for SpinnerConfigSchema {
             frames: String::new(),
             color: "Cyan".to_string(),
         }
+    }
+}
+
+// Manual JsonSchema for SpinnerConfigSchema to use proper color oneOf schema.
+impl JsonSchema for SpinnerConfigSchema {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("SpinnerConfigSchema")
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use super::colors::color_prop;
+        schemars::json_schema!({
+            "type": "object",
+            "description": "Spinner configuration for busy indicator during R execution.",
+            "properties": {
+                "frames": {
+                    "type": "string",
+                    "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner.",
+                    "default": ""
+                },
+                "color": color_prop!("Color for the spinner")
+            }
+        })
     }
 }
 
