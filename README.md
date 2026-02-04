@@ -61,7 +61,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/la
 ### winget (Windows)
 
 ```sh
-winget install arf
+winget install --id eitsupi.arf
 ```
 
 ### Manual Download
