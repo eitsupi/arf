@@ -439,15 +439,12 @@ pub(crate) fn render_size_warning(
     let width = cols as usize;
     let height = rows as usize;
 
-    queue!(stdout, BeginSynchronizedUpdate)?;
-    stdout.execute(cursor::MoveTo(0, 0))?;
-    stdout.execute(cursor::Hide)?;
-
+    let title = "Terminal too small";
     let current_line = format!("Current:  {}x{}", cols, rows);
     let minimum_line = format!("Minimum:  {}x{}", min.cols, min.rows);
 
-    let messages: [&str; 8] = [
-        "Terminal too small",
+    let messages = [
+        title,
         "",
         &current_line,
         &minimum_line,
@@ -456,6 +453,13 @@ pub(crate) fn render_size_warning(
         "",
         "Press q or Esc to exit.",
     ];
+
+    queue!(
+        stdout,
+        BeginSynchronizedUpdate,
+        cursor::MoveTo(0, 0),
+        cursor::Hide
+    )?;
 
     // Center vertically
     let start_row = height.saturating_sub(messages.len()) / 2;
@@ -466,10 +470,8 @@ pub(crate) fn render_size_warning(
             let msg = messages[row - start_row];
             let msg_width = text_utils::display_width(msg);
             let padding = width.saturating_sub(msg_width) / 2;
-            if row == start_row {
-                // Title line: styled
-                let styled = format!("{}", msg.yellow().bold());
-                write!(stdout, "\r{}{}", " ".repeat(padding), styled)?;
+            if msg == title {
+                write!(stdout, "\r{}{}", " ".repeat(padding), msg.yellow().bold())?;
             } else {
                 write!(stdout, "\r{}{}", " ".repeat(padding), msg)?;
             }
