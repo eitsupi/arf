@@ -1370,7 +1370,7 @@
           "const": "emacs"
         },
         {
-          "description": "Vi/Vim-style keybindings.",
+          "description": "Vi-style keybindings.",
           "type": "string",
           "const": "vi"
         }

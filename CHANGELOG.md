@@ -14,7 +14,7 @@
 - **BREAKING:** Configuration structure reorganized - the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization.
 - **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match`
 - **BREAKING:** `completion.function_paren_check_limit` config key renamed to `completion.auto_paren_limit`
-- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"` (the `"vim"` alias is still accepted for backward compatibility)
+- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"`
 - Improved JSON Schema for color properties with proper `oneOf` typing (named string, `{ Fixed: N }`, `{ Rgb: [r, g, b] }`)
 
 #### Migration Guide

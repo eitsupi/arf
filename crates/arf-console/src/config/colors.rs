@@ -15,12 +15,8 @@ use serde::{Deserialize, Serialize};
 /// - `color_prop!("description")` — without default
 /// - `color_prop!("description", default = "Cyan")` — with default value
 macro_rules! color_prop {
-    ($desc:expr) => {{
-        $crate::config::colors::make_color_schema($desc, None)
-    }};
-    ($desc:expr, default = $default:expr) => {{
-        $crate::config::colors::make_color_schema($desc, Some($default))
-    }};
+    ($desc:expr) => {{ $crate::config::colors::make_color_schema($desc, None) }};
+    ($desc:expr, default = $default:expr) => {{ $crate::config::colors::make_color_schema($desc, Some($default)) }};
 }
 
 /// Build a color property schema. Used by the `color_prop!` macro.
@@ -293,4 +289,3 @@ impl Default for ViColorConfig {
         }
     }
 }
-

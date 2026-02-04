@@ -12,8 +12,7 @@ use std::fmt;
 pub enum EditorMode {
     /// Emacs-style keybindings (default).
     Emacs,
-    /// Vi/Vim-style keybindings.
-    #[serde(alias = "vim")]
+    /// Vi-style keybindings.
     Vi,
 }
 
