@@ -153,6 +153,21 @@ impl HelpBrowser {
                             key.code,
                             key.modifiers
                         );
+
+                        // When the terminal is too small, only accept exit keys
+                        // to prevent character input from leaking into the filter.
+                        if check_terminal_too_small(&MIN_SIZE).is_some() {
+                            match (key.code, key.modifiers) {
+                                (KeyCode::Esc, _)
+                                | (KeyCode::Char('q'), KeyModifiers::NONE)
+                                | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                    break;
+                                }
+                                _ => continue,
+                            }
+                        }
+
                         match (key.code, key.modifiers) {
                             // Exit
                             (KeyCode::Esc, _)

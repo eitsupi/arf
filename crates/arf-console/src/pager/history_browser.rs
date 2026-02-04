@@ -457,6 +457,20 @@ impl HistoryBrowser {
                         needs_redraw = true;
                         self.feedback_message = None;
 
+                        // When the terminal is too small, only accept exit keys
+                        // to prevent input from leaking into filter or other state.
+                        if check_terminal_too_small(&MIN_SIZE).is_some() {
+                            match (key.code, key.modifiers) {
+                                (KeyCode::Esc, _)
+                                | (KeyCode::Char('q'), KeyModifiers::NONE)
+                                | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                    return Ok(HistoryBrowserResult::Cancelled);
+                                }
+                                _ => continue,
+                            }
+                        }
+
                         // Handle delete confirmation dialog
                         if self.show_delete_dialog {
                             match key.code {
