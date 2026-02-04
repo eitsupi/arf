@@ -785,8 +785,20 @@ impl HistoryBrowser {
         println!("\r{}", "─".repeat(width).dark_grey());
 
         // Calculate layout
-        let (cmd_width, host_width) = calculate_layout(width);
+        let (cmd_width, cwd_width, host_width) = calculate_layout(width);
         let visible_rows = visible_result_rows();
+
+        // Column headers
+        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        let col_headers = format!(
+            "       {:<16} {:>4} {} {} {}",
+            "Date",
+            "Exit",
+            pad_to_width("Command", cmd_width),
+            pad_to_width("Directory", cwd_width),
+            pad_to_width("Host", host_width),
+        );
+        println!("\r{}", pad_to_width(&col_headers, width).dark_grey());
 
         // Results
         for i in 0..visible_rows {
@@ -808,6 +820,12 @@ impl HistoryBrowser {
                     .map(|ts| ts.format("%Y-%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| "                ".to_string());
 
+                // Exit status
+                let exit_str = match entry.item.exit_status {
+                    Some(code) => format!("{:>4}", code),
+                    None => "   -".to_string(),
+                };
+
                 // Command text with scrolling for selected item
                 // Convert multiline commands to single line for display
                 let cmd = flatten_multiline(&entry.item.command_line);
@@ -819,32 +837,68 @@ impl HistoryBrowser {
                     truncate_to_width(&cmd, cmd_width)
                 };
 
+                // CWD (basename only, with scrolling for current row)
+                let cwd_full = entry.item.cwd.as_deref().unwrap_or("");
+                let cwd_short = std::path::Path::new(cwd_full)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(cwd_full);
+                let display_cwd = if is_current && exceeds_width(cwd_short, cwd_width) {
+                    let (scrolled, _) =
+                        scroll_display(cwd_short, cwd_width, self.text_scroll.scroll_pos);
+                    scrolled
+                } else {
+                    truncate_to_width(cwd_short, cwd_width)
+                };
+
                 // Hostname (truncated)
                 let host = entry.item.hostname.as_deref().unwrap_or("");
                 let display_host = truncate_to_width(host, host_width);
 
-                // Build prefix (all ASCII, so byte len == display width)
-                let prefix = format!("{}{} {}  ", cursor_marker, checkbox, timestamp);
+                // Build prefix base (cursor + checkbox + timestamp, without exit)
+                let prefix_base = format!("{}{} {} ", cursor_marker, checkbox, timestamp);
                 let padded_cmd = pad_to_width(&display_cmd, cmd_width);
+                let padded_cwd = pad_to_width(&display_cwd, cwd_width);
 
                 if is_current {
-                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let content = format!(
+                        "{}{} {} {} {}",
+                        prefix_base, exit_str, padded_cmd, padded_cwd, display_host
+                    );
                     let line = pad_to_width(&content, width);
                     println!("\r{}", line.reverse());
                 } else if entry.selected {
-                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let content = format!(
+                        "{}{} {} {} {}",
+                        prefix_base, exit_str, padded_cmd, padded_cwd, display_host
+                    );
                     let line = pad_to_width(&content, width);
                     println!("\r{}", line.yellow());
                 } else {
-                    // Style hostname as dark grey
-                    let base_part = format!("{}{} ", prefix, padded_cmd);
-                    let host_str = display_host.to_string();
-                    let padding_len =
-                        width.saturating_sub(display_width(&base_part) + display_width(&host_str));
+                    // Style exit status red if non-zero, cwd and hostname dark grey
+                    let styled_exit = if matches!(entry.item.exit_status, Some(code) if code != 0) {
+                        format!("{}", exit_str.as_str().red())
+                    } else {
+                        exit_str.clone()
+                    };
+                    // Padding: prefix_base, exit, cmd, cwd are fixed-width (no ANSI);
+                    // only hostname may be shorter than its allocated width.
+                    let content_width = display_width(&prefix_base)
+                        + 4
+                        + 1
+                        + cmd_width
+                        + 1
+                        + cwd_width
+                        + 1
+                        + display_width(&display_host);
+                    let padding_len = width.saturating_sub(content_width);
                     print!(
-                        "\r{}{}{}\n",
-                        base_part,
-                        host_str.dark_grey(),
+                        "\r{}{} {} {} {}{}\n",
+                        prefix_base,
+                        styled_exit,
+                        padded_cmd,
+                        padded_cwd.dark_grey(),
+                        display_host.dark_grey(),
                         " ".repeat(padding_len)
                     );
                 }
@@ -932,21 +986,26 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
     Ok(items)
 }
 
-/// Calculate layout widths.
-fn calculate_layout(cols: usize) -> (usize, usize) {
-    // Layout: " > [x] 2024-01-15 14:32  command...  hostname"
-    // Prefix: 3 + checkbox: 3 + space: 1 + timestamp: 16 + spaces: 2 = 25
-    let prefix_width = 25;
-    let host_width = 15.min(cols / 6); // ~1/6 of screen for hostname
-    let cmd_width = cols.saturating_sub(prefix_width + host_width + 1);
-    (cmd_width.max(20), host_width)
+/// Calculate layout widths for the history browser columns.
+///
+/// Returns (cmd_width, cwd_width, host_width).
+fn calculate_layout(cols: usize) -> (usize, usize, usize) {
+    // Layout: " > [x] 2024-01-15 14:32    0 command...  /path/to/dir  hostname"
+    // Prefix: cursor(3) + checkbox(3) + space(1) + timestamp(16) + space(1) + exit(4) + space(1) = 29
+    let prefix_width = 29;
+    let host_width = (cols / 8).clamp(5, 15);
+    let cwd_width = (cols / 6).clamp(8, 20);
+    let cmd_width = cols
+        .saturating_sub(prefix_width + cwd_width + host_width + 2)
+        .max(20);
+    (cmd_width, cwd_width, host_width)
 }
 
 /// Calculate the number of visible result rows.
 fn visible_result_rows() -> usize {
     let (_, rows) = terminal::size().unwrap_or((80, 24));
-    // Reserve: header(1) + filter(1) + separator(1) + footer_separator(1) + footer(2) = 6
-    rows.saturating_sub(6).max(3) as usize
+    // Reserve: header(1) + filter(1) + separator(1) + column_headers(1) + footer_separator(1) + footer(2) = 7
+    rows.saturating_sub(7).max(3) as usize
 }
 
 /// Convert a multiline string to a single line for display.
@@ -1041,6 +1100,54 @@ mod tests {
         assert!(filter.exit_status.is_none());
         // Invalid exit:abc becomes part of command pattern
         assert_eq!(filter.command_pattern, "exit:abc git");
+    }
+
+    #[test]
+    fn test_calculate_layout_standard_terminal() {
+        let (cmd, cwd, host) = calculate_layout(120);
+        assert!(cmd >= 20);
+        assert!(cwd >= 8);
+        assert!(host >= 5);
+        // prefix(29) + cmd + space(1) + cwd + space(1) + host = total
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 120);
+    }
+
+    #[test]
+    fn test_calculate_layout_80_columns() {
+        let (cmd, cwd, host) = calculate_layout(80);
+        assert!(cmd >= 20);
+        assert!(cwd >= 8);
+        assert!(host >= 5);
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 80);
+    }
+
+    #[test]
+    fn test_calculate_layout_wide_terminal() {
+        let (cmd, cwd, host) = calculate_layout(200);
+        assert!(cmd >= 20);
+        assert!(cwd <= 20, "cwd_width should be capped at 20, got {}", cwd);
+        assert!(
+            host <= 15,
+            "host_width should be capped at 15, got {}",
+            host
+        );
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 200);
+    }
+
+    #[test]
+    fn test_calculate_layout_narrow_terminal() {
+        // Very narrow terminal: cmd_width floors at 20 so total exceeds cols
+        let (cmd, cwd, host) = calculate_layout(50);
+        assert_eq!(cmd, 20, "cmd_width should floor at 20");
+        assert!(cwd >= 8);
+        assert!(host >= 5);
+        // Total overflows because cmd_width has a minimum of 20
+        let total = 29 + cmd + 1 + cwd + 1 + host;
+        assert!(
+            total > 50,
+            "narrow terminal should overflow, total={}",
+            total
+        );
     }
 
     #[test]
@@ -1209,5 +1316,32 @@ mod tests {
 
         // Empty string
         assert_eq!(flatten_multiline(""), "");
+    }
+
+    #[test]
+    fn test_cwd_basename_extraction() {
+        use std::path::Path;
+
+        // Helper matching the logic in render()
+        fn basename(cwd: &str) -> String {
+            Path::new(cwd)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(cwd)
+                .to_string()
+        }
+
+        assert_eq!(basename("/home/user/project"), "project");
+        assert_eq!(
+            basename("/home/user/my-long-directory-name"),
+            "my-long-directory-name"
+        );
+        assert_eq!(basename("/"), "/");
+        assert_eq!(basename(""), "");
+        assert_eq!(basename("/foo/bar/baz"), "baz");
+        // file_name() returns None for "..", so full path is used as fallback
+        assert_eq!(basename("/foo/.."), "/foo/..");
+        // file_name() strips trailing "." and returns the parent component
+        assert_eq!(basename("/foo/."), "foo");
     }
 }
