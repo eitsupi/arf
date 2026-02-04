@@ -15,7 +15,8 @@ use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
 use super::{
-    MinimumSize, TextScrollState, is_terminal_too_small, render_size_warning, with_alternate_screen,
+    MinimumSize, TextScrollState, check_terminal_too_small, render_size_warning,
+    with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
 use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
@@ -316,8 +317,8 @@ impl HelpBrowser {
     }
 
     fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
-        if is_terminal_too_small(&MIN_SIZE) {
-            return render_size_warning(stdout, &MIN_SIZE);
+        if let Some((cols, rows)) = check_terminal_too_small(&MIN_SIZE) {
+            return render_size_warning(stdout, cols, rows, &MIN_SIZE);
         }
 
         // Begin synchronized update to prevent flickering

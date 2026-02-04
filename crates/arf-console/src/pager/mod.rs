@@ -427,8 +427,15 @@ pub(crate) struct MinimumSize {
 ///
 /// This is a shared utility for browser UIs that require a minimum terminal size.
 /// It fills the alternate screen with a centered message asking the user to resize.
-pub(crate) fn render_size_warning(stdout: &mut io::Stdout, min: &MinimumSize) -> io::Result<()> {
-    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+///
+/// Accepts the current terminal size to avoid a redundant `terminal::size()` call
+/// (the caller already obtained the size for its check).
+pub(crate) fn render_size_warning(
+    stdout: &mut io::Stdout,
+    cols: u16,
+    rows: u16,
+    min: &MinimumSize,
+) -> io::Result<()> {
     let width = cols as usize;
     let height = rows as usize;
 
@@ -436,11 +443,14 @@ pub(crate) fn render_size_warning(stdout: &mut io::Stdout, min: &MinimumSize) ->
     stdout.execute(cursor::MoveTo(0, 0))?;
     stdout.execute(cursor::Hide)?;
 
-    let messages = [
+    let current_line = format!("Current:  {}x{}", cols, rows);
+    let minimum_line = format!("Minimum:  {}x{}", min.cols, min.rows);
+
+    let messages: [&str; 8] = [
         "Terminal too small",
         "",
-        &format!("Current:  {}×{}", cols, rows),
-        &format!("Minimum:  {}×{}", min.cols, min.rows),
+        &current_line,
+        &minimum_line,
         "",
         "Please resize your terminal.",
         "",
@@ -451,18 +461,22 @@ pub(crate) fn render_size_warning(stdout: &mut io::Stdout, min: &MinimumSize) ->
     let start_row = height.saturating_sub(messages.len()) / 2;
 
     for row in 0..height {
-        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        queue!(stdout, terminal::Clear(ClearType::CurrentLine))?;
         if row >= start_row && row < start_row + messages.len() {
             let msg = messages[row - start_row];
-            // Center horizontally
-            let padding = width.saturating_sub(msg.len()) / 2;
-            if msg == "Terminal too small" {
-                println!("\r{}{}", " ".repeat(padding), msg.yellow().bold());
+            let msg_width = text_utils::display_width(msg);
+            let padding = width.saturating_sub(msg_width) / 2;
+            if row == start_row {
+                // Title line: styled
+                let styled = format!("{}", msg.yellow().bold());
+                write!(stdout, "\r{}{}", " ".repeat(padding), styled)?;
             } else {
-                println!("\r{}{}", " ".repeat(padding), msg);
+                write!(stdout, "\r{}{}", " ".repeat(padding), msg)?;
             }
-        } else {
-            println!("\r");
+        }
+        // Move to the next line (except for the last row to avoid scrolling)
+        if row + 1 < height {
+            write!(stdout, "\r\n")?;
         }
     }
 
@@ -472,7 +486,50 @@ pub(crate) fn render_size_warning(stdout: &mut io::Stdout, min: &MinimumSize) ->
 }
 
 /// Check whether the terminal meets minimum size requirements.
-pub(crate) fn is_terminal_too_small(min: &MinimumSize) -> bool {
+///
+/// Returns `Some((cols, rows))` if the terminal is too small, `None` if it meets
+/// the requirements. The returned size can be passed to [`render_size_warning`]
+/// to avoid a redundant `terminal::size()` call.
+pub(crate) fn check_terminal_too_small(min: &MinimumSize) -> Option<(u16, u16)> {
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    if is_below_minimum(cols, rows, min) {
+        Some((cols, rows))
+    } else {
+        None
+    }
+}
+
+/// Pure comparison for minimum size check (testable without a real terminal).
+fn is_below_minimum(cols: u16, rows: u16, min: &MinimumSize) -> bool {
     cols < min.cols || rows < min.rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_below_minimum_both_ok() {
+        let min = MinimumSize { cols: 70, rows: 10 };
+        assert!(!is_below_minimum(80, 24, &min));
+        assert!(!is_below_minimum(70, 10, &min)); // exact boundary
+    }
+
+    #[test]
+    fn test_is_below_minimum_cols_too_small() {
+        let min = MinimumSize { cols: 70, rows: 10 };
+        assert!(is_below_minimum(69, 24, &min));
+    }
+
+    #[test]
+    fn test_is_below_minimum_rows_too_small() {
+        let min = MinimumSize { cols: 70, rows: 10 };
+        assert!(is_below_minimum(80, 9, &min));
+    }
+
+    #[test]
+    fn test_is_below_minimum_both_too_small() {
+        let min = MinimumSize { cols: 70, rows: 10 };
+        assert!(is_below_minimum(40, 5, &min));
+    }
 }
