@@ -785,8 +785,20 @@ impl HistoryBrowser {
         println!("\r{}", "─".repeat(width).dark_grey());
 
         // Calculate layout
-        let (cmd_width, host_width) = calculate_layout(width);
+        let (cmd_width, cwd_width, host_width) = calculate_layout(width);
         let visible_rows = visible_result_rows();
+
+        // Column headers
+        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        let col_headers = format!(
+            "       {:<16} {:>4} {} {} {}",
+            "Date",
+            "Exit",
+            pad_to_width("Command", cmd_width),
+            pad_to_width("Directory", cwd_width),
+            pad_to_width("Host", host_width),
+        );
+        println!("\r{}", pad_to_width(&col_headers, width).dark_grey());
 
         // Results
         for i in 0..visible_rows {
@@ -808,6 +820,12 @@ impl HistoryBrowser {
                     .map(|ts| ts.format("%Y-%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| "                ".to_string());
 
+                // Exit status
+                let exit_str = match entry.item.exit_status {
+                    Some(code) => format!("{:>4}", code),
+                    None => "   -".to_string(),
+                };
+
                 // Command text with scrolling for selected item
                 // Convert multiline commands to single line for display
                 let cmd = flatten_multiline(&entry.item.command_line);
@@ -819,31 +837,59 @@ impl HistoryBrowser {
                     truncate_to_width(&cmd, cmd_width)
                 };
 
+                // CWD (truncated)
+                let cwd = entry.item.cwd.as_deref().unwrap_or("");
+                let display_cwd = truncate_to_width(cwd, cwd_width);
+
                 // Hostname (truncated)
                 let host = entry.item.hostname.as_deref().unwrap_or("");
                 let display_host = truncate_to_width(host, host_width);
 
-                // Build prefix (all ASCII, so byte len == display width)
-                let prefix = format!("{}{} {}  ", cursor_marker, checkbox, timestamp);
+                // Build prefix base (cursor + checkbox + timestamp, without exit)
+                let prefix_base =
+                    format!("{}{} {} ", cursor_marker, checkbox, timestamp);
                 let padded_cmd = pad_to_width(&display_cmd, cmd_width);
+                let padded_cwd = pad_to_width(&display_cwd, cwd_width);
 
                 if is_current {
-                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let content = format!(
+                        "{}{} {} {} {}",
+                        prefix_base, exit_str, padded_cmd, padded_cwd, display_host
+                    );
                     let line = pad_to_width(&content, width);
                     println!("\r{}", line.reverse());
                 } else if entry.selected {
-                    let content = format!("{}{} {}", prefix, padded_cmd, display_host);
+                    let content = format!(
+                        "{}{} {} {} {}",
+                        prefix_base, exit_str, padded_cmd, padded_cwd, display_host
+                    );
                     let line = pad_to_width(&content, width);
                     println!("\r{}", line.yellow());
                 } else {
-                    // Style hostname as dark grey
-                    let base_part = format!("{}{} ", prefix, padded_cmd);
+                    // Style exit status red if non-zero, cwd and hostname dark grey
+                    let styled_exit =
+                        if matches!(entry.item.exit_status, Some(code) if code != 0) {
+                            format!("{}", exit_str.as_str().red())
+                        } else {
+                            exit_str.clone()
+                        };
+                    let base_part =
+                        format!("{}{} {} ", prefix_base, styled_exit, padded_cmd);
+                    let cwd_str = padded_cwd.to_string();
                     let host_str = display_host.to_string();
-                    let padding_len =
-                        width.saturating_sub(display_width(&base_part) + display_width(&host_str));
+                    let raw_width = display_width(&prefix_base)
+                        + 4
+                        + 1
+                        + display_width(&padded_cmd)
+                        + 1
+                        + display_width(&padded_cwd)
+                        + 1
+                        + display_width(&host_str);
+                    let padding_len = width.saturating_sub(raw_width);
                     print!(
-                        "\r{}{}{}\n",
+                        "\r{}{} {}{}\n",
                         base_part,
+                        cwd_str.dark_grey(),
                         host_str.dark_grey(),
                         " ".repeat(padding_len)
                     );
@@ -932,21 +978,26 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
     Ok(items)
 }
 
-/// Calculate layout widths.
-fn calculate_layout(cols: usize) -> (usize, usize) {
-    // Layout: " > [x] 2024-01-15 14:32  command...  hostname"
-    // Prefix: 3 + checkbox: 3 + space: 1 + timestamp: 16 + spaces: 2 = 25
-    let prefix_width = 25;
-    let host_width = 15.min(cols / 6); // ~1/6 of screen for hostname
-    let cmd_width = cols.saturating_sub(prefix_width + host_width + 1);
-    (cmd_width.max(20), host_width)
+/// Calculate layout widths for the history browser columns.
+///
+/// Returns (cmd_width, cwd_width, host_width).
+fn calculate_layout(cols: usize) -> (usize, usize, usize) {
+    // Layout: " > [x] 2024-01-15 14:32    0 command...  /path/to/dir  hostname"
+    // Prefix: cursor(3) + checkbox(3) + space(1) + timestamp(16) + space(1) + exit(4) + space(1) = 29
+    let prefix_width = 29;
+    let host_width = (cols / 8).clamp(5, 15);
+    let cwd_width = (cols / 6).clamp(8, 20);
+    let cmd_width = cols
+        .saturating_sub(prefix_width + cwd_width + host_width + 2)
+        .max(20);
+    (cmd_width, cwd_width, host_width)
 }
 
 /// Calculate the number of visible result rows.
 fn visible_result_rows() -> usize {
     let (_, rows) = terminal::size().unwrap_or((80, 24));
-    // Reserve: header(1) + filter(1) + separator(1) + footer_separator(1) + footer(2) = 6
-    rows.saturating_sub(6).max(3) as usize
+    // Reserve: header(1) + filter(1) + separator(1) + column_headers(1) + footer_separator(1) + footer(2) = 7
+    rows.saturating_sub(7).max(3) as usize
 }
 
 /// Convert a multiline string to a single line for display.
