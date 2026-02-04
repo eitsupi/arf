@@ -433,6 +433,7 @@ impl HistoryBrowser {
         let mut stdout = io::stdout();
         let poll_timeout = Duration::from_millis(50);
         let mut needs_redraw = true;
+        let mut too_small = false;
 
         loop {
             // Update animation state
@@ -441,6 +442,7 @@ impl HistoryBrowser {
             }
 
             if needs_redraw {
+                too_small = check_terminal_too_small(&MIN_SIZE).is_some();
                 self.render(&mut stdout)?;
                 needs_redraw = false;
             }
@@ -455,11 +457,10 @@ impl HistoryBrowser {
                         }
 
                         needs_redraw = true;
-                        self.feedback_message = None;
 
                         // When the terminal is too small, only accept exit keys
                         // to prevent input from leaking into filter or other state.
-                        if check_terminal_too_small(&MIN_SIZE).is_some() {
+                        if too_small {
                             match (key.code, key.modifiers) {
                                 (KeyCode::Esc, _)
                                 | (KeyCode::Char('q'), KeyModifiers::NONE)
@@ -470,6 +471,8 @@ impl HistoryBrowser {
                                 _ => continue,
                             }
                         }
+
+                        self.feedback_message = None;
 
                         // Handle delete confirmation dialog
                         if self.show_delete_dialog {

@@ -119,6 +119,7 @@ impl HelpBrowser {
         let mut stdout = io::stdout();
         let poll_timeout = Duration::from_millis(50); // ~20fps for smooth animation
         let mut needs_redraw = true;
+        let mut too_small = false;
 
         loop {
             // Update animation state
@@ -127,6 +128,7 @@ impl HelpBrowser {
             }
 
             if needs_redraw {
+                too_small = check_terminal_too_small(&MIN_SIZE).is_some();
                 self.render(&mut stdout)?;
                 needs_redraw = false;
             }
@@ -156,7 +158,7 @@ impl HelpBrowser {
 
                         // When the terminal is too small, only accept exit keys
                         // to prevent character input from leaking into the filter.
-                        if check_terminal_too_small(&MIN_SIZE).is_some() {
+                        if too_small {
                             match (key.code, key.modifiers) {
                                 (KeyCode::Esc, _)
                                 | (KeyCode::Char('q'), KeyModifiers::NONE)
