@@ -1119,15 +1119,19 @@ mod tests {
         assert!(cmd >= 20);
         assert!(cwd <= 20, "cwd_width should be capped at 20, got {}", cwd);
         assert!(host <= 15, "host_width should be capped at 15, got {}", host);
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 200);
     }
 
     #[test]
     fn test_calculate_layout_narrow_terminal() {
-        // Very narrow terminal: cmd_width floors at 20 so total may exceed cols
+        // Very narrow terminal: cmd_width floors at 20 so total exceeds cols
         let (cmd, cwd, host) = calculate_layout(50);
         assert_eq!(cmd, 20, "cmd_width should floor at 20");
         assert!(cwd >= 8);
         assert!(host >= 5);
+        // Total overflows because cmd_width has a minimum of 20
+        let total = 29 + cmd + 1 + cwd + 1 + host;
+        assert!(total > 50, "narrow terminal should overflow, total={}", total);
     }
 
     #[test]
