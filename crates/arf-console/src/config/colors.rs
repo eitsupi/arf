@@ -49,7 +49,49 @@ macro_rules! color_prop {
             ]
         })
     };
+    ($desc:expr, default = $default:expr) => {
+        schemars::json_schema!({
+            "description": $desc,
+            "default": $default,
+            "oneOf": [
+                {
+                    "type": "string",
+                    "enum": [
+                        "Default", "Black", "Red", "Green", "Yellow", "Blue",
+                        "Purple", "Magenta", "Cyan", "White",
+                        "DarkGray", "LightGray",
+                        "LightRed", "LightGreen", "LightYellow", "LightBlue",
+                        "LightPurple", "LightMagenta", "LightCyan"
+                    ]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "Fixed": { "type": "integer", "minimum": 0, "maximum": 255 }
+                    },
+                    "required": ["Fixed"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "Rgb": {
+                            "type": "array",
+                            "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                            "minItems": 3,
+                            "maxItems": 3
+                        }
+                    },
+                    "required": ["Rgb"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    };
 }
+
+// Re-export the macro for use in sibling modules (e.g., experimental.rs).
+pub(crate) use color_prop;
 
 /// Color configuration for syntax highlighting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
