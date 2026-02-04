@@ -281,6 +281,7 @@ arf history import --from radian --hostname "radian-import"
 | `--file` | Path to source file (required for `arf`, defaults to standard locations for others) |
 | `--hostname` | Custom hostname to mark imported entries |
 | `--dry-run` | Preview without importing |
+| `--import-duplicates` | Import duplicate entries instead of skipping them |
 
 **Supported sources:**
 
@@ -300,7 +301,7 @@ Entries with unknown modes are skipped with a warning.
 
 **Notes:**
 
-- Importing the same file multiple times will create duplicate entries. Use `--dry-run` first to preview what would be imported.
+- By default, duplicate entries are skipped during import (matched by command text and timestamp). Use `--import-duplicates` to import all entries regardless.
 - Self-import is detected and rejected when importing from an arf database to the same target file.
 
 ## Known Issues
