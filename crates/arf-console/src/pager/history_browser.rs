@@ -433,7 +433,7 @@ impl HistoryBrowser {
         let mut stdout = io::stdout();
         let poll_timeout = Duration::from_millis(50);
         let mut needs_redraw = true;
-        let mut too_small = false;
+        let mut too_small;
 
         loop {
             // Update animation state
