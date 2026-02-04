@@ -1,11 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
 ## [0.2.0-rc.2] - 2026-02-04
 
 ### Added
 
 - Experimental history browser for interactive history management with search, filtering, copy, and delete support (#38)
-  - Column headers showing index, exit code, and working directory (#47)
+  - Column headers, exit code column, and working directory column (#47)
   - Minimum terminal size warning for pager browsers (#50)
 - Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)
 - Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
