@@ -873,24 +873,24 @@ impl HistoryBrowser {
                         } else {
                             exit_str.clone()
                         };
-                    let base_part =
-                        format!("{}{} {} ", prefix_base, styled_exit, padded_cmd);
-                    let cwd_str = padded_cwd.to_string();
-                    let host_str = display_host.to_string();
-                    let raw_width = display_width(&prefix_base)
+                    // Padding: prefix_base, exit, cmd, cwd are fixed-width (no ANSI);
+                    // only hostname may be shorter than its allocated width.
+                    let content_width = display_width(&prefix_base)
                         + 4
                         + 1
-                        + display_width(&padded_cmd)
+                        + cmd_width
                         + 1
-                        + display_width(&padded_cwd)
+                        + cwd_width
                         + 1
-                        + display_width(&host_str);
-                    let padding_len = width.saturating_sub(raw_width);
+                        + display_width(&display_host);
+                    let padding_len = width.saturating_sub(content_width);
                     print!(
-                        "\r{}{} {}{}\n",
-                        base_part,
-                        cwd_str.dark_grey(),
-                        host_str.dark_grey(),
+                        "\r{}{} {} {} {}{}\n",
+                        prefix_base,
+                        styled_exit,
+                        padded_cmd,
+                        padded_cwd.dark_grey(),
+                        display_host.dark_grey(),
                         " ".repeat(padding_len)
                     );
                 }
@@ -1092,6 +1092,42 @@ mod tests {
         assert!(filter.exit_status.is_none());
         // Invalid exit:abc becomes part of command pattern
         assert_eq!(filter.command_pattern, "exit:abc git");
+    }
+
+    #[test]
+    fn test_calculate_layout_standard_terminal() {
+        let (cmd, cwd, host) = calculate_layout(120);
+        assert!(cmd >= 20);
+        assert!(cwd >= 8);
+        assert!(host >= 5);
+        // prefix(29) + cmd + space(1) + cwd + space(1) + host = total
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 120);
+    }
+
+    #[test]
+    fn test_calculate_layout_80_columns() {
+        let (cmd, cwd, host) = calculate_layout(80);
+        assert!(cmd >= 20);
+        assert!(cwd >= 8);
+        assert!(host >= 5);
+        assert_eq!(29 + cmd + 1 + cwd + 1 + host, 80);
+    }
+
+    #[test]
+    fn test_calculate_layout_wide_terminal() {
+        let (cmd, cwd, host) = calculate_layout(200);
+        assert!(cmd >= 20);
+        assert!(cwd <= 20, "cwd_width should be capped at 20, got {}", cwd);
+        assert!(host <= 15, "host_width should be capped at 15, got {}", host);
+    }
+
+    #[test]
+    fn test_calculate_layout_narrow_terminal() {
+        // Very narrow terminal: cmd_width floors at 20 so total may exceed cols
+        let (cmd, cwd, host) = calculate_layout(50);
+        assert_eq!(cmd, 20, "cmd_width should floor at 20");
+        assert!(cwd >= 8);
+        assert!(host >= 5);
     }
 
     #[test]
