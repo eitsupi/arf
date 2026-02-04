@@ -84,20 +84,38 @@ pub struct StatusConfig {
 
 /// Symbols displayed in the prompt to indicate vi editing mode.
 ///
-/// Example: `symbol = { insert = "> ", normal = ": ", non_vi = "> " }`
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+/// Example: `symbol = { insert = "[I] ", normal = "[N] " }`
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct ViSymbol {
-    /// Symbol shown in vi insert mode (default: "").
-    #[serde(default)]
+    /// Symbol shown in vi insert mode (default: "[I] ").
+    #[serde(default = "default_vi_insert_symbol")]
     pub insert: String,
-    /// Symbol shown in vi normal mode (default: "").
-    #[serde(default)]
+    /// Symbol shown in vi normal mode (default: "[N] ").
+    #[serde(default = "default_vi_normal_symbol")]
     pub normal: String,
     /// Symbol shown in non-vi modes like Emacs (default: "").
     /// Use this to maintain consistent prompt appearance across all editor modes.
     #[serde(default)]
     pub non_vi: String,
+}
+
+fn default_vi_insert_symbol() -> String {
+    "[I] ".to_string()
+}
+
+fn default_vi_normal_symbol() -> String {
+    "[N] ".to_string()
+}
+
+impl Default for ViSymbol {
+    fn default() -> Self {
+        Self {
+            insert: default_vi_insert_symbol(),
+            normal: default_vi_normal_symbol(),
+            non_vi: String::new(),
+        }
+    }
 }
 
 /// Vi mode indicator configuration.

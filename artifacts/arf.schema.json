@@ -20,9 +20,9 @@
             "success": "LightGreen"
           },
           "vi": {
-            "insert": "Default",
+            "insert": "LightGreen",
             "non_vi": "Default",
-            "normal": "Default"
+            "normal": "LightYellow"
           }
         },
         "r": {
@@ -111,9 +111,9 @@
         },
         "vi": {
           "symbol": {
-            "insert": "",
+            "insert": "[I] ",
             "non_vi": "",
-            "normal": ""
+            "normal": "[N] "
           }
         }
       }
@@ -482,9 +482,9 @@
           "$ref": "#/$defs/ViConfig",
           "default": {
             "symbol": {
-              "insert": "",
+              "insert": "[I] ",
               "non_vi": "",
-              "normal": ""
+              "normal": "[N] "
             }
           }
         }
@@ -637,21 +637,21 @@
           "description": "Symbols to display for insert/normal mode.\nExample: `symbol = { insert = \"[I] \", normal = \"[N] \" }`",
           "$ref": "#/$defs/ViSymbol",
           "default": {
-            "insert": "",
+            "insert": "[I] ",
             "non_vi": "",
-            "normal": ""
+            "normal": "[N] "
           }
         }
       }
     },
     "ViSymbol": {
-      "description": "Symbols displayed in the prompt to indicate vi editing mode.\n\nExample: `symbol = { insert = \"> \", normal = \": \", non_vi = \"> \" }`",
+      "description": "Symbols displayed in the prompt to indicate vi editing mode.\n\nExample: `symbol = { insert = \"[I] \", normal = \"[N] \" }`",
       "type": "object",
       "properties": {
         "insert": {
-          "description": "Symbol shown in vi insert mode (default: \"\").",
+          "description": "Symbol shown in vi insert mode (default: \"[I] \").",
           "type": "string",
-          "default": ""
+          "default": "[I] "
         },
         "non_vi": {
           "description": "Symbol shown in non-vi modes like Emacs (default: \"\").\nUse this to maintain consistent prompt appearance across all editor modes.",
@@ -659,9 +659,9 @@
           "default": ""
         },
         "normal": {
-          "description": "Symbol shown in vi normal mode (default: \"\").",
+          "description": "Symbol shown in vi normal mode (default: \"[N] \").",
           "type": "string",
-          "default": ""
+          "default": "[N] "
         }
       }
     }

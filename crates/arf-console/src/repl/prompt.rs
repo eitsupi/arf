@@ -224,14 +224,26 @@ mod tests {
         assert_eq!(prompt.render_prompt_right(), "");
     }
 
-    #[test]
-    fn test_rprompt_vi_insert_mode_indicator() {
+    /// Helper to create a prompt with custom vi symbols and no vi colors (Default).
+    fn prompt_with_vi_symbols() -> RPrompt {
         let vi_symbol = ViSymbol {
             insert: "[I] ".to_string(),
             normal: "[N] ".to_string(),
             non_vi: "[E] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
+        let vi_colors = ViColorConfig {
+            insert: Color::Default,
+            normal: Color::Default,
+            non_vi: Color::Default,
+        };
+        RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol)
+            .with_vi_colors(vi_colors)
+    }
+
+    #[test]
+    fn test_rprompt_vi_insert_mode_indicator() {
+        let prompt = prompt_with_vi_symbols();
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert));
         assert_eq!(indicator, "[I] ");
@@ -239,12 +251,7 @@ mod tests {
 
     #[test]
     fn test_rprompt_vi_normal_mode_indicator() {
-        let vi_symbol = ViSymbol {
-            insert: "[I] ".to_string(),
-            normal: "[N] ".to_string(),
-            non_vi: "[E] ".to_string(),
-        };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
+        let prompt = prompt_with_vi_symbols();
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal));
         assert_eq!(indicator, "[N] ");
@@ -252,12 +259,7 @@ mod tests {
 
     #[test]
     fn test_rprompt_emacs_mode_indicator() {
-        let vi_symbol = ViSymbol {
-            insert: "[I] ".to_string(),
-            normal: "[N] ".to_string(),
-            non_vi: "[E] ".to_string(),
-        };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
+        let prompt = prompt_with_vi_symbols();
 
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Emacs);
         assert_eq!(indicator, "[E] ");
@@ -270,7 +272,14 @@ mod tests {
             normal: "[N] ".to_string(),
             non_vi: "[D] ".to_string(),
         };
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
+        let vi_colors = ViColorConfig {
+            insert: Color::Default,
+            normal: Color::Default,
+            non_vi: Color::Default,
+        };
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+            .with_vi_symbol(vi_symbol)
+            .with_vi_colors(vi_colors);
 
         // Default mode should use non_vi symbol
         let indicator = prompt.render_prompt_indicator(PromptEditMode::Default);
@@ -279,10 +288,16 @@ mod tests {
 
     #[test]
     fn test_rprompt_empty_vi_symbols() {
-        // Default empty symbols
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string());
+        // Explicitly set empty symbols
+        let vi_symbol = ViSymbol {
+            insert: String::new(),
+            normal: String::new(),
+            non_vi: String::new(),
+        };
+        let prompt =
+            RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
-        // All modes should return empty string with default (empty) symbols
+        // All modes should return empty string with empty symbols
         assert_eq!(
             prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
             ""
