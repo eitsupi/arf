@@ -371,6 +371,9 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
         eprint!("{}", format_error_output(&s));
     } else {
         print!("{}", s);
+        // Flush stdout immediately so progress bars using \r without \n
+        // are displayed in real time instead of accumulating in the buffer.
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }
 
