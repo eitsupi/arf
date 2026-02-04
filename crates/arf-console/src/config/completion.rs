@@ -18,7 +18,7 @@ pub struct CompletionConfig {
     /// Number of completions to check for function type (for adding parentheses).
     /// Set to 0 to disable function parenthesis insertion.
     /// Only the first N completions are checked to avoid performance issues.
-    pub function_paren_check_limit: usize,
+    pub auto_paren_limit: usize,
 }
 
 impl Default for CompletionConfig {
@@ -28,7 +28,7 @@ impl Default for CompletionConfig {
             timeout_ms: 50,
             debounce_ms: 100,
             max_height: 10,
-            function_paren_check_limit: 50,
+            auto_paren_limit: 50,
         }
     }
 }

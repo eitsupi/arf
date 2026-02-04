@@ -460,9 +460,9 @@ impl CombinedCompleter {
     pub fn with_settings(
         timeout_ms: u64,
         debounce_ms: u64,
-        function_paren_check_limit: usize,
+        auto_paren_limit: usize,
     ) -> Self {
-        Self::with_settings_and_rig(timeout_ms, debounce_ms, function_paren_check_limit, true)
+        Self::with_settings_and_rig(timeout_ms, debounce_ms, auto_paren_limit, true)
     }
 
     /// Create a new CombinedCompleter with custom settings and rig availability.
@@ -471,7 +471,7 @@ impl CombinedCompleter {
     pub fn with_settings_and_rig(
         timeout_ms: u64,
         debounce_ms: u64,
-        function_paren_check_limit: usize,
+        auto_paren_limit: usize,
         rig_enabled: bool,
     ) -> Self {
         // Build exclusion list: always exclude `:r` in R mode
@@ -486,7 +486,7 @@ impl CombinedCompleter {
             r_completer: RCompleter::with_settings(
                 timeout_ms,
                 debounce_ms,
-                function_paren_check_limit,
+                auto_paren_limit,
             ),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }
@@ -527,7 +527,7 @@ pub struct RCompleter {
     /// Debounce delay in milliseconds.
     debounce_ms: u64,
     /// Number of completions to check for function type (0 = disable).
-    function_paren_check_limit: usize,
+    auto_paren_limit: usize,
     /// Cached completion results.
     cache: Option<CompletionCache>,
 }
@@ -538,7 +538,7 @@ impl RCompleter {
         RCompleter {
             timeout_ms: 50,
             debounce_ms: 100,
-            function_paren_check_limit: 50,
+            auto_paren_limit: 50,
             cache: None,
         }
     }
@@ -547,12 +547,12 @@ impl RCompleter {
     pub fn with_settings(
         timeout_ms: u64,
         debounce_ms: u64,
-        function_paren_check_limit: usize,
+        auto_paren_limit: usize,
     ) -> Self {
         RCompleter {
             timeout_ms,
             debounce_ms,
-            function_paren_check_limit,
+            auto_paren_limit,
             cache: None,
         }
     }
@@ -682,7 +682,7 @@ impl Completer for RCompleter {
         }
 
         // Determine which completions are functions (for parenthesis insertion)
-        let is_function = if self.function_paren_check_limit > 0 {
+        let is_function = if self.auto_paren_limit > 0 {
             self.check_function_types(&filtered)
         } else {
             vec![false; filtered.len()]
@@ -730,10 +730,10 @@ impl Completer for RCompleter {
 impl RCompleter {
     /// Check which completions are functions.
     ///
-    /// Only checks up to `function_paren_check_limit` items for performance.
+    /// Only checks up to `auto_paren_limit` items for performance.
     fn check_function_types(&self, completions: &[String]) -> Vec<bool> {
         // Only check the first N items
-        let check_count = completions.len().min(self.function_paren_check_limit);
+        let check_count = completions.len().min(self.auto_paren_limit);
 
         if check_count == 0 {
             return vec![false; completions.len()];

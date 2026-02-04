@@ -216,7 +216,7 @@ impl Repl {
             let completer = Box::new(CombinedCompleter::with_settings_and_rig(
                 self.config.completion.timeout_ms,
                 self.config.completion.debounce_ms,
-                self.config.completion.function_paren_check_limit,
+                self.config.completion.auto_paren_limit,
                 self.r_source_status.rig_enabled(),
             ));
             line_editor = line_editor.with_completer(completer);

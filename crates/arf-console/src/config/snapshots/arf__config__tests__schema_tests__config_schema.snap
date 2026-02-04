@@ -44,9 +44,9 @@ expression: schema
     "completion": {
       "$ref": "#/$defs/CompletionConfig",
       "default": {
+        "auto_paren_limit": 50,
         "debounce_ms": 100,
         "enabled": true,
-        "function_paren_check_limit": 50,
         "max_height": 10,
         "timeout_ms": 50
       }
@@ -229,6 +229,13 @@ expression: schema
       "description": "Completion configuration.",
       "type": "object",
       "properties": {
+        "auto_paren_limit": {
+          "description": "Number of completions to check for function type (for adding parentheses).\nSet to 0 to disable function parenthesis insertion.\nOnly the first N completions are checked to avoid performance issues.",
+          "type": "integer",
+          "format": "uint",
+          "default": 50,
+          "minimum": 0
+        },
         "debounce_ms": {
           "description": "Debounce delay in milliseconds (reuse cached results within this window).",
           "type": "integer",
@@ -240,13 +247,6 @@ expression: schema
           "description": "Enable completion.",
           "type": "boolean",
           "default": true
-        },
-        "function_paren_check_limit": {
-          "description": "Number of completions to check for function type (for adding parentheses).\nSet to 0 to disable function parenthesis insertion.\nOnly the first N completions are checked to avoid performance issues.",
-          "type": "integer",
-          "format": "uint",
-          "default": 50,
-          "minimum": 0
         },
         "max_height": {
           "description": "Maximum height (rows) for the completion menu.",
