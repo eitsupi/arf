@@ -303,6 +303,13 @@ fn handle_history_import(
                 };
                 (r_dedup, shell_dedup)
             } else {
+                // history_dir could not be resolved (no config, no XDG default).
+                // Dedup is silently skipped; warn the user so they know the
+                // duplicate count is not available.
+                eprintln!(
+                    "Warning: Could not determine history directory; \
+                     duplicate detection skipped in dry-run."
+                );
                 (None, None)
             }
         } else {

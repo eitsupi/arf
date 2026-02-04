@@ -280,6 +280,14 @@ impl DedupSet {
     ///
     /// Used in the non-dry-run import path where the database is already opened
     /// via `SqliteBackedHistory::with_file()` for writing.
+    ///
+    /// Note: reedline's deserialization falls back to `Utc::now()` when a
+    /// stored timestamp is not a valid millisecond value. This means the
+    /// millis round-trip (`DateTime → i64 → DateTime → i64`) could
+    /// theoretically differ from the raw DB value for corrupt rows. In
+    /// practice this cannot happen because reedline always writes
+    /// `timestamp_millis()`, but [`from_db`] avoids this entirely by
+    /// reading the raw i64 directly.
     pub fn from_history(history: &SqliteBackedHistory) -> Result<Self> {
         use reedline::History;
 
@@ -441,6 +449,13 @@ pub fn import_entries_dry_run(
 ///
 /// If `skip_duplicates` is true, entries that already exist in the target
 /// database are skipped (anti-join on command + timestamp).
+///
+/// Note: The dedup set is built once from the database state at the start
+/// of the import. Duplicates *within* the import batch are not detected
+/// (e.g., if the source file contains the same entry twice, both will be
+/// imported). This is acceptable because real-world history files rarely
+/// contain exact duplicates, and the primary use case is idempotent
+/// re-import across separate invocations.
 ///
 /// For dry-run previews, use [`import_entries_dry_run`] instead.
 pub fn import_entries(
