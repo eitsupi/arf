@@ -2,20 +2,25 @@
 
 ## [Unreleased]
 
+## [0.2.0-rc.2] - 2026-02-04
+
 ### Added
 
+- Experimental history browser for interactive history management with search, filtering, copy, and delete support (#38)
+  - Column headers, exit code column, and working directory column (#47)
+  - Minimum terminal size warning for pager browsers (#50)
 - Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)
 - Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
 - Vi mode indicator support for prompts via `prompt.mode_indicator` config (#23)
 
 ### Changed
 
-- Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow)
-- **BREAKING:** Configuration structure reorganized - the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization.
-- **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match`
-- **BREAKING:** `completion.function_paren_check_limit` config key renamed to `completion.auto_paren_limit`
-- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"`
-- Improved JSON Schema for color properties with proper `oneOf` typing (named string, `{ Fixed: N }`, `{ Rgb: [r, g, b] }`)
+- Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow) (#45)
+- **BREAKING:** Configuration structure reorganized — the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization (#27)
+- **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match` (#48)
+- **BREAKING:** `completion.function_paren_check_limit` config key renamed to `completion.auto_paren_limit` (#48)
+- **BREAKING:** `editor.mode` is now a typed enum accepting only `"emacs"` or `"vi"` (#48)
+- Improved JSON Schema for color properties with proper `oneOf` typing (named string, `{ Fixed: N }`, `{ Rgb: [r, g, b] }`) (#48)
 
 #### Migration Guide
 
@@ -66,7 +71,13 @@ auto_paren_limit = 50
 
 ### Fixed
 
+- Flush stdout after print in `r_write_console_ex` to prevent output buffering issues (#44)
+- Use display-width-aware truncation for "Copied" feedback message (#41)
+- Mouse wheel scroll now moves cursor in history browser (#40)
+- Use display-width-aware text utilities for correct CJK character rendering (#39)
+- Correct sponge delay semantics in `history_forget` (#37)
 - Windows: Manually source `.Rprofile` etc. after R initialization (#20)
+- Use intermediate pointer cast for signal handlers (#16)
 
 ## [0.1.1] - 2026-01-31
 
