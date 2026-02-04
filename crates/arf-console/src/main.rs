@@ -292,16 +292,12 @@ fn handle_history_import(
                 let r_path = history_dir.join("r.db");
                 let shell_path = history_dir.join("shell.db");
                 let r_dedup = if r_path.exists() {
-                    let r_hist = SqliteBackedHistory::with_file(r_path, None, None)
-                        .context("Failed to open R history database for dedup")?;
-                    Some(DedupSet::from_history(&r_hist)?)
+                    Some(DedupSet::from_db(&r_path)?)
                 } else {
                     None
                 };
                 let shell_dedup = if shell_path.exists() {
-                    let shell_hist = SqliteBackedHistory::with_file(shell_path, None, None)
-                        .context("Failed to open shell history database for dedup")?;
-                    Some(DedupSet::from_history(&shell_hist)?)
+                    Some(DedupSet::from_db(&shell_path)?)
                 } else {
                     None
                 };

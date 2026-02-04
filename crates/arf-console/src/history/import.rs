@@ -269,14 +269,17 @@ fn classify_mode(mode: Option<&str>) -> Option<bool> {
 /// The `.Rhistory` import is typically a one-time migration, so this conservative
 /// approach is acceptable.
 pub struct DedupSet {
-    /// `(command_line, unix_timestamp)` pairs for matching entries with timestamps.
+    /// `(command_line, unix_timestamp_millis)` pairs for matching entries with timestamps.
     command_timestamps: HashSet<(String, i64)>,
     /// All distinct `command_line` values for matching entries without timestamps.
     commands: HashSet<String>,
 }
 
 impl DedupSet {
-    /// Build a dedup set from an existing history database.
+    /// Build a dedup set from an existing history database opened for writing.
+    ///
+    /// Used in the non-dry-run import path where the database is already opened
+    /// via `SqliteBackedHistory::with_file()` for writing.
     pub fn from_history(history: &SqliteBackedHistory) -> Result<Self> {
         use reedline::History;
 
@@ -294,7 +297,49 @@ impl DedupSet {
         for item in items {
             commands.insert(item.command_line.clone());
             if let Some(ts) = item.start_timestamp {
-                command_timestamps.insert((item.command_line, ts.timestamp()));
+                command_timestamps.insert((item.command_line, ts.timestamp_millis()));
+            }
+        }
+
+        Ok(DedupSet {
+            command_timestamps,
+            commands,
+        })
+    }
+
+    /// Build a dedup set by opening a history database in read-only mode.
+    ///
+    /// Used in the dry-run path to avoid WAL/shm side-effect files that
+    /// `SqliteBackedHistory::with_file()` would create.
+    pub fn from_db(path: &Path) -> Result<Self> {
+        use rusqlite::{Connection, OpenFlags};
+
+        let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("Failed to open history database: {}", path.display()))?;
+
+        let mut stmt = db
+            .prepare("SELECT command_line, start_timestamp FROM history")
+            .context("Failed to prepare dedup query")?;
+
+        let mut command_timestamps = HashSet::new();
+        let mut commands = HashSet::new();
+
+        // INVARIANT: `commands` must contain every command_line that appears
+        // in `command_timestamps`, because `is_duplicate` uses `commands` as
+        // a fast-path filter for both timestamped and non-timestamped lookups.
+        let rows = stmt
+            .query_map([], |row| {
+                let command: String = row.get(0)?;
+                let ts_millis: Option<i64> = row.get(1)?;
+                Ok((command, ts_millis))
+            })
+            .context("Failed to query history for dedup")?;
+
+        for row in rows {
+            let (command, ts_millis) = row.context("Failed to read history row")?;
+            commands.insert(command.clone());
+            if let Some(ms) = ts_millis {
+                command_timestamps.insert((command, ms));
             }
         }
 
@@ -313,7 +358,7 @@ impl DedupSet {
         }
         if let Some(ts) = timestamp {
             self.command_timestamps
-                .contains(&(command.to_string(), ts.timestamp()))
+                .contains(&(command.to_string(), ts.timestamp_millis()))
         } else {
             true // command exists in commands set (checked above)
         }
