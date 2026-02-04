@@ -50,7 +50,7 @@ autoformat = false      # Enable auto-formatting (requires air)
 [editor]
 mode = "emacs"          # Editing mode: "emacs" or "vi"
 auto_match = true       # Auto-close brackets and quotes
-autosuggestion = true   # Show history-based autosuggestions
+auto_suggestions = true # Show history-based autosuggestions
 
 # Keyboard shortcuts (crokey format)
 [editor.key_map]

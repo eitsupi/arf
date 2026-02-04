@@ -457,11 +457,7 @@ impl CombinedCompleter {
     }
 
     /// Create a new CombinedCompleter with custom settings.
-    pub fn with_settings(
-        timeout_ms: u64,
-        debounce_ms: u64,
-        auto_paren_limit: usize,
-    ) -> Self {
+    pub fn with_settings(timeout_ms: u64, debounce_ms: u64, auto_paren_limit: usize) -> Self {
         Self::with_settings_and_rig(timeout_ms, debounce_ms, auto_paren_limit, true)
     }
 
@@ -483,11 +479,7 @@ impl CombinedCompleter {
         }
 
         CombinedCompleter {
-            r_completer: RCompleter::with_settings(
-                timeout_ms,
-                debounce_ms,
-                auto_paren_limit,
-            ),
+            r_completer: RCompleter::with_settings(timeout_ms, debounce_ms, auto_paren_limit),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }
     }
@@ -544,11 +536,7 @@ impl RCompleter {
     }
 
     /// Create a new RCompleter with custom settings.
-    pub fn with_settings(
-        timeout_ms: u64,
-        debounce_ms: u64,
-        auto_paren_limit: usize,
-    ) -> Self {
+    pub fn with_settings(timeout_ms: u64, debounce_ms: u64, auto_paren_limit: usize) -> Self {
         RCompleter {
             timeout_ms,
             debounce_ms,
