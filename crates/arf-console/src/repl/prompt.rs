@@ -294,8 +294,7 @@ mod tests {
             normal: String::new(),
             non_vi: String::new(),
         };
-        let prompt =
-            RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
+        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string()).with_vi_symbol(vi_symbol);
 
         // All modes should return empty string with empty symbols
         assert_eq!(
