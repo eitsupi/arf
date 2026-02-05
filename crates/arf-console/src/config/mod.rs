@@ -648,7 +648,10 @@ show_banner = false
         fn test_windows_default_config() {
             let config = crate::config::Config::default();
             // On Windows, auto_match defaults to false because bracketed paste is not supported
-            assert!(!config.editor.auto_match, "auto_match should default to false on Windows");
+            assert!(
+                !config.editor.auto_match,
+                "auto_match should default to false on Windows"
+            );
         }
 
         #[test]
