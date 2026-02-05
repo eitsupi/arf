@@ -19,11 +19,14 @@ Set `r.rterm` to `"arf"` for your platform, and enable `r.bracketedPaste`:
 
 The platform-specific `r.rterm` settings are `r.rterm.linux`, `r.rterm.mac`, and `r.rterm.windows`.
 
+> [!NOTE]
+> If `"arf"` doesn't work, you may need to specify the full path. Use `which arf` (Linux/macOS) or `where.exe arf` (Windows) to find the executable path, then use that path instead (e.g., `"${userHome}/.cargo/bin/arf"`).
+
 Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. This can cause issues with arf's auto-match feature (automatic bracket/quote completion), because each line is processed as individual keystrokes. With bracketed paste enabled, code is sent as a single unit, avoiding interference from auto-match.
 
 > [!NOTE]
 > This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
-
+>
 > [!WARNING]
 > On Windows, vscode-R has a [known bug](https://github.com/REditorSupport/vscode-R/issues/1590) where bracketed paste mode is silently disabled. When `r.bracketedPaste` is `true`, vscode-R still sends code line-by-line on Windows, which can cause issues with auto-match. As a workaround, set `r.bracketedPaste` to `false` and consider [disabling auto-match](configuration.md) (`auto_match = false` under `[editor]` in `arf.toml`) if you encounter problems when sending code from the editor.
 
@@ -59,10 +62,6 @@ You can bind this task to a keyboard shortcut in your `keymap.json`:
     }
 }
 ```
-
-### Bracketed Paste
-
-No special configuration is needed for bracketed paste in Zed. Zed's terminal handles paste mode automatically.
 
 ## Migrating from radian
 
