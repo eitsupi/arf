@@ -131,6 +131,23 @@ impl Repl {
         dir.map(|d| d.join("shell.db"))
     }
 
+    /// Create an R language hinter based on config settings.
+    ///
+    /// Returns `Some(hinter)` if auto_suggestions is enabled, `None` otherwise.
+    fn create_r_hinter(&self) -> Option<Box<RLanguageHinter>> {
+        match self.config.editor.auto_suggestions {
+            AutoSuggestions::None => None,
+            AutoSuggestions::All => Some(Box::new(
+                RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray)),
+            )),
+            AutoSuggestions::Cwd => Some(Box::new(
+                RLanguageHinter::new()
+                    .with_style(Style::new().italic().fg(Color::DarkGray))
+                    .with_cwd_aware(true),
+            )),
+        }
+    }
+
     /// Run the REPL main loop.
     pub fn run(&mut self) -> Result<()> {
         // Show startup banner unless disabled
@@ -267,19 +284,8 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        match self.config.editor.auto_suggestions {
-            AutoSuggestions::None => {}
-            AutoSuggestions::All => {
-                let hinter =
-                    RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
-                line_editor = line_editor.with_hinter(Box::new(hinter));
-            }
-            AutoSuggestions::Cwd => {
-                let hinter = RLanguageHinter::new()
-                    .with_style(Style::new().italic().fg(Color::DarkGray))
-                    .with_cwd_aware(true);
-                line_editor = line_editor.with_hinter(Box::new(hinter));
-            }
+        if let Some(hinter) = self.create_r_hinter() {
+            line_editor = line_editor.with_hinter(hinter);
         }
 
         // Set up idle callback to process R events during input waiting.
@@ -429,19 +435,8 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        match self.config.editor.auto_suggestions {
-            AutoSuggestions::None => {}
-            AutoSuggestions::All => {
-                let hinter =
-                    RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
-                line_editor = line_editor.with_hinter(Box::new(hinter));
-            }
-            AutoSuggestions::Cwd => {
-                let hinter = RLanguageHinter::new()
-                    .with_style(Style::new().italic().fg(Color::DarkGray))
-                    .with_cwd_aware(true);
-                line_editor = line_editor.with_hinter(Box::new(hinter));
-            }
+        if let Some(hinter) = self.create_r_hinter() {
+            line_editor = line_editor.with_hinter(hinter);
         }
 
         // Mode indicator for special modes (reprex, etc.)

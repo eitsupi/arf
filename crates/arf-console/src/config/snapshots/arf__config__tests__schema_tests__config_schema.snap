@@ -137,21 +137,20 @@ expression: schema
   "$defs": {
     "AutoSuggestions": {
       "description": "Auto-suggestions mode for history-based hints.\n\nThis controls the fish/nushell-style autosuggestions that appear as you type.",
+      "default": "all",
       "oneOf": [
         {
-          "description": "Disable suggestions entirely.",
-          "type": "string",
-          "const": "none"
+          "description": "true = show all history, false = disable suggestions",
+          "type": "boolean"
         },
         {
-          "description": "Show suggestions from all history (default).",
+          "description": "none = disable, all = all history, cwd = current directory only",
           "type": "string",
-          "const": "all"
-        },
-        {
-          "description": "Show suggestions only from history entries recorded in the current directory.\n\nFalls back to all history if no matches found in current directory.",
-          "type": "string",
-          "const": "cwd"
+          "enum": [
+            "none",
+            "all",
+            "cwd"
+          ]
         }
       ]
     },

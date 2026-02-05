@@ -29,19 +29,36 @@ impl fmt::Display for EditorMode {
 ///
 /// This controls the fish/nushell-style autosuggestions that appear as you type.
 #[derive(Debug, Clone, Copy, PartialEq, Default, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[schemars(schema_with = "auto_suggestions_schema")]
 pub enum AutoSuggestions {
     /// Disable suggestions entirely.
-    #[serde(alias = "false")]
     None,
     /// Show suggestions from all history (default).
     #[default]
-    #[serde(alias = "true")]
     All,
     /// Show suggestions only from history entries recorded in the current directory.
     ///
     /// Falls back to all history if no matches found in current directory.
     Cwd,
+}
+
+/// Custom JSON schema for AutoSuggestions that accepts both boolean and string values.
+fn auto_suggestions_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "History-based autosuggestions mode. Accepts boolean (true/false) or string (\"none\", \"all\", \"cwd\").",
+        "oneOf": [
+            {
+                "type": "boolean",
+                "description": "true = show all history, false = disable suggestions"
+            },
+            {
+                "type": "string",
+                "enum": ["none", "all", "cwd"],
+                "description": "none = disable, all = all history, cwd = current directory only"
+            }
+        ],
+        "default": "all"
+    })
 }
 
 impl fmt::Display for AutoSuggestions {

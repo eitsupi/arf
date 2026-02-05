@@ -121,6 +121,33 @@ non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 # Reserved for future experimental features
 ```
 
+## Auto Suggestions
+
+arf supports fish/nushell-style autosuggestions that appear as you type. These grayed-out suggestions can be accepted with the right arrow key.
+
+### Configuration
+
+```toml
+[editor]
+auto_suggestions = "all"  # "none", "all", or "cwd"
+```
+
+| Value | Description |
+|-------|-------------|
+| `"none"` | Disable suggestions |
+| `"all"` | Show suggestions from all history (default) |
+| `"cwd"` | Show suggestions only from current directory history |
+
+For backward compatibility, boolean values are also accepted:
+- `true` → `"all"`
+- `false` → `"none"`
+
+### CWD Mode
+
+The `"cwd"` mode filters suggestions to show only history entries that were recorded in the current working directory. If no matches are found, it falls back to all history.
+
+> **Note**: The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
+
 ## Keyboard Shortcuts
 
 arf supports configurable keyboard shortcuts using the [crokey](https://github.com/Canop/crokey) format.

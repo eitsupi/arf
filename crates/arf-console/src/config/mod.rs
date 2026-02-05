@@ -456,6 +456,22 @@ auto_suggestions = false
     }
 
     #[test]
+    fn test_parse_auto_suggestions_invalid_string() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = "invalid"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown variant"),
+            "Error should mention unknown variant: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_parse_r_source_auto() {
         let toml_str = r#"
 [startup]
