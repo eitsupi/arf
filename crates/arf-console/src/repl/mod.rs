@@ -9,7 +9,9 @@ pub(crate) mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
-use crate::config::{AutoSuggestions, Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir};
+use crate::config::{
+    AutoSuggestions, Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir,
+};
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
