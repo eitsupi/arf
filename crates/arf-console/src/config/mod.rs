@@ -222,10 +222,17 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert!(
-            config.editor.auto_match,
-            "auto_match should be enabled by default"
-        );
+        if cfg!(windows) {
+            assert!(
+                !config.editor.auto_match,
+                "auto_match should be disabled by default on Windows"
+            );
+        } else {
+            assert!(
+                config.editor.auto_match,
+                "auto_match should be enabled by default"
+            );
+        }
         assert_eq!(config.editor.mode, EditorMode::Emacs);
         assert!(matches!(
             config.startup.r_source,
@@ -623,7 +630,10 @@ show_banner = false
     mod schema_tests {
         use crate::config::schema::{generate_schema, schema_path, write_schema};
 
+        /// Skipped on Windows because `auto_match` defaults to `false` there,
+        /// which causes the generated schema to differ from the Unix snapshot.
         #[test]
+        #[cfg(not(windows))]
         fn test_schema_snapshot() {
             let schema = generate_schema();
             insta::assert_snapshot!("config_schema", schema);
@@ -631,13 +641,52 @@ show_banner = false
 
         /// Snapshot test for the default configuration file.
         /// This ensures we notice when the config structure changes.
+        ///
+        /// Skipped on Windows because `auto_match` defaults to `false` there,
+        /// which differs from the Unix snapshot. Windows developers can use WSL
+        /// for snapshot updates.
         #[test]
+        #[cfg(not(windows))]
         fn test_default_config_snapshot() {
             let config = crate::config::generate_default_config();
             insta::assert_snapshot!("default_config", config);
         }
 
+        /// Windows-specific test for platform-dependent default values.
         #[test]
+        #[cfg(windows)]
+        fn test_windows_default_config() {
+            let config = crate::config::Config::default();
+            // On Windows, auto_match defaults to false because bracketed paste is not supported
+            assert!(
+                !config.editor.auto_match,
+                "auto_match should default to false on Windows"
+            );
+        }
+
+        /// Windows-specific schema test: verify the generated schema reflects
+        /// the platform-dependent `auto_match` default.
+        #[test]
+        #[cfg(windows)]
+        fn test_windows_schema_defaults() {
+            let schema = generate_schema();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&schema).expect("Schema should be valid JSON");
+
+            // The EditorConfig default embedded in the schema should have auto_match = false
+            let auto_match = parsed["properties"]["editor"]["default"]["auto_match"]
+                .as_bool()
+                .expect("auto_match default should be a boolean in schema");
+            assert!(
+                !auto_match,
+                "Schema should reflect auto_match = false on Windows"
+            );
+        }
+
+        /// Skipped on Windows because the generated schema uses platform-dependent
+        /// defaults (e.g. `auto_match`), so it won't match the Unix-generated artifact.
+        #[test]
+        #[cfg(not(windows))]
         fn test_schema_matches_artifact() {
             let schema = generate_schema();
             let path = schema_path();
