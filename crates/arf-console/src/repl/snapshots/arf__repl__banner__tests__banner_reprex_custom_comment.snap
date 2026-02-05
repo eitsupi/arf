@@ -2,7 +2,7 @@
 source: crates/arf-console/src/repl/banner.rs
 expression: banner
 ---
-# arf console v0.2.0-rc.2
+# arf console v0.2.0-rc.3
 # Edit mode: emacs
 # Reprex mode: enabled | Comment: "## "
 # R is ready.
