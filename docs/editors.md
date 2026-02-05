@@ -21,7 +21,8 @@ The platform-specific `r.rterm` settings are `r.rterm.linux`, `r.rterm.mac`, and
 
 Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. This can cause issues with arf's auto-match feature (automatic bracket/quote completion), because each line is processed as individual keystrokes. With bracketed paste enabled, code is sent as a single unit, avoiding interference from auto-match.
 
-> **Note**: This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
+> [!NOTE]
+> This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
 
 ## Zed (zed-r)
 
@@ -71,3 +72,18 @@ If you are currently using radian with vscode-R, the migration to arf is straigh
 For Zed users, replace `"radian"` with `"arf"` in your task's `command` field.
 
 Note that arf uses its own configuration file (`arf.toml`) instead of `.radian_profile`. See the [Configuration](configuration.md) documentation for details on configuring arf.
+
+### Importing History
+
+You can import your radian command history into arf:
+
+```sh
+# Preview what would be imported (dry run)
+arf history import --from radian --dry-run
+
+# Import from radian (default: ~/.radian_history)
+arf history import --from radian
+```
+
+> [!CAUTION]
+> This feature is experimental. Always back up your history files before importing. Importing the same file multiple times will create duplicate entries.
