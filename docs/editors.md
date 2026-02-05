@@ -89,21 +89,3 @@ arf history import --from radian
 
 > [!NOTE]
 > Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
-
-### Backing Up History
-
-You can export your arf history to a backup file:
-
-```sh
-# Export to a backup file
-arf history export backup.db
-
-# Preview what would be exported (dry run)
-arf history export backup.db --dry-run
-```
-
-To restore or transfer history to another machine:
-
-```sh
-arf history import --from arf backup.db
-```
