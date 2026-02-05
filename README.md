@@ -27,7 +27,7 @@
 
 - **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) (R Installation Manager) support. Switch R versions with `--with-r-version` flag, or use the `:switch` meta command to change versions within a running session.
 
-- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly.
+- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly. Import your existing history from radian or R's `.Rhistory`.
 
 - **Syntax Highlighting** — Tree-sitter based highlighting for R code with customizable colors.
 
@@ -46,7 +46,7 @@
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - Syntax highlighting with customizable colors
-- SQLite-backed persistent history
+- SQLite-backed persistent history with import/export support
 
 ## Installation
 
