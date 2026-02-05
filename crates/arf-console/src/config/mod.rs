@@ -664,6 +664,25 @@ show_banner = false
             );
         }
 
+        /// Windows-specific schema test: verify the generated schema reflects
+        /// the platform-dependent `auto_match` default.
+        #[test]
+        #[cfg(windows)]
+        fn test_windows_schema_defaults() {
+            let schema = generate_schema();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&schema).expect("Schema should be valid JSON");
+
+            // The EditorConfig default embedded in the schema should have auto_match = false
+            let auto_match = parsed["properties"]["editor"]["default"]["auto_match"]
+                .as_bool()
+                .expect("auto_match default should be a boolean in schema");
+            assert!(
+                !auto_match,
+                "Schema should reflect auto_match = false on Windows"
+            );
+        }
+
         /// Skipped on Windows because the generated schema uses platform-dependent
         /// defaults (e.g. `auto_match`), so it won't match the Unix-generated artifact.
         #[test]
