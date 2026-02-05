@@ -7,6 +7,7 @@
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Result of an export operation.
 #[derive(Debug, Default)]
@@ -61,9 +62,38 @@ pub fn export_history(
         );
     }
 
+    // Check write permission early by attempting to create and immediately remove a test file.
+    // This gives a clearer error message than failing later during the actual write.
+    let test_write_path = output_path.with_extension("arf-write-test");
+    match fs::File::create(&test_write_path) {
+        Ok(_) => {
+            let _ = fs::remove_file(&test_write_path);
+        }
+        Err(e) => {
+            bail!(
+                "Cannot write to output location: {}\n{}",
+                output_path.display(),
+                e
+            );
+        }
+    }
+
     // Use atomic write: write to temp file, then rename on success.
     // This prevents leaving incomplete files if export fails partway through.
-    let temp_path = output_path.with_extension("arf-export-tmp");
+    //
+    // Note on atomicity: `fs::rename` is atomic on POSIX systems when source and
+    // destination are on the same filesystem. On Windows, atomicity is not guaranteed
+    // by the Win32 API. For single-user CLI usage, this is acceptable; concurrent
+    // writes to the same output path are not a supported use case.
+    //
+    // The temp file includes a timestamp to prevent collisions on multi-user systems
+    // and to avoid predictable paths.
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_extension = format!("arf-export-tmp-{}", timestamp);
+    let temp_path = output_path.with_extension(temp_extension);
 
     // Clean up any leftover temp file from a previous failed attempt.
     // Use unconditional remove to avoid TOCTOU race condition.
@@ -101,6 +131,12 @@ pub fn export_history(
 }
 
 /// Internal function that performs the actual export to a file.
+///
+/// Note: This function allows exporting even when both source databases are missing,
+/// returning an empty result with zero entries. The CLI handler in `main.rs` enforces
+/// stricter validation (requiring at least one database to exist) to provide a better
+/// user experience. This separation allows the low-level function to be more flexible
+/// for potential future use cases (e.g., creating an empty export file template).
 fn export_to_file(
     r_db_path: &Path,
     shell_db_path: &Path,
@@ -364,7 +400,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let r_path = temp_dir.path().join("r.db");
         let output_path = temp_dir.path().join("export.db");
-        let temp_path = output_path.with_extension("arf-export-tmp");
 
         create_test_history(&r_path, &["test"]);
 
@@ -377,36 +412,16 @@ mod tests {
         )
         .unwrap();
 
-        // Output file should exist, temp file should not
+        // Output file should exist, no temp files should remain
         assert!(output_path.exists());
-        assert!(!temp_path.exists());
-    }
 
-    #[test]
-    fn test_export_cleans_up_stale_temp_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let r_path = temp_dir.path().join("r.db");
-        let output_path = temp_dir.path().join("export.db");
-        let temp_path = output_path.with_extension("arf-export-tmp");
-
-        create_test_history(&r_path, &["test"]);
-
-        // Create a stale temp file (simulating a previous failed export)
-        std::fs::write(&temp_path, "stale data").unwrap();
-        assert!(temp_path.exists());
-
-        // Export should succeed and clean up the stale temp file
-        export_history(
-            &r_path,
-            &temp_dir.path().join("none.db"),
-            &output_path,
-            "r",
-            "shell",
-        )
-        .unwrap();
-
-        assert!(output_path.exists());
-        assert!(!temp_path.exists());
+        // Check that no temp files (with pattern arf-export-tmp-*) remain
+        let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("arf-export-tmp"))
+            .collect();
+        assert!(entries.is_empty(), "Temp files should be cleaned up");
     }
 
     #[test]
@@ -457,5 +472,97 @@ mod tests {
             .unwrap();
         assert_eq!(r_count, 1);
         assert_eq!(shell_count, 1);
+    }
+
+    #[test]
+    fn test_export_cleans_up_temp_file_on_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        // Point to a corrupted/invalid database file
+        let invalid_db_path = temp_dir.path().join("invalid.db");
+        std::fs::write(&invalid_db_path, "not a valid sqlite database").unwrap();
+
+        let output_path = temp_dir.path().join("export.db");
+
+        // Export should fail because the source database is invalid
+        let result = export_history(
+            &invalid_db_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "r",
+            "shell",
+        );
+
+        assert!(result.is_err());
+
+        // No output file should exist
+        assert!(!output_path.exists());
+
+        // No temp files should remain
+        let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("arf-export-tmp"))
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "Temp files should be cleaned up on failure"
+        );
+    }
+
+    #[test]
+    fn test_export_import_round_trip() {
+        use crate::history::import::{ImportTargets, import_entries, parse_unified_arf_history};
+        use reedline::History;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create source history databases with test data
+        let r_path = temp_dir.path().join("r.db");
+        let shell_path = temp_dir.path().join("shell.db");
+        create_test_history(&r_path, &["library(dplyr)", "summary(iris)", "print(1)"]);
+        create_test_history(&shell_path, &["ls -la", "pwd", "git status"]);
+
+        // Export to a unified file
+        let export_path = temp_dir.path().join("backup.db");
+        let export_result =
+            export_history(&r_path, &shell_path, &export_path, "r", "shell").unwrap();
+
+        assert_eq!(export_result.r_exported, 3);
+        assert_eq!(export_result.shell_exported, 3);
+
+        // Parse the exported file
+        let entries = parse_unified_arf_history(&export_path, "r", "shell").unwrap();
+        assert_eq!(entries.len(), 6);
+
+        // Import into new databases
+        let new_r_path = temp_dir.path().join("new_r.db");
+        let new_shell_path = temp_dir.path().join("new_shell.db");
+        let mut targets = ImportTargets {
+            r_history: SqliteBackedHistory::with_file(new_r_path, None, None).unwrap(),
+            shell_history: SqliteBackedHistory::with_file(new_shell_path, None, None).unwrap(),
+        };
+
+        let import_result = import_entries(&mut targets, entries, None, false).unwrap();
+        assert_eq!(import_result.r_imported, 3);
+        assert_eq!(import_result.shell_imported, 3);
+
+        // Verify the imported data matches the original
+        let r_query = reedline::SearchQuery::everything(reedline::SearchDirection::Forward, None);
+        let r_items = targets.r_history.search(r_query).unwrap();
+        let r_commands: Vec<&str> = r_items.iter().map(|i| i.command_line.as_str()).collect();
+        assert!(r_commands.contains(&"library(dplyr)"));
+        assert!(r_commands.contains(&"summary(iris)"));
+        assert!(r_commands.contains(&"print(1)"));
+
+        let shell_query =
+            reedline::SearchQuery::everything(reedline::SearchDirection::Forward, None);
+        let shell_items = targets.shell_history.search(shell_query).unwrap();
+        let shell_commands: Vec<&str> = shell_items
+            .iter()
+            .map(|i| i.command_line.as_str())
+            .collect();
+        assert!(shell_commands.contains(&"ls -la"));
+        assert!(shell_commands.contains(&"pwd"));
+        assert!(shell_commands.contains(&"git status"));
     }
 }

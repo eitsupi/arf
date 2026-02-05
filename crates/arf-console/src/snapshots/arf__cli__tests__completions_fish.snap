@@ -77,11 +77,11 @@ r\t'R native history file (.Rhistory)'
 arf\t'Another arf SQLite history database'"
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l file -d 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db' -r -F
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l hostname -d 'Override hostname for imported entries. Marks entries to distinguish them from native arf history' -r
-complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l r-table -d 'Table name for R history in unified export file. Only used when importing from a unified arf export file' -r
-complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l shell-table -d 'Table name for shell history in unified export file. Only used when importing from a unified arf export file' -r
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l r-table -d 'Table name for R history when importing from unified export file' -r
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l shell-table -d 'Table name for shell history when importing from unified export file' -r
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l dry-run -d 'Perform a dry run without actually importing'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l import-duplicates -d 'Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)'
-complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l unified -d 'Treat the input file as a unified export file (with both R and shell tables). By default, files named r.db/shell.db are treated as single-database files, and other filenames are treated as unified export files. Use this flag to explicitly import from a unified file regardless of filename'
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l unified -d 'Force unified export file mode (imports both R and shell history)'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from export" -l file -d 'Path to the output SQLite file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from export" -l r-table -d 'Table name for R history in the output file' -r

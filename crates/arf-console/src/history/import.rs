@@ -550,7 +550,8 @@ pub fn import_entries(
 /// Validate that a table name is safe for use in SQL queries.
 ///
 /// Table names must contain only alphanumeric characters and underscores,
-/// and must not be empty. This prevents SQL injection attacks.
+/// must not be empty, and must contain at least one alphanumeric character.
+/// This prevents SQL injection attacks and avoids confusing names like `_` or `___`.
 pub fn validate_table_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("Table name cannot be empty");
@@ -564,6 +565,13 @@ pub fn validate_table_name(name: &str) -> Result<()> {
     // SQLite identifiers cannot start with a digit
     if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         bail!("Invalid table name '{}': cannot start with a digit", name);
+    }
+    // Require at least one alphanumeric character to avoid confusing names like "_" or "___"
+    if !name.chars().any(|c| c.is_ascii_alphanumeric()) {
+        bail!(
+            "Invalid table name '{}': must contain at least one alphanumeric character",
+            name
+        );
     }
     Ok(())
 }
@@ -1980,6 +1988,11 @@ mod tests {
         // Special characters
         assert!(validate_table_name("table name").is_err());
         assert!(validate_table_name("table\nname").is_err());
+
+        // Underscore-only names (confusing and should be rejected)
+        assert!(validate_table_name("_").is_err());
+        assert!(validate_table_name("___").is_err());
+        assert!(validate_table_name("_____").is_err());
     }
 
     /// Test that parse_unified_arf_history works even when file is named r.db
