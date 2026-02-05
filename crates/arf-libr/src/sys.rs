@@ -366,6 +366,12 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     }
 
     // Default: print to stdout/stderr
+    // On Windows, R may produce CRLF line endings which cause display issues
+    // (the CR returns cursor to start of line, overwriting previous content).
+    // Normalize CRLF to LF before printing.
+    #[cfg(windows)]
+    let s = normalize_crlf(&s);
+
     if is_error {
         // Wrap error output in red ANSI codes (like radian does)
         eprint!("{}", format_error_output(&s));
@@ -418,6 +424,23 @@ fn strip_ansi_escapes(s: &str) -> String {
     }
 
     result
+}
+
+/// Normalize CRLF line endings to LF.
+///
+/// On Windows, R may produce CRLF (`\r\n`) line endings in error messages.
+/// When printed to the terminal, the CR (`\r`) returns the cursor to the
+/// start of the line, causing subsequent text to overwrite previous content.
+/// This results in garbled output.
+///
+/// This function converts all CRLF sequences to just LF to prevent this issue.
+#[cfg(any(windows, test))]
+fn normalize_crlf(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains("\r\n") {
+        std::borrow::Cow::Owned(s.replace("\r\n", "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
 }
 
 /// Strip R's Windows console formatting escape sequences.
@@ -1720,5 +1743,31 @@ mod tests {
         let formatted = format_error_output(original);
         let stripped = strip_ansi_escapes(&formatted);
         assert_eq!(stripped, original);
+    }
+
+    #[test]
+    fn test_normalize_crlf() {
+        // CRLF should be converted to LF
+        let normalized = normalize_crlf("Error: foo\r\nbar\r\n");
+        assert_eq!(normalized, "Error: foo\nbar\n");
+
+        // Text without CRLF should be unchanged (and borrowed, not owned)
+        let input = "Error: foo\nbar\n";
+        let normalized = normalize_crlf(input);
+        assert_eq!(normalized, input);
+        assert!(matches!(normalized, std::borrow::Cow::Borrowed(_)));
+
+        // Mixed line endings: only CRLF should be converted
+        let normalized = normalize_crlf("line1\r\nline2\nline3\r\n");
+        assert_eq!(normalized, "line1\nline2\nline3\n");
+
+        // Standalone CR should NOT be converted (only CRLF)
+        let normalized = normalize_crlf("progress\rbar\r\n");
+        assert_eq!(normalized, "progress\rbar\n");
+
+        // Empty string
+        let normalized = normalize_crlf("");
+        assert_eq!(normalized, "");
+        assert!(matches!(normalized, std::borrow::Cow::Borrowed(_)));
     }
 }
