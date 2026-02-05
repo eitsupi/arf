@@ -856,6 +856,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         state.prompt_config.start_spinner();
                     }
 
+                    // On Windows, reedline inserts CRLF for newlines in multiline input.
+                    // R doesn't accept CR in code, so we need to strip it.
+                    #[cfg(windows)]
+                    let code = code.replace('\r', "");
+
                     // Return the (possibly formatted) code to R
                     return Some(code);
                 }
