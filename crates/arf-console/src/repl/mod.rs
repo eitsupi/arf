@@ -9,7 +9,7 @@ pub(crate) mod state;
 
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
-use crate::config::{Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir};
+use crate::config::{AutoSuggestions, Config, EditorMode, ModeIndicatorPosition, RSourceStatus, history_dir};
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
@@ -267,10 +267,19 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.auto_suggestions {
-            let hinter =
-                RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
-            line_editor = line_editor.with_hinter(Box::new(hinter));
+        match self.config.editor.auto_suggestions {
+            AutoSuggestions::None => {}
+            AutoSuggestions::All => {
+                let hinter =
+                    RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
+                line_editor = line_editor.with_hinter(Box::new(hinter));
+            }
+            AutoSuggestions::Cwd => {
+                let hinter = RLanguageHinter::new()
+                    .with_style(Style::new().italic().fg(Color::DarkGray))
+                    .with_cwd_aware(true);
+                line_editor = line_editor.with_hinter(Box::new(hinter));
+            }
         }
 
         // Set up idle callback to process R events during input waiting.
@@ -420,10 +429,19 @@ impl Repl {
 
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
-        if self.config.editor.auto_suggestions {
-            let hinter =
-                RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
-            line_editor = line_editor.with_hinter(Box::new(hinter));
+        match self.config.editor.auto_suggestions {
+            AutoSuggestions::None => {}
+            AutoSuggestions::All => {
+                let hinter =
+                    RLanguageHinter::new().with_style(Style::new().italic().fg(Color::DarkGray));
+                line_editor = line_editor.with_hinter(Box::new(hinter));
+            }
+            AutoSuggestions::Cwd => {
+                let hinter = RLanguageHinter::new()
+                    .with_style(Style::new().italic().fg(Color::DarkGray))
+                    .with_cwd_aware(true);
+                line_editor = line_editor.with_hinter(Box::new(hinter));
+            }
         }
 
         // Mode indicator for special modes (reprex, etc.)
@@ -620,7 +638,8 @@ impl Repl {
         )));
 
         // Set up history-based autosuggestion (uses shell history)
-        if self.config.editor.auto_suggestions {
+        // Note: Shell mode doesn't support cwd filtering; treat All and Cwd the same
+        if !matches!(self.config.editor.auto_suggestions, AutoSuggestions::None) {
             let hinter =
                 DefaultHinter::default().with_style(Style::new().italic().fg(Color::DarkGray));
             shell_editor = shell_editor.with_hinter(Box::new(hinter));

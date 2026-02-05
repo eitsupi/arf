@@ -51,7 +51,7 @@
       "$ref": "#/$defs/EditorConfig",
       "default": {
         "auto_match": true,
-        "auto_suggestions": true,
+        "auto_suggestions": "all",
         "key_map": {
           "Alt-Hyphen": " <- ",
           "Alt-p": " |> "
@@ -131,6 +131,26 @@
     }
   },
   "$defs": {
+    "AutoSuggestions": {
+      "description": "Auto-suggestions mode for history-based hints.\n\nThis controls the fish/nushell-style autosuggestions that appear as you type.",
+      "oneOf": [
+        {
+          "description": "Disable suggestions entirely.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Show suggestions from all history (default).",
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "description": "Show suggestions only from history entries recorded in the current directory.\n\nFalls back to all history if no matches found in current directory.",
+          "type": "string",
+          "const": "cwd"
+        }
+      ]
+    },
     "ColorsConfig": {
       "description": "Color configuration for syntax highlighting and prompts. Colors can be named (e.g., 'Red', 'DarkGray'), 256-color ({ Fixed: 99 }), or RGB ({ Rgb: [255, 0, 0] }).",
       "type": "object",
@@ -1333,9 +1353,9 @@
           "default": true
         },
         "auto_suggestions": {
-          "description": "Show history-based autosuggestions (fish/nushell style).\nSuggestions appear grayed out and can be accepted with right arrow.",
-          "type": "boolean",
-          "default": true
+          "description": "History-based autosuggestions mode (fish/nushell style).\n\n- `\"none\"` or `false`: Disable suggestions\n- `\"all\"` or `true`: Show suggestions from all history (default)\n- `\"cwd\"`: Show suggestions only from current directory history\n\nSuggestions appear grayed out and can be accepted with right arrow.",
+          "$ref": "#/$defs/AutoSuggestions",
+          "default": "all"
         },
         "key_map": {
           "description": "Keyboard shortcuts that insert text.\nFormat: \"modifier-key\" = \"text to insert\"\nExamples: \"alt-hyphen\" = \" <- \", \"alt-p\" = \" |> \"",
