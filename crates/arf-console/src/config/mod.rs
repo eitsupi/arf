@@ -472,6 +472,28 @@ auto_suggestions = "invalid"
     }
 
     #[test]
+    fn test_parse_auto_suggestions_string_true_rejected() {
+        // String "true" should be rejected (use boolean true instead)
+        let toml_str = r#"
+[editor]
+auto_suggestions = "true"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "String 'true' should be rejected");
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_string_false_rejected() {
+        // String "false" should be rejected (use boolean false instead)
+        let toml_str = r#"
+[editor]
+auto_suggestions = "false"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "String 'false' should be rejected");
+    }
+
+    #[test]
     fn test_parse_r_source_auto() {
         let toml_str = r#"
 [startup]

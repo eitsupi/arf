@@ -142,9 +142,12 @@ pub struct EditorConfig {
     pub auto_match: bool,
     /// History-based autosuggestions mode (fish/nushell style).
     ///
-    /// - `"none"` or `false`: Disable suggestions
-    /// - `"all"` or `true`: Show suggestions from all history (default)
-    /// - `"cwd"`: Show suggestions only from current directory history
+    /// String values: `"none"`, `"all"`, `"cwd"`
+    /// Boolean values: `false` (= none), `true` (= all)
+    ///
+    /// - `none`: Disable suggestions
+    /// - `all`: Show suggestions from all history (default)
+    /// - `cwd`: Show suggestions only from current directory history
     ///
     /// Suggestions appear grayed out and can be accepted with right arrow.
     pub auto_suggestions: AutoSuggestions,

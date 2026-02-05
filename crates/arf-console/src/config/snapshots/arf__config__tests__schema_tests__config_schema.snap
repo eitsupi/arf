@@ -1356,7 +1356,7 @@ expression: schema
           "default": true
         },
         "auto_suggestions": {
-          "description": "History-based autosuggestions mode (fish/nushell style).\n\n- `\"none\"` or `false`: Disable suggestions\n- `\"all\"` or `true`: Show suggestions from all history (default)\n- `\"cwd\"`: Show suggestions only from current directory history\n\nSuggestions appear grayed out and can be accepted with right arrow.",
+          "description": "History-based autosuggestions mode (fish/nushell style).\n\nString values: `\"none\"`, `\"all\"`, `\"cwd\"`\nBoolean values: `false` (= none), `true` (= all)\n\n- `none`: Disable suggestions\n- `all`: Show suggestions from all history (default)\n- `cwd`: Show suggestions only from current directory history\n\nSuggestions appear grayed out and can be accepted with right arrow.",
           "$ref": "#/$defs/AutoSuggestions",
           "default": "all"
         },
