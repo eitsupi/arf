@@ -11,7 +11,7 @@ mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
 pub use completion::CompletionConfig;
-pub use editor::{EditorConfig, EditorMode};
+pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::SpinnerConfig;
 pub use experimental::{ExperimentalConfig, HistoryForgetConfig};
 pub use history::HistoryConfig;
@@ -397,6 +397,100 @@ on_exit_only = true
         assert!(config.experimental.history_forget.enabled);
         assert_eq!(config.experimental.history_forget.delay, 5);
         assert!(config.experimental.history_forget.on_exit_only);
+    }
+
+    #[test]
+    fn test_auto_suggestions_default_is_all() {
+        let config = Config::default();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_none_string() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = "none"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::None);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_all_string() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = "all"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_cwd_string() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = "cwd"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::Cwd);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_bool_true() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_bool_false() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, AutoSuggestions::None);
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_invalid_string() {
+        let toml_str = r#"
+[editor]
+auto_suggestions = "invalid"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown variant"),
+            "Error should mention unknown variant: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_string_true_rejected() {
+        // String "true" should be rejected (use boolean true instead)
+        let toml_str = r#"
+[editor]
+auto_suggestions = "true"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "String 'true' should be rejected");
+    }
+
+    #[test]
+    fn test_parse_auto_suggestions_string_false_rejected() {
+        // String "false" should be rejected (use boolean false instead)
+        let toml_str = r#"
+[editor]
+auto_suggestions = "false"
+"#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "String 'false' should be rejected");
     }
 
     #[test]

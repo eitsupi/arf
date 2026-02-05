@@ -18,7 +18,7 @@ autoformat = false
 [editor]
 mode = "emacs"
 auto_match = true
-auto_suggestions = true
+auto_suggestions = "all"
 
 [editor.key_map]
 Alt-Hyphen = " <- "

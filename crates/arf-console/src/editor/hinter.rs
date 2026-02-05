@@ -7,7 +7,7 @@
 
 use crate::r_parser::{is_atomic_node, parse_r};
 use nu_ansi_term::Style;
-use reedline::{DefaultHinter, Hinter, History};
+use reedline::{Hinter, History, SearchQuery};
 
 /// Get the first R token from a string using tree-sitter.
 ///
@@ -128,25 +128,32 @@ fn find_first_token_bounds(node: &tree_sitter::Node, source: &[u8]) -> Option<(u
 
 /// An R language-aware hinter that properly tokenizes R code.
 ///
-/// This hinter wraps `DefaultHinter` but overrides `next_hint_token()` to use
-/// tree-sitter for tokenization. This ensures multi-character operators like
-/// `|>`, `<-`, `%>%` are accepted as single units with Ctrl+Right.
+/// This hinter implements history-based suggestions with:
+/// - R-aware tokenization via tree-sitter (operators like `|>`, `<-` are single tokens)
+/// - Optional cwd filtering (only show suggestions from current directory)
 pub struct RLanguageHinter {
-    inner: DefaultHinter,
+    style: Style,
+    current_hint: String,
+    min_chars: usize,
+    /// If true, prefer history entries from the current working directory.
+    cwd_aware: bool,
 }
 
 impl RLanguageHinter {
     /// Create a new R language hinter.
     pub fn new() -> Self {
         RLanguageHinter {
-            inner: DefaultHinter::default(),
+            style: Style::new(),
+            current_hint: String::new(),
+            min_chars: 1,
+            cwd_aware: false,
         }
     }
 
     /// Set the style for the hint text.
     #[must_use]
     pub fn with_style(mut self, style: Style) -> Self {
-        self.inner = self.inner.with_style(style);
+        self.style = style;
         self
     }
 
@@ -154,7 +161,18 @@ impl RLanguageHinter {
     #[must_use]
     #[allow(dead_code)]
     pub fn with_min_chars(mut self, min_chars: usize) -> Self {
-        self.inner = self.inner.with_min_chars(min_chars);
+        self.min_chars = min_chars;
+        self
+    }
+
+    /// Enable cwd-aware filtering.
+    ///
+    /// When enabled, the hinter will prefer history entries that were recorded
+    /// in the current working directory. Falls back to all history if no
+    /// matches found in current directory.
+    #[must_use]
+    pub fn with_cwd_aware(mut self, cwd_aware: bool) -> Self {
+        self.cwd_aware = cwd_aware;
         self
     }
 }
@@ -169,23 +187,75 @@ impl Hinter for RLanguageHinter {
     fn handle(
         &mut self,
         line: &str,
-        pos: usize,
+        #[allow(unused_variables)] pos: usize,
         history: &dyn History,
         use_ansi_coloring: bool,
         cwd: &str,
     ) -> String {
-        // Delegate to DefaultHinter for history lookup
-        self.inner
-            .handle(line, pos, history, use_ansi_coloring, cwd)
+        self.current_hint = if line.chars().count() >= self.min_chars {
+            if self.cwd_aware {
+                // Try cwd-filtered search first
+                let cwd_results = history
+                    .search(SearchQuery::last_with_prefix_and_cwd(
+                        line.to_string(),
+                        cwd.to_string(),
+                        history.session(),
+                    ))
+                    .unwrap_or_default();
+
+                if !cwd_results.is_empty() {
+                    cwd_results[0]
+                        .command_line
+                        .get(line.len()..)
+                        .unwrap_or_default()
+                        .to_string()
+                } else {
+                    // Fall back to all history
+                    self.search_all_history(line, history)
+                }
+            } else {
+                // Search all history
+                self.search_all_history(line, history)
+            }
+        } else {
+            String::new()
+        };
+
+        if use_ansi_coloring && !self.current_hint.is_empty() {
+            self.style.paint(&self.current_hint).to_string()
+        } else {
+            self.current_hint.clone()
+        }
     }
 
     fn complete_hint(&self) -> String {
-        self.inner.complete_hint()
+        self.current_hint.clone()
     }
 
     fn next_hint_token(&self) -> String {
         // Use tree-sitter to get the first R token
-        get_first_r_token(&self.inner.complete_hint())
+        get_first_r_token(&self.current_hint)
+    }
+}
+
+impl RLanguageHinter {
+    /// Search all history for entries starting with the given prefix.
+    fn search_all_history(&self, prefix: &str, history: &dyn History) -> String {
+        history
+            .search(SearchQuery::last_with_prefix(
+                prefix.to_string(),
+                history.session(),
+            ))
+            .unwrap_or_default()
+            .first()
+            .map(|entry| {
+                entry
+                    .command_line
+                    .get(prefix.len()..)
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_default()
     }
 }
 
