@@ -5,6 +5,7 @@
 //! backup or to transfer history to another machine.
 
 use anyhow::{Context, Result, bail};
+use std::fs;
 use std::path::Path;
 
 /// Result of an export operation.
@@ -28,7 +29,6 @@ pub fn export_history(
     shell_table: &str,
 ) -> Result<ExportResult> {
     use super::import::validate_table_name;
-    use rusqlite::{Connection, OpenFlags};
 
     // Validate table names to prevent SQL injection
     validate_table_name(r_table)?;
@@ -51,6 +51,49 @@ pub fn export_history(
             );
         }
     }
+
+    // Use atomic write: write to temp file, then rename on success.
+    // This prevents leaving incomplete files if export fails partway through.
+    let temp_path = output_path.with_extension("tmp");
+
+    // Clean up any leftover temp file from a previous failed attempt
+    if temp_path.exists() {
+        fs::remove_file(&temp_path)
+            .with_context(|| format!("Failed to remove stale temp file: {}", temp_path.display()))?;
+    }
+
+    // Perform export to temp file, with cleanup on failure
+    let result = export_to_file(r_db_path, shell_db_path, &temp_path, r_table, shell_table);
+
+    match result {
+        Ok(export_result) => {
+            // Atomically move temp file to final destination
+            fs::rename(&temp_path, output_path).with_context(|| {
+                format!(
+                    "Failed to rename temp file {} to {}",
+                    temp_path.display(),
+                    output_path.display()
+                )
+            })?;
+            Ok(export_result)
+        }
+        Err(e) => {
+            // Clean up temp file on failure
+            let _ = fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+/// Internal function that performs the actual export to a file.
+fn export_to_file(
+    r_db_path: &Path,
+    shell_db_path: &Path,
+    output_path: &Path,
+    r_table: &str,
+    shell_table: &str,
+) -> Result<ExportResult> {
+    use rusqlite::{Connection, OpenFlags};
 
     // Create output database
     let mut output_db =
@@ -277,5 +320,41 @@ mod tests {
         let result = export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn test_export_no_temp_file_left_on_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let r_path = temp_dir.path().join("r.db");
+        let output_path = temp_dir.path().join("export.db");
+        let temp_path = output_path.with_extension("tmp");
+
+        create_test_history(&r_path, &["test"]);
+
+        export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell").unwrap();
+
+        // Output file should exist, temp file should not
+        assert!(output_path.exists());
+        assert!(!temp_path.exists());
+    }
+
+    #[test]
+    fn test_export_cleans_up_stale_temp_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let r_path = temp_dir.path().join("r.db");
+        let output_path = temp_dir.path().join("export.db");
+        let temp_path = output_path.with_extension("tmp");
+
+        create_test_history(&r_path, &["test"]);
+
+        // Create a stale temp file (simulating a previous failed export)
+        std::fs::write(&temp_path, "stale data").unwrap();
+        assert!(temp_path.exists());
+
+        // Export should succeed and clean up the stale temp file
+        export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell").unwrap();
+
+        assert!(output_path.exists());
+        assert!(!temp_path.exists());
     }
 }
