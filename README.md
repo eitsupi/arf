@@ -146,7 +146,7 @@ autoformat = false      # Requires Air CLI
 
 [editor]
 mode = "emacs"          # "emacs" or "vi"
-auto_match = true
+auto_match = true       # Defaults to false on Windows (see Known Issues)
 auto_suggestions = true # fish/nushell style history suggestions
 
 # Keyboard shortcuts (crokey format)
@@ -346,6 +346,11 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 **Limitations**:
 - If you set a custom error handler via `options(error = ...)`, arf will chain to your handler, but arf's handler takes precedence. Your handler will still be called after arf records the error.
 - There is a slight performance overhead (~microseconds) on each prompt due to R API calls for checking and resetting error state. This is negligible in practice but may be noticeable in benchmarks.
+
+### Auto-matching brackets disabled by default on Windows
+
+> [!NOTE]
+> On Windows, `auto_match` defaults to `false` because Windows Console and Windows Terminal do not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste). Without bracketed paste, pasting code containing brackets or quotes triggers auto-matching, which corrupts the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
 
 ### Windows Terminal flickering in TUI pagers
 
