@@ -367,6 +367,13 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
 
     // Default: print to stdout/stderr
     if is_error {
+        // On Windows, R may produce CR characters in error messages which cause
+        // display issues (the CR returns cursor to start of line, overwriting
+        // previous content). Strip CR characters from error output only to
+        // preserve progress bar functionality in normal output.
+        #[cfg(windows)]
+        let s = strip_cr(&s);
+
         // Wrap error output in red ANSI codes (like radian does)
         eprint!("{}", format_error_output(&s));
     } else {
@@ -418,6 +425,24 @@ fn strip_ansi_escapes(s: &str) -> String {
     }
 
     result
+}
+
+/// Strip all carriage return characters from a string.
+///
+/// On Windows, R may produce CR (`\r`) characters in output messages.
+/// When printed to the terminal, the CR returns the cursor to the
+/// start of the line, causing subsequent text to overwrite previous content.
+/// This results in garbled output.
+///
+/// This function removes all CR characters to prevent this issue.
+/// Both CRLF (`\r\n`) and standalone CR are handled.
+#[cfg(any(windows, test))]
+fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains('\r') {
+        std::borrow::Cow::Owned(s.replace('\r', ""))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
 }
 
 /// Strip R's Windows console formatting escape sequences.
@@ -1720,5 +1745,31 @@ mod tests {
         let formatted = format_error_output(original);
         let stripped = strip_ansi_escapes(&formatted);
         assert_eq!(stripped, original);
+    }
+
+    #[test]
+    fn test_strip_cr() {
+        // CRLF should be converted to LF
+        let stripped = strip_cr("Error: foo\r\nbar\r\n");
+        assert_eq!(stripped, "Error: foo\nbar\n");
+
+        // Text without CR should be unchanged (and borrowed, not owned)
+        let input = "Error: foo\nbar\n";
+        let stripped = strip_cr(input);
+        assert_eq!(stripped, input);
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
+
+        // Standalone CR should also be stripped
+        let stripped = strip_cr("Error: \"{\r\" の)");
+        assert_eq!(stripped, "Error: \"{\" の)");
+
+        // Mixed line endings: all CR should be removed
+        let stripped = strip_cr("line1\r\nline2\nline3\r");
+        assert_eq!(stripped, "line1\nline2\nline3");
+
+        // Empty string
+        let stripped = strip_cr("");
+        assert_eq!(stripped, "");
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
     }
 }
