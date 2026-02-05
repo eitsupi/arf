@@ -349,7 +349,7 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 
 ### Auto-matching brackets disabled by default on Windows
 
-On Windows, `auto_match` defaults to `false` because Windows Console and Windows Terminal do not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste). Without bracketed paste, pasting code containing brackets or quotes triggers auto-matching, which corrupts the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
+On Windows, `auto_match` defaults to `false` because [crossterm](https://github.com/crossterm-rs/crossterm) (the terminal library used by arf via reedline) does not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste) on Windows ([crossterm#737](https://github.com/crossterm-rs/crossterm/issues/737)). crossterm uses the Windows Console API directly without setting `ENABLE_VIRTUAL_TERMINAL_INPUT` or parsing ANSI sequences from input, so pasted text is received as individual key events. This causes auto-matching to trigger on each bracket or quote character during paste, corrupting the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
 
 ### Windows Terminal flickering in TUI pagers
 
