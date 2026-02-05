@@ -1960,4 +1960,42 @@ mod tests {
         assert!(validate_table_name("table name").is_err());
         assert!(validate_table_name("table\nname").is_err());
     }
+
+    /// Test that parse_unified_arf_history works even when file is named r.db
+    /// This verifies that the unified parser doesn't rely on filename.
+    #[test]
+    fn test_parse_unified_works_regardless_of_filename() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        // Name the file "r.db" - traditionally a single-database file
+        let unified_path = temp_dir.path().join("r.db");
+
+        // But create it as a unified file with both r and shell tables
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        db.execute(
+            "CREATE TABLE r (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "CREATE TABLE shell (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)",
+            [],
+        )
+        .unwrap();
+        db.execute("INSERT INTO r (command_line) VALUES ('r_cmd')", []).unwrap();
+        db.execute("INSERT INTO shell (command_line) VALUES ('shell_cmd')", []).unwrap();
+        drop(db);
+
+        // parse_unified_arf_history should work regardless of filename
+        let entries = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let r_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("r")).collect();
+        let shell_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("shell")).collect();
+        assert_eq!(r_entries.len(), 1);
+        assert_eq!(r_entries[0].command, "r_cmd");
+        assert_eq!(shell_entries.len(), 1);
+        assert_eq!(shell_entries[0].command, "shell_cmd");
+    }
 }
