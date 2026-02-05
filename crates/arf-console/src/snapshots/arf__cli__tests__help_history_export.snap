@@ -1,0 +1,26 @@
+---
+source: crates/arf-console/src/cli.rs
+expression: help
+---
+Export history to a unified SQLite file (experimental)
+
+Export both R and shell history to a single SQLite file. This can be used as a backup or to transfer history between machines.
+
+Usage: export [OPTIONS] --file <FILE>
+
+Options:
+      --file <FILE>
+          Path to the output SQLite file
+
+      --r-table <R_TABLE>
+          Table name for R history in the output file
+          
+          [default: r]
+
+      --shell-table <SHELL_TABLE>
+          Table name for shell history in the output file
+          
+          [default: shell]
+
+  -h, --help
+          Print help (see a summary with '-h')

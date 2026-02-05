@@ -471,6 +471,32 @@ Default location (XDG data directory):
 - **macOS**: `~/Library/Application Support/arf/history/`
 - **Windows**: `C:\Users\<user>\AppData\Local\arf\history\`
 
+### Exporting and Importing History
+
+You can export your history to a backup file:
+
+```bash
+arf history export --file backup.db
+```
+
+To restore or transfer history to another machine:
+
+```bash
+arf history import --from arf --file backup.db
+```
+
+You can also import history from other sources:
+
+```bash
+# Import from radian
+arf history import --from radian
+
+# Import from standard R history file
+arf history import --from r
+```
+
+> **Note**: Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
+
 ## CLI Options Override
 
 Command-line options take precedence over config file settings:

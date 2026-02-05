@@ -208,30 +208,46 @@ fn handle_history_command(
             hostname,
             dry_run,
             import_duplicates,
+            unified,
+            r_table,
+            shell_table,
         } => handle_history_import(
             *from,
             file.as_ref(),
             hostname.as_deref(),
             *dry_run,
             !import_duplicates,
+            *unified,
+            r_table,
+            shell_table,
             config_path,
             cli_history_dir,
         ),
+        HistoryAction::Export {
+            file,
+            r_table,
+            shell_table,
+        } => handle_history_export(file, r_table, shell_table, config_path, cli_history_dir),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_history_import(
     source: ImportSource,
     file: Option<&std::path::PathBuf>,
     hostname: Option<&str>,
     dry_run: bool,
     skip_duplicates: bool,
+    unified: bool,
+    r_table: &str,
+    shell_table: &str,
     config_path: Option<&std::path::PathBuf>,
     cli_history_dir: Option<&std::path::PathBuf>,
 ) -> Result<()> {
     use history::import::{
         DedupSet, default_r_history_path, default_radian_path, import_entries,
         import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
+        parse_unified_arf_history,
     };
     use reedline::SqliteBackedHistory;
 
@@ -277,7 +293,25 @@ fn handle_history_import(
     let entries = match source {
         ImportSource::Radian => parse_radian_history(&source_path)?,
         ImportSource::R => parse_r_history(&source_path)?,
-        ImportSource::Arf => parse_arf_history(&source_path)?,
+        ImportSource::Arf => {
+            // Determine if this is a unified export file or a single-database file.
+            // --unified flag forces unified mode; otherwise infer from filename.
+            let is_unified = unified || {
+                let filename = source_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                filename != "r.db" && filename != "shell.db"
+            };
+
+            if is_unified {
+                // Unified export file - use table names to import both r and shell
+                parse_unified_arf_history(&source_path, r_table, shell_table)?
+            } else {
+                // Traditional single-database import
+                parse_arf_history(&source_path)?
+            }
+        }
     };
 
     println!("Found {} entries to import", entries.len());
@@ -418,6 +452,59 @@ fn handle_history_import(
             println!("  ... and {} more warnings", result.warnings.len() - 10);
         }
     }
+
+    Ok(())
+}
+
+fn handle_history_export(
+    output_file: &std::path::Path,
+    r_table: &str,
+    shell_table: &str,
+    config_path: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::PathBuf>,
+) -> Result<()> {
+    use history::export::export_history;
+
+    // Load config (respecting --config flag if provided)
+    let config = if let Some(path) = config_path {
+        load_config_from_path(path)
+    } else {
+        load_config()
+    };
+
+    // Resolve effective history directory
+    let history_dir = cli_history_dir
+        .cloned()
+        .or(config.history.dir.clone())
+        .or_else(config::history_dir)
+        .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
+
+    let r_path = history_dir.join("r.db");
+    let shell_path = history_dir.join("shell.db");
+
+    // Check if at least one database exists
+    if !r_path.exists() && !shell_path.exists() {
+        anyhow::bail!(
+            "No history databases found in: {}\n\
+             Expected r.db and/or shell.db",
+            history_dir.display()
+        );
+    }
+
+    println!("Exporting history to: {}", output_file.display());
+    println!("Source databases:");
+    if r_path.exists() {
+        println!("  R:     {} (table: {})", r_path.display(), r_table);
+    }
+    if shell_path.exists() {
+        println!("  Shell: {} (table: {})", shell_path.display(), shell_table);
+    }
+
+    let result = export_history(&r_path, &shell_path, output_file, r_table, shell_table)?;
+
+    println!("\nExport complete:");
+    println!("  R commands:     {}", result.r_exported);
+    println!("  Shell commands: {}", result.shell_exported);
 
     Ok(())
 }

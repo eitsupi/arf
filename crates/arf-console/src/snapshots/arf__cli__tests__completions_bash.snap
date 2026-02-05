@@ -59,11 +59,17 @@ _arf() {
             arf__help__config,init)
                 cmd="arf__help__config__init"
                 ;;
+            arf__help__history,export)
+                cmd="arf__help__history__export"
+                ;;
             arf__help__history,import)
                 cmd="arf__help__history__import"
                 ;;
             arf__help__history,schema)
                 cmd="arf__help__history__schema"
+                ;;
+            arf__history,export)
+                cmd="arf__history__export"
                 ;;
             arf__history,help)
                 cmd="arf__history__help"
@@ -73,6 +79,9 @@ _arf() {
                 ;;
             arf__history,schema)
                 cmd="arf__history__schema"
+                ;;
+            arf__history__help,export)
+                cmd="arf__history__help__export"
                 ;;
             arf__history__help,help)
                 cmd="arf__history__help__help"
@@ -314,8 +323,22 @@ _arf() {
             return 0
             ;;
         arf__help__history)
-            opts="schema import"
+            opts="schema import export"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__history__export)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -356,7 +379,7 @@ _arf() {
             return 0
             ;;
         arf__history)
-            opts="-h --help schema import help"
+            opts="-h --help schema import export help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -369,9 +392,60 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help)
-            opts="schema import help"
+        arf__history__export)
+            opts="-h --file --r-table --shell-table --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --file)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                --r-table)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --shell-table)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__history__help)
+            opts="schema import export help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__history__help__export)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -426,7 +500,7 @@ _arf() {
             return 0
             ;;
         arf__history__import)
-            opts="-h --from --file --hostname --dry-run --import-duplicates --help"
+            opts="-h --from --file --hostname --dry-run --import-duplicates --unified --r-table --shell-table --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -452,6 +526,14 @@ _arf() {
                     return 0
                     ;;
                 --hostname)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --r-table)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --shell-table)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

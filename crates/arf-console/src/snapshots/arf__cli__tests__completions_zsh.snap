@@ -144,8 +144,20 @@ r\:"R native history file (.Rhistory)"
 arf\:"Another arf SQLite history database"))' \
 '--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db]:FILE:_files' \
 '--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_default' \
+'--r-table=[Table name for R history when importing from unified export file]:R_TABLE:_default' \
+'--shell-table=[Table name for shell history when importing from unified export file]:SHELL_TABLE:_default' \
 '--dry-run[Perform a dry run without actually importing]' \
 '--import-duplicates[Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)]' \
+'--unified[Force unified export file mode (imports both R and shell history)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+'--file=[Path to the output SQLite file]:FILE:_files' \
+'--r-table=[Table name for R history in the output file]:R_TABLE:_default' \
+'--shell-table=[Table name for shell history in the output file]:SHELL_TABLE:_default' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
@@ -167,6 +179,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (import)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(export)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -235,6 +251,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (import)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(export)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -338,8 +358,14 @@ _arf__help__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
+'export:Export history to a unified SQLite file (experimental)' \
     )
     _describe -t commands 'arf help history commands' commands "$@"
+}
+(( $+functions[_arf__help__history__export_commands] )) ||
+_arf__help__history__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help history export commands' commands "$@"
 }
 (( $+functions[_arf__help__history__import_commands] )) ||
 _arf__help__history__import_commands() {
@@ -356,18 +382,30 @@ _arf__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
+'export:Export history to a unified SQLite file (experimental)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf history commands' commands "$@"
+}
+(( $+functions[_arf__history__export_commands] )) ||
+_arf__history__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history export commands' commands "$@"
 }
 (( $+functions[_arf__history__help_commands] )) ||
 _arf__history__help_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
+'export:Export history to a unified SQLite file (experimental)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf history help commands' commands "$@"
+}
+(( $+functions[_arf__history__help__export_commands] )) ||
+_arf__history__help__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf history help export commands' commands "$@"
 }
 (( $+functions[_arf__history__help__help_commands] )) ||
 _arf__history__help__help_commands() {

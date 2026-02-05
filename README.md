@@ -27,7 +27,7 @@
 
 - **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) (R Installation Manager) support. Switch R versions with `--with-r-version` flag, or use the `:switch` meta command to change versions within a running session.
 
-- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly.
+- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly. Import your existing history from radian or R's `.Rhistory`.
 
 - **Syntax Highlighting** — Tree-sitter based highlighting for R code with customizable colors.
 
@@ -46,7 +46,7 @@
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - Syntax highlighting with customizable colors
-- SQLite-backed persistent history
+- SQLite-backed persistent history with import/export support
 
 ## Installation
 
@@ -249,12 +249,34 @@ on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 | `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
 | `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
 
-### History import
+### History export/import
 
 > [!CAUTION]
-> This feature is experimental and has not been thoroughly tested. Always back up your history files before importing. The import format and behavior may change in future versions.
+> These features are experimental and have not been thoroughly tested. The format and behavior may change in future versions.
 
-Import command history from radian, R's native `.Rhistory`, or another arf database into arf's SQLite history:
+#### Export
+
+Export both R and shell history to a unified SQLite file for backup or transfer:
+
+```sh
+# Export to a unified file
+arf history export --file ~/arf_backup.db
+
+# Export with custom table names
+arf history export --file ~/arf_backup.db --r-table my_r --shell-table my_shell
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--file` | Path to output SQLite file (required) |
+| `--r-table` | Table name for R history (default: `r`) |
+| `--shell-table` | Table name for shell history (default: `shell`) |
+
+#### Import
+
+Import command history from radian, R's native `.Rhistory`, or another arf database:
 
 ```sh
 # Preview what would be imported (dry run)
@@ -266,7 +288,10 @@ arf history import --from radian
 # Import from R's native history
 arf history import --from r --file .Rhistory
 
-# Import from another arf database
+# Import from a unified export file (restores both R and shell history)
+arf history import --from arf --file ~/arf_backup.db
+
+# Import from a single-database file (r.db or shell.db)
 arf history import --from arf --file /path/to/r.db
 
 # Import with custom hostname (to distinguish from native entries)
@@ -282,6 +307,9 @@ arf history import --from radian --hostname "radian-import"
 | `--hostname` | Custom hostname to mark imported entries |
 | `--dry-run` | Preview without importing |
 | `--import-duplicates` | Import duplicate entries instead of skipping them |
+| `--unified` | Force unified file mode (import both R and shell from table names) |
+| `--r-table` | Table name for R history in unified file (default: `r`) |
+| `--shell-table` | Table name for shell history in unified file (default: `shell`) |
 
 **Supported sources:**
 
@@ -289,20 +317,25 @@ arf history import --from radian --hostname "radian-import"
 |--------|-------------|:----------:|:---------:|:------------:|
 | `radian` | `~/.radian_history` | Preserved | Preserved | By `# mode:` |
 | `r` | `.Rhistory` or `R_HISTFILE` | - | - | → `r.db` |
-| `arf` | SQLite database (`--file` required) | Preserved | Preserved | By filename |
+| `arf` | SQLite database (`--file` required) | Preserved | Preserved | By filename or `--unified` |
 
-**Mode routing:**
+**Mode routing for arf format:**
 
-- **radian**: Routes by `# mode:` header (r/browse → `r.db`, shell → `shell.db`)
-- **arf**: Routes by filename (`shell.db` → `shell.db`, others → `r.db`). To import both R and shell history, run the command twice with each database file.
-- **r**: All commands go to `r.db` (no mode information)
-
-Entries with unknown modes are skipped with a warning.
+- Files named `r.db` or `shell.db`: Single-database import (by filename)
+- Other filenames or `--unified` flag: Unified import (by table names, imports both R and shell)
 
 **Notes:**
 
 - By default, duplicate entries are skipped during import (matched by command text and timestamp). Use `--import-duplicates` to import all entries regardless.
 - Self-import is detected and rejected when importing from an arf database to the same target file.
+- **Important:** Exit arf before exporting to ensure the source databases are in a consistent state. The export itself uses atomic writes to prevent incomplete output files, but reading while arf is writing may capture inconsistent data.
+
+**Restore from backup:**
+
+```sh
+# Restore history from a unified export file
+arf history import --from arf --file ~/arf_backup.db
+```
 
 ## Known Issues
 

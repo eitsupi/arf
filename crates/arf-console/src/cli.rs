@@ -189,6 +189,41 @@ pub enum HistoryAction {
         /// are skipped (anti-join on command text and timestamp).
         #[arg(long)]
         import_duplicates: bool,
+
+        /// Force unified export file mode (imports both R and shell history).
+        ///
+        /// By default, the file format is auto-detected by filename:
+        ///   - 'r.db' or 'shell.db' → single-database mode (one history type)
+        ///   - Other names (e.g., 'backup.db') → unified mode (both history types)
+        ///
+        /// Use this flag to force unified mode even for files named r.db/shell.db.
+        #[arg(long)]
+        unified: bool,
+
+        /// Table name for R history when importing from unified export file
+        #[arg(long, default_value = "r")]
+        r_table: String,
+
+        /// Table name for shell history when importing from unified export file
+        #[arg(long, default_value = "shell")]
+        shell_table: String,
+    },
+    /// Export history to a unified SQLite file (experimental)
+    ///
+    /// Export both R and shell history to a single SQLite file.
+    /// This can be used as a backup or to transfer history between machines.
+    Export {
+        /// Path to the output SQLite file
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        file: PathBuf,
+
+        /// Table name for R history in the output file
+        #[arg(long, default_value = "r")]
+        r_table: String,
+
+        /// Table name for shell history in the output file
+        #[arg(long, default_value = "shell")]
+        shell_table: String,
     },
 }
 
@@ -372,5 +407,11 @@ mod tests {
     fn test_help_history_import_snapshot() {
         let help = Cli::generate_help_string(&["history", "import"]);
         insta::assert_snapshot!("help_history_import", help);
+    }
+
+    #[test]
+    fn test_help_history_export_snapshot() {
+        let help = Cli::generate_help_string(&["history", "export"]);
+        insta::assert_snapshot!("help_history_export", help);
     }
 }
