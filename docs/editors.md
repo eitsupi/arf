@@ -6,49 +6,9 @@ arf can be used as the R terminal in code editors that support custom terminal p
 
 The [vscode-R](https://github.com/REditorSupport/vscode-R) extension provides R language support in VS Code, including the ability to send code from the editor to an R terminal. To use arf as the R terminal, configure the following settings.
 
-### Setting the R Terminal Path
+### Settings
 
-Set `r.rterm` to the path of the arf binary for your platform. Open VS Code settings (`Ctrl+,` or `Cmd+,`) and search for `r.rterm`, then set the appropriate platform-specific entry:
-
-- **Linux**: `r.rterm.linux`
-- **macOS**: `r.rterm.mac`
-- **Windows**: `r.rterm.windows`
-
-For example, if arf is installed via `cargo install`:
-
-```json
-{
-    "r.rterm.linux": "${userHome}/.cargo/bin/arf",
-    "r.rterm.mac": "${userHome}/.cargo/bin/arf",
-    "r.rterm.windows": "${userHome}\\.cargo\\bin\\arf.exe"
-}
-```
-
-If arf is already in your `PATH`, you can simply set:
-
-```json
-{
-    "r.rterm.linux": "arf"
-}
-```
-
-### Enabling Bracketed Paste
-
-You should enable `r.bracketedPaste` for arf:
-
-```json
-{
-    "r.bracketedPaste": true
-}
-```
-
-Without this setting, vscode-R sends code line-by-line to the terminal. This can cause issues with arf's auto-match feature (automatic bracket/quote completion), because each line is processed as individual keystrokes. With bracketed paste enabled, code is sent as a single unit, avoiding interference from auto-match.
-
-> **Note**: This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
-
-### Complete Example
-
-A minimal `settings.json` for using arf with vscode-R on Linux:
+Set `r.rterm` to `"arf"` for your platform, and enable `r.bracketedPaste`:
 
 ```json
 {
@@ -57,13 +17,19 @@ A minimal `settings.json` for using arf with vscode-R on Linux:
 }
 ```
 
+The platform-specific `r.rterm` settings are `r.rterm.linux`, `r.rterm.mac`, and `r.rterm.windows`.
+
+Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. This can cause issues with arf's auto-match feature (automatic bracket/quote completion), because each line is processed as individual keystrokes. With bracketed paste enabled, code is sent as a single unit, avoiding interference from auto-match.
+
+> **Note**: This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
+
 ## Zed (zed-r)
 
 The [zed-r](https://github.com/ocsmit/zed-r) extension provides R language support in Zed. You can use arf as the R terminal by configuring a task.
 
 ### Setting Up an R Terminal Task
 
-Add the following to your `tasks.json` (open with `Cmd+Shift+P` or `Ctrl+Shift+P` and select "zed: open tasks"):
+Add the following to your `tasks.json`:
 
 ```json
 [
