@@ -25,7 +25,7 @@ Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. Th
 > This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
 
 > [!WARNING]
-> On Windows, vscode-R has a [known bug](https://github.com/REditorSupport/vscode-R/issues/1590) where bracketed paste mode is silently disabled. When `r.bracketedPaste` is `true`, vscode-R still sends code line-by-line on Windows, which can cause issues with auto-match. As a workaround, set `r.bracketedPaste` to `false` and consider disabling auto-match (`editor.auto_match = false` in `arf.toml`) if you encounter problems when sending code from the editor.
+> On Windows, vscode-R has a [known bug](https://github.com/REditorSupport/vscode-R/issues/1590) where bracketed paste mode is silently disabled. When `r.bracketedPaste` is `true`, vscode-R still sends code line-by-line on Windows, which can cause issues with auto-match. As a workaround, set `r.bracketedPaste` to `false` and consider [disabling auto-match](configuration.md) (`auto_match = false` under `[editor]` in `arf.toml`) if you encounter problems when sending code from the editor.
 
 ## Zed (zed-r)
 
