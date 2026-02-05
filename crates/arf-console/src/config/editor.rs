@@ -120,8 +120,8 @@ impl<'de> Deserialize<'de> for AutoSuggestions {
                 E: de::Error,
             {
                 match value.to_lowercase().as_str() {
-                    "none" | "false" => Ok(AutoSuggestions::None),
-                    "all" | "true" => Ok(AutoSuggestions::All),
+                    "none" => Ok(AutoSuggestions::None),
+                    "all" => Ok(AutoSuggestions::All),
                     "cwd" => Ok(AutoSuggestions::Cwd),
                     _ => Err(de::Error::unknown_variant(value, &["none", "all", "cwd"])),
                 }
