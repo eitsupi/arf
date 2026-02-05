@@ -349,8 +349,7 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 
 ### Auto-matching brackets disabled by default on Windows
 
-> [!NOTE]
-> On Windows, `auto_match` defaults to `false` because Windows Console and Windows Terminal do not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste). Without bracketed paste, pasting code containing brackets or quotes triggers auto-matching, which corrupts the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
+On Windows, `auto_match` defaults to `false` because Windows Console and Windows Terminal do not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste). Without bracketed paste, pasting code containing brackets or quotes triggers auto-matching, which corrupts the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
 
 ### Windows Terminal flickering in TUI pagers
 
