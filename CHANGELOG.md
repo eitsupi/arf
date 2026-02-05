@@ -15,6 +15,10 @@
   - Use `--r-table` and `--shell-table` to specify custom table names
 - History browser now displays timestamps in local time instead of UTC
 
+### Fixed
+
+- **Windows:** Fixed garbled error message display caused by CRLF line endings in R output
+
 ## [0.2.0-rc.2] - 2026-02-04
 
 ### Added
