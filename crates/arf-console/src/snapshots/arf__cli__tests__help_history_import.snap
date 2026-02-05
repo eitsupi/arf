@@ -30,15 +30,19 @@ Options:
           Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)
 
       --unified
-          Treat the input file as a unified export file (with both R and shell tables). By default, files named r.db/shell.db are treated as single-database files, and other filenames are treated as unified export files. Use this flag to explicitly import from a unified file regardless of filename
+          Force unified export file mode (imports both R and shell history).
+          
+          By default, the file format is auto-detected by filename: - 'r.db' or 'shell.db' → single-database mode (one history type) - Other names (e.g., 'backup.db') → unified mode (both history types)
+          
+          Use this flag to force unified mode even for files named r.db/shell.db.
 
       --r-table <R_TABLE>
-          Table name for R history in unified export file. Only used when importing from a unified arf export file
+          Table name for R history when importing from unified export file
           
           [default: r]
 
       --shell-table <SHELL_TABLE>
-          Table name for shell history in unified export file. Only used when importing from a unified arf export file
+          Table name for shell history when importing from unified export file
           
           [default: shell]
 

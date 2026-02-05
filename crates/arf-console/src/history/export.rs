@@ -430,4 +430,33 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("must be different"));
     }
+
+    #[test]
+    fn test_export_with_sqlite_reserved_words_as_table_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let r_path = temp_dir.path().join("r.db");
+        let shell_path = temp_dir.path().join("shell.db");
+        let output_path = temp_dir.path().join("export.db");
+
+        create_test_history(&r_path, &["library(dplyr)"]);
+        create_test_history(&shell_path, &["ls"]);
+
+        // SQLite reserved words should work when quoted
+        let result =
+            export_history(&r_path, &shell_path, &output_path, "select", "from").unwrap();
+
+        assert_eq!(result.r_exported, 1);
+        assert_eq!(result.shell_exported, 1);
+
+        // Verify we can read back the data
+        let db = rusqlite::Connection::open(&output_path).unwrap();
+        let r_count: i32 = db
+            .query_row(r#"SELECT COUNT(*) FROM "select""#, [], |row| row.get(0))
+            .unwrap();
+        let shell_count: i32 = db
+            .query_row(r#"SELECT COUNT(*) FROM "from""#, [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(r_count, 1);
+        assert_eq!(shell_count, 1);
+    }
 }

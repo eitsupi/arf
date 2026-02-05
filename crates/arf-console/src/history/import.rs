@@ -2049,4 +2049,45 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("must be different"));
     }
+
+    #[test]
+    fn test_parse_unified_with_sqlite_reserved_words_as_table_names() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let unified_path = temp_dir.path().join("export.db");
+
+        // Create a database with SQLite reserved words as table names
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        db.execute(
+            r#"CREATE TABLE "select" (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)"#,
+            [],
+        )
+        .unwrap();
+        db.execute(
+            r#"CREATE TABLE "from" (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)"#,
+            [],
+        )
+        .unwrap();
+        db.execute(r#"INSERT INTO "select" (command_line) VALUES ('r_cmd')"#, [])
+            .unwrap();
+        db.execute(r#"INSERT INTO "from" (command_line) VALUES ('shell_cmd')"#, [])
+            .unwrap();
+        drop(db);
+
+        // SQLite reserved words should work when quoted
+        let entries = parse_unified_arf_history(&unified_path, "select", "from").unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let r_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("r"))
+            .collect();
+        let shell_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("shell"))
+            .collect();
+        assert_eq!(r_entries.len(), 1);
+        assert_eq!(r_entries[0].command, "r_cmd");
+        assert_eq!(shell_entries.len(), 1);
+        assert_eq!(shell_entries[0].command, "shell_cmd");
+    }
 }
