@@ -366,13 +366,14 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     }
 
     // Default: print to stdout/stderr
-    // On Windows, R may produce CR characters which cause display issues
-    // (the CR returns cursor to start of line, overwriting previous content).
-    // Strip all CR characters before printing.
-    #[cfg(windows)]
-    let s = strip_cr(&s);
-
     if is_error {
+        // On Windows, R may produce CR characters in error messages which cause
+        // display issues (the CR returns cursor to start of line, overwriting
+        // previous content). Strip CR characters from error output only to
+        // preserve progress bar functionality in normal output.
+        #[cfg(windows)]
+        let s = strip_cr(&s);
+
         // Wrap error output in red ANSI codes (like radian does)
         eprint!("{}", format_error_output(&s));
     } else {
