@@ -62,8 +62,9 @@ pub fn export_history(
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
-            return Err(e)
-                .with_context(|| format!("Failed to remove stale temp file: {}", temp_path.display()))
+            return Err(e).with_context(|| {
+                format!("Failed to remove stale temp file: {}", temp_path.display())
+            });
         }
     }
 
@@ -116,7 +117,9 @@ fn export_to_file(
     // Export shell history if it exists
     if shell_db_path.exists() {
         let shell_db = Connection::open_with_flags(shell_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .with_context(|| format!("Failed to open shell history: {}", shell_db_path.display()))?;
+            .with_context(|| {
+                format!("Failed to open shell history: {}", shell_db_path.display())
+            })?;
         result.shell_exported = copy_history_table(&shell_db, &mut output_db, shell_table)?;
     }
 
@@ -199,7 +202,9 @@ fn copy_history_table(
     let mut count = 0;
 
     {
-        let mut insert_stmt = tx.prepare(&insert_sql).context("Failed to prepare insert")?;
+        let mut insert_stmt = tx
+            .prepare(&insert_sql)
+            .context("Failed to prepare insert")?;
 
         let rows = read_stmt
             .query_map([], |row| {
@@ -295,9 +300,14 @@ mod tests {
 
         create_test_history(&r_path, &["test"]);
 
-        let result =
-            export_history(&r_path, &temp_dir.path().join("nonexistent.db"), &output_path, "my_r", "my_shell")
-                .unwrap();
+        let result = export_history(
+            &r_path,
+            &temp_dir.path().join("nonexistent.db"),
+            &output_path,
+            "my_r",
+            "my_shell",
+        )
+        .unwrap();
 
         assert_eq!(result.r_exported, 1);
         assert_eq!(result.shell_exported, 0);
@@ -319,10 +329,23 @@ mod tests {
         create_test_history(&r_path, &["test"]);
 
         // First export
-        export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell").unwrap();
+        export_history(
+            &r_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "r",
+            "shell",
+        )
+        .unwrap();
 
         // Second export should fail
-        let result = export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell");
+        let result = export_history(
+            &r_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "r",
+            "shell",
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already exists"));
     }
@@ -336,7 +359,14 @@ mod tests {
 
         create_test_history(&r_path, &["test"]);
 
-        export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell").unwrap();
+        export_history(
+            &r_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "r",
+            "shell",
+        )
+        .unwrap();
 
         // Output file should exist, temp file should not
         assert!(output_path.exists());
@@ -357,7 +387,14 @@ mod tests {
         assert!(temp_path.exists());
 
         // Export should succeed and clean up the stale temp file
-        export_history(&r_path, &temp_dir.path().join("none.db"), &output_path, "r", "shell").unwrap();
+        export_history(
+            &r_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "r",
+            "shell",
+        )
+        .unwrap();
 
         assert!(output_path.exists());
         assert!(!temp_path.exists());

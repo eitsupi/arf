@@ -555,10 +555,7 @@ pub fn validate_table_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("Table name cannot be empty");
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         bail!(
             "Invalid table name '{}': must contain only alphanumeric characters and underscores",
             name
@@ -566,10 +563,7 @@ pub fn validate_table_name(name: &str) -> Result<()> {
     }
     // SQLite identifiers cannot start with a digit
     if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        bail!(
-            "Invalid table name '{}': cannot start with a digit",
-            name
-        );
+        bail!("Invalid table name '{}': cannot start with a digit", name);
     }
     Ok(())
 }
@@ -1869,8 +1863,16 @@ mod tests {
         .unwrap();
 
         db.execute("INSERT INTO r (command_line, start_timestamp) VALUES ('library(dplyr)', 1705315800000)", []).unwrap();
-        db.execute("INSERT INTO r (command_line, start_timestamp) VALUES ('print(1)', NULL)", []).unwrap();
-        db.execute("INSERT INTO shell (command_line, start_timestamp) VALUES ('ls -la', 1705315860000)", []).unwrap();
+        db.execute(
+            "INSERT INTO r (command_line, start_timestamp) VALUES ('print(1)', NULL)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO shell (command_line, start_timestamp) VALUES ('ls -la', 1705315860000)",
+            [],
+        )
+        .unwrap();
         drop(db);
 
         // Parse the unified file
@@ -1879,7 +1881,10 @@ mod tests {
         assert_eq!(entries.len(), 3);
 
         // R entries
-        let r_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("r")).collect();
+        let r_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("r"))
+            .collect();
         assert_eq!(r_entries.len(), 2);
         assert_eq!(r_entries[0].command, "library(dplyr)");
         assert!(r_entries[0].timestamp.is_some());
@@ -1887,7 +1892,10 @@ mod tests {
         assert!(r_entries[1].timestamp.is_none());
 
         // Shell entries
-        let shell_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("shell")).collect();
+        let shell_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("shell"))
+            .collect();
         assert_eq!(shell_entries.len(), 1);
         assert_eq!(shell_entries[0].command, "ls -la");
     }
@@ -1906,11 +1914,16 @@ mod tests {
             [],
         )
         .unwrap();
-        db.execute("INSERT INTO my_r_history (command_line) VALUES ('test_cmd')", []).unwrap();
+        db.execute(
+            "INSERT INTO my_r_history (command_line) VALUES ('test_cmd')",
+            [],
+        )
+        .unwrap();
         drop(db);
 
         // Parse with custom table names
-        let entries = parse_unified_arf_history(&unified_path, "my_r_history", "my_shell_history").unwrap();
+        let entries =
+            parse_unified_arf_history(&unified_path, "my_r_history", "my_shell_history").unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "test_cmd");
@@ -1983,16 +1996,24 @@ mod tests {
             [],
         )
         .unwrap();
-        db.execute("INSERT INTO r (command_line) VALUES ('r_cmd')", []).unwrap();
-        db.execute("INSERT INTO shell (command_line) VALUES ('shell_cmd')", []).unwrap();
+        db.execute("INSERT INTO r (command_line) VALUES ('r_cmd')", [])
+            .unwrap();
+        db.execute("INSERT INTO shell (command_line) VALUES ('shell_cmd')", [])
+            .unwrap();
         drop(db);
 
         // parse_unified_arf_history should work regardless of filename
         let entries = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
 
         assert_eq!(entries.len(), 2);
-        let r_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("r")).collect();
-        let shell_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("shell")).collect();
+        let r_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("r"))
+            .collect();
+        let shell_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.mode.as_deref() == Some("shell"))
+            .collect();
         assert_eq!(r_entries.len(), 1);
         assert_eq!(r_entries[0].command, "r_cmd");
         assert_eq!(shell_entries.len(), 1);
