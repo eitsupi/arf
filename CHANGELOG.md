@@ -2,25 +2,7 @@
 
 ## [Unreleased]
 
-### Added
-
-- Experimental `arf history export` subcommand for backing up history to a unified SQLite file
-  - Exports both R and shell history to a single file with customizable table names
-  - Use with `arf history import --from arf` to restore or transfer history
-
-### Changed
-
-- `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
-- `arf history import --from arf` now supports importing from unified export files (files other than `r.db` or `shell.db`)
-  - Use `--r-table` and `--shell-table` to specify custom table names
-- History browser now displays timestamps in local time instead of UTC
-
-### Fixed
-
-- **Windows:** Fixed garbled error message display caused by CRLF line endings in R output
-- **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline
-
-## [0.2.0-rc.2] - 2026-02-04
+## [0.2.0-rc.3] - 2026-02-05
 
 ### Added
 
@@ -28,11 +10,21 @@
   - Column headers, exit code column, and working directory column (#47)
   - Minimum terminal size warning for pager browsers (#50)
 - Experimental `arf history import` subcommand for importing history from radian, R, or another arf database (#31)
+- Experimental `arf history export` subcommand for backing up history to a unified SQLite file (#54)
+  - Exports both R and shell history to a single file with customizable table names
+  - Use with `arf history import --from arf` to restore or transfer history
+- `editor.auto_suggestions` now supports `"cwd"` mode for directory-aware suggestions (#55)
+  - When set to `"cwd"`, suggestions are filtered to history entries recorded in the current directory
+  - Falls back to all history if no matches found
 - Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
 - Vi mode indicator support for prompts via `prompt.mode_indicator` config (#23)
 
 ### Changed
 
+- `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
+- `arf history import --from arf` now supports importing from unified export files (files other than `r.db` or `shell.db`)
+  - Use `--r-table` and `--shell-table` to specify custom table names
+- History browser now displays timestamps in local time instead of UTC (#53)
 - Vi mode prompt indicators now have sensible defaults: `[I]` for insert mode (LightGreen) and `[N]` for normal mode (LightYellow) (#45)
 - **BREAKING:** Configuration structure reorganized — the `[reprex]` section has been split into `[startup.mode]` and `[mode.reprex]` for better semantic organization (#27)
 - **BREAKING:** `editor.autosuggestion` config key renamed to `editor.auto_suggestions` for naming consistency with `auto_match` (#48)
@@ -89,6 +81,8 @@ auto_paren_limit = 50
 
 ### Fixed
 
+- **Windows:** Fixed garbled error message display caused by CRLF line endings in R output (#56)
+- **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline (#57)
 - Flush stdout after print in `r_write_console_ex` to prevent output buffering issues (#44)
 - Use display-width-aware truncation for "Copied" feedback message (#41)
 - Mouse wheel scroll now moves cursor in history browser (#40)
