@@ -500,7 +500,7 @@ _arf() {
             return 0
             ;;
         arf__history__import)
-            opts="-h --from --file --hostname --dry-run --import-duplicates --r-table --shell-table --help"
+            opts="-h --from --file --hostname --dry-run --import-duplicates --unified --r-table --shell-table --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

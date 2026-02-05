@@ -190,6 +190,13 @@ pub enum HistoryAction {
         #[arg(long)]
         import_duplicates: bool,
 
+        /// Treat the input file as a unified export file (with both R and shell tables).
+        /// By default, files named r.db/shell.db are treated as single-database files,
+        /// and other filenames are treated as unified export files.
+        /// Use this flag to explicitly import from a unified file regardless of filename.
+        #[arg(long)]
+        unified: bool,
+
         /// Table name for R history in unified export file.
         /// Only used when importing from a unified arf export file.
         #[arg(long, default_value = "r")]

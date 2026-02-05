@@ -27,7 +27,12 @@ pub fn export_history(
     r_table: &str,
     shell_table: &str,
 ) -> Result<ExportResult> {
+    use super::import::validate_table_name;
     use rusqlite::{Connection, OpenFlags};
+
+    // Validate table names to prevent SQL injection
+    validate_table_name(r_table)?;
+    validate_table_name(shell_table)?;
 
     // Ensure output file doesn't exist (don't overwrite)
     if output_path.exists() {
@@ -35,6 +40,16 @@ pub fn export_history(
             "Output file already exists: {}\nRemove it or specify a different path.",
             output_path.display()
         );
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            bail!(
+                "Parent directory does not exist: {}\nCreate it first or specify a different path.",
+                parent.display()
+            );
+        }
     }
 
     // Create output database

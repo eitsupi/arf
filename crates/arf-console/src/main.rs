@@ -208,6 +208,7 @@ fn handle_history_command(
             hostname,
             dry_run,
             import_duplicates,
+            unified,
             r_table,
             shell_table,
         } => handle_history_import(
@@ -216,6 +217,7 @@ fn handle_history_command(
             hostname.as_deref(),
             *dry_run,
             !import_duplicates,
+            *unified,
             r_table,
             shell_table,
             config_path,
@@ -235,6 +237,7 @@ fn handle_history_import(
     hostname: Option<&str>,
     dry_run: bool,
     skip_duplicates: bool,
+    unified: bool,
     r_table: &str,
     shell_table: &str,
     config_path: Option<&std::path::PathBuf>,
@@ -290,19 +293,22 @@ fn handle_history_import(
         ImportSource::Radian => parse_radian_history(&source_path)?,
         ImportSource::R => parse_r_history(&source_path)?,
         ImportSource::Arf => {
-            // Check if the file is a traditional single-database file (r.db or shell.db)
-            // or a unified export file
-            let filename = source_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            // Determine if this is a unified export file or a single-database file.
+            // --unified flag forces unified mode; otherwise infer from filename.
+            let is_unified = unified || {
+                let filename = source_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                filename != "r.db" && filename != "shell.db"
+            };
 
-            if filename == "r.db" || filename == "shell.db" {
-                // Traditional single-database import
-                parse_arf_history(&source_path)?
-            } else {
+            if is_unified {
                 // Unified export file - use table names to import both r and shell
                 parse_unified_arf_history(&source_path, r_table, shell_table)?
+            } else {
+                // Traditional single-database import
+                parse_arf_history(&source_path)?
             }
         }
     };

@@ -547,6 +547,33 @@ pub fn import_entries(
     Ok(result)
 }
 
+/// Validate that a table name is safe for use in SQL queries.
+///
+/// Table names must contain only alphanumeric characters and underscores,
+/// and must not be empty. This prevents SQL injection attacks.
+pub fn validate_table_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("Table name cannot be empty");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        bail!(
+            "Invalid table name '{}': must contain only alphanumeric characters and underscores",
+            name
+        );
+    }
+    // SQLite identifiers cannot start with a digit
+    if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        bail!(
+            "Invalid table name '{}': cannot start with a digit",
+            name
+        );
+    }
+    Ok(())
+}
+
 /// Parse entries from a unified arf export file that contains both R and shell history.
 ///
 /// This function reads from a SQLite file that has separate tables for R and shell history,
@@ -559,6 +586,10 @@ pub fn parse_unified_arf_history(
     shell_table: &str,
 ) -> Result<Vec<ImportEntry>> {
     use rusqlite::{Connection, OpenFlags};
+
+    // Validate table names to prevent SQL injection
+    validate_table_name(r_table)?;
+    validate_table_name(shell_table)?;
 
     if !path.exists() {
         bail!("arf export file not found: {}", path.display());
@@ -605,9 +636,9 @@ fn read_history_table(
     use chrono::TimeZone;
 
     // Use format! for table name since it can't be parameterized in SQL.
-    // The table_name comes from CLI args with defaults, not untrusted input.
+    // Table names are validated by validate_table_name() before reaching here.
     let query = format!(
-        "SELECT command_line, start_timestamp FROM {} ORDER BY id",
+        "SELECT command_line, start_timestamp FROM \"{}\" ORDER BY id",
         table_name
     );
 
@@ -1900,5 +1931,33 @@ mod tests {
         // Should return empty vec, not error
         let entries = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_validate_table_name_valid() {
+        assert!(validate_table_name("r").is_ok());
+        assert!(validate_table_name("shell").is_ok());
+        assert!(validate_table_name("my_r_history").is_ok());
+        assert!(validate_table_name("R_History_2024").is_ok());
+        assert!(validate_table_name("_private").is_ok());
+    }
+
+    #[test]
+    fn test_validate_table_name_invalid() {
+        // Empty
+        assert!(validate_table_name("").is_err());
+
+        // SQL injection attempts
+        assert!(validate_table_name("r; DROP TABLE history;--").is_err());
+        assert!(validate_table_name("r' OR '1'='1").is_err());
+        assert!(validate_table_name("table-name").is_err());
+        assert!(validate_table_name("table.name").is_err());
+
+        // Starts with digit
+        assert!(validate_table_name("123table").is_err());
+
+        // Special characters
+        assert!(validate_table_name("table name").is_err());
+        assert!(validate_table_name("table\nname").is_err());
     }
 }
