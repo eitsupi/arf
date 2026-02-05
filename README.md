@@ -328,7 +328,7 @@ arf history import --from radian --hostname "radian-import"
 
 - By default, duplicate entries are skipped during import (matched by command text and timestamp). Use `--import-duplicates` to import all entries regardless.
 - Self-import is detected and rejected when importing from an arf database to the same target file.
-- **Important:** Exit arf before exporting to ensure a consistent snapshot. Exporting while arf is running may capture incomplete data.
+- **Important:** Exit arf before exporting to ensure the source databases are in a consistent state. The export itself uses atomic writes to prevent incomplete output files, but reading while arf is writing may capture inconsistent data.
 
 **Restore from backup:**
 

@@ -54,12 +54,17 @@ pub fn export_history(
 
     // Use atomic write: write to temp file, then rename on success.
     // This prevents leaving incomplete files if export fails partway through.
-    let temp_path = output_path.with_extension("tmp");
+    let temp_path = output_path.with_extension("arf-export-tmp");
 
-    // Clean up any leftover temp file from a previous failed attempt
-    if temp_path.exists() {
-        fs::remove_file(&temp_path)
-            .with_context(|| format!("Failed to remove stale temp file: {}", temp_path.display()))?;
+    // Clean up any leftover temp file from a previous failed attempt.
+    // Use unconditional remove to avoid TOCTOU race condition.
+    match fs::remove_file(&temp_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e)
+                .with_context(|| format!("Failed to remove stale temp file: {}", temp_path.display()))
+        }
     }
 
     // Perform export to temp file, with cleanup on failure
@@ -327,7 +332,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let r_path = temp_dir.path().join("r.db");
         let output_path = temp_dir.path().join("export.db");
-        let temp_path = output_path.with_extension("tmp");
+        let temp_path = output_path.with_extension("arf-export-tmp");
 
         create_test_history(&r_path, &["test"]);
 
@@ -343,7 +348,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let r_path = temp_dir.path().join("r.db");
         let output_path = temp_dir.path().join("export.db");
-        let temp_path = output_path.with_extension("tmp");
+        let temp_path = output_path.with_extension("arf-export-tmp");
 
         create_test_history(&r_path, &["test"]);
 
