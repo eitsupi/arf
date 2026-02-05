@@ -34,6 +34,14 @@ pub fn export_history(
     validate_table_name(r_table)?;
     validate_table_name(shell_table)?;
 
+    // Ensure the R and shell tables have different names
+    if r_table == shell_table {
+        bail!(
+            "R table name and shell table name must be different (both are '{}')",
+            r_table
+        );
+    }
+
     // Ensure output file doesn't exist (don't overwrite)
     if output_path.exists() {
         bail!(
@@ -399,5 +407,27 @@ mod tests {
 
         assert!(output_path.exists());
         assert!(!temp_path.exists());
+    }
+
+    #[test]
+    fn test_export_rejects_same_table_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let r_path = temp_dir.path().join("r.db");
+        let output_path = temp_dir.path().join("export.db");
+
+        create_test_history(&r_path, &["test"]);
+
+        // Export with same table names should fail
+        let result = export_history(
+            &r_path,
+            &temp_dir.path().join("none.db"),
+            &output_path,
+            "history",
+            "history",
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be different"));
     }
 }

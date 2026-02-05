@@ -476,17 +476,13 @@ Default location (XDG data directory):
 You can export your history to a backup file:
 
 ```bash
-# Export to a backup file
-arf history export backup.db
-
-# Preview what would be exported (dry run)
-arf history export backup.db --dry-run
+arf history export --file backup.db
 ```
 
 To restore or transfer history to another machine:
 
 ```bash
-arf history import --from arf backup.db
+arf history import --from arf --file backup.db
 ```
 
 You can also import history from other sources:

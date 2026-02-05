@@ -585,6 +585,14 @@ pub fn parse_unified_arf_history(
     validate_table_name(r_table)?;
     validate_table_name(shell_table)?;
 
+    // Ensure the R and shell tables have different names to avoid duplicate entries
+    if r_table == shell_table {
+        bail!(
+            "R table name and shell table name must be different (both are '{}')",
+            r_table
+        );
+    }
+
     if !path.exists() {
         bail!("arf export file not found: {}", path.display());
     }
@@ -2018,5 +2026,27 @@ mod tests {
         assert_eq!(r_entries[0].command, "r_cmd");
         assert_eq!(shell_entries.len(), 1);
         assert_eq!(shell_entries[0].command, "shell_cmd");
+    }
+
+    #[test]
+    fn test_parse_unified_rejects_same_table_names() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let unified_path = temp_dir.path().join("backup.db");
+
+        // Create a minimal database
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        db.execute(
+            "CREATE TABLE history (id INTEGER PRIMARY KEY, command_line TEXT)",
+            [],
+        )
+        .unwrap();
+        drop(db);
+
+        // Parsing with same table names should fail
+        let result = parse_unified_arf_history(&unified_path, "history", "history");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be different"));
     }
 }
