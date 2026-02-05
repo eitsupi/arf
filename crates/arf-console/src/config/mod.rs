@@ -631,10 +631,24 @@ show_banner = false
 
         /// Snapshot test for the default configuration file.
         /// This ensures we notice when the config structure changes.
+        ///
+        /// Skipped on Windows because `auto_match` defaults to `false` there,
+        /// which differs from the Unix snapshot. Windows developers can use WSL
+        /// for snapshot updates.
         #[test]
+        #[cfg(not(windows))]
         fn test_default_config_snapshot() {
             let config = crate::config::generate_default_config();
             insta::assert_snapshot!("default_config", config);
+        }
+
+        /// Windows-specific test for platform-dependent default values.
+        #[test]
+        #[cfg(windows)]
+        fn test_windows_default_config() {
+            let config = crate::config::Config::default();
+            // On Windows, auto_match defaults to false because bracketed paste is not supported
+            assert!(!config.editor.auto_match, "auto_match should default to false on Windows");
         }
 
         #[test]
