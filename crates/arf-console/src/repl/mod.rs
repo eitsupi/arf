@@ -858,8 +858,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 
                     // On Windows, reedline inserts CRLF for newlines in multiline input.
                     // R doesn't accept CR in code, so we need to strip it.
+                    // Use the shared strip_cr function from arf_libr.
                     #[cfg(windows)]
-                    let code = code.replace('\r', "");
+                    let code = arf_libr::strip_cr(&code).into_owned();
 
                     // Return the (possibly formatted) code to R
                     return Some(code);

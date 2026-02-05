@@ -429,15 +429,20 @@ fn strip_ansi_escapes(s: &str) -> String {
 
 /// Strip all carriage return characters from a string.
 ///
-/// On Windows, R may produce CR (`\r`) characters in output messages.
-/// When printed to the terminal, the CR returns the cursor to the
-/// start of the line, causing subsequent text to overwrite previous content.
-/// This results in garbled output.
+/// On Windows, CR (`\r`) characters can cause issues in two contexts:
 ///
-/// This function removes all CR characters to prevent this issue.
+/// 1. **Output**: R may produce CR in error messages, causing the cursor to
+///    return to the start of the line and overwrite previous content.
+///
+/// 2. **Input**: reedline inserts CRLF for newlines in multiline input, but
+///    R treats CR as an invalid token.
+///
+/// This function removes all CR characters to prevent these issues.
 /// Both CRLF (`\r\n`) and standalone CR are handled.
+///
+/// Returns a `Cow<str>` to avoid allocation when no CR characters are present.
 #[cfg(any(windows, test))]
-fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
+pub fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
     if s.contains('\r') {
         std::borrow::Cow::Owned(s.replace('\r', ""))
     } else {
