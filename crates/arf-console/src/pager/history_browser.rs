@@ -844,11 +844,15 @@ impl HistoryBrowser {
                 let checkbox = if entry.selected { "[x]" } else { "[ ]" };
                 let cursor_marker = if is_current { " > " } else { "   " };
 
-                // Format timestamp
+                // Format timestamp in local time
                 let timestamp = entry
                     .item
                     .start_timestamp
-                    .map(|ts| ts.format("%Y-%m-%d %H:%M").to_string())
+                    .map(|ts| {
+                        ts.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M")
+                            .to_string()
+                    })
                     .unwrap_or_else(|| "                ".to_string());
 
                 // Exit status
