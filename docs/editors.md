@@ -87,5 +87,5 @@ arf history import --from radian --dry-run
 arf history import --from radian
 ```
 
-> [!CAUTION]
-> This feature is experimental. Always back up your history files before importing. Importing the same file multiple times will create duplicate entries.
+> [!NOTE]
+> Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
