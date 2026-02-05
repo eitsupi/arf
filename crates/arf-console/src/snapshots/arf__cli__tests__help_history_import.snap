@@ -29,5 +29,15 @@ Options:
       --import-duplicates
           Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)
 
+      --r-table <R_TABLE>
+          Table name for R history in unified export file. Only used when importing from a unified arf export file
+          
+          [default: r]
+
+      --shell-table <SHELL_TABLE>
+          Table name for shell history in unified export file. Only used when importing from a unified arf export file
+          
+          [default: shell]
+
   -h, --help
           Print help (see a summary with '-h')

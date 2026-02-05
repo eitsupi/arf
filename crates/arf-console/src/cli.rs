@@ -189,6 +189,33 @@ pub enum HistoryAction {
         /// are skipped (anti-join on command text and timestamp).
         #[arg(long)]
         import_duplicates: bool,
+
+        /// Table name for R history in unified export file.
+        /// Only used when importing from a unified arf export file.
+        #[arg(long, default_value = "r")]
+        r_table: String,
+
+        /// Table name for shell history in unified export file.
+        /// Only used when importing from a unified arf export file.
+        #[arg(long, default_value = "shell")]
+        shell_table: String,
+    },
+    /// Export history to a unified SQLite file (experimental)
+    ///
+    /// Export both R and shell history to a single SQLite file.
+    /// This can be used as a backup or to transfer history between machines.
+    Export {
+        /// Path to the output SQLite file
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        file: PathBuf,
+
+        /// Table name for R history in the output file
+        #[arg(long, default_value = "r")]
+        r_table: String,
+
+        /// Table name for shell history in the output file
+        #[arg(long, default_value = "shell")]
+        shell_table: String,
     },
 }
 
@@ -372,5 +399,11 @@ mod tests {
     fn test_help_history_import_snapshot() {
         let help = Cli::generate_help_string(&["history", "import"]);
         insta::assert_snapshot!("help_history_import", help);
+    }
+
+    #[test]
+    fn test_help_history_export_snapshot() {
+        let help = Cli::generate_help_string(&["history", "export"]);
+        insta::assert_snapshot!("help_history_export", help);
     }
 }

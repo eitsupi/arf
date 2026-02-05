@@ -2,9 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental `arf history export` subcommand for backing up history to a unified SQLite file
+  - Exports both R and shell history to a single file with customizable table names
+  - Use with `arf history import --from arf` to restore or transfer history
+
 ### Changed
 
 - `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
+- `arf history import --from arf` now supports importing from unified export files (files other than `r.db` or `shell.db`)
+  - Use `--r-table` and `--shell-table` to specify custom table names
 - History browser now displays timestamps in local time instead of UTC
 
 ## [0.2.0-rc.2] - 2026-02-04

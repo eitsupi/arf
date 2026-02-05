@@ -547,6 +547,99 @@ pub fn import_entries(
     Ok(result)
 }
 
+/// Parse entries from a unified arf export file that contains both R and shell history.
+///
+/// This function reads from a SQLite file that has separate tables for R and shell history,
+/// as created by `export_history`. The table names are specified by the caller.
+///
+/// If a table doesn't exist, it's silently skipped (no error).
+pub fn parse_unified_arf_history(
+    path: &Path,
+    r_table: &str,
+    shell_table: &str,
+) -> Result<Vec<ImportEntry>> {
+    use rusqlite::{Connection, OpenFlags};
+
+    if !path.exists() {
+        bail!("arf export file not found: {}", path.display());
+    }
+
+    let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("Failed to open arf export file: {}", path.display()))?;
+
+    let mut entries = Vec::new();
+
+    // Try to read R history table
+    if table_exists(&db, r_table)? {
+        let r_entries = read_history_table(&db, r_table, "r")?;
+        entries.extend(r_entries);
+    }
+
+    // Try to read shell history table
+    if table_exists(&db, shell_table)? {
+        let shell_entries = read_history_table(&db, shell_table, "shell")?;
+        entries.extend(shell_entries);
+    }
+
+    Ok(entries)
+}
+
+/// Check if a table exists in the database.
+fn table_exists(db: &rusqlite::Connection, table_name: &str) -> Result<bool> {
+    let count: i32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+            [table_name],
+            |row| row.get(0),
+        )
+        .context("Failed to check if table exists")?;
+    Ok(count > 0)
+}
+
+/// Read history entries from a table.
+fn read_history_table(
+    db: &rusqlite::Connection,
+    table_name: &str,
+    mode: &str,
+) -> Result<Vec<ImportEntry>> {
+    use chrono::TimeZone;
+
+    // Use format! for table name since it can't be parameterized in SQL.
+    // The table_name comes from CLI args with defaults, not untrusted input.
+    let query = format!(
+        "SELECT command_line, start_timestamp FROM {} ORDER BY id",
+        table_name
+    );
+
+    let mut stmt = db.prepare(&query).with_context(|| {
+        format!(
+            "Failed to query table '{}' (not a valid history table?)",
+            table_name
+        )
+    })?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let command: String = row.get(0)?;
+            let ts_millis: Option<i64> = row.get(1)?;
+            Ok((command, ts_millis))
+        })
+        .context("Failed to query history")?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        let (command, ts_millis) = row.context("Failed to read history row")?;
+        let timestamp = ts_millis.and_then(|ms| Utc.timestamp_millis_opt(ms).single());
+        entries.push(ImportEntry {
+            command,
+            timestamp,
+            mode: Some(mode.to_string()),
+        });
+    }
+
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1722,5 +1815,90 @@ mod tests {
         assert!(!from_db.is_duplicate("new_cmd", None));
         assert!(from_history.is_duplicate("summary(iris)", None));
         assert!(from_db.is_duplicate("summary(iris)", None));
+    }
+
+    #[test]
+    fn test_parse_unified_arf_history_basic() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let unified_path = temp_dir.path().join("export.db");
+
+        // Create a unified export file with r and shell tables
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        db.execute(
+            "CREATE TABLE r (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "CREATE TABLE shell (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)",
+            [],
+        )
+        .unwrap();
+
+        db.execute("INSERT INTO r (command_line, start_timestamp) VALUES ('library(dplyr)', 1705315800000)", []).unwrap();
+        db.execute("INSERT INTO r (command_line, start_timestamp) VALUES ('print(1)', NULL)", []).unwrap();
+        db.execute("INSERT INTO shell (command_line, start_timestamp) VALUES ('ls -la', 1705315860000)", []).unwrap();
+        drop(db);
+
+        // Parse the unified file
+        let entries = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+
+        assert_eq!(entries.len(), 3);
+
+        // R entries
+        let r_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("r")).collect();
+        assert_eq!(r_entries.len(), 2);
+        assert_eq!(r_entries[0].command, "library(dplyr)");
+        assert!(r_entries[0].timestamp.is_some());
+        assert_eq!(r_entries[1].command, "print(1)");
+        assert!(r_entries[1].timestamp.is_none());
+
+        // Shell entries
+        let shell_entries: Vec<_> = entries.iter().filter(|e| e.mode.as_deref() == Some("shell")).collect();
+        assert_eq!(shell_entries.len(), 1);
+        assert_eq!(shell_entries[0].command, "ls -la");
+    }
+
+    #[test]
+    fn test_parse_unified_arf_history_custom_table_names() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let unified_path = temp_dir.path().join("custom.db");
+
+        // Create a unified export file with custom table names
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        db.execute(
+            "CREATE TABLE my_r_history (id INTEGER PRIMARY KEY, command_line TEXT NOT NULL, start_timestamp INTEGER)",
+            [],
+        )
+        .unwrap();
+        db.execute("INSERT INTO my_r_history (command_line) VALUES ('test_cmd')", []).unwrap();
+        drop(db);
+
+        // Parse with custom table names
+        let entries = parse_unified_arf_history(&unified_path, "my_r_history", "my_shell_history").unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "test_cmd");
+        assert_eq!(entries[0].mode, Some("r".to_string()));
+    }
+
+    #[test]
+    fn test_parse_unified_arf_history_missing_tables() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let unified_path = temp_dir.path().join("empty.db");
+
+        // Create an empty database (no tables)
+        let db = rusqlite::Connection::open(&unified_path).unwrap();
+        drop(db);
+
+        // Should return empty vec, not error
+        let entries = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+        assert!(entries.is_empty());
     }
 }
