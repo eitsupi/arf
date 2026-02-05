@@ -2067,10 +2067,16 @@ mod tests {
             [],
         )
         .unwrap();
-        db.execute(r#"INSERT INTO "select" (command_line) VALUES ('r_cmd')"#, [])
-            .unwrap();
-        db.execute(r#"INSERT INTO "from" (command_line) VALUES ('shell_cmd')"#, [])
-            .unwrap();
+        db.execute(
+            r#"INSERT INTO "select" (command_line) VALUES ('r_cmd')"#,
+            [],
+        )
+        .unwrap();
+        db.execute(
+            r#"INSERT INTO "from" (command_line) VALUES ('shell_cmd')"#,
+            [],
+        )
+        .unwrap();
         drop(db);
 
         // SQLite reserved words should work when quoted

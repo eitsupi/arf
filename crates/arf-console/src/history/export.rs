@@ -442,8 +442,7 @@ mod tests {
         create_test_history(&shell_path, &["ls"]);
 
         // SQLite reserved words should work when quoted
-        let result =
-            export_history(&r_path, &shell_path, &output_path, "select", "from").unwrap();
+        let result = export_history(&r_path, &shell_path, &output_path, "select", "from").unwrap();
 
         assert_eq!(result.r_exported, 1);
         assert_eq!(result.shell_exported, 1);
