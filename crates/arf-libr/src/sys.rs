@@ -366,11 +366,11 @@ unsafe extern "C" fn r_write_console_ex(buf: *const c_char, buflen: c_int, otype
     }
 
     // Default: print to stdout/stderr
-    // On Windows, R may produce CRLF line endings which cause display issues
+    // On Windows, R may produce CR characters which cause display issues
     // (the CR returns cursor to start of line, overwriting previous content).
-    // Normalize CRLF to LF before printing.
+    // Strip all CR characters before printing.
     #[cfg(windows)]
-    let s = normalize_crlf(&s);
+    let s = strip_cr(&s);
 
     if is_error {
         // Wrap error output in red ANSI codes (like radian does)
@@ -426,18 +426,19 @@ fn strip_ansi_escapes(s: &str) -> String {
     result
 }
 
-/// Normalize CRLF line endings to LF.
+/// Strip all carriage return characters from a string.
 ///
-/// On Windows, R may produce CRLF (`\r\n`) line endings in error messages.
-/// When printed to the terminal, the CR (`\r`) returns the cursor to the
+/// On Windows, R may produce CR (`\r`) characters in output messages.
+/// When printed to the terminal, the CR returns the cursor to the
 /// start of the line, causing subsequent text to overwrite previous content.
 /// This results in garbled output.
 ///
-/// This function converts all CRLF sequences to just LF to prevent this issue.
+/// This function removes all CR characters to prevent this issue.
+/// Both CRLF (`\r\n`) and standalone CR are handled.
 #[cfg(any(windows, test))]
-fn normalize_crlf(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.contains("\r\n") {
-        std::borrow::Cow::Owned(s.replace("\r\n", "\n"))
+fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains('\r') {
+        std::borrow::Cow::Owned(s.replace('\r', ""))
     } else {
         std::borrow::Cow::Borrowed(s)
     }
@@ -1746,28 +1747,28 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_crlf() {
+    fn test_strip_cr() {
         // CRLF should be converted to LF
-        let normalized = normalize_crlf("Error: foo\r\nbar\r\n");
-        assert_eq!(normalized, "Error: foo\nbar\n");
+        let stripped = strip_cr("Error: foo\r\nbar\r\n");
+        assert_eq!(stripped, "Error: foo\nbar\n");
 
-        // Text without CRLF should be unchanged (and borrowed, not owned)
+        // Text without CR should be unchanged (and borrowed, not owned)
         let input = "Error: foo\nbar\n";
-        let normalized = normalize_crlf(input);
-        assert_eq!(normalized, input);
-        assert!(matches!(normalized, std::borrow::Cow::Borrowed(_)));
+        let stripped = strip_cr(input);
+        assert_eq!(stripped, input);
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
 
-        // Mixed line endings: only CRLF should be converted
-        let normalized = normalize_crlf("line1\r\nline2\nline3\r\n");
-        assert_eq!(normalized, "line1\nline2\nline3\n");
+        // Standalone CR should also be stripped
+        let stripped = strip_cr("Error: \"{\r\" の)");
+        assert_eq!(stripped, "Error: \"{\" の)");
 
-        // Standalone CR should NOT be converted (only CRLF)
-        let normalized = normalize_crlf("progress\rbar\r\n");
-        assert_eq!(normalized, "progress\rbar\n");
+        // Mixed line endings: all CR should be removed
+        let stripped = strip_cr("line1\r\nline2\nline3\r");
+        assert_eq!(stripped, "line1\nline2\nline3");
 
         // Empty string
-        let normalized = normalize_crlf("");
-        assert_eq!(normalized, "");
-        assert!(matches!(normalized, std::borrow::Cow::Borrowed(_)));
+        let stripped = strip_cr("");
+        assert_eq!(stripped, "");
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
     }
 }
