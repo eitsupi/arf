@@ -139,6 +139,10 @@ pub struct EditorConfig {
     /// Editing mode: "emacs" or "vi".
     pub mode: EditorMode,
     /// Auto-close brackets and quotes.
+    ///
+    /// Default: `true` on Unix, `false` on Windows.
+    /// Windows default is `false` because bracketed paste is not supported,
+    /// which causes issues when pasting code containing brackets.
     pub auto_match: bool,
     /// History-based autosuggestions mode (fish/nushell style).
     ///
@@ -190,7 +194,8 @@ impl Default for EditorConfig {
     fn default() -> Self {
         EditorConfig {
             mode: EditorMode::Emacs,
-            auto_match: true,
+            // Windows: bracketed paste not supported, so auto_match causes issues when pasting
+            auto_match: !cfg!(windows),
             auto_suggestions: AutoSuggestions::All,
             key_map: default_key_map(),
         }
