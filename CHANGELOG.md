@@ -18,6 +18,7 @@
 ### Fixed
 
 - **Windows:** Fixed garbled error message display caused by CRLF line endings in R output
+- **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline
 
 ## [0.2.0-rc.2] - 2026-02-04
 
