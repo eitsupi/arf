@@ -231,6 +231,7 @@ fn handle_history_command(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_history_import(
     source: ImportSource,
     file: Option<&std::path::PathBuf>,
@@ -456,7 +457,7 @@ fn handle_history_import(
 }
 
 fn handle_history_export(
-    output_file: &std::path::PathBuf,
+    output_file: &std::path::Path,
     r_table: &str,
     shell_table: &str,
     config_path: Option<&std::path::PathBuf>,

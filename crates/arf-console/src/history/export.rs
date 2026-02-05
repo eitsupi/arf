@@ -43,13 +43,14 @@ pub fn export_history(
     }
 
     // Ensure parent directory exists
-    if let Some(parent) = output_path.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            bail!(
-                "Parent directory does not exist: {}\nCreate it first or specify a different path.",
-                parent.display()
-            );
-        }
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        bail!(
+            "Parent directory does not exist: {}\nCreate it first or specify a different path.",
+            parent.display()
+        );
     }
 
     // Use atomic write: write to temp file, then rename on success.
