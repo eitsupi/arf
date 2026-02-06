@@ -27,6 +27,9 @@ Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. Th
 > [!NOTE]
 > This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
 
+> [!WARNING]
+> On Windows, vscode-R forcibly disables bracketed paste regardless of the `r.bracketedPaste` setting ([vscode-R#1590](https://github.com/REditorSupport/vscode-R/issues/1590)). Until [vscode-R#1631](https://github.com/REditorSupport/vscode-R/pull/1631) is merged, code sent from the editor will be received as individual key events, which may cause issues with auto-match.
+
 ## Zed (zed-r)
 
 The [zed-r](https://github.com/ocsmit/zed-r) extension provides R language support in Zed. You can use arf as the R terminal by configuring a task.
