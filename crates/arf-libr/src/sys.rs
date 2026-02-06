@@ -1964,13 +1964,16 @@ export R_DOC_DIR
 
     #[test]
     fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
-        // Pre-set R_DOC_DIR in the environment
+        // NOTE: This test mutates process-global env vars. It saves/restores
+        // R_DOC_DIR to minimise interference with parallel tests.
         let original = std::env::var("R_DOC_DIR").ok();
+
+        // Pre-set R_DOC_DIR in the environment
         unsafe { std::env::set_var("R_DOC_DIR", "/custom/doc") };
 
-        // Create a temp dir with a fake wrapper script
-        let tmp = std::env::temp_dir().join("arf_test_wrapper");
-        let bin_dir = tmp.join("bin");
+        // Create a temp dir with a fake wrapper script (auto-cleaned on drop)
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_dir = tmp.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
         std::fs::write(
             bin_dir.join("R"),
@@ -1978,17 +1981,15 @@ export R_DOC_DIR
         )
         .unwrap();
 
-        set_r_path_vars_from_wrapper(&tmp);
+        set_r_path_vars_from_wrapper(tmp.path());
 
         // R_DOC_DIR should NOT be overwritten
         assert_eq!(std::env::var("R_DOC_DIR").unwrap(), "/custom/doc");
 
-        // Cleanup
-        if let Some(val) = original {
-            unsafe { std::env::set_var("R_DOC_DIR", val) };
-        } else {
-            unsafe { std::env::remove_var("R_DOC_DIR") };
+        // Restore original value
+        match original {
+            Some(val) => unsafe { std::env::set_var("R_DOC_DIR", val) },
+            None => unsafe { std::env::remove_var("R_DOC_DIR") },
         }
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
