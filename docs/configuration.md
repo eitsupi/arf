@@ -2,7 +2,8 @@
 
 arf uses a TOML configuration file following the XDG Base Directory specification.
 
-> **Warning**: The configuration file format is not yet stable and may change in future versions.
+> [!WARNING]
+> The configuration file format is not yet stable and may change in future versions.
 
 ## Configuration File Location
 
@@ -64,11 +65,16 @@ shell_format = "[{shell}] $ "  # Shell mode prompt
 mode_indicator = "prefix"  # Position of mode indicator: "prefix", "suffix", or "none"
 
 [prompt.status]
-symbol = { error = "✗ " }  # Status symbols: success and error (both default to empty)
 override_prompt_color = false  # Also change entire prompt color based on status
 
-[prompt.vi]
-symbol = {}                # Vi mode symbols (all empty by default)
+[prompt.status.symbol]
+success = ""               # Status symbol on success (empty = hidden)
+error = "✗ "               # Status symbol on error
+
+[prompt.vi.symbol]
+insert = "[I] "            # Vi insert mode indicator
+normal = "[N] "            # Vi normal mode indicator
+non_vi = ""                # Non-vi modes (Emacs, etc.)
 
 [prompt.indicators]
 reprex = "[reprex] "       # Indicator text for reprex mode
@@ -79,6 +85,7 @@ enabled = true             # Enable tab completion
 timeout_ms = 50            # Completion timeout in milliseconds
 debounce_ms = 100          # Debounce delay for completion
 max_height = 10            # Maximum height of completion menu
+auto_paren_limit = 50      # Max packages to check for function paren insertion
 
 [history]
 menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
@@ -113,12 +120,18 @@ success = "LightGreen"     # Color for success (symbol and/or prompt)
 error = "LightRed"         # Color for error (symbol and/or prompt)
 
 [colors.prompt.vi]
-insert = "Default"         # Color for vi insert mode indicator
-normal = "Default"         # Color for vi normal mode indicator
+insert = "LightGreen"     # Color for vi insert mode indicator
+normal = "LightYellow"    # Color for vi normal mode indicator
 non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 
-[experimental]
-# Reserved for future experimental features
+[experimental.history_forget]
+enabled = false            # Auto-remove failed commands from history
+delay = 2                  # Keep last N failed commands for retry
+on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
+
+[experimental.prompt_spinner]
+frames = ""                # Animation frames (empty = disabled)
+color = "Cyan"             # Spinner color
 ```
 
 ## Auto Suggestions
@@ -146,7 +159,8 @@ For backward compatibility, boolean values are also accepted:
 
 The `"cwd"` mode filters suggestions to show only history entries that were recorded in the current working directory. If no matches are found, it falls back to all history.
 
-> **Note**: The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
+> [!NOTE]
+> The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
 
 ## Keyboard Shortcuts
 
@@ -159,7 +173,8 @@ arf supports configurable keyboard shortcuts using the [crokey](https://github.c
 | `Alt+-` | ` <- ` | `"alt-hyphen"` |
 | `Alt+P` | ` \|> ` | `"alt-p"` |
 
-> **Note**: arf uses `Alt+P` instead of the RStudio-style `Ctrl+Shift+M` because `Ctrl+Shift+M` conflicts with VS Code and Zed's diagnostics panels when running in their integrated terminals. See [Customizing for RStudio compatibility](#customizing-for-rstudio-compatibility) below.
+> [!NOTE]
+> arf uses `Alt+P` instead of the RStudio-style `Ctrl+Shift+M` because `Ctrl+Shift+M` conflicts with VS Code and Zed's diagnostics panels when running in their integrated terminals. See [Customizing for RStudio compatibility](#customizing-for-rstudio-compatibility) below.
 
 ### Key Format
 
@@ -199,7 +214,8 @@ If you prefer RStudio-style shortcuts and are using a standalone terminal (not V
 "ctrl-shift-m" = " |> "
 ```
 
-> **Warning**: `Ctrl+Shift+M` opens the Problems/Diagnostics panel in VS Code and Zed, so this shortcut won't reach arf when running in their integrated terminals.
+> [!WARNING]
+> `Ctrl+Shift+M` opens the Problems/Diagnostics panel in VS Code and Zed, so this shortcut won't reach arf when running in their integrated terminals.
 
 ### Disabling Default Shortcuts
 
@@ -386,7 +402,8 @@ normal = "Yellow"
 symbol = { insert = "", normal = "" }
 ```
 
-> **Note**: To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
+> [!NOTE]
+> To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
 
 ## Auto-Formatting (Reprex Mode)
 
@@ -522,7 +539,8 @@ arf history import --from radian
 arf history import --from r
 ```
 
-> **Note**: Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
+> [!NOTE]
+> Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
 ## CLI Options Override
 
