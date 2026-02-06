@@ -64,11 +64,16 @@ shell_format = "[{shell}] $ "  # Shell mode prompt
 mode_indicator = "prefix"  # Position of mode indicator: "prefix", "suffix", or "none"
 
 [prompt.status]
-symbol = { error = "✗ " }  # Status symbols: success and error (both default to empty)
 override_prompt_color = false  # Also change entire prompt color based on status
 
-[prompt.vi]
-symbol = {}                # Vi mode symbols (all empty by default)
+[prompt.status.symbol]
+success = ""               # Status symbol on success (empty = hidden)
+error = "✗ "               # Status symbol on error
+
+[prompt.vi.symbol]
+insert = "[I] "            # Vi insert mode indicator
+normal = "[N] "            # Vi normal mode indicator
+non_vi = ""                # Non-vi modes (Emacs, etc.)
 
 [prompt.indicators]
 reprex = "[reprex] "       # Indicator text for reprex mode
@@ -79,6 +84,7 @@ enabled = true             # Enable tab completion
 timeout_ms = 50            # Completion timeout in milliseconds
 debounce_ms = 100          # Debounce delay for completion
 max_height = 10            # Maximum height of completion menu
+auto_paren_limit = 50      # Max packages to check for function paren insertion
 
 [history]
 menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
@@ -117,8 +123,14 @@ insert = "LightGreen"     # Color for vi insert mode indicator
 normal = "LightYellow"    # Color for vi normal mode indicator
 non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 
-[experimental]
-# Reserved for future experimental features
+[experimental.history_forget]
+enabled = false            # Auto-remove failed commands from history
+delay = 2                  # Keep last N failed commands for retry
+on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
+
+[experimental.prompt_spinner]
+frames = ""                # Animation frames (empty = disabled)
+color = "Cyan"             # Spinner color
 ```
 
 ## Auto Suggestions
