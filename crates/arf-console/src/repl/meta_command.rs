@@ -222,7 +222,7 @@ pub fn process_meta_command(
             println!(
                 "#   :autoformat    - Toggle auto-formatting in reprex mode (requires Air CLI)"
             );
-            println!("#   :history       - History management (clear, schema)");
+            println!("#   :history       - History management (browse, clear, schema)");
             println!("#   :restart       - Restart R session");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
             println!("#   :commands      - Show this list");

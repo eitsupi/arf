@@ -111,11 +111,15 @@ Press `:h` or `:help` to open the fuzzy help browser:
 | `:info`, `:session` | Show session information (version, config path, etc.) |
 | `:shell` | Enter shell mode |
 | `:r` | Return to R mode |
+| `:system <cmd>` | Execute a single shell command inline |
 | `:reprex` | Toggle reprex mode |
-| `:autoformat` | Toggle auto-formatting (requires Air) |
+| `:autoformat`, `:format` | Toggle auto-formatting (requires Air) |
 | `:switch <version>` | Restart with different R version (requires rig) |
 | `:restart` | Restart R session |
-| `:history clear` | Clear command history |
+| `:history browse` | Browse and manage command history |
+| `:history clear` | Clear command history (supports `r`, `shell`, `all` targets) |
+| `:history schema` | Display history database schema and R examples |
+| `:commands`, `:cmds` | Show available commands |
 | `:quit`, `:exit` | Exit arf |
 
 ## Configuration
