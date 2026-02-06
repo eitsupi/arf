@@ -21,7 +21,6 @@
 
 ### Changed
 
-- **Windows:** `auto_match` now defaults to `false` because bracketed paste is not supported, which causes issues when pasting code containing brackets (#61)
 - `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
 - `arf history import --from arf` now supports importing from unified export files (files other than `r.db` or `shell.db`)
   - Use `--r-table` and `--shell-table` to specify custom table names
