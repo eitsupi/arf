@@ -1347,7 +1347,7 @@
       "type": "object",
       "properties": {
         "auto_match": {
-          "description": "Auto-close brackets and quotes.\n\nDefault: `true` on Unix, `false` on Windows.\nWindows default is `false` because bracketed paste is not supported,\nwhich causes issues when pasting code containing brackets.",
+          "description": "Auto-close brackets and quotes.",
           "type": "boolean",
           "default": true
         },

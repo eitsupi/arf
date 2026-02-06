@@ -150,7 +150,7 @@ autoformat = false      # Requires Air CLI
 
 [editor]
 mode = "emacs"          # "emacs" or "vi"
-auto_match = true       # Defaults to false on Windows (see Known Issues)
+auto_match = true       # Auto-close brackets and quotes
 auto_suggestions = "all" # "none", "all", or "cwd"
 
 # Keyboard shortcuts (crokey format)
@@ -350,10 +350,6 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 **Limitations**:
 - If you set a custom error handler via `options(error = ...)`, arf will chain to your handler, but arf's handler takes precedence. Your handler will still be called after arf records the error.
 - There is a slight performance overhead (~microseconds) on each prompt due to R API calls for checking and resetting error state. This is negligible in practice but may be noticeable in benchmarks.
-
-### Auto-matching brackets disabled by default on Windows
-
-On Windows, `auto_match` defaults to `false` because [crossterm](https://github.com/crossterm-rs/crossterm) (the terminal library used by arf via reedline) does not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste) on Windows ([crossterm#737](https://github.com/crossterm-rs/crossterm/issues/737)). crossterm uses the Windows Console API directly without setting `ENABLE_VIRTUAL_TERMINAL_INPUT` or parsing ANSI sequences from input, so pasted text is received as individual key events. This causes auto-matching to trigger on each bracket or quote character during paste, corrupting the pasted text. To enable auto-matching on Windows, add `auto_match = true` to your `[editor]` configuration—but be aware that pasting may not work correctly.
 
 ### Windows Terminal flickering in TUI pagers
 

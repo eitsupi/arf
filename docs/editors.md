@@ -28,7 +28,7 @@ Without `r.bracketedPaste`, vscode-R sends code line-by-line to the terminal. Th
 > This is the same recommendation as for radian. The `r.bracketedPaste` setting is disabled by default in vscode-R because the standard R terminal does not support it.
 
 > [!WARNING]
-> On Windows, [crossterm](https://github.com/crossterm-rs/crossterm) (the terminal library used by arf) does not support [bracketed paste mode](https://en.wikipedia.org/wiki/Bracketed-paste) ([crossterm#737](https://github.com/crossterm-rs/crossterm/issues/737)), so pasted text is received as individual key events regardless of vscode-R settings. Because of this, `auto_match` defaults to `false` on Windows to prevent bracket/quote corruption during paste. See [Known Issues](../README.md#auto-matching-brackets-disabled-by-default-on-windows) in the README for details.
+> On Windows, vscode-R forcibly disables bracketed paste regardless of the `r.bracketedPaste` setting ([vscode-R#1590](https://github.com/REditorSupport/vscode-R/issues/1590)). Until [vscode-R#1631](https://github.com/REditorSupport/vscode-R/pull/1631) is merged, code sent from the editor will be received as individual key events, which may cause issues with auto-match.
 
 ## Zed (zed-r)
 

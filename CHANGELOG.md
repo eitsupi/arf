@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.2.0-rc.3] - 2026-02-05
+## [0.2.0] - 2026-02-06
 
 ### Added
 
@@ -21,7 +21,6 @@
 
 ### Changed
 
-- **Windows:** `auto_match` now defaults to `false` because bracketed paste is not supported, which causes issues when pasting code containing brackets (#61)
 - `arf history import` now skips duplicate entries by default (anti-join on command text and timestamp). Use `--import-duplicates` to import all entries regardless (#52)
 - `arf history import --from arf` now supports importing from unified export files (files other than `r.db` or `shell.db`)
   - Use `--r-table` and `--shell-table` to specify custom table names
@@ -82,9 +81,10 @@ auto_paren_limit = 50
 
 ### Fixed
 
-- Set `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` from R's shell wrapper script on startup. On distributions where these paths differ from the default `$R_HOME/<component>` (e.g. Fedora, RHEL), `:help` and `utils::hsearch_db()` could fail because `R.home("doc")` returned a non-existent path (#59)
+- **Windows:** Enable bracketed paste mode by patching crossterm with VT input + ANSI parser hybrid support ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030))
 - **Windows:** Fixed garbled error message display caused by CRLF line endings in R output (#56)
 - **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline (#57)
+- Set `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` from R's shell wrapper script on startup. On distributions where these paths differ from the default `$R_HOME/<component>` (e.g. Fedora, RHEL), `:help` and `utils::hsearch_db()` could fail because `R.home("doc")` returned a non-existent path (#59)
 - Flush stdout after print in `r_write_console_ex` to prevent output buffering issues (#44)
 - Use display-width-aware truncation for "Copied" feedback message (#41)
 - Mouse wheel scroll now moves cursor in history browser (#40)

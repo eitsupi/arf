@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/arf-console"]
 
 [workspace.package]
-version = "0.2.0-rc.3"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/eitsupi/arf"
@@ -21,7 +21,7 @@ libloading = "0.9"
 crossterm = "0.29"
 crokey = "1.4"
 nu-ansi-term = { version = "0.50", features = ["derive_serde_style"] }
-reedline = { git = "https://github.com/nushell/reedline.git", rev = "refs/pull/1015/head", features = ["sqlite", "idle_callback"] }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "8afe75ec78c2631728244b7f13a0d8df289dafeb", features = ["sqlite", "idle_callback"] }
 
 # Configuration
 dirs = "6.0"
@@ -70,6 +70,11 @@ portable-pty = "0.9"
 regex = "1.11"
 tempfile = "3"
 vt100 = "0.16"
+
+# Patch crossterm with Windows VT input support (bracketed paste)
+# https://github.com/crossterm-rs/crossterm/pull/1030
+[patch.crates-io]
+crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "e81d5d643700f6a1de17c130327acfd7df70420f" }
 
 # The profile that 'dist' will build with
 [profile.dist]

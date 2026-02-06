@@ -78,7 +78,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "arf-console"
-version = "0.2.0-rc.3"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.2.0-rc.3"
+version = "0.2.0"
 dependencies = [
  "arf-libr",
  "log",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.2.0-rc.3"
+version = "0.2.0"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -332,13 +332,11 @@ dependencies = [
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+source = "git+https://github.com/crossterm-rs/crossterm?rev=e81d5d643700f6a1de17c130327acfd7df70420f#e81d5d643700f6a1de17c130327acfd7df70420f"
 dependencies = [
  "bitflags 2.10.0",
  "crossterm_winapi",
  "derive_more",
- "document-features",
  "mio",
  "parking_lot",
  "rustix",
@@ -398,15 +396,6 @@ dependencies = [
  "option-ext",
  "redox_users",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "document-features"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
-dependencies = [
- "litrs",
 ]
 
 [[package]]
@@ -792,12 +781,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
-name = "litrs"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
-
-[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1013,7 +996,7 @@ dependencies = [
 [[package]]
 name = "reedline"
 version = "0.45.0"
-source = "git+https://github.com/nushell/reedline.git?rev=refs%2Fpull%2F1015%2Fhead#8afe75ec78c2631728244b7f13a0d8df289dafeb"
+source = "git+https://github.com/nushell/reedline.git?rev=8afe75ec78c2631728244b7f13a0d8df289dafeb#8afe75ec78c2631728244b7f13a0d8df289dafeb"
 dependencies = [
  "chrono",
  "crossterm",
