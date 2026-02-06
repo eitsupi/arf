@@ -188,10 +188,16 @@ fn set_r_path_vars_from_wrapper(r_home: &Path) {
 /// surrounding quotes stripped. Returns `None` if the variable is not found
 /// or the value is empty.
 fn parse_var_from_wrapper_script(script_content: &str, var_name: &str) -> Option<String> {
-    let prefix = format!("{}=", var_name);
     let value = script_content.lines().find_map(|line| {
         let trimmed = line.trim();
-        trimmed.strip_prefix(&prefix)
+        // Split on first '=' and compare the key exactly to avoid partial
+        // prefix matches (e.g. "R_DOC_DIR_EXTRA=" matching "R_DOC_DIR").
+        let (key, val) = trimmed.split_once('=')?;
+        if key == var_name {
+            Some(val)
+        } else {
+            None
+        }
     })?;
 
     // Strip surrounding quotes if present
@@ -1937,5 +1943,52 @@ export R_DOC_DIR
             parse_var_from_wrapper_script(script, "R_DOC_DIR"),
             None
         );
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script_no_partial_prefix_match() {
+        // R_DOC_DIR_EXTRA should NOT match when looking for R_DOC_DIR
+        let script = "R_DOC_DIR_EXTRA=/some/path\nR_DOC_DIR=/usr/share/doc/R\n";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/usr/share/doc/R".to_string())
+        );
+
+        // If only the longer name exists, R_DOC_DIR should not match
+        let script = "R_DOC_DIR_EXTRA=/some/path\n";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
+        // Pre-set R_DOC_DIR in the environment
+        let original = std::env::var("R_DOC_DIR").ok();
+        unsafe { std::env::set_var("R_DOC_DIR", "/custom/doc") };
+
+        // Create a temp dir with a fake wrapper script
+        let tmp = std::env::temp_dir().join("arf_test_wrapper");
+        let bin_dir = tmp.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(
+            bin_dir.join("R"),
+            "R_DOC_DIR=/should/not/override\nexport R_DOC_DIR\n",
+        )
+        .unwrap();
+
+        set_r_path_vars_from_wrapper(&tmp);
+
+        // R_DOC_DIR should NOT be overwritten
+        assert_eq!(std::env::var("R_DOC_DIR").unwrap(), "/custom/doc");
+
+        // Cleanup
+        if let Some(val) = original {
+            unsafe { std::env::set_var("R_DOC_DIR", val) };
+        } else {
+            unsafe { std::env::remove_var("R_DOC_DIR") };
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
