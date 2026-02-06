@@ -193,11 +193,7 @@ fn parse_var_from_wrapper_script(script_content: &str, var_name: &str) -> Option
         // Split on first '=' and compare the key exactly to avoid partial
         // prefix matches (e.g. "R_DOC_DIR_EXTRA=" matching "R_DOC_DIR").
         let (key, val) = trimmed.split_once('=')?;
-        if key == var_name {
-            Some(val)
-        } else {
-            None
-        }
+        if key == var_name { Some(val) } else { None }
     })?;
 
     // Strip surrounding quotes if present
@@ -1894,10 +1890,7 @@ export R_DOC_DIR
         );
 
         // Variable not present
-        assert_eq!(
-            parse_var_from_wrapper_script(script, "R_MISSING_VAR"),
-            None
-        );
+        assert_eq!(parse_var_from_wrapper_script(script, "R_MISSING_VAR"), None);
     }
 
     #[test]
@@ -1939,10 +1932,7 @@ export R_DOC_DIR
     #[test]
     fn test_parse_var_from_wrapper_script_empty_value() {
         let script = "R_DOC_DIR=\nexport R_DOC_DIR\n";
-        assert_eq!(
-            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
-            None
-        );
+        assert_eq!(parse_var_from_wrapper_script(script, "R_DOC_DIR"), None);
     }
 
     #[test]
@@ -1956,10 +1946,7 @@ export R_DOC_DIR
 
         // If only the longer name exists, R_DOC_DIR should not match
         let script = "R_DOC_DIR_EXTRA=/some/path\n";
-        assert_eq!(
-            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
-            None
-        );
+        assert_eq!(parse_var_from_wrapper_script(script, "R_DOC_DIR"), None);
     }
 
     #[test]
