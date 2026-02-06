@@ -71,6 +71,11 @@ regex = "1.11"
 tempfile = "3"
 vt100 = "0.16"
 
+# Patch crossterm with Windows VT input support (bracketed paste)
+# https://github.com/crossterm-rs/crossterm/pull/1030
+[patch.crates-io]
+crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "refs/pull/1030/head" }
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
