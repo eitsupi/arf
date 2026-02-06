@@ -113,8 +113,8 @@ success = "LightGreen"     # Color for success (symbol and/or prompt)
 error = "LightRed"         # Color for error (symbol and/or prompt)
 
 [colors.prompt.vi]
-insert = "Default"         # Color for vi insert mode indicator
-normal = "Default"         # Color for vi normal mode indicator
+insert = "LightGreen"     # Color for vi insert mode indicator
+normal = "LightYellow"    # Color for vi normal mode indicator
 non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 
 [experimental]
