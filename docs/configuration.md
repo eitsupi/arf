@@ -159,7 +159,8 @@ For backward compatibility, boolean values are also accepted:
 
 The `"cwd"` mode filters suggestions to show only history entries that were recorded in the current working directory. If no matches are found, it falls back to all history.
 
-> **Note**: The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
+> [!NOTE]
+> The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
 
 ## Keyboard Shortcuts
 
@@ -172,7 +173,8 @@ arf supports configurable keyboard shortcuts using the [crokey](https://github.c
 | `Alt+-` | ` <- ` | `"alt-hyphen"` |
 | `Alt+P` | ` \|> ` | `"alt-p"` |
 
-> **Note**: arf uses `Alt+P` instead of the RStudio-style `Ctrl+Shift+M` because `Ctrl+Shift+M` conflicts with VS Code and Zed's diagnostics panels when running in their integrated terminals. See [Customizing for RStudio compatibility](#customizing-for-rstudio-compatibility) below.
+> [!NOTE]
+> arf uses `Alt+P` instead of the RStudio-style `Ctrl+Shift+M` because `Ctrl+Shift+M` conflicts with VS Code and Zed's diagnostics panels when running in their integrated terminals. See [Customizing for RStudio compatibility](#customizing-for-rstudio-compatibility) below.
 
 ### Key Format
 
@@ -212,7 +214,8 @@ If you prefer RStudio-style shortcuts and are using a standalone terminal (not V
 "ctrl-shift-m" = " |> "
 ```
 
-> **Warning**: `Ctrl+Shift+M` opens the Problems/Diagnostics panel in VS Code and Zed, so this shortcut won't reach arf when running in their integrated terminals.
+> [!WARNING]
+> `Ctrl+Shift+M` opens the Problems/Diagnostics panel in VS Code and Zed, so this shortcut won't reach arf when running in their integrated terminals.
 
 ### Disabling Default Shortcuts
 
@@ -399,7 +402,8 @@ normal = "Yellow"
 symbol = { insert = "", normal = "" }
 ```
 
-> **Note**: To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
+> [!NOTE]
+> To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
 
 ## Auto-Formatting (Reprex Mode)
 
@@ -535,7 +539,8 @@ arf history import --from radian
 arf history import --from r
 ```
 
-> **Note**: Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
+> [!NOTE]
+> Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
 ## CLI Options Override
 
