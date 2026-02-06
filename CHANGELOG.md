@@ -17,7 +17,7 @@
   - When set to `"cwd"`, suggestions are filtered to history entries recorded in the current directory
   - Falls back to all history if no matches found
 - Enhanced `:info` meta command with pager view, clipboard copy, and path masking (#29)
-- Vi mode indicator support for prompts via `prompt.mode_indicator` config (#23)
+- Vi mode indicator support for prompts via `prompt.vi` and `colors.prompt.vi` config (#23)
 
 ### Changed
 
