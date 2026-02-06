@@ -17,3 +17,6 @@ exec.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 encoding_rs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

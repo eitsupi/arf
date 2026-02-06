@@ -82,6 +82,7 @@ auto_paren_limit = 50
 
 ### Fixed
 
+- Set `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` from R's shell wrapper script on startup. On distributions where these paths differ from the default `$R_HOME/<component>` (e.g. Fedora, RHEL), `:help` and `utils::hsearch_db()` could fail because `R.home("doc")` returned a non-existent path (#59)
 - **Windows:** Fixed garbled error message display caused by CRLF line endings in R output (#56)
 - **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline (#57)
 - Flush stdout after print in `r_write_console_ex` to prevent output buffering issues (#44)

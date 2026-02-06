@@ -5,7 +5,7 @@ use crate::functions::{init_r_library, r_library};
 use std::env;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Default R library paths by platform.
@@ -128,6 +128,81 @@ pub fn get_r_home() -> RResult<PathBuf> {
         Err(RError::LibraryNotFound(
             "R RHOME failed. Is R installed and in PATH?".to_string(),
         ))
+    }
+}
+
+/// Environment variables that R's shell wrapper script exports but that are
+/// absent from `$R_HOME/etc/Renviron`. When embedding R we bypass the wrapper,
+/// so these must be extracted from the script and set manually.
+const R_WRAPPER_ENV_VARS: &[&str] = &["R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR"];
+
+/// Parse R's shell wrapper script (`$R_HOME/bin/R`) to extract environment
+/// variable assignments for paths that are not set via `Renviron`.
+///
+/// The wrapper is generated from R's `src/scripts/R.sh.in` template and
+/// contains lines like:
+/// ```text
+/// R_DOC_DIR=/usr/share/doc/R
+/// export R_DOC_DIR
+/// ```
+///
+/// On most installations `$R_HOME/doc` etc. exist and match these values, but
+/// some distributions (e.g. Fedora, RHEL) relocate them. Without these
+/// variables, `R.home("doc")` falls back to the non-existent `$R_HOME/doc`.
+///
+/// Note: ark solves the same problem by spawning
+/// `R --vanilla -s -e "cat(R.home('share'), ...)"` to query the values.
+/// We parse the wrapper script directly instead to avoid the ~300ms R
+/// startup cost, which matters for a terminal application.
+fn set_r_path_vars_from_wrapper(r_home: &Path) {
+    let wrapper_path = r_home.join("bin").join("R");
+    let content = match std::fs::read_to_string(&wrapper_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!(
+                "Could not read R wrapper script {}: {}",
+                wrapper_path.display(),
+                e
+            );
+            return;
+        }
+    };
+
+    for var_name in R_WRAPPER_ENV_VARS {
+        // Skip if already set in the environment
+        if env::var(var_name).is_ok() {
+            continue;
+        }
+
+        if let Some(value) = parse_var_from_wrapper_script(&content, var_name) {
+            log::debug!("Setting {} from R wrapper: {}", var_name, value);
+            // SAFETY: We're in single-threaded initialization
+            unsafe { env::set_var(var_name, &value) };
+        }
+    }
+}
+
+/// Extract a variable assignment from an R wrapper script.
+///
+/// Looks for lines of the form `VAR_NAME=value` and returns the value with
+/// surrounding quotes stripped. Returns `None` if the variable is not found
+/// or the value is empty.
+fn parse_var_from_wrapper_script(script_content: &str, var_name: &str) -> Option<String> {
+    let value = script_content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        // Split on first '=' and compare the key exactly to avoid partial
+        // prefix matches (e.g. "R_DOC_DIR_EXTRA=" matching "R_DOC_DIR").
+        let (key, val) = trimmed.split_once('=')?;
+        if key == var_name { Some(val) } else { None }
+    })?;
+
+    // Strip surrounding quotes if present
+    let value = value.trim_matches('\'').trim_matches('"');
+
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
     }
 }
 
@@ -651,6 +726,16 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
         if lib_path.exists() {
             unsafe { env::set_var("R_LIBS_SITE", lib_path.to_string_lossy().as_ref()) };
         }
+    }
+
+    // Set R_DOC_DIR, R_SHARE_DIR, R_INCLUDE_DIR if not already set.
+    // These are normally exported by R's shell wrapper script ($R_HOME/bin/R),
+    // which is bypassed when embedding R. On distributions where these paths
+    // differ from the default $R_HOME/<component> (e.g., Fedora/RHEL), this
+    // causes R.home("doc") etc. to return non-existent paths.
+    // SAFETY: We're in single-threaded initialization
+    if let Ok(r_home) = get_r_home() {
+        set_r_path_vars_from_wrapper(&r_home);
     }
 
     let lib = r_library()?;
@@ -1776,5 +1861,122 @@ mod tests {
         let stripped = strip_cr("");
         assert_eq!(stripped, "");
         assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script() {
+        // Standard R wrapper format (unquoted)
+        let script = "\
+#!/bin/bash
+R_HOME_DIR=/usr/lib64/R
+R_SHARE_DIR=/usr/share/R
+export R_SHARE_DIR
+R_INCLUDE_DIR=/usr/include/R
+export R_INCLUDE_DIR
+R_DOC_DIR=/usr/share/doc/R
+export R_DOC_DIR
+";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/usr/share/doc/R".to_string())
+        );
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_SHARE_DIR"),
+            Some("/usr/share/R".to_string())
+        );
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_INCLUDE_DIR"),
+            Some("/usr/include/R".to_string())
+        );
+
+        // Variable not present
+        assert_eq!(parse_var_from_wrapper_script(script, "R_MISSING_VAR"), None);
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script_quoted() {
+        // Single-quoted values
+        let script = "R_DOC_DIR='/usr/share/doc/R'\nexport R_DOC_DIR\n";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/usr/share/doc/R".to_string())
+        );
+
+        // Double-quoted values
+        let script = "R_DOC_DIR=\"/usr/share/doc/R\"\nexport R_DOC_DIR\n";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/usr/share/doc/R".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script_standard_install() {
+        // Standard (non-Fedora) installation where paths are under R_HOME
+        let script = "\
+#!/bin/bash
+R_HOME_DIR=/opt/R/4.5.2/lib/R
+R_SHARE_DIR=/opt/R/4.5.2/lib/R/share
+export R_SHARE_DIR
+R_INCLUDE_DIR=/opt/R/4.5.2/lib/R/include
+export R_INCLUDE_DIR
+R_DOC_DIR=/opt/R/4.5.2/lib/R/doc
+export R_DOC_DIR
+";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/opt/R/4.5.2/lib/R/doc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script_empty_value() {
+        let script = "R_DOC_DIR=\nexport R_DOC_DIR\n";
+        assert_eq!(parse_var_from_wrapper_script(script, "R_DOC_DIR"), None);
+    }
+
+    #[test]
+    fn test_parse_var_from_wrapper_script_no_partial_prefix_match() {
+        // R_DOC_DIR_EXTRA should NOT match when looking for R_DOC_DIR
+        let script = "R_DOC_DIR_EXTRA=/some/path\nR_DOC_DIR=/usr/share/doc/R\n";
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR"),
+            Some("/usr/share/doc/R".to_string())
+        );
+
+        // If only the longer name exists, R_DOC_DIR should not match
+        let script = "R_DOC_DIR_EXTRA=/some/path\n";
+        assert_eq!(parse_var_from_wrapper_script(script, "R_DOC_DIR"), None);
+    }
+
+    #[test]
+    fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
+        // NOTE: This test mutates process-global env vars. It saves/restores
+        // R_DOC_DIR to minimise interference with parallel tests.
+        let original = std::env::var("R_DOC_DIR").ok();
+
+        // Pre-set R_DOC_DIR in the environment
+        unsafe { std::env::set_var("R_DOC_DIR", "/custom/doc") };
+
+        // Create a temp dir with a fake wrapper script (auto-cleaned on drop)
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(
+            bin_dir.join("R"),
+            "R_DOC_DIR=/should/not/override\nexport R_DOC_DIR\n",
+        )
+        .unwrap();
+
+        set_r_path_vars_from_wrapper(tmp.path());
+
+        // R_DOC_DIR should NOT be overwritten
+        assert_eq!(std::env::var("R_DOC_DIR").unwrap(), "/custom/doc");
+
+        // Restore original value
+        match original {
+            Some(val) => unsafe { std::env::set_var("R_DOC_DIR", val) },
+            None => unsafe { std::env::remove_var("R_DOC_DIR") },
+        }
     }
 }
