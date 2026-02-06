@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-06
+
+### Fixed
+
+- **Windows:** Enable bracketed paste mode by patching crossterm with VT input + ANSI parser hybrid support ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030))
+
 ## [0.2.0-rc.3] - 2026-02-05
 
 ### Added
