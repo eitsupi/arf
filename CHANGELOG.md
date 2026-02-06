@@ -4,12 +4,6 @@
 
 ## [0.2.0] - 2026-02-06
 
-### Fixed
-
-- **Windows:** Enable bracketed paste mode by patching crossterm with VT input + ANSI parser hybrid support ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030))
-
-## [0.2.0-rc.3] - 2026-02-05
-
 ### Added
 
 - Experimental history browser for interactive history management with search, filtering, copy, and delete support (#38)
@@ -87,6 +81,7 @@ auto_paren_limit = 50
 
 ### Fixed
 
+- **Windows:** Enable bracketed paste mode by patching crossterm with VT input + ANSI parser hybrid support ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030))
 - Set `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` from R's shell wrapper script on startup. On distributions where these paths differ from the default `$R_HOME/<component>` (e.g. Fedora, RHEL), `:help` and `utils::hsearch_db()` could fail because `R.home("doc")` returned a non-existent path (#59)
 - **Windows:** Fixed garbled error message display caused by CRLF line endings in R output (#56)
 - **Windows:** Fixed multiline input causing "invalid token" error due to CRLF newlines from reedline (#57)
