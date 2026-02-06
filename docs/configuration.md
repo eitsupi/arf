@@ -2,7 +2,8 @@
 
 arf uses a TOML configuration file following the XDG Base Directory specification.
 
-> **Warning**: The configuration file format is not yet stable and may change in future versions.
+> [!WARNING]
+> The configuration file format is not yet stable and may change in future versions.
 
 ## Configuration File Location
 
