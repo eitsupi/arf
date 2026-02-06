@@ -151,7 +151,7 @@ autoformat = false      # Requires Air CLI
 [editor]
 mode = "emacs"          # "emacs" or "vi"
 auto_match = true       # Defaults to false on Windows (see Known Issues)
-auto_suggestions = true # fish/nushell style history suggestions
+auto_suggestions = "all" # "none", "all", or "cwd"
 
 # Keyboard shortcuts (crokey format)
 [editor.key_map]
