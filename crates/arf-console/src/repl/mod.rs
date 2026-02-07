@@ -854,7 +854,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 "cd" => {
                                     let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
                                     match meta_command::meta_cd(path_arg) {
-                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Ok(cwd) => arf_println!("cd: {}", cwd.display()),
                                         Err(e) => arf_println!("cd: {}", e),
                                     }
                                     continue;
@@ -862,14 +862,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 "pushd" => {
                                     let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
                                     match meta_command::meta_pushd(&mut state.dir_stack, path_arg) {
-                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Ok(cwd) => arf_println!("pushd: {}", cwd.display()),
                                         Err(e) => arf_println!("pushd: {}", e),
                                     }
                                     continue;
                                 }
                                 "popd" => {
                                     match meta_command::meta_popd(&mut state.dir_stack) {
-                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Ok(cwd) => arf_println!("popd: {}", cwd.display()),
                                         Err(e) => arf_println!("popd: {}", e),
                                     }
                                     continue;

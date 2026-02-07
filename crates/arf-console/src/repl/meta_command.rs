@@ -109,6 +109,9 @@ pub fn process_meta_command(
             if shell_cmd.is_empty() {
                 arf_println!("Usage: :system <command>");
             } else {
+                if let Some(hint) = dir_command_hint(shell_cmd) {
+                    arf_println!("{}", hint);
+                }
                 super::shell::execute_shell_command(shell_cmd);
             }
             Some(MetaCommandResult::ShellExecuted)
@@ -463,6 +466,17 @@ pub(crate) fn meta_popd(dir_stack: &mut Vec<PathBuf>) -> Result<PathBuf, String>
         .ok_or_else(|| "Directory stack is empty".to_string())?;
     std::env::set_current_dir(&target).map_err(|e| format!("{}", e))?;
     std::env::current_dir().map_err(|e| e.to_string())
+}
+
+/// Return a hint message if the shell command is a directory navigation command
+/// that won't work as expected in a subprocess.
+fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
+    match shell_cmd.split_whitespace().next()? {
+        "cd" => Some("Hint: Use the :cd meta command instead to change directory."),
+        "pushd" => Some("Hint: Use the :pushd meta command instead to change directory."),
+        "popd" => Some("Hint: Use the :popd meta command instead to restore directory."),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -894,5 +908,33 @@ mod tests {
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(dir_stack.is_empty());
+    }
+
+    // --- dir_command_hint tests ---
+
+    #[test]
+    fn test_dir_command_hint_cd() {
+        assert!(dir_command_hint("cd /tmp").unwrap().contains(":cd"));
+    }
+
+    #[test]
+    fn test_dir_command_hint_pushd() {
+        assert!(dir_command_hint("pushd /tmp").unwrap().contains(":pushd"));
+    }
+
+    #[test]
+    fn test_dir_command_hint_popd() {
+        assert!(dir_command_hint("popd").unwrap().contains(":popd"));
+    }
+
+    #[test]
+    fn test_dir_command_hint_other() {
+        assert!(dir_command_hint("ls -la").is_none());
+        assert!(dir_command_hint("echo cd").is_none());
+    }
+
+    #[test]
+    fn test_dir_command_hint_empty() {
+        assert!(dir_command_hint("").is_none());
     }
 }
