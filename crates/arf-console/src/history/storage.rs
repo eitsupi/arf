@@ -120,7 +120,7 @@ mod tests {
 
         let json = serde_json::to_string(&item).unwrap();
         let deserialized: HistoryItem<HistoryExtraInfo> = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.more_info.as_ref().unwrap().meta_command, true);
+        assert!(deserialized.more_info.as_ref().unwrap().meta_command);
         assert_eq!(deserialized.command_line, ":cd /tmp");
     }
 }
