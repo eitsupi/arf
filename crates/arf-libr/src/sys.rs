@@ -1015,14 +1015,14 @@ fn get_r_user_home(lib: &crate::functions::RLibrary) -> String {
         let path = match std::str::from_utf8(bytes) {
             Ok(s) => s.to_string(),
             Err(_) => {
-                log::info!(
+                log::debug!(
                     "[WINDOWS] getRUser() returned non-UTF-8 path, decoding from system code page"
                 );
                 decode_windows_native(bytes).into_owned()
             }
         };
 
-        log::info!("[WINDOWS] getRUser() returned: {}", path);
+        log::debug!("[WINDOWS] getRUser() returned: {}", path);
         return path;
     }
 
