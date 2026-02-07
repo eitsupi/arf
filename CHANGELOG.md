@@ -4,6 +4,9 @@
 
 ### Added
 
+- `:cd`, `:pushd`, `:popd` meta commands for directory navigation (#60)
+  - Path autocompletion with fuzzy matching for `:cd` and `:pushd` arguments
+  - In shell mode, `cd`, `pushd`, `popd` are intercepted and handled natively
 - Experimental `{duration}` prompt placeholder for showing command execution time (#67)
   - Format follows starship convention: "5s", "1m30s", "2h48m30s"
   - Configurable format via `experimental.prompt_duration.format` (default: `"{value} "`)

@@ -1,5 +1,6 @@
 //! Meta command processing.
 
+use crate::completion::path::expand_tilde;
 use crate::config::RSourceStatus;
 use crate::external::formatter;
 use crate::pager::{
@@ -35,6 +36,7 @@ pub fn process_meta_command(
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
+    dir_stack: &mut Vec<PathBuf>,
 ) -> Option<MetaCommandResult> {
     let trimmed = input.trim();
     if !trimmed.starts_with(':') {
@@ -211,6 +213,29 @@ pub fn process_meta_command(
             );
             Some(MetaCommandResult::Handled)
         }
+        "cd" => {
+            let path_arg = trimmed[1..].strip_prefix("cd").unwrap_or("").trim();
+            match meta_cd(path_arg) {
+                Ok(cwd) => arf_println!("{}", cwd.display()),
+                Err(e) => arf_println!("cd: {}", e),
+            }
+            Some(MetaCommandResult::Handled)
+        }
+        "pushd" => {
+            let path_arg = trimmed[1..].strip_prefix("pushd").unwrap_or("").trim();
+            match meta_pushd(dir_stack, path_arg) {
+                Ok(cwd) => arf_println!("{}", cwd.display()),
+                Err(e) => arf_println!("pushd: {}", e),
+            }
+            Some(MetaCommandResult::Handled)
+        }
+        "popd" => {
+            match meta_popd(dir_stack) {
+                Ok(cwd) => arf_println!("{}", cwd.display()),
+                Err(e) => arf_println!("popd: {}", e),
+            }
+            Some(MetaCommandResult::Handled)
+        }
         "commands" | "cmds" => {
             arf_println!("Available commands:");
             println!("#   :help          - Search R help");
@@ -218,6 +243,9 @@ pub fn process_meta_command(
             println!("#   :shell         - Enter shell mode (input goes to system shell)");
             println!("#   :r             - Return to R mode (from shell mode)");
             println!("#   :system <cmd>  - Execute a single system command");
+            println!("#   :cd <path>     - Change working directory");
+            println!("#   :pushd <path>  - Push directory and change to it");
+            println!("#   :popd          - Pop directory from stack");
             println!("#   :reprex        - Toggle reprex mode");
             println!(
                 "#   :autoformat    - Toggle auto-formatting in reprex mode (requires Air CLI)"
@@ -400,6 +428,36 @@ fn process_history_clear(
     Some(MetaCommandResult::Handled)
 }
 
+/// Change the current working directory.
+///
+/// If `path_arg` is empty, changes to the home directory.
+/// Tilde (`~`) is expanded to the home directory.
+pub(crate) fn meta_cd(path_arg: &str) -> Result<PathBuf, String> {
+    let target = if path_arg.is_empty() {
+        dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?
+    } else {
+        PathBuf::from(expand_tilde(path_arg))
+    };
+    std::env::set_current_dir(&target).map_err(|e| format!("{}: {}", path_arg, e))?;
+    std::env::current_dir().map_err(|e| e.to_string())
+}
+
+/// Push the current directory onto the stack and change to a new directory.
+pub(crate) fn meta_pushd(dir_stack: &mut Vec<PathBuf>, path_arg: &str) -> Result<PathBuf, String> {
+    let current = std::env::current_dir().map_err(|e| e.to_string())?;
+    dir_stack.push(current);
+    meta_cd(path_arg)
+}
+
+/// Pop the top directory from the stack and change to it.
+pub(crate) fn meta_popd(dir_stack: &mut Vec<PathBuf>) -> Result<PathBuf, String> {
+    let target = dir_stack
+        .pop()
+        .ok_or_else(|| "Directory stack is empty".to_string())?;
+    std::env::set_current_dir(&target).map_err(|e| format!("{}", e))?;
+    std::env::current_dir().map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,11 +472,32 @@ mod tests {
         RSourceStatus::Path
     }
 
+    /// Helper to call process_meta_command with default dir_stack.
+    fn call_meta(
+        input: &str,
+        config: &mut PromptRuntimeConfig,
+        config_path: &Option<PathBuf>,
+        r_history_path: &Option<PathBuf>,
+        shell_history_path: &Option<PathBuf>,
+        status: &RSourceStatus,
+    ) -> Option<MetaCommandResult> {
+        let mut dir_stack = Vec::new();
+        process_meta_command(
+            input,
+            config,
+            config_path,
+            r_history_path,
+            shell_history_path,
+            status,
+            &mut dir_stack,
+        )
+    }
+
     #[test]
     fn test_process_meta_command_not_meta() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command("print(x)", &mut config, &None, &None, &None, &status);
+        let result = call_meta("print(x)", &mut config, &None, &None, &None, &status);
         assert!(result.is_none());
     }
 
@@ -428,11 +507,11 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_reprex_enabled());
 
-        let result = process_meta_command(":reprex", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":reprex", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_reprex_enabled());
 
-        let result = process_meta_command(":reprex", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":reprex", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_reprex_enabled());
     }
@@ -441,11 +520,11 @@ mod tests {
     fn test_process_meta_command_commands() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":commands", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":commands", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test alias
-        let result = process_meta_command(":cmds", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":cmds", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -454,11 +533,11 @@ mod tests {
     fn test_process_meta_command_info() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":info", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":info", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test alias
-        let result = process_meta_command(":session", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":session", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -471,7 +550,7 @@ mod tests {
         // Test with existing config path (using tempfile)
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let existing_path = temp_file.path().to_path_buf();
-        let result = process_meta_command(
+        let result = call_meta(
             ":info",
             &mut config,
             &Some(existing_path),
@@ -484,7 +563,7 @@ mod tests {
         // Test with non-existing config path (using tempfile directory with fake filename)
         let temp_dir = tempfile::tempdir().unwrap();
         let non_existing_path = temp_dir.path().join("nonexistent_config.toml");
-        let result = process_meta_command(
+        let result = call_meta(
             ":info",
             &mut config,
             &Some(non_existing_path),
@@ -495,7 +574,7 @@ mod tests {
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test with None config path (using defaults)
-        let result = process_meta_command(":info", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":info", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -503,10 +582,10 @@ mod tests {
     fn test_process_meta_command_quit() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":quit", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":quit", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Exit)));
 
-        let result = process_meta_command(":exit", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":exit", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Exit)));
     }
 
@@ -514,7 +593,7 @@ mod tests {
     fn test_process_meta_command_unknown() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":unknown", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":unknown", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
     }
 
@@ -522,7 +601,7 @@ mod tests {
     fn test_process_meta_command_empty_colon() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -530,7 +609,7 @@ mod tests {
     fn test_process_meta_command_with_whitespace() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command("  :reprex  ", &mut config, &None, &None, &None, &status);
+        let result = call_meta("  :reprex  ", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_reprex_enabled());
     }
@@ -541,7 +620,7 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
 
-        let result = process_meta_command(":shell", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":shell", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_shell_enabled());
     }
@@ -553,7 +632,7 @@ mod tests {
         config.set_shell(true);
         assert!(config.is_shell_enabled());
 
-        let result = process_meta_command(":r", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":r", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled());
     }
@@ -565,7 +644,7 @@ mod tests {
         config.set_shell(true);
         assert!(config.is_shell_enabled());
 
-        let result = process_meta_command(":R", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":R", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled());
     }
@@ -576,7 +655,7 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
 
-        let result = process_meta_command(":r", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":r", &mut config, &None, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled()); // Still not in shell
     }
@@ -585,7 +664,7 @@ mod tests {
     fn test_process_meta_command_system() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(
+        let result = call_meta(
             ":system echo hello",
             &mut config,
             &None,
@@ -600,7 +679,7 @@ mod tests {
     fn test_process_meta_command_system_empty() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = process_meta_command(":system", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":system", &mut config, &None, &None, &None, &status);
         // Empty :system should still be handled
         assert!(matches!(result, Some(MetaCommandResult::ShellExecuted)));
     }
@@ -611,7 +690,7 @@ mod tests {
 
         // With PATH mode (rig not enabled), :switch should show error
         let status_path = RSourceStatus::Path;
-        let result = process_meta_command(
+        let result = call_meta(
             ":switch 4.4",
             &mut config,
             &None,
@@ -628,8 +707,187 @@ mod tests {
         };
         // Note: This will prompt for confirmation, so we can't fully test it in unit tests
         // Just testing the setup path here
-        let result = process_meta_command(":switch", &mut config, &None, &None, &None, &status_rig);
+        let result = call_meta(":switch", &mut config, &None, &None, &None, &status_rig);
         // Without version argument, it should show usage
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
+    }
+
+    // --- cd/pushd/popd tests ---
+
+    #[test]
+    fn test_meta_cd_relative_path() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let subdir = tmp.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let result = meta_cd("sub");
+        std::env::set_current_dir(&original_cwd).unwrap();
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().ends_with("sub"));
+    }
+
+    #[test]
+    fn test_meta_cd_absolute_path() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = meta_cd(&tmp.path().to_string_lossy());
+        std::env::set_current_dir(&original_cwd).unwrap();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_meta_cd_tilde() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let result = meta_cd("~");
+        std::env::set_current_dir(&original_cwd).unwrap();
+
+        assert!(result.is_ok());
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(
+                result.unwrap().canonicalize().ok(),
+                home.canonicalize().ok()
+            );
+        }
+    }
+
+    #[test]
+    fn test_meta_cd_no_args() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let result = meta_cd("");
+        std::env::set_current_dir(&original_cwd).unwrap();
+
+        assert!(result.is_ok());
+        // Should go to home
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(
+                result.unwrap().canonicalize().ok(),
+                home.canonicalize().ok()
+            );
+        }
+    }
+
+    #[test]
+    fn test_meta_cd_nonexistent() {
+        let result = meta_cd("/nonexistent_path_12345");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_meta_pushd_popd() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut dir_stack = Vec::new();
+
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let subdir = tmp.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+
+        // pushd into sub
+        let result = meta_pushd(&mut dir_stack, "sub");
+        assert!(result.is_ok());
+        assert_eq!(dir_stack.len(), 1);
+        assert!(std::env::current_dir().unwrap().ends_with("sub"));
+
+        // popd back
+        let result = meta_popd(&mut dir_stack);
+        assert!(result.is_ok());
+        assert!(dir_stack.is_empty());
+        assert_eq!(
+            std::env::current_dir().unwrap().canonicalize().ok(),
+            tmp.path().canonicalize().ok()
+        );
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_meta_popd_empty_stack() {
+        let mut dir_stack: Vec<PathBuf> = Vec::new();
+        let result = meta_popd(&mut dir_stack);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_meta_pushd_saves_previous() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let subdir = tmp.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+        let mut dir_stack = Vec::new();
+
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let before_pushd = std::env::current_dir().unwrap();
+
+        let _ = meta_pushd(&mut dir_stack, "sub");
+        assert_eq!(dir_stack.len(), 1);
+        assert_eq!(
+            dir_stack[0].canonicalize().ok(),
+            before_pushd.canonicalize().ok()
+        );
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_process_meta_command_cd() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = create_test_prompt_config();
+        let status = default_r_source_status();
+        let mut dir_stack = Vec::new();
+
+        let result = process_meta_command(
+            &format!(":cd {}", tmp.path().display()),
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status,
+            &mut dir_stack,
+        );
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_process_meta_command_pushd_popd() {
+        let original_cwd = std::env::current_dir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = create_test_prompt_config();
+        let status = default_r_source_status();
+        let mut dir_stack = Vec::new();
+
+        let result = process_meta_command(
+            &format!(":pushd {}", tmp.path().display()),
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status,
+            &mut dir_stack,
+        );
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        assert_eq!(dir_stack.len(), 1);
+
+        let result = process_meta_command(
+            ":popd",
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status,
+            &mut dir_stack,
+        );
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        assert!(dir_stack.is_empty());
+
+        std::env::set_current_dir(&original_cwd).unwrap();
     }
 }

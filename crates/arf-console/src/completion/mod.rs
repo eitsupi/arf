@@ -4,4 +4,4 @@
 
 pub mod completer;
 pub mod menu;
-mod path;
+pub(crate) mod path;

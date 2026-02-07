@@ -118,6 +118,8 @@ pub struct ReplState {
     pub forget_config: HistoryForgetConfig,
     /// Queue for the sponge feature (tracks commands to potentially delete).
     pub sponge_queue: SpongeQueue,
+    /// Directory stack for :pushd/:popd navigation.
+    pub dir_stack: Vec<PathBuf>,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

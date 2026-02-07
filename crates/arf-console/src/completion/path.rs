@@ -11,13 +11,13 @@ use std::path::Path;
 /// This is needed for R compatibility on Windows, since backslashes
 /// are escape characters in R strings.
 #[cfg(windows)]
-fn normalize_separators(path: &str) -> String {
+pub fn normalize_separators(path: &str) -> String {
     path.replace('\\', "/")
 }
 
 /// On non-Windows platforms, no normalization is needed.
 #[cfg(not(windows))]
-fn normalize_separators(path: &str) -> String {
+pub fn normalize_separators(path: &str) -> String {
     path.to_string()
 }
 
@@ -57,7 +57,7 @@ impl Default for PathCompletionOptions {
 
 /// Expand tilde to home directory.
 /// Returns normalized path with forward slashes for R compatibility.
-fn expand_tilde(path: &str) -> String {
+pub fn expand_tilde(path: &str) -> String {
     if path.starts_with('~')
         && let Some(home) = dirs::home_dir()
     {

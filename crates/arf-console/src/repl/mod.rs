@@ -353,6 +353,7 @@ impl Repl {
                 r_source_status: self.r_source_status.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
+                dir_stack: Vec::new(),
             });
         });
 
@@ -496,6 +497,7 @@ impl Repl {
                 .build();
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();
+        let mut dir_stack: Vec<std::path::PathBuf> = Vec::new();
 
         loop {
             match line_editor.read_line(&prompt) {
@@ -514,6 +516,7 @@ impl Repl {
                         &r_history_path,
                         &shell_history_path,
                         &self.r_source_status,
+                        &mut dir_stack,
                     ) {
                         match result {
                             MetaCommandResult::Handled => {
@@ -793,6 +796,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.r_history_path,
                         &state.shell_history_path,
                         &state.r_source_status,
+                        &mut state.dir_stack,
                     ) {
                         match result {
                             MetaCommandResult::Handled => {
@@ -838,6 +842,36 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 state.prompt_config.set_shell(false);
                                 arf_println!("Returned to R mode.");
                                 continue;
+                            }
+                            // Intercept directory navigation commands.
+                            // These must affect the parent process (not run in a subprocess).
+                            let shell_parts: Vec<&str> =
+                                trimmed.splitn(2, char::is_whitespace).collect();
+                            match shell_parts[0] {
+                                "cd" => {
+                                    let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
+                                    match meta_command::meta_cd(path_arg) {
+                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Err(e) => arf_println!("cd: {}", e),
+                                    }
+                                    continue;
+                                }
+                                "pushd" => {
+                                    let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
+                                    match meta_command::meta_pushd(&mut state.dir_stack, path_arg) {
+                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Err(e) => arf_println!("pushd: {}", e),
+                                    }
+                                    continue;
+                                }
+                                "popd" => {
+                                    match meta_command::meta_popd(&mut state.dir_stack) {
+                                        Ok(cwd) => arf_println!("{}", cwd.display()),
+                                        Err(e) => arf_println!("popd: {}", e),
+                                    }
+                                    continue;
+                                }
+                                _ => {}
                             }
                             execute_shell_command(trimmed);
                         }
