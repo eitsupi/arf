@@ -497,6 +497,9 @@ impl Repl {
                 .build();
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();
+        // Separate dir_stack for standalone mode (R not initialized).
+        // The R mainloop path stores its own dir_stack in ReplState.
+        // These two paths are mutually exclusive, so no sharing is needed.
         let mut dir_stack: Vec<std::path::PathBuf> = Vec::new();
 
         loop {

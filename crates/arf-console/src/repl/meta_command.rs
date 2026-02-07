@@ -438,12 +438,19 @@ pub(crate) fn meta_cd(path_arg: &str) -> Result<PathBuf, String> {
     } else {
         PathBuf::from(expand_tilde(path_arg))
     };
-    std::env::set_current_dir(&target).map_err(|e| format!("{}: {}", path_arg, e))?;
+    std::env::set_current_dir(&target).map_err(|e| format!("{}: {}", target.display(), e))?;
     std::env::current_dir().map_err(|e| e.to_string())
 }
 
 /// Push the current directory onto the stack and change to a new directory.
+///
+/// Requires a path argument. Unlike bash's `pushd` (which swaps the top two
+/// stack entries when called without arguments), this always requires an
+/// explicit destination.
 pub(crate) fn meta_pushd(dir_stack: &mut Vec<PathBuf>, path_arg: &str) -> Result<PathBuf, String> {
+    if path_arg.is_empty() {
+        return Err("Usage: :pushd <path>".to_string());
+    }
     let current = std::env::current_dir().map_err(|e| e.to_string())?;
     dir_stack.push(current);
     meta_cd(path_arg)
@@ -811,6 +818,16 @@ mod tests {
         let result = meta_popd(&mut dir_stack);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_meta_pushd_no_args_returns_error() {
+        let mut dir_stack: Vec<PathBuf> = Vec::new();
+        let result = meta_pushd(&mut dir_stack, "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
+        // Stack should not be modified
+        assert!(dir_stack.is_empty());
     }
 
     #[test]
