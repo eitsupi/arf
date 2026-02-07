@@ -1667,7 +1667,7 @@
       "type": "object",
       "properties": {
         "format": {
-          "description": "Format string for the duration display. Use `{value}` for the time string.\n\nExamples:\n- `\"{value} \"` (default) — \"5s \" after a 5-second command\n- `\"took {value} \"` — \"took 5s \"\n- `\"({value}) \"` — \"(5s) \"",
+          "description": "Format string for the duration display. Must contain `{value}` for the time string.\n\nExamples:\n- `\"{value} \"` (default) — \"5s \" after a 5-second command\n- `\"took {value} \"` — \"took 5s \"\n- `\"({value}) \"` — \"(5s) \"",
           "type": "string",
           "default": "{value} "
         },

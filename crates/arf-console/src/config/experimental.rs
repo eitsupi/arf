@@ -176,7 +176,7 @@ impl Default for HistoryForgetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct PromptDurationConfig {
-    /// Format string for the duration display. Use `{value}` for the time string.
+    /// Format string for the duration display. Must contain `{value}` for the time string.
     ///
     /// Examples:
     /// - `"{value} "` (default) — "5s " after a 5-second command
