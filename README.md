@@ -116,6 +116,9 @@ Press `:h` or `:help` to open the fuzzy help browser:
 | `:autoformat`, `:format` | Toggle auto-formatting (requires Air) |
 | `:switch <version>` | Restart with different R version (requires rig) |
 | `:restart` | Restart R session |
+| `:cd [path]` | Change working directory (no args → home) |
+| `:pushd <path>` | Push current directory to stack and change to path |
+| `:popd` | Pop directory from stack and change to it |
 | `:history browse` | Browse and manage command history |
 | `:history clear` | Clear command history (supports `r`, `shell`, `all` targets) |
 | `:history schema` | Display history database schema and R examples |
