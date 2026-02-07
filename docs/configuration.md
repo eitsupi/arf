@@ -132,6 +132,10 @@ on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 [experimental.prompt_spinner]
 frames = ""                # Animation frames (empty = disabled)
 color = "Cyan"             # Spinner color
+
+[experimental.prompt_duration]
+format = "{value} "        # Duration display format ({value} = time string)
+threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 ```
 
 ## Auto Suggestions
@@ -270,6 +274,7 @@ string = { Rgb = [0, 255, 128] }    # RGB values 0-255
 | `indicator` | Mode indicator text color ([reprex], [format], #!) | Yellow |
 | `status.success` | Color for success (symbol and/or prompt when override_prompt_color is true) | LightGreen |
 | `status.error` | Color for error (symbol and/or prompt when override_prompt_color is true) | LightRed |
+| `duration` | Color for command duration indicator | Yellow |
 | `vi.insert` | Color for vi insert mode indicator | Default |
 | `vi.normal` | Color for vi normal mode indicator | Default |
 | `vi.non_vi` | Color for non-vi modes (Emacs, etc.) | Default |
@@ -285,6 +290,7 @@ The `prompt.format`, `prompt.continuation`, and `prompt.shell_format` fields sup
 | `{cwd_short}` | Current working directory (basename only) | `project` |
 | `{shell}` | Shell name from $SHELL (Unix) or "cmd" (Windows) | `bash`, `zsh`, `cmd` |
 | `{status}` | Command status indicator (see below) | `✗ ` on error |
+| `{duration}` | Command execution time (see [Command Duration](#command-duration-indicator)) | `5s `, `1m30s ` |
 
 ### Prompt Examples
 
@@ -347,6 +353,65 @@ override_prompt_color = true
 [prompt.status]
 symbol = { error = "✗ " }
 override_prompt_color = true
+```
+
+## Command Duration Indicator
+
+arf can show how long the previous command took to execute via the `{duration}` prompt placeholder. This is an experimental feature.
+
+The time format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped). For sub-second durations, milliseconds are shown (e.g., `800ms`).
+
+> [!NOTE]
+> `{duration}` is not included in the default prompt format. To use it, add `{duration}` to your `prompt.format` setting.
+
+### Configuration
+
+```toml
+[prompt]
+format = "{duration}{status}R {version}> "
+
+[experimental.prompt_duration]
+format = "{value} "   # How to display the duration ({value} = time string)
+threshold_ms = 2000   # Only show for commands that take longer than 2s (default)
+
+[colors.prompt]
+duration = "Yellow"   # Color for duration text (default)
+```
+
+### How It Works
+
+- The `format` string uses `{value}` as a sub-placeholder for the time string (e.g., "5s"). If `{value}` is omitted, only the static text in the format string is shown
+- When the previous command exceeded `threshold_ms`, `{value}` in the format string is replaced with the time string, and the result replaces `{duration}` in the prompt
+- When the command was fast (below threshold) or no command has been run yet, `{duration}` expands to an empty string
+- The entire format string is conditional — static text in the format (like "took ") only appears when the duration is shown
+- This means you can safely place `{duration}` in your prompt — it will only appear when relevant
+
+### Examples
+
+```toml
+# Simple (default format): "5s R 4.4.0> " after slow command
+[prompt]
+format = "{duration}{status}R {version}> "
+
+# starship-like: "took 5s R 4.4.0> "
+[prompt]
+format = "{duration}{status}R {version}> "
+[experimental.prompt_duration]
+format = "took {value} "
+
+# Bracketed: "(5s) R 4.4.0> "
+[prompt]
+format = "{duration}{status}R {version}> "
+[experimental.prompt_duration]
+format = "({value}) "
+
+# Lower threshold to 500ms (sub-second shows milliseconds like "800ms")
+[experimental.prompt_duration]
+threshold_ms = 500
+
+# Custom color
+[colors.prompt]
+duration = "DarkGray"
 ```
 
 ## Vi Mode Indicator

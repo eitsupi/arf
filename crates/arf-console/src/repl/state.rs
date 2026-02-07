@@ -1,8 +1,8 @@
 //! REPL state management.
 
 use crate::config::{
-    HistoryForgetConfig, Indicators, ModeIndicatorPosition, RSourceStatus, SpinnerConfig,
-    StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
+    HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig, RSourceStatus,
+    SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
 };
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
@@ -10,6 +10,7 @@ use nu_ansi_term::Color;
 use reedline::{HistoryItemId, Reedline};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::prompt::RPrompt;
 
@@ -151,6 +152,14 @@ pub struct PromptRuntimeConfig {
     status_colors: StatusColorConfig,
     /// Whether the last command failed (for status indicator).
     last_command_failed: bool,
+    /// Command duration configuration (format and threshold).
+    duration_config: PromptDurationConfig,
+    /// Color for command duration indicator.
+    duration_color: Color,
+    /// When the last command started executing.
+    last_command_start: Option<Instant>,
+    /// How long the last command took to execute.
+    last_command_duration: Option<Duration>,
     /// Spinner configuration for busy indicator.
     spinner_config: SpinnerConfig,
     /// Vi mode configuration (symbols).
@@ -177,6 +186,8 @@ impl PromptRuntimeConfig {
         mode_indicator_color: Color,
         status_config: StatusConfig,
         status_colors: StatusColorConfig,
+        duration_config: PromptDurationConfig,
+        duration_color: Color,
         spinner_config: SpinnerConfig,
         vi_config: ViConfig,
         vi_colors: ViColorConfig,
@@ -205,6 +216,10 @@ impl PromptRuntimeConfig {
             status_config,
             status_colors,
             last_command_failed: false,
+            duration_config,
+            duration_color,
+            last_command_start: None,
+            last_command_duration: None,
             spinner_config,
             vi_config,
             vi_colors,
@@ -237,6 +252,9 @@ impl PromptRuntimeConfig {
 
             // Expand {status} placeholder, passing prompt_color to restore after symbol
             let main_format = self.expand_status_placeholder(&main_format, prompt_color);
+
+            // Expand {duration} placeholder for command execution time
+            let main_format = self.expand_duration_placeholder(&main_format, prompt_color);
 
             RPrompt::new(main_format, cont_format)
                 .with_mode_indicator(mode_indicator, self.mode_indicator_position)
@@ -314,6 +332,58 @@ impl PromptRuntimeConfig {
     /// Set whether the last command failed.
     pub fn set_last_command_failed(&mut self, failed: bool) {
         self.last_command_failed = failed;
+    }
+
+    /// Record the start time of a command execution.
+    pub fn set_command_start(&mut self) {
+        self.last_command_start = Some(Instant::now());
+    }
+
+    /// Calculate and store the duration since the last command start.
+    ///
+    /// Should be called when R returns to the command prompt (alongside `set_last_command_failed`).
+    pub fn set_command_duration(&mut self) {
+        self.last_command_duration = self.last_command_start.take().map(|start| start.elapsed());
+    }
+
+    /// Expand the {duration} placeholder based on duration config and last command duration.
+    ///
+    /// Shows the duration only when it exceeds the configured threshold.
+    /// The format string from config is used to wrap the time value (e.g., "{value} " → "5s ").
+    /// The formatted text is colored with the duration color.
+    /// After the text, the prompt_color is restored so the rest of the prompt keeps its color.
+    fn expand_duration_placeholder(&self, template: &str, prompt_color: Color) -> String {
+        use nu_ansi_term::Style;
+
+        if !template.contains("{duration}") {
+            return template.to_string();
+        }
+
+        let duration_str = match self.last_command_duration {
+            Some(duration)
+                if duration.as_millis() >= u128::from(self.duration_config.threshold_ms) =>
+            {
+                let time_str = render_time(duration);
+                // Apply format string: replace {value} with the time string
+                let formatted = self.duration_config.format.replace("{value}", &time_str);
+                let duration_style = match self.duration_color {
+                    Color::Default => Style::new(),
+                    c => Style::new().fg(c),
+                };
+                let prompt_style = match prompt_color {
+                    Color::Default => Style::new(),
+                    c => Style::new().fg(c),
+                };
+                format!(
+                    "{}{}",
+                    duration_style.paint(&formatted),
+                    prompt_style.prefix()
+                )
+            }
+            _ => String::new(),
+        };
+
+        template.replace("{duration}", &duration_str)
     }
 
     pub fn build_cont_prompt(&self) -> RPrompt {
@@ -407,6 +477,50 @@ impl PromptRuntimeConfig {
     }
 }
 
+/// Format a duration into a human-readable string (starship-style).
+///
+/// Examples:
+/// - 800ms → "800ms"
+/// - 5.2s → "5s"
+/// - 90s → "1m30s"
+/// - 3661s → "1h1m1s"
+/// - 86400s → "1d0h0m0s"
+///
+/// For durations under 1 second, milliseconds are shown (e.g., "800ms").
+/// For longer durations, leading zero units are skipped, but once a non-zero unit
+/// appears, all subsequent units are included (even if zero).
+fn render_time(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+
+    // Show milliseconds for sub-second durations to avoid confusing "0s"
+    if total_secs == 0 {
+        return format!("{}ms", duration.as_millis());
+    }
+
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut result = String::new();
+    let mut started = false;
+
+    if days > 0 {
+        result.push_str(&format!("{}d", days));
+        started = true;
+    }
+    if started || hours > 0 {
+        result.push_str(&format!("{}h", hours));
+        started = true;
+    }
+    if started || minutes > 0 {
+        result.push_str(&format!("{}m", minutes));
+    }
+    result.push_str(&format!("{}s", seconds));
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +553,8 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -571,6 +687,8 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -613,6 +731,8 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -684,6 +804,8 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -742,6 +864,8 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -784,6 +908,8 @@ mod tests {
             Color::Default,
             status_config,
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -828,6 +954,8 @@ mod tests {
             Color::Default,
             status_config,
             status_colors,
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),
             ViColorConfig::default(),
@@ -885,6 +1013,8 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
             SpinnerConfig {
                 frames: String::new(),
                 color: Color::Default,
@@ -894,5 +1024,354 @@ mod tests {
         );
         // Should not panic when spinner is disabled
         config.start_spinner();
+    }
+
+    #[test]
+    fn test_render_time_seconds_only() {
+        assert_eq!(render_time(Duration::from_secs(5)), "5s");
+        assert_eq!(render_time(Duration::from_secs(59)), "59s");
+    }
+
+    #[test]
+    fn test_render_time_minutes_and_seconds() {
+        assert_eq!(render_time(Duration::from_secs(60)), "1m0s");
+        assert_eq!(render_time(Duration::from_secs(90)), "1m30s");
+        assert_eq!(render_time(Duration::from_secs(3599)), "59m59s");
+    }
+
+    #[test]
+    fn test_render_time_hours() {
+        assert_eq!(render_time(Duration::from_secs(3600)), "1h0m0s");
+        assert_eq!(render_time(Duration::from_secs(3661)), "1h1m1s");
+        assert_eq!(render_time(Duration::from_secs(7200)), "2h0m0s");
+    }
+
+    #[test]
+    fn test_render_time_days() {
+        assert_eq!(render_time(Duration::from_secs(86400)), "1d0h0m0s");
+        assert_eq!(render_time(Duration::from_secs(90061)), "1d1h1m1s");
+    }
+
+    #[test]
+    fn test_render_time_subsecond_shows_milliseconds() {
+        // Sub-second durations show milliseconds
+        assert_eq!(render_time(Duration::from_millis(0)), "0ms");
+        assert_eq!(render_time(Duration::from_millis(500)), "500ms");
+        assert_eq!(render_time(Duration::from_millis(800)), "800ms");
+        assert_eq!(render_time(Duration::from_millis(999)), "999ms");
+        // Once >= 1s, subsecond precision is truncated to whole seconds
+        assert_eq!(render_time(Duration::from_millis(2500)), "2s");
+    }
+
+    #[test]
+    fn test_duration_placeholder_below_threshold() {
+        let formatter = PromptFormatter::default();
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        // Simulate a fast command (below default 2000ms threshold)
+        config.last_command_duration = Some(Duration::from_millis(500));
+
+        let prompt = config.build_main_prompt();
+        // Below threshold -> {duration} should be empty
+        assert_eq!(prompt.render_prompt_left(), "r> ");
+    }
+
+    #[test]
+    fn test_duration_placeholder_above_threshold() {
+        let formatter = PromptFormatter::default();
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        // Above threshold -> should contain "5s" with default format "{value} "
+        assert!(
+            rendered.contains("5s"),
+            "Should contain duration time, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.ends_with("r> "),
+            "Should end with prompt, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_duration_placeholder_no_data() {
+        let formatter = PromptFormatter::default();
+        let config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+
+        let prompt = config.build_main_prompt();
+        // No duration data -> {duration} should be empty
+        assert_eq!(prompt.render_prompt_left(), "r> ");
+    }
+
+    #[test]
+    fn test_duration_placeholder_not_present() {
+        let formatter = PromptFormatter::default();
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            PromptDurationConfig::default(),
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        // No {duration} in template -> prompt unchanged
+        assert_eq!(prompt.render_prompt_left(), "r> ");
+    }
+
+    #[test]
+    fn test_duration_custom_threshold() {
+        let formatter = PromptFormatter::default();
+        let duration_config = PromptDurationConfig {
+            threshold_ms: 500,
+            ..PromptDurationConfig::default()
+        };
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            duration_config,
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        // 600ms > 500ms threshold, sub-second shows milliseconds
+        config.last_command_duration = Some(Duration::from_millis(600));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        assert!(
+            rendered.contains("600ms"),
+            "Should contain duration time in milliseconds, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_duration_custom_format() {
+        let formatter = PromptFormatter::default();
+        let duration_config = PromptDurationConfig {
+            format: "took {value} ".to_string(),
+            threshold_ms: 2000,
+        };
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            duration_config,
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        // Custom format "took {value} " should produce "took 5s "
+        assert!(
+            rendered.contains("took 5s"),
+            "Should contain formatted duration, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.ends_with("r> "),
+            "Should end with prompt, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_duration_format_with_brackets() {
+        let formatter = PromptFormatter::default();
+        let duration_config = PromptDurationConfig {
+            format: "({value}) ".to_string(),
+            threshold_ms: 2000,
+        };
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            duration_config,
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(90));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        // Custom format "({value}) " should produce "(1m30s) "
+        assert!(
+            rendered.contains("(1m30s)"),
+            "Should contain bracketed duration, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_duration_format_without_value_placeholder() {
+        let formatter = PromptFormatter::default();
+        let duration_config = PromptDurationConfig {
+            format: "slow! ".to_string(),
+            threshold_ms: 2000,
+        };
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            duration_config,
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        // Format without {value}: only static text "slow! " is shown
+        assert!(
+            rendered.contains("slow!"),
+            "Should contain static text from format, got: {}",
+            rendered
+        );
+        assert!(
+            !rendered.contains("5s"),
+            "Should not contain time value when {{value}} is absent, got: {}",
+            rendered
+        );
     }
 }

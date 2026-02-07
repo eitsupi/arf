@@ -12,6 +12,7 @@
         },
         "prompt": {
           "continuation": "LightGreen",
+          "duration": "Yellow",
           "indicator": "Yellow",
           "main": "LightGreen",
           "shell": "LightRed",
@@ -67,6 +68,10 @@
           "delay": 2,
           "enabled": false,
           "on_exit_only": false
+        },
+        "prompt_duration": {
+          "format": "{value} ",
+          "threshold_ms": 2000
         },
         "prompt_spinner": {
           "color": "Cyan",
@@ -228,6 +233,69 @@
           "properties": {
             "continuation": {
               "description": "Color for the continuation prompt",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "Default",
+                    "Black",
+                    "Red",
+                    "Green",
+                    "Yellow",
+                    "Blue",
+                    "Purple",
+                    "Magenta",
+                    "Cyan",
+                    "White",
+                    "DarkGray",
+                    "LightGray",
+                    "LightRed",
+                    "LightGreen",
+                    "LightYellow",
+                    "LightBlue",
+                    "LightPurple",
+                    "LightMagenta",
+                    "LightCyan"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Fixed": {
+                      "type": "integer",
+                      "maximum": 255,
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Fixed"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "Rgb": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "maximum": 255,
+                        "minimum": 0
+                      },
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "Rgb"
+                  ]
+                }
+              ]
+            },
+            "duration": {
+              "description": "Color for command duration indicator",
+              "default": "Yellow",
               "oneOf": [
                 {
                   "type": "string",
@@ -1421,6 +1489,14 @@
             "on_exit_only": false
           }
         },
+        "prompt_duration": {
+          "description": "Command duration configuration for the `{duration}` prompt placeholder.",
+          "$ref": "#/$defs/PromptDurationConfig",
+          "default": {
+            "format": "{value} ",
+            "threshold_ms": 2000
+          }
+        },
         "prompt_spinner": {
           "description": "Spinner configuration for busy indicator during R execution.",
           "$ref": "#/$defs/SpinnerConfigSchema",
@@ -1583,6 +1659,24 @@
               "normal": "[N] "
             }
           }
+        }
+      }
+    },
+    "PromptDurationConfig": {
+      "description": "Command duration configuration for the `{duration}` prompt placeholder.\n\nControls when and how command execution time is displayed in the prompt.\nOnly displayed when the command took longer than `threshold_ms`.\n\nThe `format` field uses `{value}` as a sub-placeholder for the time string.\nThe entire format string is conditionally displayed: when the duration exceeds\n`threshold_ms`, `{value}` is replaced with the time string (e.g., \"5s\");\nwhen below threshold, the `{duration}` prompt placeholder becomes empty.\n\nTime format follows starship convention: \"5s\", \"1m30s\", \"2h48m30s\"\n(no spaces between units, leading zero units skipped).",
+      "type": "object",
+      "properties": {
+        "format": {
+          "description": "Format string for the duration display.\n\nUse `{value}` as a sub-placeholder for the time string (e.g., \"5s\").\nIf `{value}` is omitted, only the static text in the format is shown.\n\nExamples:\n- `\"{value} \"` (default) — \"5s \" after a 5-second command\n- `\"took {value} \"` — \"took 5s \"\n- `\"({value}) \"` — \"(5s) \"",
+          "type": "string",
+          "default": "{value} "
+        },
+        "threshold_ms": {
+          "description": "Minimum duration in milliseconds before showing duration (default: 2000).\nCommands faster than this threshold will not show duration.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 2000,
+          "minimum": 0
         }
       }
     },

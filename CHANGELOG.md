@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental `{duration}` prompt placeholder for showing command execution time (#67)
+  - Format follows starship convention: "5s", "1m30s", "2h48m30s"
+  - Configurable format via `experimental.prompt_duration.format` (default: `"{value} "`)
+  - Configurable threshold via `experimental.prompt_duration.threshold_ms` (default: 2000ms)
+  - Color via `colors.prompt.duration` (default: Yellow)
+
 ### Fixed
 
 - Windows: `~` now correctly resolves to the Documents folder instead of USERPROFILE, fixing `R_LIBS_USER` paths when the Documents folder has been moved to a different drive (#65)

@@ -32,6 +32,10 @@ pub struct ExperimentalConfig {
     /// Spinner configuration for busy indicator during R execution.
     #[serde(default)]
     pub prompt_spinner: SpinnerConfig,
+
+    /// Command duration configuration for the `{duration}` prompt placeholder.
+    #[serde(default)]
+    pub prompt_duration: PromptDurationConfig,
 }
 
 /// Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.
@@ -112,6 +116,9 @@ struct ExperimentalConfigSchema {
 
     /// Spinner configuration for busy indicator during R execution.
     pub prompt_spinner: SpinnerConfigSchema,
+
+    /// Command duration configuration for the `{duration}` prompt placeholder.
+    pub prompt_duration: PromptDurationConfig,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -150,6 +157,56 @@ impl Default for HistoryForgetConfig {
             enabled: false,
             delay: 2,
             on_exit_only: false,
+        }
+    }
+}
+
+/// Command duration configuration for the `{duration}` prompt placeholder.
+///
+/// Controls when and how command execution time is displayed in the prompt.
+/// Only displayed when the command took longer than `threshold_ms`.
+///
+/// The `format` field uses `{value}` as a sub-placeholder for the time string.
+/// The entire format string is conditionally displayed: when the duration exceeds
+/// `threshold_ms`, `{value}` is replaced with the time string (e.g., "5s");
+/// when below threshold, the `{duration}` prompt placeholder becomes empty.
+///
+/// Time format follows starship convention: "5s", "1m30s", "2h48m30s"
+/// (no spaces between units, leading zero units skipped).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct PromptDurationConfig {
+    /// Format string for the duration display.
+    ///
+    /// Use `{value}` as a sub-placeholder for the time string (e.g., "5s").
+    /// If `{value}` is omitted, only the static text in the format is shown.
+    ///
+    /// Examples:
+    /// - `"{value} "` (default) — "5s " after a 5-second command
+    /// - `"took {value} "` — "took 5s "
+    /// - `"({value}) "` — "(5s) "
+    #[serde(default = "default_duration_format")]
+    pub format: String,
+
+    /// Minimum duration in milliseconds before showing duration (default: 2000).
+    /// Commands faster than this threshold will not show duration.
+    #[serde(default = "default_duration_threshold_ms")]
+    pub threshold_ms: u64,
+}
+
+fn default_duration_format() -> String {
+    "{value} ".to_string()
+}
+
+fn default_duration_threshold_ms() -> u64 {
+    2000
+}
+
+impl Default for PromptDurationConfig {
+    fn default() -> Self {
+        Self {
+            format: default_duration_format(),
+            threshold_ms: default_duration_threshold_ms(),
         }
     }
 }
