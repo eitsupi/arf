@@ -358,7 +358,10 @@ override_prompt_color = true
 
 arf can show how long the previous command took to execute via the `{elapsed}` prompt placeholder. This is an experimental feature.
 
-The format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped).
+The format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped). For sub-second durations, milliseconds are shown (e.g., `800ms`).
+
+> [!NOTE]
+> `{elapsed}` is not included in the default prompt format. To use it, add `{elapsed}` to your `prompt.format` setting.
 
 ### Configuration
 
@@ -373,14 +376,31 @@ threshold_ms = 2000   # Only show for commands that take longer than 2s (default
 elapsed = "Yellow"    # Color for elapsed time text (default)
 ```
 
+### How It Works
+
+- `{elapsed}` expands to the formatted duration when the previous command exceeded the threshold
+- `{elapsed}` expands to an empty string when the command was fast (below threshold) or no command has been run yet
+- This means you can safely place `{elapsed}` in your prompt — it will only appear when relevant
+
 ### Examples
 
 ```toml
-# Show elapsed time after prompt (default threshold 2s)
+# Recommended: starship-like placement at the end of the prompt
+# Normal:     "R 4.4.0> "
+# After slow: "R 4.4.0> 5s"
 [prompt]
 format = "{status}R {version}> {elapsed}"
 
-# Lower threshold to 500ms
+# With brackets around elapsed time for visibility
+# Normal:     "R 4.4.0> "
+# After slow: "R 4.4.0> [5s] "
+[prompt]
+format = "{status}R {version}> {elapsed}"
+# Note: To add brackets, include them in the format string.
+# However, bare brackets will always show even when {elapsed} is empty.
+# A workaround is to place {elapsed} at the very end without decoration.
+
+# Lower threshold to 500ms (sub-second shows milliseconds like "800ms")
 [experimental.elapsed]
 threshold_ms = 500
 
@@ -388,6 +408,9 @@ threshold_ms = 500
 [colors.prompt]
 elapsed = "DarkGray"
 ```
+
+> [!TIP]
+> Avoid placing static text (like "took ") immediately before `{elapsed}`, as it will remain visible even when `{elapsed}` is empty. Place `{elapsed}` at the end of the prompt for the cleanest result.
 
 ## Vi Mode Indicator
 
