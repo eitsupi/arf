@@ -19,7 +19,7 @@ body:
       placeholder: |
         # Session Information
 
-        arf version:    0.2.0
+        arf version:    0.2.1
         OS:             linux (x86_64)
         Config file:    ~/.config/arf/arf.toml
         R version:      4.5.2

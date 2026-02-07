@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_style_info_line_key_value() {
-        let line = "arf version:    0.2.0";
+        let line = "arf version:    0.2.1";
         let styled = style_info_line(line);
         // Should contain ANSI codes for cyan key
         assert!(styled.contains("\x1b"), "Key-value should be styled");
