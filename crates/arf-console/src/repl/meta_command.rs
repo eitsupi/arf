@@ -455,16 +455,19 @@ pub(crate) fn meta_pushd(dir_stack: &mut Vec<PathBuf>, path_arg: &str) -> Result
         return Err("Usage: :pushd <path>".to_string());
     }
     let current = std::env::current_dir().map_err(|e| e.to_string())?;
+    let new_dir = meta_cd(path_arg)?;
     dir_stack.push(current);
-    meta_cd(path_arg)
+    Ok(new_dir)
 }
 
 /// Pop the top directory from the stack and change to it.
 pub(crate) fn meta_popd(dir_stack: &mut Vec<PathBuf>) -> Result<PathBuf, String> {
     let target = dir_stack
-        .pop()
+        .last()
+        .cloned()
         .ok_or_else(|| "Directory stack is empty".to_string())?;
     std::env::set_current_dir(&target).map_err(|e| format!("{}", e))?;
+    dir_stack.pop();
     std::env::current_dir().map_err(|e| e.to_string())
 }
 

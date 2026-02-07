@@ -42,6 +42,18 @@ pub struct CwdGuard {
 
 impl Drop for CwdGuard {
     fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.original);
+        if let Err(err) = std::env::set_current_dir(&self.original) {
+            if std::thread::panicking() {
+                eprintln!(
+                    "CwdGuard: failed to restore original working directory {:?}: {}",
+                    self.original, err
+                );
+            } else {
+                panic!(
+                    "CwdGuard: failed to restore original working directory {:?}: {}",
+                    self.original, err
+                );
+            }
+        }
     }
 }
