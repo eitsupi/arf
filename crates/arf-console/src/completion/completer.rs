@@ -161,6 +161,7 @@ impl MetaCommandCompleter {
                     .filter(|cmd| !self.excluded_commands.contains(&cmd.name))
                     .map(|cmd| Suggestion {
                         value: cmd.name.to_string(),
+                        display_override: None,
                         description: Some(cmd.description.to_string()),
                         extra: None,
                         span: Span { start, end: pos },
@@ -183,6 +184,7 @@ impl MetaCommandCompleter {
                     .filter_map(|cmd| {
                         fuzzy_match(partial, cmd.name).map(|m| Suggestion {
                             value: cmd.name.to_string(),
+                            display_override: None,
                             description: Some(cmd.description.to_string()),
                             extra: None,
                             span: Span { start, end: pos },
@@ -304,6 +306,7 @@ impl MetaCommandCompleter {
                 };
                 Suggestion {
                     value: v.name.clone(),
+                    display_override: None,
                     description: Some(description),
                     extra: None,
                     span: Span { start, end: pos },
@@ -325,6 +328,7 @@ impl MetaCommandCompleter {
                     };
                     suggestions.push(Suggestion {
                         value: alias.clone(),
+                        display_override: None,
                         description: Some(format!("R {} (alias)", v.version)),
                         extra: None,
                         span: Span { start, end: pos },
@@ -359,6 +363,7 @@ impl MetaCommandCompleter {
                 };
                 Suggestion {
                     value: name.to_string(),
+                    display_override: None,
                     description: Some(desc.to_string()),
                     extra: None,
                     span: Span {
@@ -392,6 +397,7 @@ impl MetaCommandCompleter {
                 };
                 Suggestion {
                     value: name.to_string(),
+                    display_override: None,
                     description: Some(desc.to_string()),
                     extra: None,
                     span: Span {
@@ -703,6 +709,7 @@ impl Completer for RCompleter {
 
                 Suggestion {
                     value,
+                    display_override: None,
                     description: extra_info,
                     extra: None,
                     span: Span { start, end: pos },
@@ -1020,6 +1027,7 @@ fn complete_path_in_string(_line: &str, pos: usize, ctx: &StringContext) -> Vec<
 
             Suggestion {
                 value: c.path,
+                display_override: None,
                 description: if c.is_dir {
                     Some("directory".to_string())
                 } else {

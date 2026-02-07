@@ -293,12 +293,11 @@ impl Repl {
         // Set up idle callback to process R events during input waiting.
         // This allows graphics windows (plot(), help browser) to remain responsive
         // while the user is typing or the editor is waiting for input.
-        line_editor = line_editor.with_idle_callback(
-            Box::new(|| {
+        line_editor = line_editor
+            .with_poll_interval(std::time::Duration::from_millis(33))
+            .with_idle_callback(Box::new(|| {
                 arf_libr::process_r_events();
-            }),
-            std::time::Duration::from_millis(33),
-        );
+            }));
 
         // Create shell line editor with separate history
         let shell_line_editor = self.create_shell_line_editor();
@@ -644,12 +643,11 @@ impl Repl {
 
         // Set up idle callback to process R events during input waiting.
         // Even in shell mode, R graphics windows may be open and need event processing.
-        shell_editor = shell_editor.with_idle_callback(
-            Box::new(|| {
+        shell_editor = shell_editor
+            .with_poll_interval(std::time::Duration::from_millis(33))
+            .with_idle_callback(Box::new(|| {
                 arf_libr::process_r_events();
-            }),
-            std::time::Duration::from_millis(33),
-        );
+            }));
 
         shell_editor
     }
