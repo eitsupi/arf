@@ -470,7 +470,7 @@ pub(crate) fn meta_popd(dir_stack: &mut Vec<PathBuf>) -> Result<PathBuf, String>
 
 /// Return a hint message if the shell command is a directory navigation command
 /// that won't work as expected in a subprocess.
-fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
+pub(crate) fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
     match shell_cmd.split_whitespace().next()? {
         "cd" => Some("Hint: Use the :cd meta command instead to change directory."),
         "pushd" => Some("Hint: Use the :pushd meta command instead to change directory."),

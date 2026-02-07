@@ -846,35 +846,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 arf_println!("Returned to R mode.");
                                 continue;
                             }
-                            // Intercept directory navigation commands.
-                            // These must affect the parent process (not run in a subprocess).
-                            let shell_parts: Vec<&str> =
-                                trimmed.splitn(2, char::is_whitespace).collect();
-                            match shell_parts[0] {
-                                "cd" => {
-                                    let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
-                                    match meta_command::meta_cd(path_arg) {
-                                        Ok(cwd) => arf_println!("cd: {}", cwd.display()),
-                                        Err(e) => arf_println!("cd: {}", e),
-                                    }
-                                    continue;
-                                }
-                                "pushd" => {
-                                    let path_arg = shell_parts.get(1).unwrap_or(&"").trim();
-                                    match meta_command::meta_pushd(&mut state.dir_stack, path_arg) {
-                                        Ok(cwd) => arf_println!("pushd: {}", cwd.display()),
-                                        Err(e) => arf_println!("pushd: {}", e),
-                                    }
-                                    continue;
-                                }
-                                "popd" => {
-                                    match meta_command::meta_popd(&mut state.dir_stack) {
-                                        Ok(cwd) => arf_println!("popd: {}", cwd.display()),
-                                        Err(e) => arf_println!("popd: {}", e),
-                                    }
-                                    continue;
-                                }
-                                _ => {}
+                            // Show a hint for cd/pushd/popd since they have no effect
+                            // in a subprocess. The command still runs in the shell.
+                            if let Some(hint) = meta_command::dir_command_hint(trimmed) {
+                                arf_println!("{}", hint);
                             }
                             execute_shell_command(trimmed);
                         }
