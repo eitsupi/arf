@@ -404,7 +404,7 @@ fn process_history_clear(
 mod tests {
     use super::*;
     use crate::config::{
-        ElapsedConfig, Indicators, ModeIndicatorPosition, SpinnerConfig, StatusColorConfig,
+        Indicators, ModeIndicatorPosition, PromptDurationConfig, SpinnerConfig, StatusColorConfig,
         StatusConfig, ViColorConfig, ViConfig,
     };
     use crate::editor::prompt::PromptFormatter;
@@ -429,7 +429,7 @@ mod tests {
             Color::Default,
             StatusConfig::default(),
             StatusColorConfig::default(),
-            ElapsedConfig::default(),
+            PromptDurationConfig::default(),
             Color::Default,
             SpinnerConfig::default(),
             ViConfig::default(),

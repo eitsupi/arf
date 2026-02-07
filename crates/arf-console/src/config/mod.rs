@@ -12,7 +12,9 @@ mod startup;
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
 pub use completion::CompletionConfig;
 pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
-pub use experimental::{ElapsedConfig, ExperimentalConfig, HistoryForgetConfig, SpinnerConfig};
+pub use experimental::{
+    ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, SpinnerConfig,
+};
 pub use history::HistoryConfig;
 pub use mode::ModeConfig;
 #[allow(unused_imports)]

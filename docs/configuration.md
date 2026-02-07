@@ -133,8 +133,9 @@ on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 frames = ""                # Animation frames (empty = disabled)
 color = "Cyan"             # Spinner color
 
-[experimental.elapsed]
-threshold_ms = 2000        # Show elapsed time only for commands slower than this (ms)
+[experimental.prompt_duration]
+format = "{value} "        # Duration display format ({value} = time string)
+threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 ```
 
 ## Auto Suggestions
@@ -273,7 +274,7 @@ string = { Rgb = [0, 255, 128] }    # RGB values 0-255
 | `indicator` | Mode indicator text color ([reprex], [format], #!) | Yellow |
 | `status.success` | Color for success (symbol and/or prompt when override_prompt_color is true) | LightGreen |
 | `status.error` | Color for error (symbol and/or prompt when override_prompt_color is true) | LightRed |
-| `elapsed` | Color for elapsed time indicator | Yellow |
+| `duration` | Color for command duration indicator | Yellow |
 | `vi.insert` | Color for vi insert mode indicator | Default |
 | `vi.normal` | Color for vi normal mode indicator | Default |
 | `vi.non_vi` | Color for non-vi modes (Emacs, etc.) | Default |
@@ -289,7 +290,7 @@ The `prompt.format`, `prompt.continuation`, and `prompt.shell_format` fields sup
 | `{cwd_short}` | Current working directory (basename only) | `project` |
 | `{shell}` | Shell name from $SHELL (Unix) or "cmd" (Windows) | `bash`, `zsh`, `cmd` |
 | `{status}` | Command status indicator (see below) | `✗ ` on error |
-| `{elapsed}` | Command execution time (see [Elapsed Time](#elapsed-time-indicator)) | `5s`, `1m30s` |
+| `{duration}` | Command execution time (see [Command Duration](#command-duration-indicator)) | `5s `, `1m30s ` |
 
 ### Prompt Examples
 
@@ -354,63 +355,63 @@ symbol = { error = "✗ " }
 override_prompt_color = true
 ```
 
-## Elapsed Time Indicator
+## Command Duration Indicator
 
-arf can show how long the previous command took to execute via the `{elapsed}` prompt placeholder. This is an experimental feature.
+arf can show how long the previous command took to execute via the `{duration}` prompt placeholder. This is an experimental feature.
 
-The format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped). For sub-second durations, milliseconds are shown (e.g., `800ms`).
+The time format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped). For sub-second durations, milliseconds are shown (e.g., `800ms`).
 
 > [!NOTE]
-> `{elapsed}` is not included in the default prompt format. To use it, add `{elapsed}` to your `prompt.format` setting.
+> `{duration}` is not included in the default prompt format. To use it, add `{duration}` to your `prompt.format` setting.
 
 ### Configuration
 
 ```toml
 [prompt]
-format = "{status}R {version}> {elapsed}"
+format = "{duration}{status}R {version}> "
 
-[experimental.elapsed]
+[experimental.prompt_duration]
+format = "{value} "   # How to display the duration ({value} = time string)
 threshold_ms = 2000   # Only show for commands that take longer than 2s (default)
 
 [colors.prompt]
-elapsed = "Yellow"    # Color for elapsed time text (default)
+duration = "Yellow"   # Color for duration text (default)
 ```
 
 ### How It Works
 
-- `{elapsed}` expands to the formatted duration when the previous command exceeded the threshold
-- `{elapsed}` expands to an empty string when the command was fast (below threshold) or no command has been run yet
-- This means you can safely place `{elapsed}` in your prompt — it will only appear when relevant
+- When the previous command exceeded `threshold_ms`, `{value}` in the format string is replaced with the time string (e.g., "5s"), and the result replaces `{duration}` in the prompt
+- When the command was fast (below threshold) or no command has been run yet, `{duration}` expands to an empty string
+- The entire format string is conditional — static text in the format (like "took ") only appears when the duration is shown
+- This means you can safely place `{duration}` in your prompt — it will only appear when relevant
 
 ### Examples
 
 ```toml
-# Recommended: starship-like placement at the end of the prompt
-# Normal:     "R 4.4.0> "
-# After slow: "R 4.4.0> 5s"
+# Simple (default format): "5s R 4.4.0> " after slow command
 [prompt]
-format = "{status}R {version}> {elapsed}"
+format = "{duration}{status}R {version}> "
 
-# With brackets around elapsed time for visibility
-# Normal:     "R 4.4.0> "
-# After slow: "R 4.4.0> [5s] "
+# starship-like: "took 5s R 4.4.0> "
 [prompt]
-format = "{status}R {version}> {elapsed}"
-# Note: To add brackets, include them in the format string.
-# However, bare brackets will always show even when {elapsed} is empty.
-# A workaround is to place {elapsed} at the very end without decoration.
+format = "{duration}{status}R {version}> "
+[experimental.prompt_duration]
+format = "took {value} "
+
+# Bracketed: "(5s) R 4.4.0> "
+[prompt]
+format = "{duration}{status}R {version}> "
+[experimental.prompt_duration]
+format = "({value}) "
 
 # Lower threshold to 500ms (sub-second shows milliseconds like "800ms")
-[experimental.elapsed]
+[experimental.prompt_duration]
 threshold_ms = 500
 
 # Custom color
 [colors.prompt]
-elapsed = "DarkGray"
+duration = "DarkGray"
 ```
-
-> [!TIP]
-> Avoid placing static text (like "took ") immediately before `{elapsed}`, as it will remain visible even when `{elapsed}` is empty. Place `{elapsed}` at the end of the prompt for the cleanest result.
 
 ## Vi Mode Indicator
 

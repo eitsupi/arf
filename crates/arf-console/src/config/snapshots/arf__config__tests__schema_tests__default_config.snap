@@ -78,7 +78,7 @@ main = "LightGreen"
 continuation = "LightGreen"
 shell = "LightRed"
 indicator = "Yellow"
-elapsed = "Yellow"
+duration = "Yellow"
 
 [colors.prompt.status]
 success = "LightGreen"
@@ -98,5 +98,6 @@ on_exit_only = false
 frames = ""
 color = "Cyan"
 
-[experimental.elapsed]
+[experimental.prompt_duration]
+format = "{value} "
 threshold_ms = 2000

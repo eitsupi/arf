@@ -6,9 +6,9 @@
 //! - `{cwd_short}` - Current working directory (basename only)
 //! - `{shell}` - Shell name from $SHELL (e.g., "bash", "zsh")
 //! - `{status}` - Command status indicator (success/error)
-//! - `{elapsed}` - Command execution time (e.g., "5s", "1m30s")
+//! - `{duration}` - Command execution time (e.g., "5s", "1m30s")
 //!
-//! Note: `{status}` and `{elapsed}` are expanded in `PromptRuntimeConfig::build_main_prompt()`,
+//! Note: `{status}` and `{duration}` are expanded in `PromptRuntimeConfig::build_main_prompt()`,
 //! not here, because they require runtime state.
 //!
 //! Note: Vi mode indicator is handled separately via `render_prompt_indicator()`,

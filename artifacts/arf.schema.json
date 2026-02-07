@@ -12,7 +12,7 @@
         },
         "prompt": {
           "continuation": "LightGreen",
-          "elapsed": "Yellow",
+          "duration": "Yellow",
           "indicator": "Yellow",
           "main": "LightGreen",
           "shell": "LightRed",
@@ -64,13 +64,14 @@
       "$ref": "#/$defs/ExperimentalConfig",
       "default": {
         "completion_min_chars": null,
-        "elapsed": {
-          "threshold_ms": 2000
-        },
         "history_forget": {
           "delay": 2,
           "enabled": false,
           "on_exit_only": false
+        },
+        "prompt_duration": {
+          "format": "{value} ",
+          "threshold_ms": 2000
         },
         "prompt_spinner": {
           "color": "Cyan",
@@ -292,8 +293,8 @@
                 }
               ]
             },
-            "elapsed": {
-              "description": "Color for elapsed time indicator",
+            "duration": {
+              "description": "Color for command duration indicator",
               "default": "Yellow",
               "oneOf": [
                 {
@@ -1462,19 +1463,6 @@
         }
       ]
     },
-    "ElapsedConfig": {
-      "description": "Command elapsed time configuration for the `{elapsed}` prompt placeholder.\n\nControls when and how command execution time is displayed in the prompt.\nOnly displayed when the command took longer than `threshold_ms`.\n\nFormat follows starship convention: \"5s\", \"1m30s\", \"2h48m30s\"\n(no spaces between units, leading zero units skipped).",
-      "type": "object",
-      "properties": {
-        "threshold_ms": {
-          "description": "Minimum duration in milliseconds before showing elapsed time (default: 2000).\nCommands faster than this threshold will not show elapsed time.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 2000,
-          "minimum": 0
-        }
-      }
-    },
     "ExperimentalConfig": {
       "$ref": "#/$defs/ExperimentalConfigSchema"
     },
@@ -1492,13 +1480,6 @@
           "default": null,
           "minimum": 0
         },
-        "elapsed": {
-          "description": "Elapsed time configuration for the `{elapsed}` prompt placeholder.",
-          "$ref": "#/$defs/ElapsedConfig",
-          "default": {
-            "threshold_ms": 2000
-          }
-        },
         "history_forget": {
           "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",
           "$ref": "#/$defs/HistoryForgetConfig",
@@ -1506,6 +1487,14 @@
             "delay": 2,
             "enabled": false,
             "on_exit_only": false
+          }
+        },
+        "prompt_duration": {
+          "description": "Command duration configuration for the `{duration}` prompt placeholder.",
+          "$ref": "#/$defs/PromptDurationConfig",
+          "default": {
+            "format": "{value} ",
+            "threshold_ms": 2000
           }
         },
         "prompt_spinner": {
@@ -1670,6 +1659,24 @@
               "normal": "[N] "
             }
           }
+        }
+      }
+    },
+    "PromptDurationConfig": {
+      "description": "Command duration configuration for the `{duration}` prompt placeholder.\n\nControls when and how command execution time is displayed in the prompt.\nOnly displayed when the command took longer than `threshold_ms`.\n\nThe `format` field uses `{value}` as a sub-placeholder for the time string.\nThe entire format string is conditionally displayed: when the duration exceeds\n`threshold_ms`, `{value}` is replaced with the time string (e.g., \"5s\");\nwhen below threshold, the `{duration}` prompt placeholder becomes empty.\n\nTime format follows starship convention: \"5s\", \"1m30s\", \"2h48m30s\"\n(no spaces between units, leading zero units skipped).",
+      "type": "object",
+      "properties": {
+        "format": {
+          "description": "Format string for the duration display. Use `{value}` for the time string.\n\nExamples:\n- `\"{value} \"` (default) — \"5s \" after a 5-second command\n- `\"took {value} \"` — \"took 5s \"\n- `\"({value}) \"` — \"(5s) \"",
+          "type": "string",
+          "default": "{value} "
+        },
+        "threshold_ms": {
+          "description": "Minimum duration in milliseconds before showing duration (default: 2000).\nCommands faster than this threshold will not show duration.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 2000,
+          "minimum": 0
         }
       }
     },

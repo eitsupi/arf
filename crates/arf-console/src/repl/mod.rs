@@ -320,8 +320,8 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
-            self.config.experimental.elapsed.clone(),
-            self.config.colors.prompt.elapsed,
+            self.config.experimental.prompt_duration.clone(),
+            self.config.colors.prompt.duration,
             self.config.experimental.prompt_spinner.clone(),
             self.config.prompt.vi.clone(),
             self.config.colors.prompt.vi.clone(),
@@ -480,8 +480,8 @@ impl Repl {
             self.config.colors.prompt.indicator,
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
-            self.config.experimental.elapsed.clone(),
-            self.config.colors.prompt.elapsed,
+            self.config.experimental.prompt_duration.clone(),
+            self.config.colors.prompt.duration,
             self.config.experimental.prompt_spinner.clone(),
             self.config.prompt.vi.clone(),
             self.config.colors.prompt.vi.clone(),
@@ -731,8 +731,8 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
             // Update prompt status indicator for the next prompt
             state.prompt_config.set_last_command_failed(had_error);
 
-            // Calculate elapsed time for the {elapsed} prompt placeholder
-            state.prompt_config.set_command_elapsed();
+            // Calculate duration for the {duration} prompt placeholder
+            state.prompt_config.set_command_duration();
 
             // Reset error state for the next command
             arf_libr::reset_command_error_state();
@@ -855,7 +855,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         clear_input_lines(&original_line, &code);
                     }
 
-                    // Record command start time for the {elapsed} prompt placeholder
+                    // Record command start time for the {duration} prompt placeholder
                     // Start the spinner to indicate R is evaluating code
                     // The spinner will be stopped when R produces output or the next prompt appears
                     if !code.is_empty() {

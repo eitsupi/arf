@@ -4,10 +4,11 @@
 
 ### Added
 
-- Experimental `{elapsed}` prompt placeholder for showing command execution time (#67)
+- Experimental `{duration}` prompt placeholder for showing command execution time (#67)
   - Format follows starship convention: "5s", "1m30s", "2h48m30s"
-  - Configurable threshold via `experimental.elapsed.threshold_ms` (default: 2000ms)
-  - Color via `colors.prompt.elapsed` (default: Yellow)
+  - Configurable format via `experimental.prompt_duration.format` (default: `"{value} "`)
+  - Configurable threshold via `experimental.prompt_duration.threshold_ms` (default: 2000ms)
+  - Color via `colors.prompt.duration` (default: Yellow)
 
 ### Fixed
 

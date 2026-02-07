@@ -141,7 +141,7 @@ impl JsonSchema for ColorsConfig {
                                 "error": color_prop!("Color for error status")
                             }
                         },
-                        "elapsed": color_prop!("Color for elapsed time indicator", default = "Yellow"),
+                        "duration": color_prop!("Color for command duration indicator", default = "Yellow"),
                         "vi": {
                             "type": "object",
                             "description": "Colors for vi mode indicator",
@@ -233,8 +233,8 @@ pub struct PromptColorConfig {
     pub indicator: Color,
     /// Colors for command status indicator.
     pub status: StatusColorConfig,
-    /// Color for elapsed time indicator.
-    pub elapsed: Color,
+    /// Color for command duration indicator.
+    pub duration: Color,
     /// Colors for vi mode indicator.
     pub vi: ViColorConfig,
 }
@@ -247,7 +247,7 @@ impl Default for PromptColorConfig {
             shell: Color::LightRed,
             indicator: Color::Yellow,
             status: StatusColorConfig::default(),
-            elapsed: Color::Yellow,
+            duration: Color::Yellow,
             vi: ViColorConfig::default(),
         }
     }
