@@ -995,23 +995,35 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
 /// diverge, causing `R_LIBS_USER` paths like `~/R/win-library` to fail.
 ///
 /// Falls back to `USERPROFILE` if `getRUser()` returns NULL.
+///
+/// # Memory safety
+/// `getRUser()` stores its result in a static buffer inside R.dll
+/// (`UserRHome`), so the returned pointer is valid for the lifetime of the
+/// process and does not need to be freed by the caller.
 #[cfg(windows)]
 fn get_r_user_home(lib: &crate::functions::RLibrary) -> String {
     let r_user = unsafe { (lib.get_r_user)() };
 
     if !r_user.is_null() {
         let cstr = unsafe { std::ffi::CStr::from_ptr(r_user) };
-        if let Ok(s) = cstr.to_str() {
-            log::info!("[WINDOWS] getRUser() returned: {}", s);
-            return s.to_string();
-        }
-        // If not valid UTF-8, try lossy conversion
-        let s = cstr.to_string_lossy().to_string();
-        log::warn!(
-            "[WINDOWS] getRUser() returned non-UTF-8 path, using lossy: {}",
-            s
-        );
-        return s;
+        let bytes = cstr.to_bytes();
+
+        // getRUser() returns a path encoded in the system's ANSI code page
+        // (e.g. CP932/Shift-JIS on Japanese Windows). Try UTF-8 first (which
+        // covers ASCII paths), then fall back to proper code page conversion
+        // via decode_windows_native() to handle non-ASCII usernames.
+        let path = match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                log::info!(
+                    "[WINDOWS] getRUser() returned non-UTF-8 path, decoding from system code page"
+                );
+                decode_windows_native(bytes).into_owned()
+            }
+        };
+
+        log::info!("[WINDOWS] getRUser() returned: {}", path);
+        return path;
     }
 
     log::warn!("[WINDOWS] getRUser() returned NULL, falling back to USERPROFILE");
