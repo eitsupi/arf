@@ -95,6 +95,8 @@ impl FuzzyHistory {
 
 impl History for FuzzyHistory {
     fn save(&mut self, mut h: HistoryItem) -> Result<HistoryItem> {
+        // TODO: Once reedline's History trait accepts HistoryItem<HistoryMode>,
+        // populate h.more_info with the current execution mode (R/Shell/Reprex).
         // Populate metadata if not already set
         if h.start_timestamp.is_none() {
             h.start_timestamp = Some(chrono::Utc::now());
