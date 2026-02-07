@@ -873,9 +873,13 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
     let r_home_cstr = CString::new(r_home.to_string_lossy().as_ref())
         .map_err(|_| crate::error::RError::LibraryNotFound("Invalid R_HOME path".to_string()))?;
 
-    let user_home = env::var("USERPROFILE")
-        .or_else(|_| env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
+    // Use R's getRUser() to determine the user home directory.
+    // On Windows, R resolves ~ to the Documents folder (via SHGetKnownFolderPath),
+    // NOT USERPROFILE. Using USERPROFILE would cause R_LIBS_USER paths like
+    // ~/R/win-library to resolve to the wrong location, especially when the
+    // Documents folder has been moved to a different drive.
+    // See: https://github.com/eitsupi/arf/issues/65
+    let user_home = get_r_user_home(lib);
     let user_home_cstr = CString::new(user_home)
         .map_err(|_| crate::error::RError::LibraryNotFound("Invalid user home path".to_string()))?;
 
@@ -973,6 +977,47 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
     }
 
     Ok(())
+}
+
+/// Get R's user home directory on Windows using `getRUser()` from R.dll.
+///
+/// `getRUser()` returns the directory that R uses for `~`, following this
+/// search order:
+/// 1. `R_USER` environment variable
+/// 2. `HOME` environment variable
+/// 3. `SHGetKnownFolderPath(FOLDERID_Documents)` (the Documents folder)
+/// 4. `HOMEDRIVE` + `HOMEPATH`
+/// 5. Current working directory
+///
+/// This is important because R's `~` resolves to the Documents folder, not
+/// `USERPROFILE`. When users move their Documents folder to a different drive,
+/// `USERPROFILE` (e.g. `C:\Users\name`) and Documents (e.g. `D:\Users\name\Documents`)
+/// diverge, causing `R_LIBS_USER` paths like `~/R/win-library` to fail.
+///
+/// Falls back to `USERPROFILE` if `getRUser()` returns NULL.
+#[cfg(windows)]
+fn get_r_user_home(lib: &crate::functions::RLibrary) -> String {
+    let r_user = unsafe { (lib.get_r_user)() };
+
+    if !r_user.is_null() {
+        let cstr = unsafe { std::ffi::CStr::from_ptr(r_user) };
+        if let Ok(s) = cstr.to_str() {
+            log::info!("[WINDOWS] getRUser() returned: {}", s);
+            return s.to_string();
+        }
+        // If not valid UTF-8, try lossy conversion
+        let s = cstr.to_string_lossy().to_string();
+        log::warn!(
+            "[WINDOWS] getRUser() returned non-UTF-8 path, using lossy: {}",
+            s
+        );
+        return s;
+    }
+
+    log::warn!("[WINDOWS] getRUser() returned NULL, falling back to USERPROFILE");
+    env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string())
 }
 
 /// Windows callback for ProcessEvents (no-op).
