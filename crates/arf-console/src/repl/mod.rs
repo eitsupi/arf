@@ -304,28 +304,37 @@ impl Repl {
 
         // Create prompt runtime config with unexpanded templates
         // Templates are expanded dynamically in build_main_prompt() to track cwd changes
-        let prompt_config = PromptRuntimeConfig::new(
+        let prompt_config = PromptRuntimeConfig::builder(
             self.prompt_formatter.clone(),
             self.config.prompt.format.clone(),
             self.config.prompt.continuation.clone(),
             self.config.prompt.shell_format.clone(),
-            self.config.prompt.mode_indicator,
+        )
+        .mode_indicator_position(self.config.prompt.mode_indicator)
+        .reprex(
             self.config.startup.mode.reprex,
             self.config.mode.reprex.comment.clone(),
-            self.config.prompt.indicators.clone(),
-            self.config.startup.mode.autoformat,
-            self.config.colors.prompt.main,
-            self.config.colors.prompt.continuation,
-            self.config.colors.prompt.shell,
-            self.config.colors.prompt.indicator,
+        )
+        .indicators(self.config.prompt.indicators.clone())
+        .autoformat(self.config.startup.mode.autoformat)
+        .main_color(self.config.colors.prompt.main)
+        .continuation_color(self.config.colors.prompt.continuation)
+        .shell_color(self.config.colors.prompt.shell)
+        .mode_indicator_color(self.config.colors.prompt.indicator)
+        .status(
             self.config.prompt.status.clone(),
             self.config.colors.prompt.status.clone(),
+        )
+        .duration(
             self.config.experimental.prompt_duration.clone(),
             self.config.colors.prompt.duration,
-            self.config.experimental.prompt_spinner.clone(),
+        )
+        .spinner(self.config.experimental.prompt_spinner.clone())
+        .vi(
             self.config.prompt.vi.clone(),
             self.config.colors.prompt.vi.clone(),
-        );
+        )
+        .build();
 
         // Get history paths for :history commands
         let r_history_path = self.r_history_path();
@@ -464,28 +473,27 @@ impl Repl {
         );
 
         // Minimal prompt config for meta commands (R not available)
-        let mut prompt_config = PromptRuntimeConfig::new(
-            self.prompt_formatter.clone(),
-            "R > ".to_string(),
-            "+   ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            crate::config::Indicators::default(),
-            false,
-            self.config.colors.prompt.main,
-            self.config.colors.prompt.continuation,
-            self.config.colors.prompt.shell,
-            self.config.colors.prompt.indicator,
-            self.config.prompt.status.clone(),
-            self.config.colors.prompt.status.clone(),
-            self.config.experimental.prompt_duration.clone(),
-            self.config.colors.prompt.duration,
-            self.config.experimental.prompt_spinner.clone(),
-            self.config.prompt.vi.clone(),
-            self.config.colors.prompt.vi.clone(),
-        );
+        let mut prompt_config =
+            PromptRuntimeConfig::builder(self.prompt_formatter.clone(), "R > ", "+   ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .main_color(self.config.colors.prompt.main)
+                .continuation_color(self.config.colors.prompt.continuation)
+                .shell_color(self.config.colors.prompt.shell)
+                .mode_indicator_color(self.config.colors.prompt.indicator)
+                .status(
+                    self.config.prompt.status.clone(),
+                    self.config.colors.prompt.status.clone(),
+                )
+                .duration(
+                    self.config.experimental.prompt_duration.clone(),
+                    self.config.colors.prompt.duration,
+                )
+                .spinner(self.config.experimental.prompt_spinner.clone())
+                .vi(
+                    self.config.prompt.vi.clone(),
+                    self.config.colors.prompt.vi.clone(),
+                )
+                .build();
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();
 

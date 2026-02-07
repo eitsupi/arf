@@ -127,7 +127,7 @@ pub struct PromptRuntimeConfig {
     /// Main prompt template (unexpanded, e.g., "{status}R {version}> ").
     main_template: String,
     /// Continuation prompt template (unexpanded).
-    cont_template: String,
+    continuation_template: String,
     /// Shell mode prompt template (unexpanded, e.g., "[{shell}] $ ").
     shell_template: String,
     mode_indicator_position: ModeIndicatorPosition,
@@ -169,61 +169,22 @@ pub struct PromptRuntimeConfig {
 }
 
 impl PromptRuntimeConfig {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    /// Create a builder for `PromptRuntimeConfig`.
+    ///
+    /// Required parameters are the prompt formatter and template strings.
+    /// All other fields default to sensible values and can be set via builder methods.
+    pub fn builder(
         prompt_formatter: PromptFormatter,
-        main_template: String,
-        cont_template: String,
-        shell_template: String,
-        mode_indicator_position: ModeIndicatorPosition,
-        reprex_enabled: bool,
-        reprex_comment: String,
-        indicators: Indicators,
-        autoformat_enabled: bool,
-        main_color: Color,
-        continuation_color: Color,
-        shell_color: Color,
-        mode_indicator_color: Color,
-        status_config: StatusConfig,
-        status_colors: StatusColorConfig,
-        duration_config: PromptDurationConfig,
-        duration_color: Color,
-        spinner_config: SpinnerConfig,
-        vi_config: ViConfig,
-        vi_colors: ViColorConfig,
-    ) -> Self {
-        // Initialize spinner in arf-libr
-        arf_libr::set_spinner_frames(&spinner_config.frames);
-        // Convert Color to ANSI escape code
-        let color_code = color_to_ansi_code(spinner_config.color);
-        arf_libr::set_spinner_color(&color_code);
-
-        Self {
+        main_template: impl Into<String>,
+        continuation_template: impl Into<String>,
+        shell_template: impl Into<String>,
+    ) -> PromptRuntimeConfigBuilder {
+        PromptRuntimeConfigBuilder::new(
             prompt_formatter,
             main_template,
-            cont_template,
+            continuation_template,
             shell_template,
-            mode_indicator_position,
-            reprex_enabled,
-            reprex_comment,
-            indicators,
-            autoformat_enabled,
-            shell_enabled: false,
-            main_color,
-            continuation_color,
-            shell_color,
-            mode_indicator_color,
-            status_config,
-            status_colors,
-            last_command_failed: false,
-            duration_config,
-            duration_color,
-            last_command_start: None,
-            last_command_duration: None,
-            spinner_config,
-            vi_config,
-            vi_colors,
-        }
+        )
     }
 
     pub fn build_main_prompt(&self) -> RPrompt {
@@ -231,7 +192,7 @@ impl PromptRuntimeConfig {
             // In shell mode, use shell_template as the main prompt (no mode indicator)
             // Expand placeholders (including {cwd}) dynamically each time
             let shell_format = self.prompt_formatter.format(&self.shell_template);
-            let cont_format = self.prompt_formatter.format(&self.cont_template);
+            let cont_format = self.prompt_formatter.format(&self.continuation_template);
             RPrompt::new(shell_format, cont_format)
                 .with_colors(
                     self.shell_color,
@@ -244,7 +205,7 @@ impl PromptRuntimeConfig {
             // In R mode, use main_template with optional mode indicator
             // Expand placeholders (including {cwd}) dynamically each time
             let main_format = self.prompt_formatter.format(&self.main_template);
-            let cont_format = self.prompt_formatter.format(&self.cont_template);
+            let cont_format = self.prompt_formatter.format(&self.continuation_template);
             let mode_indicator = self.current_mode_indicator();
 
             // Determine prompt color based on status mode
@@ -387,7 +348,7 @@ impl PromptRuntimeConfig {
     }
 
     pub fn build_cont_prompt(&self) -> RPrompt {
-        let cont_format = self.prompt_formatter.format(&self.cont_template);
+        let cont_format = self.prompt_formatter.format(&self.continuation_template);
         let mode_indicator = self.current_mode_indicator();
         RPrompt::new(cont_format.clone(), cont_format)
             .with_mode_indicator(mode_indicator, self.mode_indicator_position)
@@ -521,6 +482,163 @@ fn render_time(duration: Duration) -> String {
     result
 }
 
+/// Builder for [`PromptRuntimeConfig`].
+///
+/// Created via [`PromptRuntimeConfig::builder()`]. Only the prompt formatter
+/// and template strings are required; all other fields have sensible defaults.
+pub struct PromptRuntimeConfigBuilder {
+    prompt_formatter: PromptFormatter,
+    main_template: String,
+    continuation_template: String,
+    shell_template: String,
+    mode_indicator_position: ModeIndicatorPosition,
+    reprex_enabled: bool,
+    reprex_comment: String,
+    indicators: Indicators,
+    autoformat_enabled: bool,
+    main_color: Color,
+    continuation_color: Color,
+    shell_color: Color,
+    mode_indicator_color: Color,
+    status_config: StatusConfig,
+    status_colors: StatusColorConfig,
+    duration_config: PromptDurationConfig,
+    duration_color: Color,
+    spinner_config: SpinnerConfig,
+    vi_config: ViConfig,
+    vi_colors: ViColorConfig,
+}
+
+impl PromptRuntimeConfigBuilder {
+    fn new(
+        prompt_formatter: PromptFormatter,
+        main_template: impl Into<String>,
+        continuation_template: impl Into<String>,
+        shell_template: impl Into<String>,
+    ) -> Self {
+        Self {
+            prompt_formatter,
+            main_template: main_template.into(),
+            continuation_template: continuation_template.into(),
+            shell_template: shell_template.into(),
+            mode_indicator_position: ModeIndicatorPosition::default(),
+            reprex_enabled: false,
+            reprex_comment: "#> ".to_string(),
+            indicators: Indicators::default(),
+            autoformat_enabled: false,
+            main_color: Color::Default,
+            continuation_color: Color::Default,
+            shell_color: Color::Default,
+            mode_indicator_color: Color::Default,
+            status_config: StatusConfig::default(),
+            status_colors: StatusColorConfig::default(),
+            duration_config: PromptDurationConfig::default(),
+            duration_color: Color::Default,
+            spinner_config: SpinnerConfig::default(),
+            vi_config: ViConfig::default(),
+            vi_colors: ViColorConfig::default(),
+        }
+    }
+
+    pub fn mode_indicator_position(mut self, position: ModeIndicatorPosition) -> Self {
+        self.mode_indicator_position = position;
+        self
+    }
+
+    pub fn reprex(mut self, enabled: bool, comment: impl Into<String>) -> Self {
+        self.reprex_enabled = enabled;
+        self.reprex_comment = comment.into();
+        self
+    }
+
+    pub fn indicators(mut self, indicators: Indicators) -> Self {
+        self.indicators = indicators;
+        self
+    }
+
+    pub fn autoformat(mut self, enabled: bool) -> Self {
+        self.autoformat_enabled = enabled;
+        self
+    }
+
+    pub fn main_color(mut self, color: Color) -> Self {
+        self.main_color = color;
+        self
+    }
+
+    pub fn continuation_color(mut self, color: Color) -> Self {
+        self.continuation_color = color;
+        self
+    }
+
+    pub fn shell_color(mut self, color: Color) -> Self {
+        self.shell_color = color;
+        self
+    }
+
+    pub fn mode_indicator_color(mut self, color: Color) -> Self {
+        self.mode_indicator_color = color;
+        self
+    }
+
+    pub fn status(mut self, config: StatusConfig, colors: StatusColorConfig) -> Self {
+        self.status_config = config;
+        self.status_colors = colors;
+        self
+    }
+
+    pub fn duration(mut self, config: PromptDurationConfig, color: Color) -> Self {
+        self.duration_config = config;
+        self.duration_color = color;
+        self
+    }
+
+    pub fn spinner(mut self, config: SpinnerConfig) -> Self {
+        self.spinner_config = config;
+        self
+    }
+
+    pub fn vi(mut self, config: ViConfig, colors: ViColorConfig) -> Self {
+        self.vi_config = config;
+        self.vi_colors = colors;
+        self
+    }
+
+    pub fn build(self) -> PromptRuntimeConfig {
+        // Initialize spinner in arf-libr
+        arf_libr::set_spinner_frames(&self.spinner_config.frames);
+        let color_code = color_to_ansi_code(self.spinner_config.color);
+        arf_libr::set_spinner_color(&color_code);
+
+        PromptRuntimeConfig {
+            prompt_formatter: self.prompt_formatter,
+            main_template: self.main_template,
+            continuation_template: self.continuation_template,
+            shell_template: self.shell_template,
+            mode_indicator_position: self.mode_indicator_position,
+            reprex_enabled: self.reprex_enabled,
+            reprex_comment: self.reprex_comment,
+            indicators: self.indicators,
+            autoformat_enabled: self.autoformat_enabled,
+            shell_enabled: false,
+            main_color: self.main_color,
+            continuation_color: self.continuation_color,
+            shell_color: self.shell_color,
+            mode_indicator_color: self.mode_indicator_color,
+            status_config: self.status_config,
+            status_colors: self.status_colors,
+            last_command_failed: false,
+            duration_config: self.duration_config,
+            duration_color: self.duration_color,
+            last_command_start: None,
+            last_command_duration: None,
+            spinner_config: self.spinner_config,
+            vi_config: self.vi_config,
+            vi_colors: self.vi_colors,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,29 +654,11 @@ mod tests {
         autoformat: bool,
         indicators: Indicators,
     ) -> PromptRuntimeConfig {
-        let formatter = PromptFormatter::default();
-        PromptRuntimeConfig::new(
-            formatter,
-            "r> ".to_string(),
-            "+  ".to_string(),
-            "[bash] $ ".to_string(),
-            ModeIndicatorPosition::Prefix,
-            reprex,
-            "#> ".to_string(),
-            indicators,
-            autoformat,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        )
+        PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ")
+            .reprex(reprex, "#> ")
+            .indicators(indicators)
+            .autoformat(autoformat)
+            .build()
     }
 
     #[test]
@@ -670,29 +770,13 @@ mod tests {
     #[test]
     fn test_prompt_runtime_config_cwd_placeholder_expansion() {
         // Test that {cwd} and {cwd_short} placeholders are expanded dynamically
-        let formatter = PromptFormatter::default();
-        let config = PromptRuntimeConfig::new(
-            formatter,
-            "{cwd_short}> ".to_string(), // Template with cwd placeholder
-            "+  ".to_string(),
-            "[{shell}] $ ".to_string(),
-            ModeIndicatorPosition::Prefix,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let config = PromptRuntimeConfig::builder(
+            PromptFormatter::default(),
+            "{cwd_short}> ",
+            "+  ",
+            "[{shell}] $ ",
+        )
+        .build();
 
         let prompt = config.build_main_prompt();
         let rendered = prompt.render_prompt_left().to_string();
@@ -714,29 +798,10 @@ mod tests {
     #[test]
     fn test_prompt_runtime_config_dynamic_cwd_update() {
         // Test that build_main_prompt() returns updated cwd after directory change
-        let formatter = PromptFormatter::default();
-        let config = PromptRuntimeConfig::new(
-            formatter,
-            "{cwd}> ".to_string(), // Template with full cwd placeholder
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{cwd}> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
 
         // Get the current directory
         let original_cwd = std::env::current_dir().unwrap();
@@ -780,7 +845,6 @@ mod tests {
 
     #[test]
     fn test_status_indicator_with_error_symbol() {
-        let formatter = PromptFormatter::default();
         let status_config = StatusConfig {
             symbol: StatusSymbol {
                 success: "".to_string(),
@@ -788,28 +852,11 @@ mod tests {
             },
             override_prompt_color: false,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{status}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            status_config,
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{status}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .status(status_config, StatusColorConfig::default())
+                .build();
 
         // Initially no error - empty status symbol
         let prompt = config.build_main_prompt();
@@ -839,7 +886,6 @@ mod tests {
 
     #[test]
     fn test_status_indicator_with_empty_symbols() {
-        let formatter = PromptFormatter::default();
         // Both symbols empty - equivalent to old mode=None
         let status_config = StatusConfig {
             symbol: StatusSymbol {
@@ -848,28 +894,11 @@ mod tests {
             },
             override_prompt_color: false,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{status}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            status_config,
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{status}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .status(status_config, StatusColorConfig::default())
+                .build();
 
         // With empty symbols, status placeholder should expand to empty string
         let prompt = config.build_main_prompt();
@@ -884,7 +913,6 @@ mod tests {
     #[test]
     fn test_status_without_placeholder() {
         // Test that status config has no effect when {status} placeholder is absent
-        let formatter = PromptFormatter::default();
         let status_config = StatusConfig {
             symbol: StatusSymbol {
                 success: "✓ ".to_string(),
@@ -892,28 +920,15 @@ mod tests {
             },
             override_prompt_color: false,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "r> ".to_string(), // No {status} placeholder
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            status_config,
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config = PromptRuntimeConfig::builder(
+            PromptFormatter::default(),
+            "r> ", // No {status} placeholder
+            "+  ",
+            "$ ",
+        )
+        .mode_indicator_position(ModeIndicatorPosition::None)
+        .status(status_config, StatusColorConfig::default())
+        .build();
 
         // Prompt stays the same regardless of status
         let prompt = config.build_main_prompt();
@@ -926,7 +941,6 @@ mod tests {
 
     #[test]
     fn test_status_override_prompt_color() {
-        let formatter = PromptFormatter::default();
         let status_config = StatusConfig {
             symbol: StatusSymbol {
                 success: "".to_string(),
@@ -938,28 +952,12 @@ mod tests {
             success: Color::Green,
             error: Color::Red,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{status}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::LightGreen, // Normal main color
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            status_config,
-            status_colors,
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{status}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .main_color(Color::LightGreen) // Normal main color
+                .status(status_config, status_colors)
+                .build();
 
         // On success, prompt should use success color (Green)
         let prompt = config.build_main_prompt();
@@ -995,33 +993,8 @@ mod tests {
 
     #[test]
     fn test_spinner_not_started_with_empty_frames() {
-        let formatter = PromptFormatter::default();
-        // Create config with empty spinner frames (disabled)
-        let config = PromptRuntimeConfig::new(
-            formatter,
-            "r> ".to_string(),
-            "+  ".to_string(),
-            "[bash] $ ".to_string(),
-            ModeIndicatorPosition::Prefix,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig {
-                frames: String::new(),
-                color: Color::Default,
-            }, // Disabled
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        // Create config with empty spinner frames (disabled by default)
+        let config = create_test_config(false, false);
         // Should not panic when spinner is disabled
         config.start_spinner();
     }
@@ -1065,29 +1038,10 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_below_threshold() {
-        let formatter = PromptFormatter::default();
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
         // Simulate a fast command (below default 2000ms threshold)
         config.last_command_duration = Some(Duration::from_millis(500));
 
@@ -1098,29 +1052,10 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_above_threshold() {
-        let formatter = PromptFormatter::default();
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
         let prompt = config.build_main_prompt();
@@ -1140,29 +1075,10 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_no_data() {
-        let formatter = PromptFormatter::default();
-        let config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
 
         let prompt = config.build_main_prompt();
         // No duration data -> {duration} should be empty
@@ -1171,29 +1087,10 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_not_present() {
-        let formatter = PromptFormatter::default();
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
         let prompt = config.build_main_prompt();
@@ -1203,33 +1100,15 @@ mod tests {
 
     #[test]
     fn test_duration_custom_threshold() {
-        let formatter = PromptFormatter::default();
         let duration_config = PromptDurationConfig {
             threshold_ms: 500,
             ..PromptDurationConfig::default()
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            duration_config,
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .duration(duration_config, Color::Default)
+                .build();
         // 600ms > 500ms threshold, sub-second shows milliseconds
         config.last_command_duration = Some(Duration::from_millis(600));
 
@@ -1244,33 +1123,15 @@ mod tests {
 
     #[test]
     fn test_duration_custom_format() {
-        let formatter = PromptFormatter::default();
         let duration_config = PromptDurationConfig {
             format: "took {value} ".to_string(),
             threshold_ms: 2000,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            duration_config,
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .duration(duration_config, Color::Default)
+                .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
         let prompt = config.build_main_prompt();
@@ -1290,33 +1151,15 @@ mod tests {
 
     #[test]
     fn test_duration_format_with_brackets() {
-        let formatter = PromptFormatter::default();
         let duration_config = PromptDurationConfig {
             format: "({value}) ".to_string(),
             threshold_ms: 2000,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            duration_config,
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .duration(duration_config, Color::Default)
+                .build();
         config.last_command_duration = Some(Duration::from_secs(90));
 
         let prompt = config.build_main_prompt();
@@ -1331,33 +1174,15 @@ mod tests {
 
     #[test]
     fn test_duration_format_without_value_placeholder() {
-        let formatter = PromptFormatter::default();
         let duration_config = PromptDurationConfig {
             format: "slow! ".to_string(),
             threshold_ms: 2000,
         };
-        let mut config = PromptRuntimeConfig::new(
-            formatter,
-            "{duration}r> ".to_string(),
-            "+  ".to_string(),
-            "$ ".to_string(),
-            ModeIndicatorPosition::None,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            duration_config,
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        );
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .duration(duration_config, Color::Default)
+                .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
         let prompt = config.build_main_prompt();
