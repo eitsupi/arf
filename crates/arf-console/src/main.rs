@@ -13,6 +13,9 @@ pub(crate) mod r_parser;
 mod repl;
 mod traps;
 
+#[cfg(test)]
+mod test_utils;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource};

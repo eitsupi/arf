@@ -1568,8 +1568,7 @@ mod tests {
 
     #[test]
     fn test_meta_cd_completes_directories() {
-        // ":cd " with trailing space should show directory completions
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("subdir")).unwrap();
         std::fs::File::create(tmp.path().join("file.txt")).unwrap();
@@ -1577,8 +1576,6 @@ mod tests {
 
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completer.complete(":cd ", 4);
-
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         // Should only contain directories (directories_only: true)
         assert!(!suggestions.is_empty(), "Should have directory completions");
@@ -1601,16 +1598,13 @@ mod tests {
 
     #[test]
     fn test_meta_cd_partial_path() {
-        // ":cd su" should fuzzy-match "subdir/"
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("subdir")).unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completer.complete(":cd su", 6);
-
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(
             suggestions.iter().any(|s| s.value == "subdir/"),
@@ -1621,16 +1615,13 @@ mod tests {
 
     #[test]
     fn test_meta_pushd_completes_directories() {
-        // ":pushd " should show directory completions
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("mydir")).unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completer.complete(":pushd ", 7);
-
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(
             suggestions.iter().any(|s| s.value == "mydir/"),
@@ -1652,8 +1643,7 @@ mod tests {
 
     #[test]
     fn test_meta_cd_nested_path() {
-        // ":cd src/" should list subdirectories inside src/
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("src");
         std::fs::create_dir(&src).unwrap();
@@ -1662,8 +1652,6 @@ mod tests {
 
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completer.complete(":cd src/", 8);
-
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(
             suggestions.iter().any(|s| s.value == "src/inner/"),

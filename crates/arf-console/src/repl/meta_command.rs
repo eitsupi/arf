@@ -723,14 +723,13 @@ mod tests {
 
     #[test]
     fn test_meta_cd_relative_path() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let subdir = tmp.path().join("sub");
         std::fs::create_dir(&subdir).unwrap();
 
         std::env::set_current_dir(tmp.path()).unwrap();
         let result = meta_cd("sub");
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(result.is_ok());
         assert!(result.unwrap().ends_with("sub"));
@@ -738,20 +737,18 @@ mod tests {
 
     #[test]
     fn test_meta_cd_absolute_path() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
 
         let result = meta_cd(&tmp.path().to_string_lossy());
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_meta_cd_tilde() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let result = meta_cd("~");
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(result.is_ok());
         if let Some(home) = dirs::home_dir() {
@@ -764,9 +761,8 @@ mod tests {
 
     #[test]
     fn test_meta_cd_no_args() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let result = meta_cd("");
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         assert!(result.is_ok());
         // Should go to home
@@ -786,7 +782,7 @@ mod tests {
 
     #[test]
     fn test_meta_pushd_popd() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let mut dir_stack = Vec::new();
 
@@ -808,8 +804,6 @@ mod tests {
             std::env::current_dir().unwrap().canonicalize().ok(),
             tmp.path().canonicalize().ok()
         );
-
-        std::env::set_current_dir(&original_cwd).unwrap();
     }
 
     #[test]
@@ -832,7 +826,7 @@ mod tests {
 
     #[test]
     fn test_meta_pushd_saves_previous() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let subdir = tmp.path().join("sub");
         std::fs::create_dir(&subdir).unwrap();
@@ -847,13 +841,11 @@ mod tests {
             dir_stack[0].canonicalize().ok(),
             before_pushd.canonicalize().ok()
         );
-
-        std::env::set_current_dir(&original_cwd).unwrap();
     }
 
     #[test]
     fn test_process_meta_command_cd() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -869,13 +861,11 @@ mod tests {
             &mut dir_stack,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
-
-        std::env::set_current_dir(&original_cwd).unwrap();
     }
 
     #[test]
     fn test_process_meta_command_pushd_popd() {
-        let original_cwd = std::env::current_dir().unwrap();
+        let _guard = crate::test_utils::lock_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -904,7 +894,5 @@ mod tests {
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(dir_stack.is_empty());
-
-        std::env::set_current_dir(&original_cwd).unwrap();
     }
 }
