@@ -1,0 +1,73 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug!
+
+        **Tip:** Run the `:info` metacommand in arf and press `c` to copy your session information to the clipboard.
+
+  - type: textarea
+    id: info-output
+    attributes:
+      label: "Session information (`:info` output)"
+      description: |
+        Paste the output of the `:info` metacommand here (press `c` to copy to clipboard).
+      placeholder: |
+        # Session Information
+
+        arf version:    0.2.0
+        OS:             linux (x86_64)
+        Config file:    ~/.config/arf/arf.toml
+        R version:      4.5.2
+        R_HOME:         /opt/R/4.5.2/lib/R
+        ...
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: "A clear description of the bug"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: "Steps to reproduce the behavior"
+      placeholder: |
+        1. Start arf
+        2. Type `...`
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: "What you expected to happen"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: "What actually happened"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: "Any other context, screenshots, or terminal recordings"
+    validations:
+      required: false
