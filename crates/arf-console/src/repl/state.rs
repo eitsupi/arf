@@ -477,15 +477,22 @@ impl PromptRuntimeConfig {
 /// Format a duration into a human-readable string (starship-style).
 ///
 /// Examples:
+/// - 800ms → "800ms"
 /// - 5.2s → "5s"
 /// - 90s → "1m30s"
 /// - 3661s → "1h1m1s"
 /// - 86400s → "1d0h0m0s"
 ///
-/// Leading zero units are skipped, but once a non-zero unit appears,
-/// all subsequent units are included (even if zero).
+/// For durations under 1 second, milliseconds are shown (e.g., "800ms").
+/// For longer durations, leading zero units are skipped, but once a non-zero unit
+/// appears, all subsequent units are included (even if zero).
 fn render_time(duration: Duration) -> String {
     let total_secs = duration.as_secs();
+
+    // Show milliseconds for sub-second durations to avoid confusing "0s"
+    if total_secs == 0 {
+        return format!("{}ms", duration.as_millis());
+    }
 
     let days = total_secs / 86400;
     let hours = (total_secs % 86400) / 3600;
@@ -1019,7 +1026,6 @@ mod tests {
     #[test]
     fn test_render_time_seconds_only() {
         assert_eq!(render_time(Duration::from_secs(5)), "5s");
-        assert_eq!(render_time(Duration::from_secs(0)), "0s");
         assert_eq!(render_time(Duration::from_secs(59)), "59s");
     }
 
@@ -1044,10 +1050,14 @@ mod tests {
     }
 
     #[test]
-    fn test_render_time_subsecond_truncated() {
-        // Subsecond precision is truncated to whole seconds
+    fn test_render_time_subsecond_shows_milliseconds() {
+        // Sub-second durations show milliseconds
+        assert_eq!(render_time(Duration::from_millis(0)), "0ms");
+        assert_eq!(render_time(Duration::from_millis(500)), "500ms");
+        assert_eq!(render_time(Duration::from_millis(800)), "800ms");
+        assert_eq!(render_time(Duration::from_millis(999)), "999ms");
+        // Once >= 1s, subsecond precision is truncated to whole seconds
         assert_eq!(render_time(Duration::from_millis(2500)), "2s");
-        assert_eq!(render_time(Duration::from_millis(999)), "0s");
     }
 
     #[test]
@@ -1217,14 +1227,14 @@ mod tests {
             ViConfig::default(),
             ViColorConfig::default(),
         );
-        // 600ms > 500ms threshold
+        // 600ms > 500ms threshold, sub-second shows milliseconds
         config.last_command_elapsed = Some(Duration::from_millis(600));
 
         let prompt = config.build_main_prompt();
         let rendered = prompt.render_prompt_left();
         assert!(
-            rendered.contains("0s"),
-            "Should contain elapsed time (600ms truncated to 0s), got: {}",
+            rendered.contains("600ms"),
+            "Should contain elapsed time in milliseconds, got: {}",
             rendered
         );
     }
