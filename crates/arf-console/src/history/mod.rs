@@ -10,4 +10,4 @@ mod storage;
 
 pub use search::FuzzyHistory;
 #[allow(unused_imports)]
-pub use storage::HistoryMode;
+pub use storage::HistoryExtraInfo;
