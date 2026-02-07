@@ -21,7 +21,7 @@ libloading = "0.9"
 crossterm = "0.29"
 crokey = "1.4"
 nu-ansi-term = { version = "0.50", features = ["derive_serde_style"] }
-reedline = { git = "https://github.com/nushell/reedline.git", rev = "99764ee6d6b05a3ce4b31eb8797c5d68b277d054", features = ["sqlite", "idle_callback"] }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "4c1668769ad0fac6e1f104adffd36821228d5ce5", features = ["sqlite", "idle_callback"] }
 
 # Configuration
 dirs = "6.0"
