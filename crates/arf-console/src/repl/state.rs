@@ -1328,4 +1328,50 @@ mod tests {
             rendered
         );
     }
+
+    #[test]
+    fn test_duration_format_without_value_placeholder() {
+        let formatter = PromptFormatter::default();
+        let duration_config = PromptDurationConfig {
+            format: "slow! ".to_string(),
+            threshold_ms: 2000,
+        };
+        let mut config = PromptRuntimeConfig::new(
+            formatter,
+            "{duration}r> ".to_string(),
+            "+  ".to_string(),
+            "$ ".to_string(),
+            ModeIndicatorPosition::None,
+            false,
+            "#> ".to_string(),
+            Indicators::default(),
+            false,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            Color::Default,
+            StatusConfig::default(),
+            StatusColorConfig::default(),
+            duration_config,
+            Color::Default,
+            SpinnerConfig::default(),
+            ViConfig::default(),
+            ViColorConfig::default(),
+        );
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        // Format without {value}: only static text "slow! " is shown
+        assert!(
+            rendered.contains("slow!"),
+            "Should contain static text from format, got: {}",
+            rendered
+        );
+        assert!(
+            !rendered.contains("5s"),
+            "Should not contain time value when {{value}} is absent, got: {}",
+            rendered
+        );
+    }
 }

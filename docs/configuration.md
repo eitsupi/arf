@@ -371,7 +371,7 @@ The time format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spa
 format = "{duration}{status}R {version}> "
 
 [experimental.prompt_duration]
-format = "{value} "   # How to display the duration ({value} = time string, required)
+format = "{value} "   # How to display the duration ({value} = time string)
 threshold_ms = 2000   # Only show for commands that take longer than 2s (default)
 
 [colors.prompt]
@@ -380,7 +380,7 @@ duration = "Yellow"   # Color for duration text (default)
 
 ### How It Works
 
-- The `format` string must contain `{value}` — it will be replaced with the time string (e.g., "5s"). If `{value}` is omitted, no time value will be shown
+- The `format` string uses `{value}` as a sub-placeholder for the time string (e.g., "5s"). If `{value}` is omitted, only the static text in the format string is shown
 - When the previous command exceeded `threshold_ms`, `{value}` in the format string is replaced with the time string, and the result replaces `{duration}` in the prompt
 - When the command was fast (below threshold) or no command has been run yet, `{duration}` expands to an empty string
 - The entire format string is conditional — static text in the format (like "took ") only appears when the duration is shown
