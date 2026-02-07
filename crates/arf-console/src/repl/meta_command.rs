@@ -403,38 +403,10 @@ fn process_history_clear(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        Indicators, ModeIndicatorPosition, PromptDurationConfig, SpinnerConfig, StatusColorConfig,
-        StatusConfig, ViColorConfig, ViConfig,
-    };
     use crate::editor::prompt::PromptFormatter;
-    use nu_ansi_term::Color;
 
     fn create_test_prompt_config() -> PromptRuntimeConfig {
-        // Create a test prompt formatter with fixed values
-        let formatter = PromptFormatter::default();
-        PromptRuntimeConfig::new(
-            formatter,
-            "r> ".to_string(),
-            "+  ".to_string(),
-            "[bash] $ ".to_string(),
-            ModeIndicatorPosition::Prefix,
-            false,
-            "#> ".to_string(),
-            Indicators::default(),
-            false,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            Color::Default,
-            StatusConfig::default(),
-            StatusColorConfig::default(),
-            PromptDurationConfig::default(),
-            Color::Default,
-            SpinnerConfig::default(),
-            ViConfig::default(),
-            ViColorConfig::default(),
-        )
+        PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
     }
 
     /// Default r_source_status for tests (PATH mode, rig not enabled).
