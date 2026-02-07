@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: `~` now correctly resolves to the Documents folder instead of USERPROFILE, fixing `R_LIBS_USER` paths when the Documents folder has been moved to a different drive (#65)
+
 ## [0.2.0] - 2026-02-06
 
 ### Added

@@ -121,6 +121,11 @@ pub struct RLibrary {
     #[cfg(windows)]
     pub readconsolecfg: unsafe extern "C" fn(),
 
+    // Windows getRUser (returns R's `~` home directory)
+    // Search order: R_USER → HOME → SHGetKnownFolderPath(Documents) → HOMEDRIVE+HOMEPATH → cwd
+    #[cfg(windows)]
+    pub get_r_user: unsafe extern "C" fn() -> *const c_char,
+
     // Windows Rgraphapp.dll functions (loaded separately, optional)
     #[cfg(windows)]
     pub ga_initapp: Option<unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int>,
@@ -369,6 +374,9 @@ impl RLibrary {
             // readconsolecfg is exported from R.dll, not Rgraphapp.dll
             #[cfg(windows)]
             load_symbol!(readconsolecfg, b"readconsolecfg\0");
+            // getRUser returns R's `~` home directory as seen by R
+            #[cfg(windows)]
+            load_symbol!(get_r_user, b"getRUser\0");
 
             // Load Rgraphapp.dll functions (GA_initapp, GA_peekevent)
             #[cfg(windows)]
@@ -562,6 +570,8 @@ impl RLibrary {
                 r_common_command_line,
                 #[cfg(windows)]
                 readconsolecfg,
+                #[cfg(windows)]
+                get_r_user,
                 #[cfg(windows)]
                 ga_initapp,
                 r_interactive,
