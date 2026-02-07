@@ -24,7 +24,7 @@ body:
         R version:      4.5.2
         R_HOME:         /opt/R/4.5.2/lib/R
         ...
-      render: markdown
+      render: text
     validations:
       required: true
 
