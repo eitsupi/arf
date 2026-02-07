@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental `{elapsed}` prompt placeholder for showing command execution time (#67)
+  - Format follows starship convention: "5s", "1m30s", "2h48m30s"
+  - Configurable threshold via `experimental.elapsed.threshold_ms` (default: 2000ms)
+  - Color via `colors.prompt.elapsed` (default: Yellow)
+
 ### Fixed
 
 - Windows: `~` now correctly resolves to the Documents folder instead of USERPROFILE, fixing `R_LIBS_USER` paths when the Documents folder has been moved to a different drive (#65)

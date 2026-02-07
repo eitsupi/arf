@@ -132,6 +132,9 @@ on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 [experimental.prompt_spinner]
 frames = ""                # Animation frames (empty = disabled)
 color = "Cyan"             # Spinner color
+
+[experimental.elapsed]
+threshold_ms = 2000        # Show elapsed time only for commands slower than this (ms)
 ```
 
 ## Auto Suggestions
@@ -270,6 +273,7 @@ string = { Rgb = [0, 255, 128] }    # RGB values 0-255
 | `indicator` | Mode indicator text color ([reprex], [format], #!) | Yellow |
 | `status.success` | Color for success (symbol and/or prompt when override_prompt_color is true) | LightGreen |
 | `status.error` | Color for error (symbol and/or prompt when override_prompt_color is true) | LightRed |
+| `elapsed` | Color for elapsed time indicator | Yellow |
 | `vi.insert` | Color for vi insert mode indicator | Default |
 | `vi.normal` | Color for vi normal mode indicator | Default |
 | `vi.non_vi` | Color for non-vi modes (Emacs, etc.) | Default |
@@ -285,6 +289,7 @@ The `prompt.format`, `prompt.continuation`, and `prompt.shell_format` fields sup
 | `{cwd_short}` | Current working directory (basename only) | `project` |
 | `{shell}` | Shell name from $SHELL (Unix) or "cmd" (Windows) | `bash`, `zsh`, `cmd` |
 | `{status}` | Command status indicator (see below) | `✗ ` on error |
+| `{elapsed}` | Command execution time (see [Elapsed Time](#elapsed-time-indicator)) | `5s`, `1m30s` |
 
 ### Prompt Examples
 
@@ -347,6 +352,41 @@ override_prompt_color = true
 [prompt.status]
 symbol = { error = "✗ " }
 override_prompt_color = true
+```
+
+## Elapsed Time Indicator
+
+arf can show how long the previous command took to execute via the `{elapsed}` prompt placeholder. This is an experimental feature.
+
+The format follows starship's convention: `5s`, `1m30s`, `2h48m30s` (no spaces between units, leading zero units skipped).
+
+### Configuration
+
+```toml
+[prompt]
+format = "{status}R {version}> {elapsed}"
+
+[experimental.elapsed]
+threshold_ms = 2000   # Only show for commands that take longer than 2s (default)
+
+[colors.prompt]
+elapsed = "Yellow"    # Color for elapsed time text (default)
+```
+
+### Examples
+
+```toml
+# Show elapsed time after prompt (default threshold 2s)
+[prompt]
+format = "{status}R {version}> {elapsed}"
+
+# Lower threshold to 500ms
+[experimental.elapsed]
+threshold_ms = 500
+
+# Custom color
+[colors.prompt]
+elapsed = "DarkGray"
 ```
 
 ## Vi Mode Indicator

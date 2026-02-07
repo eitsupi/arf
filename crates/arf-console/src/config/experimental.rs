@@ -32,6 +32,10 @@ pub struct ExperimentalConfig {
     /// Spinner configuration for busy indicator during R execution.
     #[serde(default)]
     pub prompt_spinner: SpinnerConfig,
+
+    /// Elapsed time configuration for the `{elapsed}` prompt placeholder.
+    #[serde(default)]
+    pub elapsed: ElapsedConfig,
 }
 
 /// Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.
@@ -112,6 +116,9 @@ struct ExperimentalConfigSchema {
 
     /// Spinner configuration for busy indicator during R execution.
     pub prompt_spinner: SpinnerConfigSchema,
+
+    /// Elapsed time configuration for the `{elapsed}` prompt placeholder.
+    pub elapsed: ElapsedConfig,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -150,6 +157,34 @@ impl Default for HistoryForgetConfig {
             enabled: false,
             delay: 2,
             on_exit_only: false,
+        }
+    }
+}
+
+/// Command elapsed time configuration for the `{elapsed}` prompt placeholder.
+///
+/// Controls when and how command execution time is displayed in the prompt.
+/// Only displayed when the command took longer than `threshold_ms`.
+///
+/// Format follows starship convention: "5s", "1m30s", "2h48m30s"
+/// (no spaces between units, leading zero units skipped).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ElapsedConfig {
+    /// Minimum duration in milliseconds before showing elapsed time (default: 2000).
+    /// Commands faster than this threshold will not show elapsed time.
+    #[serde(default = "default_elapsed_threshold_ms")]
+    pub threshold_ms: u64,
+}
+
+fn default_elapsed_threshold_ms() -> u64 {
+    2000
+}
+
+impl Default for ElapsedConfig {
+    fn default() -> Self {
+        Self {
+            threshold_ms: default_elapsed_threshold_ms(),
         }
     }
 }

@@ -78,6 +78,7 @@ main = "LightGreen"
 continuation = "LightGreen"
 shell = "LightRed"
 indicator = "Yellow"
+elapsed = "Yellow"
 
 [colors.prompt.status]
 success = "LightGreen"
@@ -96,3 +97,6 @@ on_exit_only = false
 [experimental.prompt_spinner]
 frames = ""
 color = "Cyan"
+
+[experimental.elapsed]
+threshold_ms = 2000
