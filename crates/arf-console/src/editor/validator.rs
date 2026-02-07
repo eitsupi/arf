@@ -204,6 +204,18 @@ impl Validator for RValidator {
             return ValidationResult::Complete;
         }
 
+        // Meta commands (starting with ':') are always single-line and complete.
+        // Without this check, commands like `:cd /tmp/` would be parsed as R code
+        // where the trailing `/` is interpreted as a division operator, causing
+        // the validator to incorrectly return Incomplete.
+        if line.trim_start().starts_with(':') {
+            debug_log(&format!(
+                "[Validator] {:?} -> Complete (meta command)",
+                escaped
+            ));
+            return ValidationResult::Complete;
+        }
+
         let source = line.as_bytes();
 
         // Parse with tree-sitter (doesn't call R, avoids re-entrancy)
@@ -377,6 +389,13 @@ mod tests {
         assert!(is_complete(validator.validate(":h")));
         assert!(is_complete(validator.validate(":help")));
         assert!(is_complete(validator.validate(":quit")));
+
+        // Meta commands with path arguments containing trailing slashes
+        // should NOT trigger multiline mode (the `/` is not a division operator)
+        assert!(is_complete(validator.validate(":cd /tmp/")));
+        assert!(is_complete(validator.validate(":cd ~/Documents/")));
+        assert!(is_complete(validator.validate(":pushd /tmp/")));
+        assert!(is_complete(validator.validate(":system ls /tmp/")));
     }
 
     #[test]

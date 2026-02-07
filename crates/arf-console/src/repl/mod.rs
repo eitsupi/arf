@@ -353,6 +353,7 @@ impl Repl {
                 r_source_status: self.r_source_status.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
+                dir_stack: Vec::new(),
             });
         });
 
@@ -496,6 +497,10 @@ impl Repl {
                 .build();
         let r_history_path = self.r_history_path();
         let shell_history_path = self.shell_history_path();
+        // Separate dir_stack for standalone mode (R not initialized).
+        // The R mainloop path stores its own dir_stack in ReplState.
+        // These two paths are mutually exclusive, so no sharing is needed.
+        let mut dir_stack: Vec<std::path::PathBuf> = Vec::new();
 
         loop {
             match line_editor.read_line(&prompt) {
@@ -514,6 +519,7 @@ impl Repl {
                         &r_history_path,
                         &shell_history_path,
                         &self.r_source_status,
+                        &mut dir_stack,
                     ) {
                         match result {
                             MetaCommandResult::Handled => {
@@ -793,6 +799,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.r_history_path,
                         &state.shell_history_path,
                         &state.r_source_status,
+                        &mut state.dir_stack,
                     ) {
                         match result {
                             MetaCommandResult::Handled => {
@@ -838,6 +845,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 state.prompt_config.set_shell(false);
                                 arf_println!("Returned to R mode.");
                                 continue;
+                            }
+                            // Show a hint for cd/pushd/popd since they have no effect
+                            // in a subprocess. The command still runs in the shell.
+                            if let Some(hint) = meta_command::dir_command_hint(trimmed) {
+                                arf_println!("{}", hint);
                             }
                             execute_shell_command(trimmed);
                         }

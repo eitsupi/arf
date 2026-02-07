@@ -118,6 +118,8 @@ pub struct ReplState {
     pub forget_config: HistoryForgetConfig,
     /// Queue for the sponge feature (tracks commands to potentially delete).
     pub sponge_queue: SpongeQueue,
+    /// Directory stack for :pushd/:popd navigation.
+    pub dir_stack: Vec<PathBuf>,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.
@@ -797,6 +799,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_dynamic_cwd_update() {
+        let _guard = crate::test_utils::lock_cwd();
+
         // Test that build_main_prompt() returns updated cwd after directory change
         let config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "{cwd}> ", "+  ", "$ ")
@@ -815,9 +819,6 @@ mod tests {
         // Build prompt again - should reflect the new directory
         let prompt2 = config.build_main_prompt();
         let rendered2 = prompt2.render_prompt_left().to_string();
-
-        // Restore original directory
-        std::env::set_current_dir(&original_cwd).unwrap();
 
         // The two prompts should be different if cwd changed
         // (unless original_cwd == temp_dir, which is unlikely)

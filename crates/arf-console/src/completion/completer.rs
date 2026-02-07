@@ -106,6 +106,21 @@ const META_COMMANDS: &[MetaCommandDef] = &[
         takes_argument: true,
     },
     MetaCommandDef {
+        name: "cd",
+        description: "Change working directory",
+        takes_argument: true,
+    },
+    MetaCommandDef {
+        name: "pushd",
+        description: "Push directory and change to it",
+        takes_argument: true,
+    },
+    MetaCommandDef {
+        name: "popd",
+        description: "Pop directory from stack",
+        takes_argument: false,
+    },
+    MetaCommandDef {
         name: "quit",
         description: "Quit arf",
         takes_argument: false,
@@ -151,6 +166,33 @@ impl MetaCommandCompleter {
 
         // Calculate the start position for the span
         let leading_whitespace = line.len() - trimmed.len();
+
+        // Handle path completion for :cd and :pushd
+        // This is done before the main match so that paths with spaces work correctly
+        // (we extract the raw substring instead of using split_whitespace parts).
+        if let Some(cmd) = parts.first()
+            && (*cmd == "cd" || *cmd == "pushd")
+            && (parts.len() > 1 || has_trailing_space)
+        {
+            let cmd_end = 1 + cmd.len(); // ":" + cmd
+            let rest = &trimmed[cmd_end..];
+            let ws_after = rest.len() - rest.trim_start().len();
+            let arg_start = leading_whitespace + cmd_end + ws_after;
+            let partial = if pos > arg_start {
+                &line[arg_start..pos]
+            } else {
+                ""
+            };
+            return path_to_suggestions(
+                partial,
+                pos,
+                arg_start,
+                &PathCompletionOptions {
+                    directories_only: true,
+                    ..Default::default()
+                },
+            );
+        }
 
         match (parts.len(), has_trailing_space) {
             (0, _) => {
@@ -1010,40 +1052,44 @@ fn detect_string_context(line: &str, cursor_pos: usize) -> Option<StringContext>
     None
 }
 
-/// Complete paths using Rust-native path completion.
-fn complete_path_in_string(_line: &str, pos: usize, ctx: &StringContext) -> Vec<Suggestion> {
+/// Convert path completions to reedline Suggestions.
+fn path_to_suggestions(
+    partial: &str,
+    pos: usize,
+    span_start: usize,
+    options: &PathCompletionOptions,
+) -> Vec<Suggestion> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let options = PathCompletionOptions::default();
-
-    let completions = complete_path(&ctx.content, &cwd, &options);
-
-    completions
+    complete_path(partial, &cwd, options)
         .into_iter()
-        .map(|c| {
-            let match_indices = c.match_indices.map(|indices| {
-                // Offset indices to account for quote position
-                indices.into_iter().collect()
-            });
-
-            Suggestion {
-                value: c.path,
-                display_override: None,
-                description: if c.is_dir {
-                    Some("directory".to_string())
-                } else {
-                    None
-                },
-                extra: None,
-                span: Span {
-                    start: ctx.start,
-                    end: pos,
-                },
-                append_whitespace: false,
-                style: None,
-                match_indices,
-            }
+        .map(|c| Suggestion {
+            value: c.path,
+            display_override: None,
+            description: if c.is_dir {
+                Some("directory".to_string())
+            } else {
+                None
+            },
+            extra: None,
+            span: Span {
+                start: span_start,
+                end: pos,
+            },
+            append_whitespace: false,
+            style: None,
+            match_indices: c.match_indices,
         })
         .collect()
+}
+
+/// Complete paths using Rust-native path completion.
+fn complete_path_in_string(_line: &str, pos: usize, ctx: &StringContext) -> Vec<Suggestion> {
+    path_to_suggestions(
+        &ctx.content,
+        pos,
+        ctx.start,
+        &PathCompletionOptions::default(),
+    )
 }
 
 #[cfg(test)]
@@ -1516,5 +1562,101 @@ mod tests {
         let ctx = ctx.unwrap();
         assert_eq!(ctx.content, "hel");
         assert_eq!(ctx.start, 8); // Content starts after r"(
+    }
+
+    // --- cd/pushd/popd completion tests ---
+
+    #[test]
+    fn test_meta_cd_completes_directories() {
+        let _guard = crate::test_utils::lock_cwd();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+        std::fs::File::create(tmp.path().join("file.txt")).unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":cd ", 4);
+
+        // Should only contain directories (directories_only: true)
+        assert!(!suggestions.is_empty(), "Should have directory completions");
+        for s in &suggestions {
+            assert!(
+                s.value.ends_with('/'),
+                "cd completion should only show directories, got: {}",
+                s.value
+            );
+        }
+        assert!(
+            suggestions.iter().any(|s| s.value == "subdir/"),
+            "Should contain subdir/"
+        );
+        assert!(
+            !suggestions.iter().any(|s| s.value == "file.txt"),
+            "Should not contain files"
+        );
+    }
+
+    #[test]
+    fn test_meta_cd_partial_path() {
+        let _guard = crate::test_utils::lock_cwd();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":cd su", 6);
+
+        assert!(
+            suggestions.iter().any(|s| s.value == "subdir/"),
+            "Should fuzzy-match subdir/, got: {:?}",
+            suggestions.iter().map(|s| &s.value).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_meta_pushd_completes_directories() {
+        let _guard = crate::test_utils::lock_cwd();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("mydir")).unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":pushd ", 7);
+
+        assert!(
+            suggestions.iter().any(|s| s.value == "mydir/"),
+            "Should contain mydir/"
+        );
+    }
+
+    #[test]
+    fn test_meta_popd_no_completion() {
+        // ":popd " should NOT show path completions (takes no argument)
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":popd ", 6);
+        assert!(
+            suggestions.is_empty(),
+            "popd should not have completions, got: {:?}",
+            suggestions.iter().map(|s| &s.value).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_meta_cd_nested_path() {
+        let _guard = crate::test_utils::lock_cwd();
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::create_dir(src.join("inner")).unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":cd src/", 8);
+
+        assert!(
+            suggestions.iter().any(|s| s.value == "src/inner/"),
+            "Should list src/inner/, got: {:?}",
+            suggestions.iter().map(|s| &s.value).collect::<Vec<_>>()
+        );
     }
 }
