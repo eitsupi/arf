@@ -7,7 +7,7 @@
 - `:cd`, `:pushd`, `:popd` meta commands for directory navigation (#60)
   - Path autocompletion with fuzzy matching for `:cd` and `:pushd` arguments
   - In shell mode and `:system`, `cd`/`pushd`/`popd` show a hint suggesting the meta command alternative
-- Experimental `{duration}` prompt placeholder for showing command execution time (#67)
+- Experimental `{duration}` prompt placeholder for showing command execution time (#75)
   - Format follows starship convention: "5s", "1m30s", "2h48m30s"
   - Configurable format via `experimental.prompt_duration.format` (default: `"{value} "`)
   - Configurable threshold via `experimental.prompt_duration.threshold_ms` (default: 2000ms)
@@ -15,7 +15,7 @@
 
 ### Fixed
 
-- Windows: `~` now correctly resolves to the Documents folder instead of USERPROFILE, fixing `R_LIBS_USER` paths when the Documents folder has been moved to a different drive (#65)
+- Windows: `~` now correctly resolves to the Documents folder instead of USERPROFILE, fixing `R_LIBS_USER` paths when the Documents folder has been moved to a different drive (#68)
 
 ## [0.2.0] - 2026-02-06
 
