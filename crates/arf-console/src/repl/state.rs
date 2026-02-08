@@ -309,6 +309,14 @@ impl PromptRuntimeConfig {
         self.last_command_duration = self.last_command_start.take().map(|start| start.elapsed());
     }
 
+    /// Clear the stored command duration.
+    ///
+    /// Should be called when a meta command is executed so that the previous
+    /// R command's duration does not persist in the prompt.
+    pub fn clear_command_duration(&mut self) {
+        self.last_command_duration = None;
+    }
+
     /// Expand the {duration} placeholder based on duration config and last command duration.
     ///
     /// Shows the duration only when it exceeds the configured threshold.
@@ -1083,6 +1091,29 @@ mod tests {
 
         let prompt = config.build_main_prompt();
         // No duration data -> {duration} should be empty
+        assert_eq!(prompt.render_prompt_left(), "r> ");
+    }
+
+    #[test]
+    fn test_clear_command_duration() {
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
+        // Set a duration above the default threshold
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        assert!(
+            rendered.contains("5s"),
+            "Should contain duration before clearing, got: {}",
+            rendered
+        );
+
+        // Clear and verify duration is no longer rendered
+        config.clear_command_duration();
+        let prompt = config.build_main_prompt();
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
