@@ -1095,6 +1095,29 @@ mod tests {
     }
 
     #[test]
+    fn test_clear_command_duration() {
+        let mut config =
+            PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
+                .mode_indicator_position(ModeIndicatorPosition::None)
+                .build();
+        // Set a duration above the default threshold
+        config.last_command_duration = Some(Duration::from_secs(5));
+
+        let prompt = config.build_main_prompt();
+        let rendered = prompt.render_prompt_left();
+        assert!(
+            rendered.contains("5s"),
+            "Should contain duration before clearing, got: {}",
+            rendered
+        );
+
+        // Clear and verify duration is no longer rendered
+        config.clear_command_duration();
+        let prompt = config.build_main_prompt();
+        assert_eq!(prompt.render_prompt_left(), "r> ");
+    }
+
+    #[test]
     fn test_duration_placeholder_not_present() {
         let mut config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "$ ")
