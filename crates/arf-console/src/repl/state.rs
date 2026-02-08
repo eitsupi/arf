@@ -309,6 +309,14 @@ impl PromptRuntimeConfig {
         self.last_command_duration = self.last_command_start.take().map(|start| start.elapsed());
     }
 
+    /// Clear the stored command duration.
+    ///
+    /// Should be called when a meta command is executed so that the previous
+    /// R command's duration does not persist in the prompt.
+    pub fn clear_command_duration(&mut self) {
+        self.last_command_duration = None;
+    }
+
     /// Expand the {duration} placeholder based on duration config and last command duration.
     ///
     /// Shows the duration only when it exceeds the configured threshold.

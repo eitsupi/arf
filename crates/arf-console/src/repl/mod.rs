@@ -521,6 +521,9 @@ impl Repl {
                         &self.r_source_status,
                         &mut dir_stack,
                     ) {
+                        // Clear duration so the previous R command's time
+                        // does not persist in the prompt after a meta command.
+                        prompt_config.clear_command_duration();
                         match result {
                             MetaCommandResult::Handled => {
                                 continue;
@@ -801,6 +804,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.r_source_status,
                         &mut state.dir_stack,
                     ) {
+                        // Clear duration so the previous R command's time
+                        // does not persist in the prompt after a meta command.
+                        state.prompt_config.clear_command_duration();
                         match result {
                             MetaCommandResult::Handled => {
                                 // Command processed, show new prompt
