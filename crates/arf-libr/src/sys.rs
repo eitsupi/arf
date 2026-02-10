@@ -1627,13 +1627,16 @@ local({
         if (.Platform$OS.type != "unix") {
             stop("askpass handler not available on this platform")
         }
-        con <- file("/dev/tty", "r")
+        con <- suppressWarnings(file("/dev/tty", "r"))
         on.exit(close(con), add = TRUE)
+        # Display prompt first via stdout. This stops the spinner and
+        # avoids red coloring (stderr goes through error formatting).
+        cat(msg)
+        flush(stdout())
         system("stty -echo < /dev/tty 2>/dev/null")
         on.exit(system("stty echo < /dev/tty 2>/dev/null"), add = TRUE)
-        cat(msg, file = stderr())
         password <- readLines(con, n = 1, warn = FALSE)
-        cat("\n", file = stderr())
+        cat("\n")
         if (length(password) == 0) return(NULL)
         password
     })
