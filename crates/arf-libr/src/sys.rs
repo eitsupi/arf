@@ -1112,6 +1112,16 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     use std::io::{BufRead, Write};
     use std::os::unix::io::AsRawFd;
 
+    // We need at least 2 bytes for "\n\0" in error/empty paths.
+    // R's readline buffer is always large (typically 4096+), but guard defensively.
+    if buflen < 2 {
+        log::error!(
+            "askpass: buflen ({}) too small, aborting password read",
+            buflen
+        );
+        return 0;
+    }
+
     // Clear the env var immediately to prevent leaking if this function fails.
     // The R handler sets it fresh before each readline() call.
     // SAFETY: No other threads read this env var concurrently; it's only checked
