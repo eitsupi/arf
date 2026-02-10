@@ -367,6 +367,12 @@ impl Terminal {
         Ok(())
     }
 
+    /// Get the current output buffer contents.
+    pub fn get_output(&self) -> Result<String, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        Ok(state.output_buffer.clone())
+    }
+
     /// Send a line of input (appends newline).
     pub fn send_line(&mut self, text: &str) -> Result<(), String> {
         let data = format!("{}\n", text);

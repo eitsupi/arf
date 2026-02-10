@@ -54,8 +54,13 @@ fn test_pty_readline() {
 
 /// Test askpass package integration for password prompts.
 ///
-/// This tests that the askpass package can prompt for input and receive it.
-/// The askpass::askpass() function displays a prompt and waits for user input.
+/// This tests that:
+/// 1. The askpass package can prompt for input and receive it
+/// 2. The password input is NOT echoed back in the terminal output
+///
+/// The custom askpass handler (set via `options(askpass = ...)`) reads directly
+/// from `/dev/tty` with echo disabled, bypassing reedline which would otherwise
+/// echo the password in plaintext.
 ///
 /// Note: This test requires the askpass package to be installed.
 /// Run: install.packages("askpass") to enable this test.
@@ -81,6 +86,9 @@ fn test_pty_askpass() {
         .expect("TRUE")
         .expect("askpass package should be available");
 
+    // Clear buffer before askpass to isolate output
+    terminal.clear_buffer().expect("Should clear buffer");
+
     // Execute askpass::askpass() with a custom prompt
     terminal
         .send_line("askpass::askpass('password> ')")
@@ -96,10 +104,25 @@ fn test_pty_askpass() {
         .send_line("secret_answer")
         .expect("Should send askpass input");
 
-    // The askpass result should be returned (masked in display but returned as string)
+    // The askpass result should be returned as a string
     terminal
         .expect(r#""secret_answer""#)
         .expect("askpass should return the input");
+
+    // Verify the password was NOT echoed in the terminal output.
+    // The return value "secret_answer" (in quotes) should appear exactly once
+    // in the output. If the password was echoed, it would appear without quotes
+    // as well. We check that bare `secret_answer` (without surrounding quotes)
+    // does not appear outside of the R return value.
+    let output = terminal.get_output().expect("Should get output");
+    let bare_occurrences = output.matches("secret_answer").count();
+    let quoted_occurrences = output.matches(r#""secret_answer""#).count();
+    assert_eq!(
+        bare_occurrences, quoted_occurrences,
+        "Password should NOT be echoed in plaintext. \
+         Found {} bare occurrences vs {} quoted occurrences in output:\n{}",
+        bare_occurrences, quoted_occurrences, output
+    );
 
     terminal.quit().expect("Should quit cleanly");
 }

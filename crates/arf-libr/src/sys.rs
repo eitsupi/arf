@@ -1598,6 +1598,49 @@ pub fn stop_spinner() {
     }
 }
 
+/// Get the R code for setting up the askpass handler.
+///
+/// This should be evaluated after R is initialized but before the main loop starts.
+/// It sets `options(askpass = ...)` with a function that reads passwords directly
+/// from `/dev/tty`, bypassing reedline's stdin. This prevents reedline from echoing
+/// the password in plaintext (reedline ignores terminal stty settings).
+///
+/// The handler is Unix-only. On Windows, askpass uses GUI dialogs by default.
+/// If the user has already set `options(askpass = ...)`, we do not override it.
+///
+/// Call this from the application layer (e.g., arf-console) and use arf-harp's
+/// eval_string to evaluate the returned code.
+pub fn askpass_handler_code() -> &'static str {
+    ASKPASS_HANDLER_CODE
+}
+
+/// R code to set up the askpass handler.
+///
+/// Opens `/dev/tty` directly to bypass reedline's stdin, uses `stty -echo`
+/// to suppress echo, and reads the password via `readLines()`.
+/// This is the same approach used by radian.
+const ASKPASS_HANDLER_CODE: &str = r#"
+local({
+    if (!is.null(getOption("askpass"))) return(invisible(NULL))
+
+    options(askpass = function(msg) {
+        if (.Platform$OS.type != "unix") {
+            stop("askpass handler not available on this platform")
+        }
+        con <- file("/dev/tty", "r")
+        on.exit(close(con), add = TRUE)
+        system("stty -echo < /dev/tty 2>/dev/null")
+        on.exit(system("stty echo < /dev/tty 2>/dev/null"), add = TRUE)
+        cat(msg, file = stderr())
+        password <- readLines(con, n = 1, warn = FALSE)
+        cat("\n", file = stderr())
+        if (length(password) == 0) return(NULL)
+        password
+    })
+    invisible(NULL)
+})
+"#;
+
 /// Check if the spinner is currently active.
 pub fn is_spinner_active() -> bool {
     SPINNER_THREAD
