@@ -1186,7 +1186,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         return 0;
     }
     let mut new_termios = old_termios;
-    new_termios.c_lflag &= !libc::ECHO;
+    new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
     if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &new_termios) } != 0 {
         log::error!(
             "askpass: failed to disable terminal echo: {}",
@@ -1286,20 +1286,28 @@ unsafe extern "C" fn r_read_console(
     stop_spinner();
 
     // Check if we're in askpass mode (password input with echo disabled).
-    // The R askpass handler sets ARF_ASKPASS_MODE env var before calling readline(),
+    // The R askpass handler sets ARF_ASKPASS_MODE=1 before calling readline(),
     // which triggers this callback. We bypass reedline and read from /dev/tty directly
-    // to prevent password echo.
+    // to prevent password echo. We check for the exact value "1" to avoid
+    // interfering if a user has this env var set for unrelated reasons.
     #[cfg(unix)]
-    if std::env::var("ARF_ASKPASS_MODE").is_ok() {
+    if matches!(std::env::var("ARF_ASKPASS_MODE").as_deref(), Ok("1")) {
         // SAFETY: prompt, buf, buflen are valid from R's ReadConsole call
         let rc = unsafe { read_password_from_tty(prompt, buf, buflen) };
         if rc != 0 {
             return rc;
         }
         // rc == 0 means read_password_from_tty failed (e.g., cannot open /dev/tty,
-        // termios failure). Fall through to the normal input path to avoid
-        // signaling EOF which would terminate R's mainloop.
-        log::warn!("r_read_console: read_password_from_tty failed, falling back to standard input");
+        // termios failure). Fail closed by returning an empty password rather than
+        // falling back to reedline which would echo input in plaintext.
+        unsafe {
+            if !buf.is_null() && buflen > 1 {
+                *buf = b'\n' as c_char;
+                *buf.add(1) = 0;
+            }
+        }
+        log::warn!("r_read_console: read_password_from_tty failed, returning empty password");
+        return 1;
     }
 
     // In reprex mode, print a blank line between expressions for readability
