@@ -1099,6 +1099,110 @@ static mut READ_CONSOLE_CALLBACK: Option<fn(&str) -> Option<String>> = None;
 /// Note: This is accessed only from R's main thread in the ReadConsole callback.
 static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// Read a password from `/dev/tty` with echo disabled.
+///
+/// This is called from `r_read_console` when `ARF_ASKPASS_MODE` is set.
+/// It opens `/dev/tty` directly (bypassing reedline's stdin), disables echo
+/// via termios, reads a line, restores echo, and copies the result to R's buffer.
+///
+/// # Safety
+/// `prompt`, `buf`, and `buflen` must be valid pointers/values from R's ReadConsole.
+#[cfg(unix)]
+unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen: c_int) -> c_int {
+    use std::io::{BufRead, Write};
+    use std::os::unix::io::AsRawFd;
+
+    // Display prompt
+    // SAFETY: prompt is a valid C string from R
+    let prompt_str = if prompt.is_null() {
+        ""
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(prompt) }
+            .to_str()
+            .unwrap_or_default()
+    };
+    print!("{}", prompt_str);
+    let _ = std::io::stdout().flush();
+
+    // Open /dev/tty for reading
+    let tty_file = match std::fs::OpenOptions::new().read(true).open("/dev/tty") {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("askpass: failed to open /dev/tty: {}", e);
+            return 0;
+        }
+    };
+    let fd = tty_file.as_raw_fd();
+
+    // Save terminal settings and disable echo
+    // SAFETY: old_termios is initialized by tcgetattr before use
+    let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
+    let saved = unsafe { libc::tcgetattr(fd, &mut old_termios) } == 0;
+    if saved {
+        let mut new_termios = old_termios;
+        new_termios.c_lflag &= !libc::ECHO;
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &new_termios) };
+    }
+
+    // Read a line from /dev/tty
+    let mut reader = std::io::BufReader::new(&tty_file);
+    let mut line = String::new();
+    let read_result = reader.read_line(&mut line);
+
+    // Restore terminal settings
+    if saved {
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &old_termios) };
+    }
+
+    // Print newline since echo was disabled
+    println!();
+
+    match read_result {
+        Ok(0) => return 0, // EOF
+        Err(e) => {
+            log::error!("askpass: failed to read from /dev/tty: {}", e);
+            return 0;
+        }
+        _ => {}
+    }
+
+    // Remove trailing newline/CR
+    if line.ends_with('\n') {
+        line.pop();
+    }
+    if line.ends_with('\r') {
+        line.pop();
+    }
+
+    // Copy to R's buffer
+    let bytes = line.as_bytes();
+    let max_len = (buflen as usize).saturating_sub(2);
+    let copy_len = if bytes.len() <= max_len {
+        bytes.len()
+    } else {
+        let mut end = max_len;
+        while end > 0 && !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        end
+    };
+
+    // SAFETY: buf is a valid buffer of at least buflen bytes from R
+    unsafe {
+        if copy_len > 0 {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, copy_len);
+        }
+
+        // Add newline and null terminator
+        let mut pos = copy_len;
+        *buf.add(pos) = b'\n' as c_char;
+        pos += 1;
+        *buf.add(pos) = 0;
+    }
+
+    1
+}
+
 /// R's ReadConsole callback.
 ///
 /// # Safety
@@ -1114,6 +1218,16 @@ unsafe extern "C" fn r_read_console(
     // Stop the spinner when a new prompt is displayed
     // This handles cases where R finishes evaluation without producing output
     stop_spinner();
+
+    // Check if we're in askpass mode (password input with echo disabled).
+    // The R askpass handler sets ARF_ASKPASS_MODE env var before calling readline(),
+    // which triggers this callback. We bypass reedline and read from /dev/tty directly
+    // to prevent password echo.
+    #[cfg(unix)]
+    if std::env::var("ARF_ASKPASS_MODE").is_ok() {
+        // SAFETY: prompt, buf, buflen are valid from R's ReadConsole call
+        return unsafe { read_password_from_tty(prompt, buf, buflen) };
+    }
 
     // In reprex mode, print a blank line between expressions for readability
     // Only print for main prompts (not continuation prompts like "+")
@@ -1601,9 +1715,14 @@ pub fn stop_spinner() {
 /// Get the R code for setting up the askpass handler.
 ///
 /// This should be evaluated after R is initialized but before the main loop starts.
-/// It sets `options(askpass = ...)` with a function that reads passwords directly
-/// from `/dev/tty`, bypassing reedline's stdin. This prevents reedline from echoing
-/// the password in plaintext (reedline ignores terminal stty settings).
+/// It sets `options(askpass = ...)` with a function that uses `readline()` for password
+/// input, coordinating with the Rust `r_read_console` callback via the `ARF_ASKPASS_MODE`
+/// environment variable. The Rust side detects this flag and reads from `/dev/tty` with
+/// echo disabled, bypassing reedline entirely.
+///
+/// This two-step approach is needed because:
+/// 1. `readline()` triggers R's ReadConsole callback, which stops the spinner
+/// 2. The Rust ReadConsole handler bypasses reedline to prevent password echo
 ///
 /// The handler is Unix-only. On Windows, askpass uses GUI dialogs by default.
 /// If the user has already set `options(askpass = ...)`, we do not override it.
@@ -1616,9 +1735,9 @@ pub fn askpass_handler_code() -> &'static str {
 
 /// R code to set up the askpass handler.
 ///
-/// Opens `/dev/tty` directly to bypass reedline's stdin, uses `stty -echo`
-/// to suppress echo, and reads the password via `readLines()`.
-/// This is the same approach used by radian.
+/// Sets `ARF_ASKPASS_MODE` env var to signal the Rust ReadConsole callback,
+/// then calls `readline()` which triggers the callback. The Rust side detects
+/// the flag and reads from `/dev/tty` with echo disabled via termios.
 const ASKPASS_HANDLER_CODE: &str = r#"
 local({
     if (!is.null(getOption("askpass"))) return(invisible(NULL))
@@ -1627,17 +1746,14 @@ local({
         if (.Platform$OS.type != "unix") {
             stop("askpass handler not available on this platform")
         }
-        con <- suppressWarnings(file("/dev/tty", "r"))
-        on.exit(close(con), add = TRUE)
-        # Display prompt via stderr to reliably trigger r_write_console_ex
-        # (which stops the spinner). Prepend ANSI reset (\033[0m) to cancel
-        # the red formatting that arf applies to all stderr output.
-        cat(paste0("\033[0m", msg), file = stderr())
-        system("stty -echo < /dev/tty 2>/dev/null")
-        on.exit(system("stty echo < /dev/tty 2>/dev/null"), add = TRUE)
-        password <- readLines(con, n = 1, warn = FALSE)
-        cat("\n", file = stderr())
-        if (length(password) == 0) return(NULL)
+        # Signal Rust ReadConsole to use /dev/tty with echo disabled
+        Sys.setenv(ARF_ASKPASS_MODE = "1")
+        on.exit(Sys.unsetenv("ARF_ASKPASS_MODE"), add = TRUE)
+        # readline() triggers ReadConsole callback which:
+        # 1. Stops the spinner (stop_spinner() at top of r_read_console)
+        # 2. Detects ARF_ASKPASS_MODE and reads from /dev/tty with echo disabled
+        password <- readline(msg)
+        if (nchar(password) == 0) return(NULL)
         password
     })
     invisible(NULL)
