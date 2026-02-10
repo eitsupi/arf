@@ -1112,21 +1112,21 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     use std::io::{BufRead, Write};
     use std::os::unix::io::AsRawFd;
 
-    // We need at least 2 bytes for "\n\0" in error/empty paths.
+    // Guard against invalid buffer parameters.
     // R's readline buffer is always large (typically 4096+), but guard defensively.
-    if buflen < 2 {
+    if buf.is_null() || buflen < 2 {
         log::error!(
-            "askpass: buflen ({}) too small, aborting password read",
+            "askpass: invalid buffer (null={}, buflen={}), aborting password read",
+            buf.is_null(),
             buflen
         );
         return 0;
     }
 
-    // Clear the env var immediately to prevent leaking if this function fails.
-    // The R handler sets it fresh before each readline() call.
-    // SAFETY: No other threads read this env var concurrently; it's only checked
-    // at the top of r_read_console on R's main thread.
-    unsafe { std::env::remove_var("ARF_ASKPASS_MODE") };
+    // We do not mutate the process environment here to avoid thread-safety
+    // issues with std::env::remove_var (other threads such as the spinner may
+    // be running). The R handler is responsible for cleanup via
+    // on.exit(Sys.unsetenv("ARF_ASKPASS_MODE")).
 
     // Open /dev/tty for read+write so prompt and newline go to the terminal
     // even when stdout is redirected.
@@ -1143,18 +1143,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     };
     let fd = tty_file.as_raw_fd();
 
-    // Display prompt to /dev/tty directly
-    // SAFETY: prompt is a valid C string from R
-    let prompt_str = if prompt.is_null() {
-        ""
-    } else {
-        unsafe { std::ffi::CStr::from_ptr(prompt) }
-            .to_str()
-            .unwrap_or_default()
-    };
-    {
+    // Display prompt to /dev/tty directly.
+    // Write raw bytes (no UTF-8 assumption) to preserve prompts in non-UTF8 locales.
+    if !prompt.is_null() {
+        // SAFETY: prompt is a valid C string from R
+        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         let mut tty_writer = std::io::BufWriter::new(&tty_file);
-        let _ = tty_writer.write_all(prompt_str.as_bytes());
+        let _ = tty_writer.write_all(prompt_bytes);
         let _ = tty_writer.flush();
     }
 
@@ -1303,9 +1298,14 @@ unsafe extern "C" fn r_read_console(
         // termios failure). Fail closed by returning an empty password rather than
         // falling back to reedline which would echo input in plaintext.
         unsafe {
-            if !buf.is_null() && buflen > 1 {
-                *buf = b'\n' as c_char;
-                *buf.add(1) = 0;
+            if !buf.is_null() && buflen >= 1 {
+                if buflen >= 2 {
+                    *buf = b'\n' as c_char;
+                    *buf.add(1) = 0;
+                } else {
+                    // Not enough space for '\n' and '\0'; write just the terminator.
+                    *buf = 0;
+                }
             }
         }
         log::warn!("r_read_console: read_password_from_tty failed, returning empty password");
