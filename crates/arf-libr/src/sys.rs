@@ -1118,20 +1118,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // at the top of r_read_console on R's main thread.
     unsafe { std::env::remove_var("ARF_ASKPASS_MODE") };
 
-    // Display prompt
-    // SAFETY: prompt is a valid C string from R
-    let prompt_str = if prompt.is_null() {
-        ""
-    } else {
-        unsafe { std::ffi::CStr::from_ptr(prompt) }
-            .to_str()
-            .unwrap_or_default()
-    };
-    print!("{}", prompt_str);
-    let _ = std::io::stdout().flush();
-
-    // Open /dev/tty for reading
-    let tty_file = match std::fs::OpenOptions::new().read(true).open("/dev/tty") {
+    // Open /dev/tty for read+write so prompt and newline go to the terminal
+    // even when stdout is redirected.
+    let tty_file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
         Ok(f) => f,
         Err(e) => {
             log::error!("askpass: failed to open /dev/tty: {}", e);
@@ -1140,28 +1133,74 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     };
     let fd = tty_file.as_raw_fd();
 
-    // Save terminal settings and disable echo
-    // SAFETY: old_termios is initialized by tcgetattr before use
-    let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
-    let saved = unsafe { libc::tcgetattr(fd, &mut old_termios) } == 0;
-    if saved {
-        let mut new_termios = old_termios;
-        new_termios.c_lflag &= !libc::ECHO;
-        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &new_termios) };
+    // Display prompt to /dev/tty directly
+    // SAFETY: prompt is a valid C string from R
+    let prompt_str = if prompt.is_null() {
+        ""
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(prompt) }
+            .to_str()
+            .unwrap_or_default()
+    };
+    {
+        let mut tty_writer = std::io::BufWriter::new(&tty_file);
+        let _ = tty_writer.write_all(prompt_str.as_bytes());
+        let _ = tty_writer.flush();
     }
+
+    // RAII guard to save/restore terminal echo settings via termios.
+    // Ensures echo is always restored even if reading fails or panics.
+    struct TermiosGuard {
+        fd: c_int,
+        old_termios: libc::termios,
+    }
+
+    impl Drop for TermiosGuard {
+        fn drop(&mut self) {
+            if unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.old_termios) } != 0 {
+                log::error!(
+                    "askpass: failed to restore terminal attributes: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
+    // Save terminal settings and disable echo
+    let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
+    if unsafe { libc::tcgetattr(fd, &mut old_termios) } != 0 {
+        log::error!(
+            "askpass: failed to get terminal attributes: {}",
+            std::io::Error::last_os_error()
+        );
+        return 0;
+    }
+    let mut new_termios = old_termios;
+    new_termios.c_lflag &= !libc::ECHO;
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &new_termios) } != 0 {
+        log::error!(
+            "askpass: failed to disable terminal echo: {}",
+            std::io::Error::last_os_error()
+        );
+        return 0;
+    }
+    // Guard ensures old_termios is restored on any exit path
+    let _guard = TermiosGuard { fd, old_termios };
 
     // Read a line from /dev/tty
     let mut reader = std::io::BufReader::new(&tty_file);
     let mut line = String::new();
     let read_result = reader.read_line(&mut line);
 
-    // Restore terminal settings
-    if saved {
-        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &old_termios) };
-    }
+    // Restore echo before writing newline (guard drops here or at function end)
+    drop(_guard);
 
-    // Print newline since echo was disabled
-    println!();
+    // Print newline to /dev/tty since echo was disabled
+    {
+        let mut tty_writer = std::io::BufWriter::new(&tty_file);
+        let _ = tty_writer.write_all(b"\n");
+        let _ = tty_writer.flush();
+    }
 
     match read_result {
         Ok(0) => return 0, // EOF
@@ -1746,12 +1785,11 @@ pub fn askpass_handler_code() -> &'static str {
 /// the flag and reads from `/dev/tty` with echo disabled via termios.
 const ASKPASS_HANDLER_CODE: &str = r#"
 local({
+    # Only override on Unix. Windows uses GUI dialogs (win-askpass.exe) by default.
+    if (.Platform$OS.type != "unix") return(invisible(NULL))
     if (!is.null(getOption("askpass"))) return(invisible(NULL))
 
     options(askpass = function(msg) {
-        if (.Platform$OS.type != "unix") {
-            stop("askpass handler not available on this platform")
-        }
         # Signal Rust ReadConsole to use /dev/tty with echo disabled
         Sys.setenv(ARF_ASKPASS_MODE = "1")
         on.exit(Sys.unsetenv("ARF_ASKPASS_MODE"), add = TRUE)
