@@ -1629,14 +1629,14 @@ local({
         }
         con <- suppressWarnings(file("/dev/tty", "r"))
         on.exit(close(con), add = TRUE)
-        # Display prompt first via stdout. This stops the spinner and
-        # avoids red coloring (stderr goes through error formatting).
-        cat(msg)
-        flush(stdout())
+        # Display prompt via stderr to reliably trigger r_write_console_ex
+        # (which stops the spinner). Prepend ANSI reset (\033[0m) to cancel
+        # the red formatting that arf applies to all stderr output.
+        cat(paste0("\033[0m", msg), file = stderr())
         system("stty -echo < /dev/tty 2>/dev/null")
         on.exit(system("stty echo < /dev/tty 2>/dev/null"), add = TRUE)
         password <- readLines(con, n = 1, warn = FALSE)
-        cat("\n")
+        cat("\n", file = stderr())
         if (length(password) == 0) return(NULL)
         password
     })
