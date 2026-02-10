@@ -1112,6 +1112,12 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     use std::io::{BufRead, Write};
     use std::os::unix::io::AsRawFd;
 
+    // Clear the env var immediately to prevent leaking if this function fails.
+    // The R handler sets it fresh before each readline() call.
+    // SAFETY: No other threads read this env var concurrently; it's only checked
+    // at the top of r_read_console on R's main thread.
+    unsafe { std::env::remove_var("ARF_ASKPASS_MODE") };
+
     // Display prompt
     // SAFETY: prompt is a valid C string from R
     let prompt_str = if prompt.is_null() {
