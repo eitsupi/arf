@@ -1219,18 +1219,27 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         line.pop();
     }
 
-    // Copy to R's buffer
+    // Copy to R's buffer.
+    // Unlike the normal r_read_console path, we do NOT use PENDING_INPUT here
+    // because passwords are single-shot (the R askpass handler calls readline()
+    // once and expects a complete result). Reject rather than silently truncate.
     let bytes = line.as_bytes();
-    let max_len = (buflen as usize).saturating_sub(2);
-    let copy_len = if bytes.len() <= max_len {
-        bytes.len()
-    } else {
-        let mut end = max_len;
-        while end > 0 && !line.is_char_boundary(end) {
-            end -= 1;
+    let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
+    if bytes.len() > max_len {
+        log::error!(
+            "askpass: password length ({}) exceeds buffer capacity ({}), rejecting",
+            bytes.len(),
+            max_len
+        );
+        // NUL-terminate so the caller doesn't read garbage
+        unsafe {
+            if buflen > 0 {
+                *buf = 0;
+            }
         }
-        end
-    };
+        return 0;
+    }
+    let copy_len = bytes.len();
 
     // SAFETY: buf is a valid buffer of at least buflen bytes from R
     unsafe {
@@ -1271,7 +1280,14 @@ unsafe extern "C" fn r_read_console(
     #[cfg(unix)]
     if std::env::var("ARF_ASKPASS_MODE").is_ok() {
         // SAFETY: prompt, buf, buflen are valid from R's ReadConsole call
-        return unsafe { read_password_from_tty(prompt, buf, buflen) };
+        let rc = unsafe { read_password_from_tty(prompt, buf, buflen) };
+        if rc != 0 {
+            return rc;
+        }
+        // rc == 0 means read_password_from_tty failed (e.g., cannot open /dev/tty,
+        // termios failure). Fall through to the normal input path to avoid
+        // signaling EOF which would terminate R's mainloop.
+        log::warn!("r_read_console: read_password_from_tty failed, falling back to standard input");
     }
 
     // In reprex mode, print a blank line between expressions for readability
