@@ -1187,7 +1187,9 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
     let mut new_termios = old_termios;
     new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &new_termios) } != 0 {
+    // TCSAFLUSH discards any pending input before applying, preventing
+    // type-ahead characters from leaking into the password buffer.
+    if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &new_termios) } != 0 {
         log::error!(
             "askpass: failed to disable terminal echo: {}",
             std::io::Error::last_os_error()
