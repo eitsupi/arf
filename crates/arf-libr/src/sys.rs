@@ -1231,13 +1231,15 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             bytes.len(),
             max_len
         );
-        // NUL-terminate so the caller doesn't read garbage
+        // Return an empty line (just "\n\0") so R receives an empty password.
+        // The R askpass handler treats nchar(password) == 0 as cancellation
+        // (returns NULL). We must NOT return 0 here — that would trigger the
+        // fallback to reedline's normal input path with echo enabled.
         unsafe {
-            if buflen > 0 {
-                *buf = 0;
-            }
+            *buf = b'\n' as c_char;
+            *buf.add(1) = 0;
         }
-        return 0;
+        return 1;
     }
     let copy_len = bytes.len();
 
