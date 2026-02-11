@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2] - 2026-02-11
+
+### Fixed
+
+- **Unix:** Password prompt (askpass) no longer echoes plaintext input (#78)
+- Duration display is now properly cleared after meta command execution (#75)
+
 ## [0.2.1] - 2026-02-07
 
 ### Added
