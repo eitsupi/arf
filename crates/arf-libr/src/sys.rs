@@ -1809,9 +1809,11 @@ pub fn stop_spinner() {
 ///
 /// Unix-only. On Windows, askpass uses GUI dialogs by default.
 /// Does not override if the user has already set `options(askpass = ...)`.
+#[cfg(unix)]
 pub fn askpass_handler_code() -> &'static str {
     ASKPASS_HANDLER_CODE
 }
+#[cfg(unix)]
 const ASKPASS_HANDLER_CODE: &str = r#"
 local({
     # Only override on Unix. Windows uses GUI dialogs (win-askpass.exe) by default.

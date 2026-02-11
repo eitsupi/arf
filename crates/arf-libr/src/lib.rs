@@ -24,14 +24,15 @@ pub use types::{
 pub use types::{Rstart, SaType, UImode};
 
 // sys
+#[cfg(unix)]
+pub use sys::askpass_handler_code;
 #[cfg(any(windows, test))]
 pub use sys::strip_cr;
 pub use sys::{
-    askpass_handler_code, command_had_error, ensure_ld_library_path, find_r_library,
-    flush_reprex_buffer, get_r_home, global_error_handler_code, initialize_r,
-    initialize_r_with_args, is_spinner_active, mark_error_condition,
-    mark_global_error_handler_initialized, peek_r_event, polled_events_for_repl, process_r_events,
-    reset_command_error_state, restore_stderr, run_r_mainloop, set_read_console_callback,
-    set_reprex_mode, set_spinner_color, set_spinner_frames, set_write_console_callback,
-    start_spinner, stop_spinner, suppress_stderr,
+    command_had_error, ensure_ld_library_path, find_r_library, flush_reprex_buffer, get_r_home,
+    global_error_handler_code, initialize_r, initialize_r_with_args, is_spinner_active,
+    mark_error_condition, mark_global_error_handler_initialized, peek_r_event,
+    polled_events_for_repl, process_r_events, reset_command_error_state, restore_stderr,
+    run_r_mainloop, set_read_console_callback, set_reprex_mode, set_spinner_color,
+    set_spinner_frames, set_write_console_callback, start_spinner, stop_spinner, suppress_stderr,
 };
