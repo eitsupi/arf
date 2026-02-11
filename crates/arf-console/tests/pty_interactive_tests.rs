@@ -52,15 +52,10 @@ fn test_pty_readline() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test askpass package integration for password prompts.
+/// Test that askpass password input is NOT echoed in plaintext.
 ///
-/// This tests that:
-/// 1. The askpass package can prompt for input and receive it
-/// 2. The password input is NOT echoed back in the terminal output
-///
-/// The custom askpass handler (set via `options(askpass = ...)`) reads directly
-/// from `/dev/tty` with echo disabled, bypassing reedline which would otherwise
-/// echo the password in plaintext.
+/// The custom askpass handler reads directly from `/dev/tty` with echo
+/// disabled, bypassing reedline which would otherwise echo the password.
 ///
 /// Port of: radian/tests/test_readline.py::test_askpass
 #[test]
@@ -71,7 +66,6 @@ fn test_pty_askpass() {
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    // Check if askpass is available
     terminal
         .send_line("requireNamespace('askpass', quietly = TRUE)")
         .expect("Should check askpass");
@@ -79,44 +73,38 @@ fn test_pty_askpass() {
         .expect("TRUE")
         .expect("askpass package should be available");
 
-    // Execute askpass::askpass() with a prompt constructed via paste0() so
-    // that the literal prompt string "Enter password: " does NOT appear in
-    // the command echo (the echo shows paste0("Enter ", "password: ")).
-    // This lets expect() reliably match only the real /dev/tty prompt.
+    // Use paste0() so the literal prompt "Enter password: " doesn't appear
+    // in the command echo, letting expect() match only the real /dev/tty prompt.
     terminal
         .send_line(r#"askpass::askpass(paste0("Enter ", "password: "))"#)
         .expect("Should send askpass command");
 
-    // Wait for the actual askpass prompt written by read_password_from_tty.
-    // The prompt appears AFTER TCSAFLUSH, so once we see it, the terminal
-    // is ready to accept input without discarding it.
+    // The prompt appears after TCSAFLUSH, so it signals readiness for input.
     terminal
         .expect("Enter password:")
         .expect("Should see askpass prompt");
 
-    // Provide input
     terminal
         .send_line("secret_answer")
         .expect("Should send askpass input");
 
-    // The askpass result should be returned as a string
     terminal
         .expect(r#""secret_answer""#)
         .expect("askpass should return the input");
 
-    // Verify the password was NOT echoed in the terminal output.
-    // The return value "secret_answer" (in quotes) should appear exactly once
-    // in the output. If the password was echoed, it would appear without quotes
-    // as well. We check that bare `secret_answer` (without surrounding quotes)
-    // does not appear outside of the R return value.
+    // Wait for next prompt to ensure all output is flushed before checking.
+    terminal.wait_for_prompt().expect("Should return to prompt");
+
+    // Every occurrence of "secret_answer" should be within quotes (the R
+    // return value). Bare occurrences would indicate password echo.
     let output = terminal.get_output().expect("Should get output");
     let bare_occurrences = output.matches("secret_answer").count();
     let quoted_occurrences = output.matches(r#""secret_answer""#).count();
     assert_eq!(
         bare_occurrences, quoted_occurrences,
-        "Password should NOT be echoed in plaintext. \
-         Found {} bare occurrences vs {} quoted occurrences in output:\n{}",
-        bare_occurrences, quoted_occurrences, output
+        "Password was echoed in plaintext.\n\
+         bare={bare_occurrences}, quoted={quoted_occurrences}\n\
+         output:\n{output}",
     );
 
     terminal.quit().expect("Should quit cleanly");
