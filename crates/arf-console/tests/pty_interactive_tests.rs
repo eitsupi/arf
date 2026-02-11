@@ -10,7 +10,7 @@
 mod common;
 
 #[cfg(unix)]
-use common::Terminal;
+use common::{Terminal, has_askpass};
 
 /// Test R's readline() function in interactive mode.
 ///
@@ -52,28 +52,25 @@ fn test_pty_readline() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test askpass package integration for password prompts.
+/// Test that askpass password input is NOT echoed in plaintext.
 ///
-/// This tests that the askpass package can prompt for input and receive it.
-/// The askpass::askpass() function displays a prompt and waits for user input.
-///
-/// Note: This test requires the askpass package to be installed.
-/// Run: install.packages("askpass") to enable this test.
+/// The custom askpass handler reads directly from `/dev/tty` with echo
+/// disabled, bypassing reedline which would otherwise echo the password.
 ///
 /// Port of: radian/tests/test_readline.py::test_askpass
-// TODO: Run this test after installing askpass package:
-//   1. R -e "install.packages('askpass')"
-//   2. cargo test test_pty_askpass -- --ignored
 #[test]
 #[cfg(unix)]
-#[ignore] // Requires askpass package - run with: cargo test -- --ignored
 fn test_pty_askpass() {
+    if !has_askpass() {
+        eprintln!("Skipping test_pty_askpass: askpass package not installed");
+        return;
+    }
+
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    // Check if askpass is available
     terminal
         .send_line("requireNamespace('askpass', quietly = TRUE)")
         .expect("Should check askpass");
@@ -81,25 +78,39 @@ fn test_pty_askpass() {
         .expect("TRUE")
         .expect("askpass package should be available");
 
-    // Execute askpass::askpass() with a custom prompt
+    // Use paste0() so the literal prompt "Enter password: " doesn't appear
+    // in the command echo, letting expect() match only the real /dev/tty prompt.
     terminal
-        .send_line("askpass::askpass('password> ')")
+        .send_line(r#"askpass::askpass(paste0("Enter ", "password: "))"#)
         .expect("Should send askpass command");
 
-    // Should see the askpass prompt
+    // The prompt appears after TCSAFLUSH, so it signals readiness for input.
     terminal
-        .expect("password>")
+        .expect("Enter password:")
         .expect("Should see askpass prompt");
 
-    // Provide input
     terminal
         .send_line("secret_answer")
         .expect("Should send askpass input");
 
-    // The askpass result should be returned (masked in display but returned as string)
     terminal
         .expect(r#""secret_answer""#)
         .expect("askpass should return the input");
+
+    // Wait for next prompt to ensure all output is flushed before checking.
+    terminal.wait_for_prompt().expect("Should return to prompt");
+
+    // Every occurrence of "secret_answer" should be within quotes (the R
+    // return value). Bare occurrences would indicate password echo.
+    let output = terminal.get_output().expect("Should get output");
+    let bare_occurrences = output.matches("secret_answer").count();
+    let quoted_occurrences = output.matches(r#""secret_answer""#).count();
+    assert_eq!(
+        bare_occurrences, quoted_occurrences,
+        "Password was echoed in plaintext.\n\
+         bare={bare_occurrences}, quoted={quoted_occurrences}\n\
+         output:\n{output}",
+    );
 
     terminal.quit().expect("Should quit cleanly");
 }

@@ -367,6 +367,12 @@ impl Terminal {
         Ok(())
     }
 
+    /// Get the current output buffer contents.
+    pub fn get_output(&self) -> Result<String, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        Ok(state.output_buffer.clone())
+    }
+
     /// Send a line of input (appends newline).
     pub fn send_line(&mut self, text: &str) -> Result<(), String> {
         let data = format!("{}\n", text);
@@ -731,6 +737,17 @@ pub fn has_air_cli() -> bool {
 pub fn has_dplyr() -> bool {
     Command::new("Rscript")
         .args(["-e", "library(dplyr)"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Check if askpass R package is available.
+///
+/// Returns true if R can load askpass without error.
+pub fn has_askpass() -> bool {
+    Command::new("Rscript")
+        .args(["-e", "library(askpass)"])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
