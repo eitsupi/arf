@@ -1106,6 +1106,44 @@ static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 #[cfg(unix)]
 const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 
+/// Safety net for termios restoration after longjmp.
+///
+/// When R's SIGINT handler fires during password reading, it may longjmp
+/// out of `read_password_from_tty`, skipping the `TermiosGuard` destructor.
+/// This leaves the terminal with echo disabled — a critical UX issue.
+///
+/// Before disabling echo we store `(fd, old_termios)` here; on successful
+/// restoration we clear it. `r_read_console` checks this on every entry
+/// and recovers if a stale entry is found.
+#[cfg(unix)]
+static PENDING_TERMIOS_RESTORE: std::sync::Mutex<Option<(c_int, libc::termios)>> =
+    std::sync::Mutex::new(None);
+
+/// Recover terminal settings if a previous `read_password_from_tty` was
+/// interrupted by longjmp (e.g. SIGINT → R's error handler).
+///
+/// Called at the top of `r_read_console` so recovery happens at the earliest
+/// safe point after the longjmp lands.
+#[cfg(unix)]
+fn recover_pending_termios() {
+    if let Ok(mut guard) = PENDING_TERMIOS_RESTORE.lock()
+        && let Some((fd, old_termios)) = guard.take()
+    {
+        log::warn!(
+            "askpass: recovering terminal settings after interrupted password read (fd={})",
+            fd
+        );
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &old_termios) } != 0 {
+            log::error!(
+                "askpass: failed to recover terminal settings: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        // Close the /dev/tty fd that was leaked by the interrupted read
+        unsafe { libc::close(fd) };
+    }
+}
+
 /// Overwrite a byte slice with zeros using volatile writes.
 ///
 /// Prevents the compiler from optimizing away the zeroing, ensuring
@@ -1178,6 +1216,8 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     let fd = tty_file.as_raw_fd();
 
     // RAII guard to save/restore terminal echo settings via termios.
+    // On successful drop, clears PENDING_TERMIOS_RESTORE so the recovery
+    // path in r_read_console knows no intervention is needed.
     struct TermiosGuard {
         fd: c_int,
         old_termios: libc::termios,
@@ -1190,6 +1230,10 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
                     "askpass: failed to restore terminal attributes: {}",
                     std::io::Error::last_os_error()
                 );
+            }
+            // Clear the safety net — normal drop path succeeded.
+            if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
+                *pending = None;
             }
         }
     }
@@ -1207,6 +1251,14 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         unsafe { write_empty_password(buf, buflen) };
         return 1;
     }
+
+    // Store (fd, old_termios) in the global safety net BEFORE disabling echo.
+    // If R's SIGINT handler longjmps past TermiosGuard::drop, r_read_console
+    // will find this entry and restore the terminal on its next invocation.
+    if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
+        *pending = Some((fd, old_termios));
+    }
+
     let mut new_termios = old_termios;
     new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
     if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &new_termios) } != 0 {
@@ -1216,6 +1268,10 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             "Error: cannot read password (terminal setup failed: {})",
             err
         );
+        // Clear safety net since we failed before echo was actually disabled.
+        if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
+            *pending = None;
+        }
         unsafe { write_empty_password(buf, buflen) };
         return 1;
     }
@@ -1315,6 +1371,12 @@ unsafe extern "C" fn r_read_console(
     // Stop the spinner when a new prompt is displayed
     // This handles cases where R finishes evaluation without producing output
     stop_spinner();
+
+    // Safety net: if a previous read_password_from_tty was interrupted by
+    // longjmp (SIGINT), the TermiosGuard destructor was skipped and the
+    // terminal may have echo disabled. Recover here at the earliest safe point.
+    #[cfg(unix)]
+    recover_pending_termios();
 
     // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
     #[cfg(unix)]
