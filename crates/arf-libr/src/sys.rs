@@ -1150,6 +1150,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         Ok(f) => f,
         Err(e) => {
             log::error!("askpass: failed to open /dev/tty: {}", e);
+            eprintln!("Error: cannot read password (/dev/tty unavailable)");
             unsafe { write_empty_password(buf, buflen) };
             return 1;
         }
@@ -1180,9 +1181,11 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // signal that we are ready to accept input (important for PTY tests too).
     let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
     if unsafe { libc::tcgetattr(fd, &mut old_termios) } != 0 {
-        log::error!(
-            "askpass: failed to get terminal attributes: {}",
-            std::io::Error::last_os_error()
+        let err = std::io::Error::last_os_error();
+        log::error!("askpass: failed to get terminal attributes: {}", err);
+        eprintln!(
+            "Error: cannot read password (terminal setup failed: {})",
+            err
         );
         unsafe { write_empty_password(buf, buflen) };
         return 1;
@@ -1190,9 +1193,11 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     let mut new_termios = old_termios;
     new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
     if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &new_termios) } != 0 {
-        log::error!(
-            "askpass: failed to disable terminal echo: {}",
-            std::io::Error::last_os_error()
+        let err = std::io::Error::last_os_error();
+        log::error!("askpass: failed to disable terminal echo: {}", err);
+        eprintln!(
+            "Error: cannot read password (terminal setup failed: {})",
+            err
         );
         unsafe { write_empty_password(buf, buflen) };
         return 1;
