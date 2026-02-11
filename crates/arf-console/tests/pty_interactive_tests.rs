@@ -62,16 +62,9 @@ fn test_pty_readline() {
 /// from `/dev/tty` with echo disabled, bypassing reedline which would otherwise
 /// echo the password in plaintext.
 ///
-/// Note: This test requires the askpass package to be installed.
-/// Run: install.packages("askpass") to enable this test.
-///
 /// Port of: radian/tests/test_readline.py::test_askpass
-// TODO: Run this test after installing askpass package:
-//   1. R -e "install.packages('askpass')"
-//   2. cargo test test_pty_askpass -- --ignored
 #[test]
 #[cfg(unix)]
-#[ignore] // Requires askpass package - run with: cargo test -- --ignored
 fn test_pty_askpass() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
@@ -86,17 +79,19 @@ fn test_pty_askpass() {
         .expect("TRUE")
         .expect("askpass package should be available");
 
-    // Clear buffer before askpass to isolate output
-    terminal.clear_buffer().expect("Should clear buffer");
-
-    // Execute askpass::askpass() with a custom prompt
+    // Execute askpass::askpass() with a prompt constructed via paste0() so
+    // that the literal prompt string "Enter password: " does NOT appear in
+    // the command echo (the echo shows paste0("Enter ", "password: ")).
+    // This lets expect() reliably match only the real /dev/tty prompt.
     terminal
-        .send_line("askpass::askpass('password> ')")
+        .send_line(r#"askpass::askpass(paste0("Enter ", "password: "))"#)
         .expect("Should send askpass command");
 
-    // Should see the askpass prompt
+    // Wait for the actual askpass prompt written by read_password_from_tty.
+    // The prompt appears AFTER TCSAFLUSH, so once we see it, the terminal
+    // is ready to accept input without discarding it.
     terminal
-        .expect("password>")
+        .expect("Enter password:")
         .expect("Should see askpass prompt");
 
     // Provide input

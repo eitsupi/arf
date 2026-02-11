@@ -1143,16 +1143,6 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     };
     let fd = tty_file.as_raw_fd();
 
-    // Display prompt to /dev/tty directly.
-    // Write raw bytes (no UTF-8 assumption) to preserve prompts in non-UTF8 locales.
-    if !prompt.is_null() {
-        // SAFETY: prompt is a valid C string from R
-        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
-        let mut tty_writer = std::io::BufWriter::new(&tty_file);
-        let _ = tty_writer.write_all(prompt_bytes);
-        let _ = tty_writer.flush();
-    }
-
     // RAII guard to save/restore terminal echo settings via termios.
     // Ensures echo is always restored even if reading fails or panics.
     struct TermiosGuard {
@@ -1171,7 +1161,11 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         }
     }
 
-    // Save terminal settings and disable echo
+    // Save terminal settings and disable echo.
+    // TCSAFLUSH discards any pending type-ahead input before applying,
+    // preventing stray characters from leaking into the password buffer.
+    // We do this BEFORE showing the prompt so the prompt serves as a reliable
+    // signal that we are ready to accept input (important for PTY tests too).
     let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
     if unsafe { libc::tcgetattr(fd, &mut old_termios) } != 0 {
         log::error!(
@@ -1182,8 +1176,6 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
     let mut new_termios = old_termios;
     new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
-    // TCSAFLUSH discards any pending input before applying, preventing
-    // type-ahead characters from leaking into the password buffer.
     if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &new_termios) } != 0 {
         log::error!(
             "askpass: failed to disable terminal echo: {}",
@@ -1193,6 +1185,17 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
     // Guard ensures old_termios is restored on any exit path
     let _guard = TermiosGuard { fd, old_termios };
+
+    // Display prompt to /dev/tty AFTER disabling echo, so the prompt
+    // appearance guarantees we are ready to read input.
+    // Write raw bytes (no UTF-8 assumption) to preserve prompts in non-UTF8 locales.
+    if !prompt.is_null() {
+        // SAFETY: prompt is a valid C string from R
+        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
+        let mut tty_writer = std::io::BufWriter::new(&tty_file);
+        let _ = tty_writer.write_all(prompt_bytes);
+        let _ = tty_writer.flush();
+    }
 
     // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
     // Passwords may contain arbitrary bytes in non-UTF8 locales, so we use
