@@ -10,7 +10,7 @@
 mod common;
 
 #[cfg(unix)]
-use common::Terminal;
+use common::{Terminal, has_askpass};
 
 /// Test R's readline() function in interactive mode.
 ///
@@ -61,6 +61,11 @@ fn test_pty_readline() {
 #[test]
 #[cfg(unix)]
 fn test_pty_askpass() {
+    if !has_askpass() {
+        eprintln!("Skipping test_pty_askpass: askpass package not installed");
+        return;
+    }
+
     let mut terminal =
         Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
 

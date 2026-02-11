@@ -741,3 +741,14 @@ pub fn has_dplyr() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+/// Check if askpass R package is available.
+///
+/// Returns true if R can load askpass without error.
+pub fn has_askpass() -> bool {
+    Command::new("Rscript")
+        .args(["-e", "library(askpass)"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
