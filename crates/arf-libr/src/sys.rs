@@ -1109,8 +1109,9 @@ const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 /// Safety net for termios restoration after longjmp.
 ///
 /// When R's SIGINT handler fires during password reading, it may longjmp
-/// out of `read_password_from_tty`, skipping the `TermiosGuard` destructor.
-/// This leaves the terminal with echo disabled — a critical UX issue.
+/// out of `read_password_from_tty`, bypassing the normal echo-restoration
+/// path in the password-reading code. This can leave the terminal with echo
+/// disabled — a critical UX issue.
 ///
 /// Before disabling echo we store `(fd, old_termios)` here; on successful
 /// restoration we clear it. `r_read_console` checks this on every entry
@@ -1133,21 +1134,34 @@ fn recover_pending_termios() {
             poisoned.into_inner()
         }
     };
-    if let Some((fd, old_termios)) = guard.take() {
+    if let Some((fd, old_termios)) = guard.as_ref() {
         log::warn!(
             "askpass: recovering terminal settings after interrupted password read (fd={})",
             fd
         );
-        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &old_termios) } != 0 {
-            log::error!(
-                "askpass: failed to recover terminal settings: {}",
-                std::io::Error::last_os_error()
-            );
+        let mut restored = false;
+        loop {
+            let rc = unsafe { libc::tcsetattr(*fd, libc::TCSANOW, old_termios) };
+            if rc == 0 {
+                restored = true;
+                break;
+            }
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            log::error!("askpass: failed to recover terminal settings: {}", err);
+            break;
         }
-        // Close the /dev/tty fd that was leaked by the interrupted read.
-        // This fd is still open because longjmp skipped File's destructor;
-        // the OS won't reuse an open fd number, so double-close cannot happen.
-        unsafe { libc::close(fd) };
+        if restored {
+            // Only clear the pending entry and close the fd after a successful restore.
+            if let Some((fd, _)) = guard.take() {
+                // Close the /dev/tty fd that was leaked by the interrupted read.
+                // This fd is still open because longjmp skipped File's destructor;
+                // the OS won't reuse an open fd number, so double-close cannot happen.
+                unsafe { libc::close(fd) };
+            }
+        }
     }
 }
 
@@ -1308,9 +1322,10 @@ unsafe extern "C" fn r_read_console(
     // This handles cases where R finishes evaluation without producing output
     stop_spinner();
 
-    // Safety net: if a previous read_password_from_tty was interrupted by
-    // longjmp (SIGINT), the TermiosGuard destructor was skipped and the
-    // terminal may have echo disabled. Recover here at the earliest safe point.
+    // Safety net: if a previous password read (via rpassword) was interrupted
+    // by longjmp (SIGINT), the terminal settings snapshot stored in
+    // PENDING_TERMIOS_RESTORE may still need to be reapplied. Recover here at
+    // the earliest safe point by restoring any pending termios state.
     #[cfg(unix)]
     recover_pending_termios();
 
