@@ -1126,9 +1126,14 @@ static PENDING_TERMIOS_RESTORE: std::sync::Mutex<Option<(c_int, libc::termios)>>
 /// safe point after the longjmp lands.
 #[cfg(unix)]
 fn recover_pending_termios() {
-    if let Ok(mut guard) = PENDING_TERMIOS_RESTORE.lock()
-        && let Some((fd, old_termios)) = guard.take()
-    {
+    let mut guard = match PENDING_TERMIOS_RESTORE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!("askpass: PENDING_TERMIOS_RESTORE mutex poisoned, attempting recovery");
+            poisoned.into_inner()
+        }
+    };
+    if let Some((fd, old_termios)) = guard.take() {
         log::warn!(
             "askpass: recovering terminal settings after interrupted password read (fd={})",
             fd
@@ -1139,7 +1144,9 @@ fn recover_pending_termios() {
                 std::io::Error::last_os_error()
             );
         }
-        // Close the /dev/tty fd that was leaked by the interrupted read
+        // Close the /dev/tty fd that was leaked by the interrupted read.
+        // This fd is still open because longjmp skipped File's destructor;
+        // the OS won't reuse an open fd number, so double-close cannot happen.
         unsafe { libc::close(fd) };
     }
 }
@@ -1163,6 +1170,8 @@ fn zeroize_bytes(bytes: &mut [u8]) {
 unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
     debug_assert!(!buf.is_null() && buflen >= 2);
     unsafe {
+        // The `if` guard is intentional: debug_assert is stripped in release
+        // builds, so this ensures no UB even if the precondition is violated.
         if buflen >= 2 {
             *buf = b'\n' as c_char;
             *buf.add(1) = 0;
