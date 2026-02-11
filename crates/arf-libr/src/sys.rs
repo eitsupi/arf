@@ -1194,10 +1194,12 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // Guard ensures old_termios is restored on any exit path
     let _guard = TermiosGuard { fd, old_termios };
 
-    // Read a line from /dev/tty
+    // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
+    // Passwords may contain arbitrary bytes in non-UTF8 locales, so we use
+    // read_until(b'\n') instead of read_line() to avoid InvalidData errors.
     let mut reader = std::io::BufReader::new(&tty_file);
-    let mut line = String::new();
-    let read_result = reader.read_line(&mut line);
+    let mut line_bytes: Vec<u8> = Vec::new();
+    let read_result = reader.read_until(b'\n', &mut line_bytes);
 
     // Restore echo before writing newline (guard drops here or at function end)
     drop(_guard);
@@ -1219,23 +1221,22 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
 
     // Remove trailing newline/CR
-    if line.ends_with('\n') {
-        line.pop();
+    if line_bytes.last() == Some(&b'\n') {
+        line_bytes.pop();
     }
-    if line.ends_with('\r') {
-        line.pop();
+    if line_bytes.last() == Some(&b'\r') {
+        line_bytes.pop();
     }
 
     // Copy to R's buffer.
     // Unlike the normal r_read_console path, we do NOT use PENDING_INPUT here
     // because passwords are single-shot (the R askpass handler calls readline()
     // once and expects a complete result). Reject rather than silently truncate.
-    let bytes = line.as_bytes();
     let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
-    if bytes.len() > max_len {
+    if line_bytes.len() > max_len {
         log::error!(
             "askpass: password length ({}) exceeds buffer capacity ({}), rejecting",
-            bytes.len(),
+            line_bytes.len(),
             max_len
         );
         // Return an empty line (just "\n\0") so R receives an empty password.
@@ -1248,12 +1249,12 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         }
         return 1;
     }
-    let copy_len = bytes.len();
+    let copy_len = line_bytes.len();
 
     // SAFETY: buf is a valid buffer of at least buflen bytes from R
     unsafe {
         if copy_len > 0 {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, copy_len);
+            std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), buf as *mut u8, copy_len);
         }
 
         // Add newline and null terminator
@@ -1824,21 +1825,24 @@ pub fn askpass_handler_code() -> &'static str {
 const ASKPASS_HANDLER_CODE: &str = r#"
 local({
     # Only override on Unix. Windows uses GUI dialogs (win-askpass.exe) by default.
-    if (.Platform$OS.type != "unix") return(invisible(NULL))
-    if (!is.null(getOption("askpass"))) return(invisible(NULL))
-
-    options(askpass = function(msg) {
-        # Signal Rust ReadConsole to use /dev/tty with echo disabled
-        Sys.setenv(ARF_ASKPASS_MODE = "1")
-        on.exit(Sys.unsetenv("ARF_ASKPASS_MODE"), add = TRUE)
-        # readline() triggers ReadConsole callback which:
-        # 1. Stops the spinner (stop_spinner() at top of r_read_console)
-        # 2. Detects ARF_ASKPASS_MODE and reads from /dev/tty with echo disabled
-        password <- readline(msg)
-        if (nchar(password) == 0) return(NULL)
-        password
-    })
-    invisible(NULL)
+    if (.Platform$OS.type != "unix") {
+        invisible(NULL)
+    } else if (!is.null(getOption("askpass"))) {
+        invisible(NULL)
+    } else {
+        options(askpass = function(msg) {
+            # Signal Rust ReadConsole to use /dev/tty with echo disabled
+            Sys.setenv(ARF_ASKPASS_MODE = "1")
+            on.exit(Sys.unsetenv("ARF_ASKPASS_MODE"), add = TRUE)
+            # readline() triggers ReadConsole callback which:
+            # 1. Stops the spinner (stop_spinner() at top of r_read_console)
+            # 2. Detects ARF_ASKPASS_MODE and reads from /dev/tty with echo disabled
+            password <- readline(msg)
+            if (nchar(password) == 0) return(NULL)
+            password
+        })
+        invisible(NULL)
+    }
 })
 "#;
 
