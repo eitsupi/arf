@@ -1228,19 +1228,23 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         } else {
             unsafe { libc::close(tty_fd) };
         }
+    } else {
+        log::warn!("askpass: could not open /dev/tty for termios snapshot");
     }
 
     let result = rpassword::prompt_password(&prompt_str);
 
     // Clear safety net — rpassword returned normally, terminal is restored.
-    if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock()
-        && let Some((fd, _)) = pending.take()
-    {
+    let mut pending = match PENDING_TERMIOS_RESTORE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some((fd, _)) = pending.take() {
         unsafe { libc::close(fd) };
     }
 
     match result {
-        Ok(password) => {
+        Ok(mut password) => {
             let password_bytes = password.as_bytes();
             let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
             if password_bytes.len() > max_len {
@@ -1249,6 +1253,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
                     password_bytes.len(),
                     max_len
                 );
+                // Zeroize before drop to minimize sensitive data in memory.
+                // SAFETY: we zero the backing allocation, then drop the String.
+                unsafe {
+                    for byte in password.as_bytes_mut() {
+                        std::ptr::write_volatile(byte, 0);
+                    }
+                }
                 unsafe { write_empty_password(buf, buflen) };
                 return 1;
             }
@@ -1263,6 +1274,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
                 }
                 *buf.add(copy_len) = b'\n' as c_char;
                 *buf.add(copy_len + 1) = 0;
+            }
+            // Zeroize before drop to minimize sensitive data in memory.
+            // SAFETY: we zero the backing allocation, then drop the String.
+            unsafe {
+                for byte in password.as_bytes_mut() {
+                    std::ptr::write_volatile(byte, 0);
+                }
             }
             1
         }
