@@ -1106,6 +1106,17 @@ static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 #[cfg(unix)]
 const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 
+/// Overwrite a byte slice with zeros using volatile writes.
+///
+/// Prevents the compiler from optimizing away the zeroing, ensuring
+/// sensitive data (passwords) is actually cleared from memory.
+#[cfg(unix)]
+fn zeroize_bytes(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        unsafe { std::ptr::write_volatile(byte as *mut u8, 0) };
+    }
+}
+
 /// Write an empty password ("\n\0") to R's readline buffer.
 ///
 /// The R askpass handler treats `identical(password, "")` as cancellation
@@ -1271,6 +1282,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             line_bytes.len(),
             max_len
         );
+        zeroize_bytes(&mut line_bytes);
         unsafe { write_empty_password(buf, buflen) };
         return 1;
     }
@@ -1284,6 +1296,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         *buf.add(copy_len + 1) = 0;
     }
 
+    zeroize_bytes(&mut line_bytes);
     1
 }
 
