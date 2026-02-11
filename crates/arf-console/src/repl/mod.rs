@@ -371,12 +371,7 @@ impl Repl {
             }
         }
 
-        // Initialize askpass handler to prevent plaintext password echo (Unix only).
-        // reedline echoes input independently of terminal stty settings, so
-        // askpass::readline_silent()'s `stty -echo` has no effect. We set
-        // options(askpass = ...) with a function that reads directly from
-        // /dev/tty, bypassing reedline entirely.
-        // On Windows, askpass uses GUI dialogs by default, so no override is needed.
+        // Initialize askpass handler (Unix only) to bypass reedline for password input.
         #[cfg(unix)]
         {
             let askpass_handler_code = arf_libr::askpass_handler_code();
