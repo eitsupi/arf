@@ -1193,8 +1193,12 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         // SAFETY: prompt is a valid C string from R
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         let mut tty_writer = std::io::BufWriter::new(&tty_file);
-        let _ = tty_writer.write_all(prompt_bytes);
-        let _ = tty_writer.flush();
+        if let Err(e) = tty_writer.write_all(prompt_bytes) {
+            log::warn!("askpass: failed to write prompt to /dev/tty: {}", e);
+        }
+        if let Err(e) = tty_writer.flush() {
+            log::warn!("askpass: failed to flush prompt to /dev/tty: {}", e);
+        }
     }
 
     // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
@@ -1841,7 +1845,7 @@ local({
             # 1. Stops the spinner (stop_spinner() at top of r_read_console)
             # 2. Detects ARF_ASKPASS_MODE and reads from /dev/tty with echo disabled
             password <- readline(msg)
-            if (nchar(password) == 0) return(NULL)
+            if (identical(password, "")) return(NULL)
             password
         })
         invisible(NULL)
