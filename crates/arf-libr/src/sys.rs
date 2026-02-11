@@ -1112,6 +1112,7 @@ const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 /// (returns NULL). `buf` must be non-null and `buflen` must be >= 2.
 #[cfg(unix)]
 unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
+    debug_assert!(!buf.is_null());
     unsafe {
         if buflen >= 2 {
             *buf = b'\n' as c_char;
@@ -1152,7 +1153,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         Ok(f) => f,
         Err(e) => {
             log::error!("askpass: failed to open /dev/tty: {}", e);
-            eprintln!("Error: cannot read password (/dev/tty unavailable)");
+            eprintln!("Error: cannot read password (/dev/tty unavailable: {e})");
             unsafe { write_empty_password(buf, buflen) };
             return 1;
         }
@@ -1206,6 +1207,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // Display prompt to /dev/tty AFTER disabling echo, so the prompt
     // appearance guarantees we are ready to read input.
     if !prompt.is_null() {
+        // SAFETY: prompt is a valid C string from R's ReadConsole
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         let mut tty_writer = std::io::BufWriter::new(&tty_file);
         if let Err(e) = tty_writer.write_all(prompt_bytes) {
@@ -1217,6 +1219,8 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
 
     // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
+    // Uses read_until(b'\n') instead of read_line() because passwords may
+    // contain arbitrary bytes in non-UTF8 locales.
     let mut reader = std::io::BufReader::new(&tty_file);
     let mut line_bytes: Vec<u8> = Vec::new();
     let read_result = reader.read_until(b'\n', &mut line_bytes);
@@ -1791,6 +1795,9 @@ pub fn stop_spinner() {
 /// Sets `options(askpass = ...)` with a function that calls `readline()` with
 /// [`ASKPASS_PROMPT_PREFIX`] prepended to the prompt. The Rust ReadConsole
 /// callback detects the prefix and reads from `/dev/tty` with echo disabled.
+///
+/// `readline()` is used (rather than reading `/dev/tty` directly from R) because
+/// it routes through R's ReadConsole callback, which stops the spinner.
 ///
 /// Unix-only. On Windows, askpass uses GUI dialogs by default.
 /// Does not override if the user has already set `options(askpass = ...)`.
