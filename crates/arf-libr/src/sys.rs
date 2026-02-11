@@ -1099,11 +1099,19 @@ static mut READ_CONSOLE_CALLBACK: Option<fn(&str) -> Option<String>> = None;
 /// Note: This is accessed only from R's main thread in the ReadConsole callback.
 static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// Magic prefix prepended to askpass prompts by the R handler.
+/// SOH (\x01) and STX (\x02) are control characters that won't appear in real prompts.
+/// The R handler calls `readline(paste0("\001ASKPASS\002", msg))` and the Rust
+/// ReadConsole callback detects this prefix to enter password-reading mode.
+#[cfg(unix)]
+const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
+
 /// Read a password from `/dev/tty` with echo disabled.
 ///
-/// This is called from `r_read_console` when `ARF_ASKPASS_MODE` is set.
-/// It opens `/dev/tty` directly (bypassing reedline's stdin), disables echo
-/// via termios, reads a line, restores echo, and copies the result to R's buffer.
+/// This is called from `r_read_console` when the prompt contains the
+/// [`ASKPASS_PROMPT_PREFIX`]. It opens `/dev/tty` directly (bypassing
+/// reedline's stdin), disables echo via termios, reads a line, restores
+/// echo, and copies the result to R's buffer.
 ///
 /// # Safety
 /// `prompt`, `buf`, and `buflen` must be valid pointers/values from R's ReadConsole.
@@ -1122,11 +1130,6 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         );
         return 0;
     }
-
-    // We do not mutate the process environment here to avoid thread-safety
-    // issues with std::env::remove_var (other threads such as the spinner may
-    // be running). The R handler is responsible for cleanup via
-    // on.exit(Sys.unsetenv("ARF_ASKPASS_MODE")).
 
     // Open /dev/tty for read+write so prompt and newline go to the terminal
     // even when stdout is redirected.
@@ -1291,33 +1294,36 @@ unsafe extern "C" fn r_read_console(
     stop_spinner();
 
     // Check if we're in askpass mode (password input with echo disabled).
-    // The R askpass handler sets ARF_ASKPASS_MODE=1 before calling readline(),
-    // which triggers this callback. We bypass reedline and read from /dev/tty directly
-    // to prevent password echo. We check for the exact value "1" to avoid
-    // interfering if a user has this env var set for unrelated reasons.
+    // The R askpass handler prepends a magic prefix to the prompt string,
+    // which we detect here. We strip the prefix and read from /dev/tty
+    // directly to prevent password echo.
     #[cfg(unix)]
-    if matches!(std::env::var("ARF_ASKPASS_MODE").as_deref(), Ok("1")) {
-        // SAFETY: prompt, buf, buflen are valid from R's ReadConsole call
-        let rc = unsafe { read_password_from_tty(prompt, buf, buflen) };
-        if rc != 0 {
-            return rc;
-        }
-        // rc == 0 means read_password_from_tty failed (e.g., cannot open /dev/tty,
-        // termios failure). Fail closed by returning an empty password rather than
-        // falling back to reedline which would echo input in plaintext.
-        unsafe {
-            if !buf.is_null() && buflen >= 1 {
-                if buflen >= 2 {
-                    *buf = b'\n' as c_char;
-                    *buf.add(1) = 0;
-                } else {
-                    // Not enough space for '\n' and '\0'; write just the terminator.
-                    *buf = 0;
+    if !prompt.is_null() {
+        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
+        if prompt_bytes.starts_with(ASKPASS_PROMPT_PREFIX) {
+            // Strip the magic prefix to get the real user-facing prompt
+            let real_prompt = unsafe { prompt.add(ASKPASS_PROMPT_PREFIX.len()) };
+            // SAFETY: real_prompt, buf, buflen are valid from R's ReadConsole call
+            let rc = unsafe { read_password_from_tty(real_prompt, buf, buflen) };
+            if rc != 0 {
+                return rc;
+            }
+            // rc == 0 means read_password_from_tty failed (e.g., cannot open /dev/tty,
+            // termios failure). Fail closed by returning an empty password rather than
+            // falling back to reedline which would echo input in plaintext.
+            unsafe {
+                if !buf.is_null() && buflen >= 1 {
+                    if buflen >= 2 {
+                        *buf = b'\n' as c_char;
+                        *buf.add(1) = 0;
+                    } else {
+                        *buf = 0;
+                    }
                 }
             }
+            log::warn!("r_read_console: read_password_from_tty failed, returning empty password");
+            return 1;
         }
-        log::warn!("r_read_console: read_password_from_tty failed, returning empty password");
-        return 1;
     }
 
     // In reprex mode, print a blank line between expressions for readability
@@ -1826,9 +1832,9 @@ pub fn askpass_handler_code() -> &'static str {
 
 /// R code to set up the askpass handler.
 ///
-/// Sets `ARF_ASKPASS_MODE` env var to signal the Rust ReadConsole callback,
-/// then calls `readline()` which triggers the callback. The Rust side detects
-/// the flag and reads from `/dev/tty` with echo disabled via termios.
+/// Prepends a magic prefix (`\001ASKPASS\002`) to the prompt so the Rust
+/// ReadConsole callback can detect askpass mode from the prompt string alone,
+/// without environment variables.
 const ASKPASS_HANDLER_CODE: &str = r#"
 local({
     # Only override on Unix. Windows uses GUI dialogs (win-askpass.exe) by default.
@@ -1838,13 +1844,10 @@ local({
         invisible(NULL)
     } else {
         options(askpass = function(msg) {
-            # Signal Rust ReadConsole to use /dev/tty with echo disabled
-            Sys.setenv(ARF_ASKPASS_MODE = "1")
-            on.exit(Sys.unsetenv("ARF_ASKPASS_MODE"), add = TRUE)
-            # readline() triggers ReadConsole callback which:
-            # 1. Stops the spinner (stop_spinner() at top of r_read_console)
-            # 2. Detects ARF_ASKPASS_MODE and reads from /dev/tty with echo disabled
-            password <- readline(msg)
+            # Prepend magic marker so Rust ReadConsole detects askpass mode
+            # from the prompt string. \001 (SOH) and \002 (STX) are control
+            # characters that won't appear in real prompts.
+            password <- readline(paste0("\001ASKPASS\002", msg))
             if (identical(password, "")) return(NULL)
             password
         })
