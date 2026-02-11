@@ -1141,7 +1141,15 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     use std::io::{BufRead, Write};
     use std::os::unix::io::AsRawFd;
 
-    debug_assert!(!buf.is_null() && buflen >= 2, "R guarantees a valid buffer");
+    // Runtime guard: R guarantees a valid buffer, but fail closed on FFI violation.
+    if buf.is_null() || buflen < 2 {
+        log::error!(
+            "askpass: invalid buffer from R (null={}, buflen={})",
+            buf.is_null(),
+            buflen
+        );
+        return 1;
+    }
 
     // Open /dev/tty for read+write so prompt and newline go to the terminal
     // even when stdout is redirected.
