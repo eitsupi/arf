@@ -1159,6 +1159,8 @@ fn recover_pending_termios() {
 unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
     debug_assert!(!buf.is_null() && buflen >= 2);
     unsafe {
+        // The `if` guard is intentional: debug_assert is stripped in release
+        // builds, so this ensures no UB even if the precondition is violated.
         if buflen >= 2 {
             *buf = b'\n' as c_char;
             *buf.add(1) = 0;
@@ -1179,6 +1181,9 @@ unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
 ///
 /// **Fail-closed**: on any error, writes an empty password to `buf` so R's
 /// handler treats it as cancellation. Never falls back to reedline.
+///
+/// **Note**: `rpassword` returns a `String`, so non-UTF-8 passwords are not
+/// supported. In practice passwords are virtually always ASCII/UTF-8.
 ///
 /// # Safety
 /// `buf` must be non-null and `buflen` must be >= 2. `prompt` may be null.
@@ -1206,12 +1211,19 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // If R's SIGINT handler longjmps during the read, rpassword's internal
     // RAII is also skipped. r_read_console checks PENDING_TERMIOS_RESTORE
     // on each entry and restores the terminal at the earliest safe point.
+    //
+    // Note: this fd is separate from the one rpassword opens internally.
+    // On longjmp, rpassword's fd leaks (one fd table entry until process
+    // exit) but the terminal state is correctly recovered via our snapshot.
     let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_RDWR) };
     if tty_fd >= 0 {
         let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
         if unsafe { libc::tcgetattr(tty_fd, &mut old_termios) } == 0 {
-            if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
-                *pending = Some((tty_fd, old_termios));
+            match PENDING_TERMIOS_RESTORE.lock() {
+                Ok(mut pending) => *pending = Some((tty_fd, old_termios)),
+                Err(_) => {
+                    unsafe { libc::close(tty_fd) };
+                }
             }
         } else {
             unsafe { libc::close(tty_fd) };
