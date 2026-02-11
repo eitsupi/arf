@@ -1294,6 +1294,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
     // Uses read_until(b'\n') instead of read_line() because passwords may
     // contain arbitrary bytes in non-UTF8 locales.
+    //
+    // Ctrl+C cancellation path: SIGINT → EINTR from read(2) → read_until
+    // returns Err(Interrupted) → error match below → TermiosGuard restores
+    // echo → write_empty_password → R handler sees "" → returns NULL
+    // (cancellation). If R's SIGINT handler longjmps instead of returning,
+    // the PENDING_TERMIOS_RESTORE safety net restores echo on the next
+    // r_read_console call.
     let mut reader = std::io::BufReader::new(&tty_file);
     let mut line_bytes: Vec<u8> = Vec::new();
     let read_result = reader.read_until(b'\n', &mut line_bytes);
