@@ -1106,6 +1106,22 @@ static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 #[cfg(unix)]
 const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 
+/// Write an empty password ("\n\0") to R's readline buffer.
+///
+/// The R askpass handler treats `identical(password, "")` as cancellation
+/// (returns NULL). `buf` must be non-null and `buflen` must be >= 2.
+#[cfg(unix)]
+unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
+    unsafe {
+        if buflen >= 2 {
+            *buf = b'\n' as c_char;
+            *buf.add(1) = 0;
+        } else {
+            *buf = 0;
+        }
+    }
+}
+
 /// Read a password from `/dev/tty` with echo disabled.
 ///
 /// This is called from `r_read_console` when the prompt contains the
@@ -1113,23 +1129,16 @@ const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 /// reedline's stdin), disables echo via termios, reads a line, restores
 /// echo, and copies the result to R's buffer.
 ///
+/// **Fail-closed**: on any error, writes an empty password to `buf` and
+/// returns 1 so R sees an empty `readline()` result (which the R handler
+/// treats as cancellation). Never falls back to reedline.
+///
 /// # Safety
-/// `prompt`, `buf`, and `buflen` must be valid pointers/values from R's ReadConsole.
+/// `buf` must be non-null and `buflen` must be >= 2. `prompt` may be null.
 #[cfg(unix)]
 unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen: c_int) -> c_int {
     use std::io::{BufRead, Write};
     use std::os::unix::io::AsRawFd;
-
-    // Guard against invalid buffer parameters.
-    // R's readline buffer is always large (typically 4096+), but guard defensively.
-    if buf.is_null() || buflen < 2 {
-        log::error!(
-            "askpass: invalid buffer (null={}, buflen={}), aborting password read",
-            buf.is_null(),
-            buflen
-        );
-        return 0;
-    }
 
     // Open /dev/tty for read+write so prompt and newline go to the terminal
     // even when stdout is redirected.
@@ -1141,13 +1150,13 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         Ok(f) => f,
         Err(e) => {
             log::error!("askpass: failed to open /dev/tty: {}", e);
-            return 0;
+            unsafe { write_empty_password(buf, buflen) };
+            return 1;
         }
     };
     let fd = tty_file.as_raw_fd();
 
     // RAII guard to save/restore terminal echo settings via termios.
-    // Ensures echo is always restored even if reading fails or panics.
     struct TermiosGuard {
         fd: c_int,
         old_termios: libc::termios,
@@ -1175,7 +1184,8 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             "askpass: failed to get terminal attributes: {}",
             std::io::Error::last_os_error()
         );
-        return 0;
+        unsafe { write_empty_password(buf, buflen) };
+        return 1;
     }
     let mut new_termios = old_termios;
     new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
@@ -1184,16 +1194,14 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             "askpass: failed to disable terminal echo: {}",
             std::io::Error::last_os_error()
         );
-        return 0;
+        unsafe { write_empty_password(buf, buflen) };
+        return 1;
     }
-    // Guard ensures old_termios is restored on any exit path
     let _guard = TermiosGuard { fd, old_termios };
 
     // Display prompt to /dev/tty AFTER disabling echo, so the prompt
     // appearance guarantees we are ready to read input.
-    // Write raw bytes (no UTF-8 assumption) to preserve prompts in non-UTF8 locales.
     if !prompt.is_null() {
-        // SAFETY: prompt is a valid C string from R
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         let mut tty_writer = std::io::BufWriter::new(&tty_file);
         if let Err(e) = tty_writer.write_all(prompt_bytes) {
@@ -1205,13 +1213,11 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
 
     // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
-    // Passwords may contain arbitrary bytes in non-UTF8 locales, so we use
-    // read_until(b'\n') instead of read_line() to avoid InvalidData errors.
     let mut reader = std::io::BufReader::new(&tty_file);
     let mut line_bytes: Vec<u8> = Vec::new();
     let read_result = reader.read_until(b'\n', &mut line_bytes);
 
-    // Restore echo before writing newline (guard drops here or at function end)
+    // Restore echo before writing newline
     drop(_guard);
 
     // Print newline to /dev/tty since echo was disabled
@@ -1222,10 +1228,15 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     }
 
     match read_result {
-        Ok(0) => return 0, // EOF
+        Ok(0) => {
+            log::warn!("askpass: EOF on /dev/tty");
+            unsafe { write_empty_password(buf, buflen) };
+            return 1;
+        }
         Err(e) => {
             log::error!("askpass: failed to read from /dev/tty: {}", e);
-            return 0;
+            unsafe { write_empty_password(buf, buflen) };
+            return 1;
         }
         _ => {}
     }
@@ -1238,10 +1249,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         line_bytes.pop();
     }
 
-    // Copy to R's buffer.
-    // Unlike the normal r_read_console path, we do NOT use PENDING_INPUT here
-    // because passwords are single-shot (the R askpass handler calls readline()
-    // once and expects a complete result). Reject rather than silently truncate.
+    // Copy to R's buffer. Reject overlong passwords rather than truncating.
     let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
     if line_bytes.len() > max_len {
         log::error!(
@@ -1249,29 +1257,17 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             line_bytes.len(),
             max_len
         );
-        // Return an empty line (just "\n\0") so R receives an empty password.
-        // The R askpass handler treats nchar(password) == 0 as cancellation
-        // (returns NULL). We must NOT return 0 here — that would trigger the
-        // fallback to reedline's normal input path with echo enabled.
-        unsafe {
-            *buf = b'\n' as c_char;
-            *buf.add(1) = 0;
-        }
+        unsafe { write_empty_password(buf, buflen) };
         return 1;
     }
     let copy_len = line_bytes.len();
 
-    // SAFETY: buf is a valid buffer of at least buflen bytes from R
     unsafe {
         if copy_len > 0 {
             std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), buf as *mut u8, copy_len);
         }
-
-        // Add newline and null terminator
-        let mut pos = copy_len;
-        *buf.add(pos) = b'\n' as c_char;
-        pos += 1;
-        *buf.add(pos) = 0;
+        *buf.add(copy_len) = b'\n' as c_char;
+        *buf.add(copy_len + 1) = 0;
     }
 
     1
@@ -1301,28 +1297,8 @@ unsafe extern "C" fn r_read_console(
     if !prompt.is_null() {
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         if prompt_bytes.starts_with(ASKPASS_PROMPT_PREFIX) {
-            // Strip the magic prefix to get the real user-facing prompt
             let real_prompt = unsafe { prompt.add(ASKPASS_PROMPT_PREFIX.len()) };
-            // SAFETY: real_prompt, buf, buflen are valid from R's ReadConsole call
-            let rc = unsafe { read_password_from_tty(real_prompt, buf, buflen) };
-            if rc != 0 {
-                return rc;
-            }
-            // rc == 0 means read_password_from_tty failed (e.g., cannot open /dev/tty,
-            // termios failure). Fail closed by returning an empty password rather than
-            // falling back to reedline which would echo input in plaintext.
-            unsafe {
-                if !buf.is_null() && buflen >= 1 {
-                    if buflen >= 2 {
-                        *buf = b'\n' as c_char;
-                        *buf.add(1) = 0;
-                    } else {
-                        *buf = 0;
-                    }
-                }
-            }
-            log::warn!("r_read_console: read_password_from_tty failed, returning empty password");
-            return 1;
+            return unsafe { read_password_from_tty(real_prompt, buf, buflen) };
         }
     }
 
