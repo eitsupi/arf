@@ -1112,13 +1112,11 @@ const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 /// (returns NULL). `buf` must be non-null and `buflen` must be >= 2.
 #[cfg(unix)]
 unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
-    debug_assert!(!buf.is_null());
+    debug_assert!(!buf.is_null() && buflen >= 2);
     unsafe {
         if buflen >= 2 {
             *buf = b'\n' as c_char;
             *buf.add(1) = 0;
-        } else {
-            *buf = 0;
         }
     }
 }
