@@ -1151,17 +1151,6 @@ fn recover_pending_termios() {
     }
 }
 
-/// Overwrite a byte slice with zeros using volatile writes.
-///
-/// Prevents the compiler from optimizing away the zeroing, ensuring
-/// sensitive data (passwords) is actually cleared from memory.
-#[cfg(unix)]
-fn zeroize_bytes(bytes: &mut [u8]) {
-    for byte in bytes.iter_mut() {
-        unsafe { std::ptr::write_volatile(byte as *mut u8, 0) };
-    }
-}
-
 /// Write an empty password ("\n\0") to R's readline buffer.
 ///
 /// The R askpass handler treats `identical(password, "")` as cancellation
@@ -1170,8 +1159,6 @@ fn zeroize_bytes(bytes: &mut [u8]) {
 unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
     debug_assert!(!buf.is_null() && buflen >= 2);
     unsafe {
-        // The `if` guard is intentional: debug_assert is stripped in release
-        // builds, so this ensures no UB even if the precondition is violated.
         if buflen >= 2 {
             *buf = b'\n' as c_char;
             *buf.add(1) = 0;
@@ -1179,24 +1166,24 @@ unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
     }
 }
 
-/// Read a password from `/dev/tty` with echo disabled.
+/// Read a password from `/dev/tty` with echo disabled using `rpassword`.
 ///
-/// This is called from `r_read_console` when the prompt contains the
-/// [`ASKPASS_PROMPT_PREFIX`]. It opens `/dev/tty` directly (bypassing
-/// reedline's stdin), disables echo via termios, reads a line, restores
-/// echo, and copies the result to R's buffer.
+/// Called from `r_read_console` when the prompt contains [`ASKPASS_PROMPT_PREFIX`].
+/// Uses `rpassword::prompt_password` which handles `/dev/tty` open, echo
+/// suppression via termios, reading, restoration, and newline echo internally.
 ///
-/// **Fail-closed**: on any error, writes an empty password to `buf` and
-/// returns 1 so R sees an empty `readline()` result (which the R handler
-/// treats as cancellation). Never falls back to reedline.
+/// **longjmp safety**: Before calling rpassword, we snapshot the current
+/// terminal state into [`PENDING_TERMIOS_RESTORE`]. If R's SIGINT handler
+/// longjmps past rpassword's internal cleanup, `r_read_console` recovers
+/// on its next invocation.
+///
+/// **Fail-closed**: on any error, writes an empty password to `buf` so R's
+/// handler treats it as cancellation. Never falls back to reedline.
 ///
 /// # Safety
 /// `buf` must be non-null and `buflen` must be >= 2. `prompt` may be null.
 #[cfg(unix)]
 unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen: c_int) -> c_int {
-    use std::io::{BufRead, Write};
-    use std::os::unix::io::AsRawFd;
-
     // Runtime guard: R guarantees a valid buffer, but fail closed on FFI violation.
     if buf.is_null() || buflen < 2 {
         log::error!(
@@ -1207,169 +1194,72 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
         return 1;
     }
 
-    // Open /dev/tty for read+write so prompt and newline go to the terminal
-    // even when stdout is redirected.
-    let tty_file = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-    {
-        Ok(f) => f,
-        Err(e) => {
-            log::error!("askpass: failed to open /dev/tty: {}", e);
-            eprintln!("Error: cannot read password (/dev/tty unavailable: {e})");
-            unsafe { write_empty_password(buf, buflen) };
-            return 1;
-        }
+    let prompt_str = if prompt.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(prompt) }
+            .to_string_lossy()
+            .into_owned()
     };
-    let fd = tty_file.as_raw_fd();
 
-    // RAII guard to save/restore terminal echo settings via termios.
-    // On successful drop, clears PENDING_TERMIOS_RESTORE so the recovery
-    // path in r_read_console knows no intervention is needed.
-    struct TermiosGuard {
-        fd: c_int,
-        old_termios: libc::termios,
-    }
-
-    impl Drop for TermiosGuard {
-        fn drop(&mut self) {
-            if unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.old_termios) } != 0 {
-                log::error!(
-                    "askpass: failed to restore terminal attributes: {}",
-                    std::io::Error::last_os_error()
-                );
-            }
-            // Clear the safety net — normal drop path succeeded.
+    // Snapshot terminal state BEFORE rpassword modifies it.
+    // If R's SIGINT handler longjmps during the read, rpassword's internal
+    // RAII is also skipped. r_read_console checks PENDING_TERMIOS_RESTORE
+    // on each entry and restores the terminal at the earliest safe point.
+    let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_RDWR) };
+    if tty_fd >= 0 {
+        let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
+        if unsafe { libc::tcgetattr(tty_fd, &mut old_termios) } == 0 {
             if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
-                *pending = None;
+                *pending = Some((tty_fd, old_termios));
             }
+        } else {
+            unsafe { libc::close(tty_fd) };
         }
     }
 
-    // Save terminal settings and disable echo + flush pending input.
-    // Prompt is displayed AFTER this so it signals readiness to accept input.
-    let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
-    if unsafe { libc::tcgetattr(fd, &mut old_termios) } != 0 {
-        let err = std::io::Error::last_os_error();
-        log::error!("askpass: failed to get terminal attributes: {}", err);
-        eprintln!(
-            "Error: cannot read password (terminal setup failed: {})",
-            err
-        );
-        unsafe { write_empty_password(buf, buflen) };
-        return 1;
-    }
+    let result = rpassword::prompt_password(&prompt_str);
 
-    // Store (fd, old_termios) in the global safety net BEFORE disabling echo.
-    // If R's SIGINT handler longjmps past TermiosGuard::drop, r_read_console
-    // will find this entry and restore the terminal on its next invocation.
-    if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
-        *pending = Some((fd, old_termios));
-    }
-
-    let mut new_termios = old_termios;
-    new_termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
-    if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &new_termios) } != 0 {
-        let err = std::io::Error::last_os_error();
-        log::error!("askpass: failed to disable terminal echo: {}", err);
-        eprintln!(
-            "Error: cannot read password (terminal setup failed: {})",
-            err
-        );
-        // Clear safety net since we failed before echo was actually disabled.
-        if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock() {
-            *pending = None;
-        }
-        unsafe { write_empty_password(buf, buflen) };
-        return 1;
-    }
-    let _guard = TermiosGuard { fd, old_termios };
-
-    // Display prompt to /dev/tty AFTER disabling echo, so the prompt
-    // appearance guarantees we are ready to read input.
-    if !prompt.is_null() {
-        // SAFETY: prompt is a valid C string from R's ReadConsole
-        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
-        let mut tty_writer = std::io::BufWriter::new(&tty_file);
-        if let Err(e) = tty_writer.write_all(prompt_bytes) {
-            log::warn!("askpass: failed to write prompt to /dev/tty: {}", e);
-        }
-        if let Err(e) = tty_writer.flush() {
-            log::warn!("askpass: failed to flush prompt to /dev/tty: {}", e);
-        }
-    }
-
-    // Read a line from /dev/tty into raw bytes (no UTF-8 assumption).
-    // Uses read_until(b'\n') instead of read_line() because passwords may
-    // contain arbitrary bytes in non-UTF8 locales.
-    //
-    // Ctrl+C cancellation path: SIGINT → EINTR from read(2) → read_until
-    // returns Err(Interrupted) → error match below → TermiosGuard restores
-    // echo → write_empty_password → R handler sees "" → returns NULL
-    // (cancellation). If R's SIGINT handler longjmps instead of returning,
-    // the PENDING_TERMIOS_RESTORE safety net restores echo on the next
-    // r_read_console call.
-    let mut reader = std::io::BufReader::new(&tty_file);
-    let mut line_bytes: Vec<u8> = Vec::new();
-    let read_result = reader.read_until(b'\n', &mut line_bytes);
-
-    // Restore echo before writing newline
-    drop(_guard);
-
-    // Print newline to /dev/tty since echo was disabled
+    // Clear safety net — rpassword returned normally, terminal is restored.
+    if let Ok(mut pending) = PENDING_TERMIOS_RESTORE.lock()
+        && let Some((fd, _)) = pending.take()
     {
-        let mut tty_writer = std::io::BufWriter::new(&tty_file);
-        let _ = tty_writer.write_all(b"\n");
-        let _ = tty_writer.flush();
+        unsafe { libc::close(fd) };
     }
 
-    match read_result {
-        Ok(0) => {
-            log::warn!("askpass: EOF on /dev/tty");
-            unsafe { write_empty_password(buf, buflen) };
-            return 1;
+    match result {
+        Ok(password) => {
+            let password_bytes = password.as_bytes();
+            let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
+            if password_bytes.len() > max_len {
+                log::error!(
+                    "askpass: password length ({}) exceeds buffer capacity ({}), rejecting",
+                    password_bytes.len(),
+                    max_len
+                );
+                unsafe { write_empty_password(buf, buflen) };
+                return 1;
+            }
+            let copy_len = password_bytes.len();
+            unsafe {
+                if copy_len > 0 {
+                    std::ptr::copy_nonoverlapping(
+                        password_bytes.as_ptr(),
+                        buf as *mut u8,
+                        copy_len,
+                    );
+                }
+                *buf.add(copy_len) = b'\n' as c_char;
+                *buf.add(copy_len + 1) = 0;
+            }
+            1
         }
         Err(e) => {
-            log::error!("askpass: failed to read from /dev/tty: {}", e);
+            log::error!("askpass: failed to read password: {}", e);
             unsafe { write_empty_password(buf, buflen) };
-            return 1;
+            1
         }
-        _ => {}
     }
-
-    // Remove trailing newline/CR
-    if line_bytes.last() == Some(&b'\n') {
-        line_bytes.pop();
-    }
-    if line_bytes.last() == Some(&b'\r') {
-        line_bytes.pop();
-    }
-
-    // Copy to R's buffer. Reject overlong passwords rather than truncating.
-    let max_len = (buflen as usize).saturating_sub(2); // room for '\n' + '\0'
-    if line_bytes.len() > max_len {
-        log::error!(
-            "askpass: password length ({}) exceeds buffer capacity ({}), rejecting",
-            line_bytes.len(),
-            max_len
-        );
-        zeroize_bytes(&mut line_bytes);
-        unsafe { write_empty_password(buf, buflen) };
-        return 1;
-    }
-    let copy_len = line_bytes.len();
-
-    unsafe {
-        if copy_len > 0 {
-            std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), buf as *mut u8, copy_len);
-        }
-        *buf.add(copy_len) = b'\n' as c_char;
-        *buf.add(copy_len + 1) = 0;
-    }
-
-    zeroize_bytes(&mut line_bytes);
-    1
 }
 
 /// R's ReadConsole callback.

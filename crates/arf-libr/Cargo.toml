@@ -14,6 +14,7 @@ thiserror.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 exec.workspace = true
+rpassword.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 encoding_rs.workspace = true

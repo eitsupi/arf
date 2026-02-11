@@ -60,6 +60,7 @@ unicode-width = "0.2"
 exec = "0.3"
 libc = "0.2"
 nix = { version = "0.30", features = ["signal", "process"] }
+rpassword = "7"
 
 # Schema generation
 schemars = "1.2"
