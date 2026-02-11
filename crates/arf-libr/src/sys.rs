@@ -1140,6 +1140,7 @@ fn recover_pending_termios() {
             fd
         );
         let mut restored = false;
+        let mut fatal = false;
         loop {
             let rc = unsafe { libc::tcsetattr(*fd, libc::TCSANOW, old_termios) };
             if rc == 0 {
@@ -1151,16 +1152,26 @@ fn recover_pending_termios() {
                 continue;
             }
             log::error!("askpass: failed to recover terminal settings: {}", err);
+            // Fatal errors where retry on the next r_read_console call won't help.
+            if matches!(
+                err.raw_os_error(),
+                Some(libc::EBADF | libc::ENOTTY | libc::EIO)
+            ) {
+                fatal = true;
+            }
             break;
         }
         if restored {
-            // Only clear the pending entry and close the fd after a successful restore.
             if let Some((fd, _)) = guard.take() {
                 // Close the /dev/tty fd that was leaked by the interrupted read.
                 // This fd is still open because longjmp skipped File's destructor;
                 // the OS won't reuse an open fd number, so double-close cannot happen.
                 unsafe { libc::close(fd) };
             }
+        } else if fatal {
+            // On fatal errors (EBADF, ENOTTY, EIO), clear the stale snapshot
+            // but skip close — the fd may already be invalid.
+            guard.take();
         }
     }
 }
