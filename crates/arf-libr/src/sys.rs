@@ -1220,6 +1220,11 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
             buf.is_null(),
             buflen
         );
+        // Fail closed: write a NUL-terminated empty string if we have any space,
+        // so R never reads stale/undefined buffer contents.
+        if !buf.is_null() && buflen > 0 {
+            unsafe { *buf = 0 };
+        }
         return 1;
     }
 
@@ -1239,7 +1244,7 @@ unsafe fn read_password_from_tty(prompt: *const c_char, buf: *mut c_char, buflen
     // Note: this fd is separate from the one rpassword opens internally.
     // On longjmp, rpassword's fd leaks (one fd table entry until process
     // exit) but the terminal state is correctly recovered via our snapshot.
-    let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_RDWR) };
+    let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
     if tty_fd >= 0 {
         let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
         if unsafe { libc::tcgetattr(tty_fd, &mut old_termios) } == 0 {
