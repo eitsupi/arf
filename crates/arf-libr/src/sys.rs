@@ -1139,12 +1139,13 @@ fn recover_pending_termios() {
             "askpass: recovering terminal settings after interrupted password read (fd={})",
             fd
         );
-        let mut restored = false;
-        let mut fatal = false;
+        // Whether to clear the snapshot and close the fd after the loop.
+        // `close_fd`: true = close fd after clearing; false = clear only (fd may be invalid).
+        let mut clear_snapshot: Option<bool> = None;
         loop {
             let rc = unsafe { libc::tcsetattr(*fd, libc::TCSANOW, old_termios) };
             if rc == 0 {
-                restored = true;
+                clear_snapshot = Some(true);
                 break;
             }
             let err = std::io::Error::last_os_error();
@@ -1153,25 +1154,23 @@ fn recover_pending_termios() {
             }
             log::error!("askpass: failed to recover terminal settings: {}", err);
             // Fatal errors where retry on the next r_read_console call won't help.
-            if matches!(
-                err.raw_os_error(),
-                Some(libc::EBADF | libc::ENOTTY | libc::EIO)
-            ) {
-                fatal = true;
+            // EBADF means the fd is already invalid, so skip close.
+            // ENOTTY/EIO: the fd may still be valid, so close it to avoid leak.
+            match err.raw_os_error() {
+                Some(libc::EBADF) => clear_snapshot = Some(false),
+                Some(libc::ENOTTY | libc::EIO) => clear_snapshot = Some(true),
+                _ => {} // Transient — keep snapshot for retry on next call
             }
             break;
         }
-        if restored {
-            if let Some((fd, _)) = guard.take() {
+        if let Some(close_fd) = clear_snapshot {
+            let leaked = guard.take();
+            if close_fd && let Some((fd, _)) = leaked {
                 // Close the /dev/tty fd that was leaked by the interrupted read.
                 // This fd is still open because longjmp skipped File's destructor;
                 // the OS won't reuse an open fd number, so double-close cannot happen.
                 unsafe { libc::close(fd) };
             }
-        } else if fatal {
-            // On fatal errors (EBADF, ENOTTY, EIO), clear the stale snapshot
-            // but skip close — the fd may already be invalid.
-            guard.take();
         }
     }
 }
