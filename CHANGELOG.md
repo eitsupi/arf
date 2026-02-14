@@ -5,7 +5,7 @@
 ### Fixed
 
 - Help browser: vignettes and demos listed in search results can now be opened when selected
-  - Vignettes are displayed as Markdown converted from HTML using htmd
+  - Vignettes are converted from HTML to Markdown for display (syntax highlighting planned for future release)
   - Demo entries show a message with the command to run in R
   - PDF vignettes show an explanatory message (cannot be rendered in terminal)
 
