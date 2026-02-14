@@ -19,7 +19,7 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use arf_harp::help::{HelpTopic, get_help_text, get_help_topics};
+use arf_harp::help::{HelpTopic, get_help_text, get_help_topics, get_vignette_text};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -200,17 +200,70 @@ impl HelpBrowser {
                             // Select
                             (KeyCode::Enter, _) | (KeyCode::Tab, _) => {
                                 if let Some((topic, _)) = self.filtered.get(self.selected) {
-                                    // Get help text directly (bypasses R's GUI pager on Windows)
-                                    match get_help_text(&topic.topic, Some(&topic.package)) {
-                                        Ok(text) => {
-                                            // Display help in our own pager
-                                            let title = topic.qualified_name();
-                                            if let Err(e) = display_help_pager(&title, &text) {
+                                    let title = topic.qualified_name();
+
+                                    match topic.entry_type.as_str() {
+                                        "vignette" => {
+                                            match get_vignette_text(&topic.topic, &topic.package) {
+                                                Ok(text) => {
+                                                    if let Err(e) =
+                                                        display_help_pager(&title, &text)
+                                                    {
+                                                        log::error!(
+                                                            "help_browser: pager error: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    // Show the error (e.g. PDF vignette message)
+                                                    // in the pager for visibility
+                                                    let msg = format!("{}", e);
+                                                    if let Err(e) = display_help_pager(&title, &msg)
+                                                    {
+                                                        log::error!(
+                                                            "help_browser: pager error: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        "demo" => {
+                                            let msg = format!(
+                                                r#"This is a demo entry.
+
+To run the demo, execute in R:
+
+demo("{name}", package = "{pkg}")"#,
+                                                name = topic.topic,
+                                                pkg = topic.package,
+                                            );
+                                            if let Err(e) = display_help_pager(&title, &msg) {
                                                 log::error!("help_browser: pager error: {}", e);
                                             }
                                         }
-                                        Err(e) => {
-                                            log::error!("help_browser: failed to get help: {}", e);
+                                        _ => {
+                                            // "help" and any other types
+                                            match get_help_text(&topic.topic, Some(&topic.package))
+                                            {
+                                                Ok(text) => {
+                                                    if let Err(e) =
+                                                        display_help_pager(&title, &text)
+                                                    {
+                                                        log::error!(
+                                                            "help_browser: pager error: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    log::error!(
+                                                        "help_browser: failed to get help: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
                                         }
                                     }
 
