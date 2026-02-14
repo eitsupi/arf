@@ -219,68 +219,26 @@ unsafe fn extract_string_at(sexp: SEXP, index: isize) -> HarpResult<String> {
     }
 }
 
-/// Get help text for a specific topic.
+/// Evaluate R code and return the result as an optional String.
 ///
-/// This retrieves the help content as plain text using `tools::Rd2txt()`,
-/// bypassing R's pager system. This is important on Windows where R's
-/// help() function may try to open a GUI window.
+/// This is an internal helper that handles the common pattern of:
+/// parsing R code, evaluating it via `R_ToplevelExec`, and extracting
+/// a character string result.
 ///
-/// The approach is inspired by the felp package's `get_help()` function.
-///
-/// # Arguments
-///
-/// * `topic` - The help topic name
-/// * `package` - Optional package name to look in
-///
-/// # Returns
-///
-/// The help text as a String, or an error if the topic is not found.
-pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
+/// Returns `Ok(Some(text))` if evaluation produces a character result,
+/// `Ok(None)` if the result is `NULL`, or `Err` on failure.
+unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
     let lib = r_library()?;
     let mut protect = RProtect::new();
 
+    let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
+        expected: "valid UTF-8".to_string(),
+        actual: "string with null byte".to_string(),
+    })?;
+
     unsafe {
-        // R code to get help text directly using tools::Rd2txt
-        // This bypasses R's pager system entirely
-        let code = if let Some(pkg) = package {
-            format!(
-                r#"local({{
-    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    pkgname <- basename(dirname(dirname(file)))
-    paste(utils::capture.output(
-        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
-    ), collapse = "\n")
-}})"#,
-                topic = escape_r_string(topic),
-                pkg = escape_r_string(pkg)
-            )
-        } else {
-            format!(
-                r#"local({{
-    x <- utils::help("{topic}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    pkgname <- basename(dirname(dirname(file)))
-    paste(utils::capture.output(
-        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
-    ), collapse = "\n")
-}})"#,
-                topic = escape_r_string(topic)
-            )
-        };
-
-        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
-            expected: "valid UTF-8".to_string(),
-            actual: "string with null byte".to_string(),
-        })?;
-
         let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
 
-        // Parse the code
         let mut status = ParseStatus::Null;
         let parsed = protect.protect((lib.r_parsevector)(
             code_sexp,
@@ -291,14 +249,14 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 
         if status != ParseStatus::Ok {
             return Err(HarpError::RError(arf_libr::RError::EvalError(
-                "Failed to parse help command".to_string(),
+                "Failed to parse R code".to_string(),
             )));
         }
 
         let n_expr = (lib.rf_length)(parsed);
         if n_expr == 0 {
             return Err(HarpError::RError(arf_libr::RError::EvalError(
-                "No help found".to_string(),
+                "Empty R expression".to_string(),
             )));
         }
 
@@ -318,53 +276,168 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 
         if success == 0 {
             return Err(HarpError::RError(arf_libr::RError::EvalError(
-                "Failed to get help text".to_string(),
+                "R evaluation failed".to_string(),
             )));
         }
 
-        // Extract the string result
-        if let Some(result) = payload.result {
-            if result == r_nil_value()? {
-                return Err(HarpError::RError(arf_libr::RError::EvalError(format!(
-                    "No help found for topic '{}'",
-                    topic
-                ))));
-            }
+        let Some(result) = payload.result else {
+            return Err(HarpError::RError(arf_libr::RError::EvalError(
+                "No result from R evaluation".to_string(),
+            )));
+        };
 
-            // Check if it's a character vector
-            let sexp_type = (lib.rf_typeof)(result);
-            if sexp_type != 16 {
-                // STRSXP = 16
-                return Err(HarpError::RError(arf_libr::RError::EvalError(
-                    "Unexpected result type from help".to_string(),
-                )));
-            }
-
-            let len = (lib.rf_length)(result);
-            if len == 0 {
-                return Err(HarpError::RError(arf_libr::RError::EvalError(
-                    "Empty help text".to_string(),
-                )));
-            }
-
-            // Get the first element
-            let str_elt = (lib.string_elt)(result, 0);
-            let char_ptr = (lib.r_charsxp)(str_elt);
-            if char_ptr.is_null() {
-                return Err(HarpError::RError(arf_libr::RError::EvalError(
-                    "Null help text".to_string(),
-                )));
-            }
-
-            let c_str = std::ffi::CStr::from_ptr(char_ptr);
-            let text = c_str.to_string_lossy().into_owned();
-            return Ok(text);
+        if result == r_nil_value()? {
+            return Ok(None);
         }
 
-        Err(HarpError::RError(arf_libr::RError::EvalError(
-            "No result from help evaluation".to_string(),
-        )))
+        // Check if it's a character vector (STRSXP = 16)
+        let sexp_type = (lib.rf_typeof)(result);
+        if sexp_type != 16 {
+            return Err(HarpError::RError(arf_libr::RError::EvalError(
+                "Unexpected result type from R".to_string(),
+            )));
+        }
+
+        let len = (lib.rf_length)(result);
+        if len == 0 {
+            return Ok(None);
+        }
+
+        let str_elt = (lib.string_elt)(result, 0);
+        let char_ptr = (lib.r_charsxp)(str_elt);
+        if char_ptr.is_null() {
+            return Ok(None);
+        }
+
+        let c_str = std::ffi::CStr::from_ptr(char_ptr);
+        let text = c_str.to_string_lossy().into_owned();
+        Ok(Some(text))
     }
+}
+
+/// Get help text for a specific topic.
+///
+/// This retrieves the help content as plain text using `tools::Rd2txt()`,
+/// bypassing R's pager system. This is important on Windows where R's
+/// help() function may try to open a GUI window.
+///
+/// The approach is inspired by the felp package's `get_help()` function.
+///
+/// # Arguments
+///
+/// * `topic` - The help topic name
+/// * `package` - Optional package name to look in
+///
+/// # Returns
+///
+/// The help text as a String, or an error if the topic is not found.
+pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
+    let code = if let Some(pkg) = package {
+        format!(
+            r#"local({{
+    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
+    paths <- as.character(x)
+    if (length(paths) == 0) return(NULL)
+    file <- paths[1L]
+    pkgname <- basename(dirname(dirname(file)))
+    paste(utils::capture.output(
+        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
+    ), collapse = "\n")
+}})"#,
+            topic = escape_r_string(topic),
+            pkg = escape_r_string(pkg)
+        )
+    } else {
+        format!(
+            r#"local({{
+    x <- utils::help("{topic}", help_type = "text")
+    paths <- as.character(x)
+    if (length(paths) == 0) return(NULL)
+    file <- paths[1L]
+    pkgname <- basename(dirname(dirname(file)))
+    paste(utils::capture.output(
+        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
+    ), collapse = "\n")
+}})"#,
+            topic = escape_r_string(topic)
+        )
+    };
+
+    unsafe {
+        eval_r_to_string(&code)?.ok_or_else(|| {
+            HarpError::RError(arf_libr::RError::EvalError(format!(
+                "No help found for topic '{}'",
+                topic
+            )))
+        })
+    }
+}
+
+/// Sentinel value returned by R when a vignette is in PDF format.
+const PDF_VIGNETTE_SENTINEL: &str = "__PDF_VIGNETTE__";
+
+/// Get vignette content as Markdown text.
+///
+/// This retrieves a vignette's HTML content via `utils::vignette()` and
+/// converts it to Markdown using htmd. PDF vignettes cannot be displayed
+/// in the terminal and will return an error with a descriptive message.
+///
+/// # Arguments
+///
+/// * `topic` - The vignette topic name
+/// * `package` - The package name containing the vignette
+///
+/// # Returns
+///
+/// The vignette content as Markdown text, or an error if unavailable.
+pub fn get_vignette_text(topic: &str, package: &str) -> HarpResult<String> {
+    let code = format!(
+        r#"local({{
+    v <- tryCatch(
+        utils::vignette("{topic}", package = "{pkg}"),
+        error = function(e) NULL
+    )
+    if (is.null(v)) return(NULL)
+    if (nchar(v$PDF) == 0) return(NULL)
+    file <- file.path(v$Dir, "doc", v$PDF)
+    if (!file.exists(file)) return(NULL)
+    ext <- tolower(tools::file_ext(file))
+    if (ext == "pdf") return("{sentinel}")
+    paste(readLines(file, warn = FALSE), collapse = "\n")
+}})"#,
+        topic = escape_r_string(topic),
+        pkg = escape_r_string(package),
+        sentinel = PDF_VIGNETTE_SENTINEL,
+    );
+
+    let html = unsafe {
+        eval_r_to_string(&code)?.ok_or_else(|| {
+            HarpError::RError(arf_libr::RError::EvalError(format!(
+                "Vignette '{}' not found in package '{}'",
+                topic, package
+            )))
+        })?
+    };
+
+    if html == PDF_VIGNETTE_SENTINEL {
+        return Err(HarpError::RError(arf_libr::RError::EvalError(format!(
+            "Vignette '{topic}' in package '{package}' is a PDF and cannot be displayed in the terminal.\n\
+             Run in R: vignette(\"{topic}\", package = \"{package}\")",
+        ))));
+    }
+
+    let converter = htmd::HtmlToMarkdown::builder()
+        .skip_tags(vec!["style", "script"])
+        .build();
+
+    let markdown = converter.convert(&html).map_err(|e| {
+        HarpError::RError(arf_libr::RError::EvalError(format!(
+            "Failed to convert vignette HTML: {}",
+            e
+        )))
+    })?;
+
+    Ok(strip_pandoc_anchors(&markdown))
 }
 
 /// Show help for a specific topic (legacy function).
@@ -380,6 +453,35 @@ pub fn show_help(topic: &str, package: Option<&str>) -> HarpResult<()> {
     let text = get_help_text(topic, package)?;
     println!("{}", text);
     Ok(())
+}
+
+/// Strip Pandoc-generated empty anchors from Markdown text.
+///
+/// Pandoc-generated HTML vignettes contain line-number anchors like
+/// `<a href="#cb1-1" tabindex="-1"></a>` which get converted to
+/// `[](#cb1-1)` by HTML-to-Markdown converters. This function removes
+/// those empty link artifacts.
+fn strip_pandoc_anchors(text: &str) -> String {
+    const PATTERN: &str = "[](#";
+
+    let mut result = String::with_capacity(text.len());
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find(PATTERN) {
+        result.push_str(&remaining[..start]);
+        remaining = &remaining[start + PATTERN.len()..];
+
+        // Skip to closing ')'
+        if let Some(end) = remaining.find(')') {
+            remaining = &remaining[end + 1..];
+        } else {
+            // No closing paren found; keep the pattern as-is
+            result.push_str(PATTERN);
+        }
+    }
+
+    result.push_str(remaining);
+    result
 }
 
 /// Escape a string for use in R code.
@@ -412,5 +514,42 @@ mod tests {
         assert_eq!(escape_r_string("hello"), "hello");
         assert_eq!(escape_r_string(r#"he"llo"#), r#"he\"llo"#);
         assert_eq!(escape_r_string("he\\llo"), "he\\\\llo");
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_basic() {
+        let input = "some code[](#cb1-1) more code";
+        assert_eq!(strip_pandoc_anchors(input), "some code more code");
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_multiple() {
+        let input = "[](#cb1-1)line1\n[](#cb1-2)line2\n[](#cb1-3)line3";
+        assert_eq!(strip_pandoc_anchors(input), "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_no_anchors() {
+        let input = "normal text without anchors";
+        assert_eq!(strip_pandoc_anchors(input), input);
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_preserves_normal_links() {
+        // Normal markdown links like [text](url) should be preserved
+        let input = "see [docs](https://example.com) for details";
+        assert_eq!(strip_pandoc_anchors(input), input);
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_empty_string() {
+        assert_eq!(strip_pandoc_anchors(""), "");
+    }
+
+    #[test]
+    fn test_strip_pandoc_anchors_unclosed() {
+        // Unclosed pattern should be preserved
+        let input = "text [](#broken";
+        assert_eq!(strip_pandoc_anchors(input), "text [](#broken");
     }
 }
