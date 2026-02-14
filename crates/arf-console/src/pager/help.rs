@@ -231,10 +231,13 @@ impl HelpBrowser {
                                         }
                                         "demo" => {
                                             let msg = format!(
-                                                "This is a demo entry.\n\n\
-                                                 To run the demo, execute in R:\n\n\
-                                                 demo(\"{}\", package = \"{}\")",
-                                                topic.topic, topic.package
+                                                r#"This is a demo entry.
+
+To run the demo, execute in R:
+
+demo("{name}", package = "{pkg}")"#,
+                                                name = topic.topic,
+                                                pkg = topic.package,
                                             );
                                             if let Err(e) = display_help_pager(&title, &msg) {
                                                 log::error!("help_browser: pager error: {}", e);

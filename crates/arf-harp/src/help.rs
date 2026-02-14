@@ -232,8 +232,8 @@ unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
     let mut protect = RProtect::new();
 
     let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
-        expected: "valid UTF-8".to_string(),
-        actual: "string with null byte".to_string(),
+        expected: "string without interior NUL bytes".to_string(),
+        actual: "string containing interior NUL byte(s)".to_string(),
     })?;
 
     unsafe {
@@ -421,8 +421,8 @@ pub fn get_vignette_text(topic: &str, package: &str) -> HarpResult<String> {
 
     if html == PDF_VIGNETTE_SENTINEL {
         return Err(HarpError::RError(arf_libr::RError::EvalError(format!(
-            "Vignette '{topic}' in package '{package}' is a PDF and cannot be displayed in the terminal.\n\
-             Run in R: vignette(\"{topic}\", package = \"{package}\")",
+            r#"Vignette '{topic}' in package '{package}' is a PDF and cannot be displayed in the terminal.
+Run in R: vignette("{topic}", package = "{package}")"#,
         ))));
     }
 
