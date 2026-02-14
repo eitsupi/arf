@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `r-vignette-to-md` crate for converting Pandoc-generated R vignette HTML to Markdown
+  - Detects code block languages from Pandoc's `sourceCode` class pattern (R, Python, bash, etc.)
+  - Removes only Pandoc code block anchors (`[](#cb...)`), preserving footnote backrefs and other anchors
+
 ### Fixed
 
 - Help browser: vignettes and demos listed in search results can now be opened when selected
