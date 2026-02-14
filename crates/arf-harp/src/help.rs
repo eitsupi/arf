@@ -407,7 +407,7 @@ pub fn get_vignette_text(topic: &str, package: &str) -> HarpResult<String> {
 }})"#,
         topic = escape_r_string(topic),
         pkg = escape_r_string(package),
-        sentinel = PDF_VIGNETTE_SENTINEL,
+        sentinel = escape_r_string(PDF_VIGNETTE_SENTINEL),
     );
 
     let html = unsafe {
