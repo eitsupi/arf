@@ -9,5 +9,3 @@ description = "Convert Pandoc-generated R vignette HTML to Markdown"
 [dependencies]
 htmd.workspace = true
 
-[dev-dependencies]
-insta.workspace = true
