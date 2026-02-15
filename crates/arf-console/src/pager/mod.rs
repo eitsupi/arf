@@ -200,6 +200,10 @@ pub fn run<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Result
 fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
+    // Clear both the internal buffer and the screen so ratatui doesn't
+    // assume the screen is empty and skip cells that still show content
+    // from a previous UI (e.g., help browser list behind the help pager).
+    terminal.clear()?;
     let mut scroll_offset = 0;
     let mut needs_redraw = true;
 
