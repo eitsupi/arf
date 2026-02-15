@@ -6,6 +6,7 @@
 mod help;
 pub mod history_browser;
 pub mod history_schema;
+pub(crate) mod markdown;
 pub mod session_info;
 pub(crate) mod style_convert;
 pub(crate) mod text_utils;
