@@ -699,7 +699,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         }
 
         // Pre-split all cells into sub-lines
-        let split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
+        let mut split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
             .table_rows
             .iter()
             .map(|row| {
@@ -717,6 +717,38 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                     let w = Self::spans_width(sub_line);
                     col_widths[col_idx] = col_widths[col_idx].max(w);
                 }
+            }
+        }
+
+        // If wrap_width is set and the table is too wide, constrain column
+        // widths and re-wrap cell content.
+        if let Some(wrap_width) = self.wrap_width {
+            // Table decoration: "| " prefix (2) + " | " after each column (3 × n_cols)
+            // + blockquote prefix (2 per depth level)
+            let decoration = self.blockquote_depth * 2 + 2 + n_cols * 3;
+            let available = wrap_width.saturating_sub(decoration);
+            let total_natural: usize = col_widths.iter().sum();
+
+            if total_natural > available && available > 0 {
+                let target_widths = Self::distribute_column_widths(&col_widths, available);
+
+                // Re-wrap cells that exceed their target width
+                for row in &mut split_rows {
+                    for (col_idx, cell_lines) in row.iter_mut().enumerate() {
+                        let target = target_widths[col_idx];
+                        if target == 0 {
+                            continue;
+                        }
+                        let mut new_lines: Vec<Vec<Span<'static>>> = Vec::new();
+                        for sub_line in cell_lines.drain(..) {
+                            let wrapped = super::text_utils::wrap_spans(&sub_line, target, 0);
+                            new_lines.extend(wrapped);
+                        }
+                        *cell_lines = new_lines;
+                    }
+                }
+
+                col_widths = target_widths;
             }
         }
 
@@ -771,6 +803,68 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 self.lines.push(Line::from(sep_spans));
             }
         }
+    }
+
+    /// Distribute `available` columns among table columns.
+    ///
+    /// Small columns (those that fit within a fair share) keep their natural
+    /// width; remaining space is divided equally among wider columns.
+    /// Every column gets at least 1 column of width.
+    fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
+        let n = natural.len();
+        if n == 0 {
+            return vec![];
+        }
+
+        // Ensure every column gets at least 1.
+        let min_width = 1;
+        if available <= n * min_width {
+            return vec![min_width; n];
+        }
+
+        let mut result = natural.to_vec();
+        let mut locked = vec![false; n];
+        let mut locked_total = 0usize;
+        let mut unlocked_count = n;
+
+        // Iteratively lock columns whose natural width fits in the fair share.
+        loop {
+            let remaining = available.saturating_sub(locked_total);
+            let share = if unlocked_count > 0 {
+                remaining / unlocked_count
+            } else {
+                0
+            };
+
+            let mut changed = false;
+            for i in 0..n {
+                if !locked[i] && result[i] <= share {
+                    locked[i] = true;
+                    locked_total += result[i];
+                    unlocked_count -= 1;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Distribute remaining space among unlocked (wide) columns.
+        if unlocked_count > 0 {
+            let remaining = available.saturating_sub(locked_total);
+            let share = remaining / unlocked_count;
+            let extra = remaining % unlocked_count;
+            let mut idx = 0;
+            for i in 0..n {
+                if !locked[i] {
+                    result[i] = share + if idx < extra { 1 } else { 0 };
+                    idx += 1;
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -1101,5 +1195,82 @@ mod tests {
         let input = "First paragraph.\n\nSecond paragraph.";
         let lines = render_plain(input);
         assert_eq!(lines, vec!["First paragraph.", "", "Second paragraph."]);
+    }
+
+    // ── wrap_width ─────────────────────────────────────────────────────
+
+    /// Helper: render with wrapping and collect plain text.
+    fn render_wrapped(input: &str, width: usize) -> Vec<String> {
+        render_markdown(input, None, Some(width))
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wrap_long_paragraph() {
+        let input = "Hello world, this is a long paragraph that should wrap.";
+        let lines = render_wrapped(input, 20);
+        assert!(lines.len() > 1, "Should wrap into multiple lines");
+        for line in &lines {
+            assert!(
+                unicode_width::UnicodeWidthStr::width(line.as_str()) <= 20,
+                "Line too wide: {:?} ({})",
+                line,
+                unicode_width::UnicodeWidthStr::width(line.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_code_block_not_wrapped() {
+        let input =
+            "```\nthis is a very long code line that should not be wrapped at all ever\n```";
+        let lines = render_wrapped(input, 20);
+        let code_text: String = lines
+            .iter()
+            .find(|l| l.contains("this is"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(code_text.len() > 20, "Code block should NOT be wrapped");
+    }
+
+    #[test]
+    fn wrap_table_cells() {
+        let input = "| Arg | Description |\n|---|---|\n| x | A very long description that should be wrapped within the cell |";
+        let lines = render_wrapped(input, 40);
+        // The table should have more rows than the raw 3 (header + sep + 1 data row)
+        // because the long description wraps.
+        assert!(
+            lines.len() > 3,
+            "Table cell should wrap: got {} lines: {:?}",
+            lines.len(),
+            lines
+        );
+        // All lines should fit within the wrap width
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.as_str());
+            assert!(w <= 40, "Table line too wide ({} > 40): {:?}", w, line);
+        }
+    }
+
+    #[test]
+    fn wrap_table_narrow_preserves_content() {
+        let input = "| Name | Value |\n|---|---|\n| foo | bar |";
+        // Wide enough that no wrapping is needed
+        let lines_wide = render_wrapped(input, 80);
+        // Narrow — may wrap but should still contain all content
+        let lines_narrow = render_wrapped(input, 30);
+        let all_text_wide: String = lines_wide.join("");
+        let all_text_narrow: String = lines_narrow.join("");
+        assert!(all_text_narrow.contains("foo"));
+        assert!(all_text_narrow.contains("bar"));
+        assert!(all_text_wide.contains("foo"));
+        assert!(all_text_wide.contains("bar"));
     }
 }
