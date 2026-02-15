@@ -316,7 +316,9 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             | Tag::MetadataBlock(_)
             | Tag::DefinitionList
             | Tag::DefinitionListTitle
-            | Tag::DefinitionListDefinition => {}
+            | Tag::DefinitionListDefinition
+            | Tag::Superscript
+            | Tag::Subscript => {}
         }
     }
 
@@ -395,7 +397,9 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             | TagEnd::MetadataBlock(_)
             | TagEnd::DefinitionList
             | TagEnd::DefinitionListTitle
-            | TagEnd::DefinitionListDefinition => {}
+            | TagEnd::DefinitionListDefinition
+            | TagEnd::Superscript
+            | TagEnd::Subscript => {}
         }
     }
 
@@ -585,7 +589,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             self.emit_prefix_if_needed();
             for token in &tokens {
                 debug_assert!(
-                    token.start < source.len() && token.end <= source.len(),
+                    token.start <= source.len() && token.end <= source.len(),
                     "token [{}, {}) out of bounds for source len {}",
                     token.start,
                     token.end,

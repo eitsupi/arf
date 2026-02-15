@@ -39,7 +39,7 @@ tree-sitter-r = { git = "https://github.com/r-lib/tree-sitter-r", rev = "95aff09
 rd2qmd-core = { git = "https://github.com/eitsupi/rd2qmd", rev = "81023220584d355395fae24030aafe0fe6afa231", features = ["roxygen"] }
 
 # Markdown parsing
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 
 # Fuzzy matching
 nucleo-matcher = "0.3"
