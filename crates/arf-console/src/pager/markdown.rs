@@ -7,11 +7,13 @@
 //! Reference: `refs/codex/codex-rs/tui2/src/markdown_render.rs`
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+use crate::config::RColorConfig;
 use crate::highlighter::{TokenType, tokenize_r};
+use crate::pager::style_convert::nu_ansi_color_to_ratatui;
 
 /// Render a Markdown string into styled ratatui lines.
 ///
@@ -64,21 +66,30 @@ impl Default for Styles {
 // R syntax highlighting for code blocks
 // ---------------------------------------------------------------------------
 
-/// Map a `TokenType` to a `ratatui::style::Style` using default R color scheme.
+/// Map a `TokenType` to a `ratatui::style::Style` using default R colors.
 ///
-/// These colors match `RColorConfig::default()` from `config/colors.rs`.
+/// Derives colors from [`RColorConfig::default()`] via [`nu_ansi_color_to_ratatui`]
+/// so the pager stays in sync with the REPL color scheme.
 fn token_type_to_style(tt: TokenType) -> Style {
-    match tt {
-        TokenType::Comment => Style::new().fg(Color::DarkGray),
-        TokenType::String => Style::new().fg(Color::Green),
-        TokenType::Number => Style::new().fg(Color::LightMagenta),
-        TokenType::Keyword => Style::new().fg(Color::LightBlue),
-        TokenType::Constant => Style::new().fg(Color::LightCyan),
-        TokenType::Operator => Style::new().fg(Color::Yellow),
-        TokenType::Punctuation
-        | TokenType::Identifier
-        | TokenType::Whitespace
-        | TokenType::Other => Style::default(),
+    // Use a static default so we only build it once.
+    static CONFIG: std::sync::LazyLock<RColorConfig> =
+        std::sync::LazyLock::new(RColorConfig::default);
+
+    let color = match tt {
+        TokenType::Comment => CONFIG.comment,
+        TokenType::String => CONFIG.string,
+        TokenType::Number => CONFIG.number,
+        TokenType::Keyword => CONFIG.keyword,
+        TokenType::Constant => CONFIG.constant,
+        TokenType::Operator => CONFIG.operator,
+        TokenType::Punctuation => CONFIG.punctuation,
+        TokenType::Identifier => CONFIG.identifier,
+        TokenType::Whitespace | TokenType::Other => return Style::default(),
+    };
+
+    match color {
+        nu_ansi_term::Color::Default => Style::default(),
+        c => Style::new().fg(nu_ansi_color_to_ratatui(c)),
     }
 }
 
@@ -560,9 +571,13 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             let tokens = tokenize_r(source);
             self.emit_prefix_if_needed();
             for token in &tokens {
-                if token.start >= source.len() || token.end > source.len() {
-                    continue;
-                }
+                debug_assert!(
+                    token.start < source.len() && token.end <= source.len(),
+                    "token [{}, {}) out of bounds for source len {}",
+                    token.start,
+                    token.end,
+                    source.len()
+                );
                 let text = &source[token.start..token.end];
                 let style = token_type_to_style(token.token_type);
                 // Handle newlines within token text (whitespace tokens may span lines)
@@ -700,6 +715,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     /// Helper: render markdown and collect line text (without styling).
     fn render_plain(input: &str) -> Vec<String> {

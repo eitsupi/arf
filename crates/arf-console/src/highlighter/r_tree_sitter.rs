@@ -13,9 +13,8 @@ use crate::r_parser::{is_atomic_node, parse_r};
 use nu_ansi_term::Style;
 use once_cell::sync::Lazy;
 use reedline::{Highlighter, StyledText};
-use std::cell::RefCell;
 use std::collections::HashSet;
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 use super::r_regex::TokenType;
 
@@ -208,20 +207,14 @@ pub fn tokenize_r(source: &str) -> Vec<Token> {
 /// keeping the state accurate even after history navigation.
 pub struct RTreeSitterHighlighter {
     config: RColorConfig,
-    parser: RefCell<Parser>,
     /// Optional editor state reference for syncing on redraw.
     editor_state: Option<EditorStateRef>,
 }
 
 impl RTreeSitterHighlighter {
     pub fn new(config: RColorConfig) -> Self {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_r::LANGUAGE.into())
-            .expect("Failed to set tree-sitter-r language");
         RTreeSitterHighlighter {
             config,
-            parser: RefCell::new(parser),
             editor_state: None,
         }
     }
@@ -249,11 +242,6 @@ impl RTreeSitterHighlighter {
             state.uncertain = false;
         }
     }
-
-    /// Parse input and return the tree.
-    fn parse(&self, input: &str) -> Option<Tree> {
-        self.parser.borrow_mut().parse(input.as_bytes(), None)
-    }
 }
 
 impl Default for RTreeSitterHighlighter {
@@ -270,7 +258,7 @@ impl Highlighter for RTreeSitterHighlighter {
 
         let mut styled = StyledText::new();
 
-        if let Some(tree) = self.parse(line) {
+        if let Some(tree) = parse_r(line) {
             let source = line.as_bytes();
             let mut tokens = Vec::new();
             let mut cursor = tree.walk();
