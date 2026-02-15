@@ -236,7 +236,11 @@ pub fn wrap_spans(
         };
 
         if line_width == 0 {
-            break;
+            // Continuation indent consumed all available width.
+            // Fall back to wrapping without indent to avoid dropping text.
+            result.push(build_line(&chars[pos..pos + 1], false, 0));
+            pos += 1;
+            continue;
         }
 
         let mut col = 0;

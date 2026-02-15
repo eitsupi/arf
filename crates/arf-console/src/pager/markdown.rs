@@ -590,8 +590,18 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         if self.list_depth > 0 {
             // Nesting indent for outer levels
             indent += self.list_depth.saturating_sub(1) * 2;
-            // Marker width ("- " or "N. ")
-            indent += 2;
+            // Marker width: "- " (2) for unordered, "N. " (digits + 2) for ordered
+            if let Some(Some(idx)) = self.list_indices.last() {
+                // Count digits in the current index
+                let digits = if *idx == 0 {
+                    1
+                } else {
+                    (*idx).ilog10() as usize + 1
+                };
+                indent += digits + 2; // "N. "
+            } else {
+                indent += 2; // "- "
+            }
         }
         indent
     }
@@ -1272,5 +1282,38 @@ mod tests {
         assert!(all_text_narrow.contains("bar"));
         assert!(all_text_wide.contains("foo"));
         assert!(all_text_wide.contains("bar"));
+    }
+
+    #[test]
+    fn wrap_prose_but_not_code_block() {
+        // Integration test: a document with both a paragraph and a code block.
+        // The paragraph should wrap; the code block should not.
+        let input = "This is a long paragraph that will be wrapped at the given width.\n\n```\ncode_line_that_must_not_be_wrapped_ever()\n```";
+        let lines = render_wrapped(input, 30);
+
+        // Paragraph lines should all fit within 30 columns
+        let code_start = lines
+            .iter()
+            .position(|l| l.contains("code_line"))
+            .expect("Should contain the code line");
+        for (i, line) in lines.iter().enumerate() {
+            if i < code_start && !line.is_empty() {
+                let w = unicode_width::UnicodeWidthStr::width(line.as_str());
+                assert!(
+                    w <= 30,
+                    "Paragraph line should wrap (line {}: {} cols): {:?}",
+                    i,
+                    w,
+                    line
+                );
+            }
+        }
+
+        // Code block line should NOT be wrapped (wider than 30)
+        let code_line = &lines[code_start];
+        assert!(
+            code_line.contains("code_line_that_must_not_be_wrapped_ever()"),
+            "Code block should remain intact"
+        );
     }
 }
