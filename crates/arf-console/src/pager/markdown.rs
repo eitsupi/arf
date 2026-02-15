@@ -6,10 +6,12 @@
 //!
 //! Reference: `refs/codex/codex-rs/tui2/src/markdown_render.rs`
 
-use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use ratatui::style::Style;
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
+
+use crate::highlighter::{TokenType, tokenize_r};
 
 /// Render a Markdown string into styled ratatui lines.
 pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
@@ -55,6 +57,33 @@ impl Default for Styles {
 }
 
 // ---------------------------------------------------------------------------
+// R syntax highlighting for code blocks
+// ---------------------------------------------------------------------------
+
+/// Map a `TokenType` to a `ratatui::style::Style` using default R color scheme.
+///
+/// These colors match `RColorConfig::default()` from `config/colors.rs`.
+fn token_type_to_style(tt: TokenType) -> Style {
+    match tt {
+        TokenType::Comment => Style::new().fg(Color::DarkGray),
+        TokenType::String => Style::new().fg(Color::Green),
+        TokenType::Number => Style::new().fg(Color::LightMagenta),
+        TokenType::Keyword => Style::new().fg(Color::LightBlue),
+        TokenType::Constant => Style::new().fg(Color::LightCyan),
+        TokenType::Operator => Style::new().fg(Color::Yellow),
+        TokenType::Punctuation
+        | TokenType::Identifier
+        | TokenType::Whitespace
+        | TokenType::Other => Style::default(),
+    }
+}
+
+/// Check if a code block language tag indicates R code.
+fn is_r_language(lang: &str) -> bool {
+    matches!(lang, "r" | "R")
+}
+
+// ---------------------------------------------------------------------------
 // Writer state machine
 // ---------------------------------------------------------------------------
 
@@ -74,6 +103,12 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
 
     /// Inside a code block (fenced or indented).
     in_code_block: bool,
+
+    /// Language tag for the current code block (e.g., "r", "python").
+    code_block_lang: Option<String>,
+
+    /// Buffer accumulating code block text for deferred rendering.
+    code_block_buffer: String,
 
     /// Track ordered list counters (Some(n) = ordered starting at n).
     list_indices: Vec<Option<u64>>,
@@ -119,6 +154,8 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             current_spans: Vec::new(),
             in_heading: None,
             in_code_block: false,
+            code_block_lang: None,
+            code_block_buffer: String::new(),
             list_indices: Vec::new(),
             list_depth: 0,
             blockquote_depth: 0,
@@ -193,9 +230,21 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 self.ensure_blank_line_before_block();
                 self.blockquote_depth += 1;
             }
-            Tag::CodeBlock(_kind) => {
+            Tag::CodeBlock(kind) => {
                 self.ensure_blank_line_before_block();
                 self.in_code_block = true;
+                self.code_block_lang = match kind {
+                    CodeBlockKind::Fenced(lang) => {
+                        let lang = lang.split_whitespace().next().unwrap_or("");
+                        if lang.is_empty() {
+                            None
+                        } else {
+                            Some(lang.to_string())
+                        }
+                    }
+                    CodeBlockKind::Indented => None,
+                };
+                self.code_block_buffer.clear();
             }
             Tag::List(start) => {
                 if self.list_depth == 0 {
@@ -270,8 +319,9 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 self.needs_newline = true;
             }
             TagEnd::CodeBlock => {
-                self.flush_line();
+                self.flush_code_block();
                 self.in_code_block = false;
+                self.code_block_lang = None;
                 self.needs_newline = true;
             }
             TagEnd::List(_) => {
@@ -336,16 +386,8 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         }
 
         if self.in_code_block {
-            // Code blocks: split into lines, each gets its own Line
-            let s = text.to_string();
-            let mut line_iter = s.split('\n').peekable();
-            while let Some(line_text) = line_iter.next() {
-                self.emit_prefix_if_needed();
-                self.push_span(Span::styled(line_text.to_string(), self.styles.code_block));
-                if line_iter.peek().is_some() {
-                    self.flush_line();
-                }
-            }
+            // Buffer code block text for deferred rendering at TagEnd::CodeBlock
+            self.code_block_buffer.push_str(&text);
             return;
         }
 
@@ -490,6 +532,52 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             self.flush_line();
             self.push_blank_line();
             self.needs_newline = false;
+        }
+    }
+
+    // -- code block rendering ------------------------------------------------
+
+    /// Flush the accumulated code block buffer, applying syntax highlighting
+    /// for R code blocks.
+    fn flush_code_block(&mut self) {
+        let buffer = std::mem::take(&mut self.code_block_buffer);
+        // Remove trailing newline that pulldown-cmark typically appends
+        let source = buffer.strip_suffix('\n').unwrap_or(&buffer);
+
+        let use_r_highlight = self
+            .code_block_lang
+            .as_deref()
+            .is_some_and(is_r_language);
+
+        if use_r_highlight {
+            let tokens = tokenize_r(source);
+            self.emit_prefix_if_needed();
+            for token in &tokens {
+                if token.start >= source.len() || token.end > source.len() {
+                    continue;
+                }
+                let text = &source[token.start..token.end];
+                let style = token_type_to_style(token.token_type);
+                // Handle newlines within token text (whitespace tokens may span lines)
+                let parts: Vec<&str> = text.split('\n').collect();
+                for (i, part) in parts.iter().enumerate() {
+                    if i > 0 {
+                        self.flush_line();
+                        self.emit_prefix_if_needed();
+                    }
+                    if !part.is_empty() {
+                        self.push_span(Span::styled(part.to_string(), style));
+                    }
+                }
+            }
+            self.flush_line();
+        } else {
+            // Non-R code blocks: render with dim style (original behavior)
+            for line_text in source.split('\n') {
+                self.emit_prefix_if_needed();
+                self.push_span(Span::styled(line_text.to_string(), self.styles.code_block));
+                self.flush_line();
+            }
         }
     }
 
@@ -736,6 +824,131 @@ mod tests {
         let input = "line one<br>line two";
         let lines = render_plain(input);
         assert_eq!(lines, vec!["line one", "line two"]);
+    }
+
+    #[test]
+    fn r_code_block_syntax_highlight() {
+        let input = "```r\nx <- 42\n```";
+        let lines = render_markdown(input);
+        // Should produce one line: "x <- 42"
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(text.contains("x <- 42"));
+
+        // Find the line containing "x <- 42"
+        let code_line = lines.iter().find(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            t.contains("<-")
+        });
+        assert!(code_line.is_some(), "Should have a line with <-");
+        let code_line = code_line.unwrap();
+
+        // With syntax highlighting, should have multiple spans (not a single dim span)
+        assert!(
+            code_line.spans.len() >= 3,
+            "R code should be tokenized into multiple spans, got {}",
+            code_line.spans.len()
+        );
+
+        // The operator "<-" should have Yellow foreground
+        let op_span = code_line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().contains("<-"));
+        assert!(op_span.is_some(), "Should have an <- operator span");
+        assert_eq!(
+            op_span.unwrap().style.fg,
+            Some(Color::Yellow),
+            "Operator <- should be Yellow"
+        );
+
+        // The number "42" should have LightMagenta foreground
+        let num_span = code_line.spans.iter().find(|s| s.content.as_ref() == "42");
+        assert!(num_span.is_some(), "Should have a 42 number span");
+        assert_eq!(
+            num_span.unwrap().style.fg,
+            Some(Color::LightMagenta),
+            "Number 42 should be LightMagenta"
+        );
+    }
+
+    #[test]
+    fn non_r_code_block_uses_dim_style() {
+        let input = "```python\nprint('hello')\n```";
+        let lines = render_markdown(input);
+        // Should produce one line with dim style (not syntax highlighted)
+        let code_line = lines.iter().find(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            t.contains("print")
+        });
+        assert!(code_line.is_some());
+        let code_line = code_line.unwrap();
+        // Non-R code blocks get a single dim span per line
+        assert_eq!(
+            code_line.spans.len(),
+            1,
+            "Non-R code should be a single span"
+        );
+        assert!(
+            code_line.spans[0]
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM),
+            "Non-R code should use DIM style"
+        );
+    }
+
+    #[test]
+    fn r_code_block_multiline() {
+        let input = "```r\nif (TRUE) {\n  print(x)\n}\n```";
+        let lines = render_markdown(input);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(texts.iter().any(|t| t.contains("if")));
+        assert!(texts.iter().any(|t| t.contains("print")));
+
+        // The "if" keyword should be highlighted
+        let if_line = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.as_ref() == "if"));
+        assert!(if_line.is_some());
+        let if_span = if_line
+            .unwrap()
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "if");
+        assert_eq!(
+            if_span.unwrap().style.fg,
+            Some(Color::LightBlue),
+            "Keyword 'if' should be LightBlue"
+        );
+    }
+
+    #[test]
+    fn r_code_block_with_comments() {
+        let input = "```r\n# A comment\nx <- 1\n```";
+        let lines = render_markdown(input);
+        // Comment line should be DarkGray
+        let comment_line = lines.iter().find(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.content.as_ref().contains("# A comment"))
+        });
+        assert!(comment_line.is_some());
+        let comment_span = comment_line
+            .unwrap()
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().contains("# A comment"));
+        assert_eq!(
+            comment_span.unwrap().style.fg,
+            Some(Color::DarkGray),
+            "Comment should be DarkGray"
+        );
     }
 
     #[test]
