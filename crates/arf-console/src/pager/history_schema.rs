@@ -423,8 +423,13 @@ fn style_sql_line_ratatui(line: &str) -> Line<'static> {
         if let Some(space_idx) = code_no_comma.find(' ') {
             let col_name = &code_no_comma[..space_idx];
             let rest = &code_no_comma[space_idx..];
+            // Separate leading whitespace (alignment padding) from type keywords
+            let type_start = rest.len() - rest.trim_start().len();
+            let padding = &rest[..type_start];
+            let type_part = &rest[type_start..];
             spans.push(Span::styled(col_name.to_string(), ident));
-            spans.push(Span::styled(rest.to_string(), kw));
+            spans.push(Span::raw(padding.to_string()));
+            spans.push(Span::styled(type_part.to_string(), kw));
         } else {
             spans.push(Span::styled(code_no_comma.to_string(), ident));
         }
@@ -434,7 +439,11 @@ fn style_sql_line_ratatui(line: &str) -> Line<'static> {
         }
 
         if let Some(comment) = comment_part {
-            // Add spacing that was between code and comment
+            // Restore spacing between code and comment that was stripped by trim_end()
+            let gap_len = code_part.len() - code_trimmed.len();
+            if gap_len > 0 {
+                spans.push(Span::raw(" ".repeat(gap_len)));
+            }
             spans.push(Span::styled(comment.to_string(), comment_style));
         }
 
@@ -792,6 +801,34 @@ mod tests {
             .iter()
             .any(|s| s.style.add_modifier.contains(Modifier::ITALIC));
         assert!(has_italic, "Comment should be italic");
+        // Verify spacing between comma and comment is preserved
+        let full_text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            full_text.contains(",  -- Unix"),
+            "Spacing before comment should be preserved: {}",
+            full_text
+        );
+    }
+
+    #[test]
+    fn test_style_sql_line_ratatui_padding_unstyled() {
+        let line = "    id              INTEGER PRIMARY KEY AUTOINCREMENT,";
+        let styled = style_sql_line_ratatui(line);
+        // Padding between column name and type should be unstyled (raw)
+        let padding_span = styled
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().chars().all(|c| c == ' ') && s.content.len() > 1);
+        assert!(
+            padding_span.is_some(),
+            "Should have a whitespace-only padding span"
+        );
+        let ps = padding_span.unwrap();
+        assert_eq!(
+            ps.style,
+            RatStyle::default(),
+            "Padding span should be unstyled"
+        );
     }
 
     #[test]
