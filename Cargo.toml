@@ -13,6 +13,7 @@ repository = "https://github.com/eitsupi/arf"
 # Internal crates
 arf-harp = { path = "crates/arf-harp" }
 arf-libr = { path = "crates/arf-libr" }
+r-vignette-to-md = { path = "crates/r-vignette-to-md" }
 
 # R FFI
 libloading = "0.9"

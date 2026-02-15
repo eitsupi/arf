@@ -426,18 +426,12 @@ Run in R: vignette("{topic}", package = "{package}")"#,
         ))));
     }
 
-    let converter = htmd::HtmlToMarkdown::builder()
-        .skip_tags(vec!["style", "script"])
-        .build();
-
-    let markdown = converter.convert(&html).map_err(|e| {
+    r_vignette_to_md::convert(&html).map_err(|e| {
         HarpError::RError(arf_libr::RError::EvalError(format!(
             "Failed to convert vignette HTML: {}",
             e
         )))
-    })?;
-
-    Ok(strip_pandoc_anchors(&markdown))
+    })
 }
 
 /// Show help for a specific topic (legacy function).
@@ -453,35 +447,6 @@ pub fn show_help(topic: &str, package: Option<&str>) -> HarpResult<()> {
     let text = get_help_text(topic, package)?;
     println!("{}", text);
     Ok(())
-}
-
-/// Strip Pandoc-generated empty anchors from Markdown text.
-///
-/// Pandoc-generated HTML vignettes contain line-number anchors like
-/// `<a href="#cb1-1" tabindex="-1"></a>` which get converted to
-/// `[](#cb1-1)` by HTML-to-Markdown converters. This function removes
-/// those empty link artifacts.
-fn strip_pandoc_anchors(text: &str) -> String {
-    const PATTERN: &str = "[](#";
-
-    let mut result = String::with_capacity(text.len());
-    let mut remaining = text;
-
-    while let Some(start) = remaining.find(PATTERN) {
-        result.push_str(&remaining[..start]);
-        remaining = &remaining[start + PATTERN.len()..];
-
-        // Skip to closing ')'
-        if let Some(end) = remaining.find(')') {
-            remaining = &remaining[end + 1..];
-        } else {
-            // No closing paren found; keep the pattern as-is
-            result.push_str(PATTERN);
-        }
-    }
-
-    result.push_str(remaining);
-    result
 }
 
 /// Escape a string for use in R code.
@@ -514,42 +479,5 @@ mod tests {
         assert_eq!(escape_r_string("hello"), "hello");
         assert_eq!(escape_r_string(r#"he"llo"#), r#"he\"llo"#);
         assert_eq!(escape_r_string("he\\llo"), "he\\\\llo");
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_basic() {
-        let input = "some code[](#cb1-1) more code";
-        assert_eq!(strip_pandoc_anchors(input), "some code more code");
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_multiple() {
-        let input = "[](#cb1-1)line1\n[](#cb1-2)line2\n[](#cb1-3)line3";
-        assert_eq!(strip_pandoc_anchors(input), "line1\nline2\nline3");
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_no_anchors() {
-        let input = "normal text without anchors";
-        assert_eq!(strip_pandoc_anchors(input), input);
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_preserves_normal_links() {
-        // Normal markdown links like [text](url) should be preserved
-        let input = "see [docs](https://example.com) for details";
-        assert_eq!(strip_pandoc_anchors(input), input);
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_empty_string() {
-        assert_eq!(strip_pandoc_anchors(""), "");
-    }
-
-    #[test]
-    fn test_strip_pandoc_anchors_unclosed() {
-        // Unclosed pattern should be preserved
-        let input = "text [](#broken";
-        assert_eq!(strip_pandoc_anchors(input), "text [](#broken");
     }
 }

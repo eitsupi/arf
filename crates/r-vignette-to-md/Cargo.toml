@@ -1,0 +1,11 @@
+[package]
+name = "r-vignette-to-md"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Convert Pandoc-generated R vignette HTML to Markdown"
+
+[dependencies]
+htmd.workspace = true
+
