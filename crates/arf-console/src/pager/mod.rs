@@ -204,6 +204,7 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
     // assume the screen is empty and skip cells that still show content
     // from a previous UI (e.g., help browser list behind the help pager).
     terminal.clear()?;
+    terminal.hide_cursor()?;
     let mut scroll_offset = 0;
     let mut needs_redraw = true;
 
