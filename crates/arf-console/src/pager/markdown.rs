@@ -548,10 +548,9 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     }
 
     /// Like `flush_line`, but applies the code block background to the entire line.
+    /// Unlike `flush_line`, this always emits a line even when spans are empty,
+    /// so that blank lines within code blocks retain the background color.
     fn flush_code_line(&mut self) {
-        if self.current_spans.is_empty() {
-            return;
-        }
         let spans = std::mem::take(&mut self.current_spans);
         let line = Line::from(spans).style(Style::new().bg(self.styles.code_block_bg));
         self.lines.push(line);
