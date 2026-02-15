@@ -14,12 +14,16 @@ use unicode_width::UnicodeWidthStr;
 use crate::highlighter::{TokenType, tokenize_r};
 
 /// Render a Markdown string into styled ratatui lines.
-pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
+///
+/// `default_code_lang` is used for fenced code blocks that have no language tag.
+/// Pass `Some("r")` when rendering R documentation (help pages, vignettes) so
+/// that untagged code blocks receive R syntax highlighting.
+pub fn render_markdown(input: &str, default_code_lang: Option<&str>) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser);
+    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()));
     writer.run();
     writer.lines
 }
@@ -92,6 +96,9 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     lines: Vec<Line<'static>>,
     styles: Styles,
 
+    /// Default language for code blocks without a language tag.
+    default_code_lang: Option<String>,
+
     /// Stack of inline styles (emphasis, strong, …).
     inline_styles: Vec<Style>,
 
@@ -145,11 +152,12 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
 }
 
 impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
-    fn new(iter: I) -> Self {
+    fn new(iter: I, default_code_lang: Option<String>) -> Self {
         Self {
             iter,
             lines: Vec::new(),
             styles: Styles::default(),
+            default_code_lang,
             inline_styles: Vec::new(),
             current_spans: Vec::new(),
             in_heading: None,
@@ -233,7 +241,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             Tag::CodeBlock(kind) => {
                 self.ensure_blank_line_before_block();
                 self.in_code_block = true;
-                self.code_block_lang = match kind {
+                let explicit_lang = match kind {
                     CodeBlockKind::Fenced(lang) => {
                         let lang = lang.split_whitespace().next().unwrap_or("");
                         if lang.is_empty() {
@@ -244,6 +252,8 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                     }
                     CodeBlockKind::Indented => None,
                 };
+                // Fall back to the default language when no explicit tag is given
+                self.code_block_lang = explicit_lang.or_else(|| self.default_code_lang.clone());
                 self.code_block_buffer.clear();
             }
             Tag::List(start) => {
@@ -544,10 +554,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         // Remove trailing newline that pulldown-cmark typically appends
         let source = buffer.strip_suffix('\n').unwrap_or(&buffer);
 
-        let use_r_highlight = self
-            .code_block_lang
-            .as_deref()
-            .is_some_and(is_r_language);
+        let use_r_highlight = self.code_block_lang.as_deref().is_some_and(is_r_language);
 
         if use_r_highlight {
             let tokens = tokenize_r(source);
@@ -696,7 +703,7 @@ mod tests {
 
     /// Helper: render markdown and collect line text (without styling).
     fn render_plain(input: &str) -> Vec<String> {
-        render_markdown(input)
+        render_markdown(input, None)
             .iter()
             .map(|line| {
                 line.spans
@@ -727,7 +734,7 @@ mod tests {
 
     #[test]
     fn emphasis_and_strong() {
-        let lines = render_markdown("*em* **strong**");
+        let lines = render_markdown("*em* **strong**", None);
         assert_eq!(lines.len(), 1);
         // Check that there are separate spans with appropriate styles
         let spans = &lines[0].spans;
@@ -736,7 +743,7 @@ mod tests {
 
     #[test]
     fn inline_code() {
-        let lines = render_markdown("Use `print()`");
+        let lines = render_markdown("Use `print()`", None);
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Use print()");
@@ -829,7 +836,7 @@ mod tests {
     #[test]
     fn r_code_block_syntax_highlight() {
         let input = "```r\nx <- 42\n```";
-        let lines = render_markdown(input);
+        let lines = render_markdown(input, None);
         // Should produce one line: "x <- 42"
         let text: String = lines
             .iter()
@@ -877,7 +884,7 @@ mod tests {
     #[test]
     fn non_r_code_block_uses_dim_style() {
         let input = "```python\nprint('hello')\n```";
-        let lines = render_markdown(input);
+        let lines = render_markdown(input, None);
         // Should produce one line with dim style (not syntax highlighted)
         let code_line = lines.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -903,7 +910,7 @@ mod tests {
     #[test]
     fn r_code_block_multiline() {
         let input = "```r\nif (TRUE) {\n  print(x)\n}\n```";
-        let lines = render_markdown(input);
+        let lines = render_markdown(input, None);
         let texts: Vec<String> = lines
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
@@ -931,7 +938,7 @@ mod tests {
     #[test]
     fn r_code_block_with_comments() {
         let input = "```r\n# A comment\nx <- 1\n```";
-        let lines = render_markdown(input);
+        let lines = render_markdown(input, None);
         // Comment line should be DarkGray
         let comment_line = lines.iter().find(|l| {
             l.spans
@@ -948,6 +955,60 @@ mod tests {
             comment_span.unwrap().style.fg,
             Some(Color::DarkGray),
             "Comment should be DarkGray"
+        );
+    }
+
+    #[test]
+    fn untagged_code_block_with_default_r() {
+        // Code blocks without a language tag should use the default language
+        let input = "```\nx <- 42\n```";
+        // Without default: no highlighting (dim style)
+        let lines_no_default = render_markdown(input, None);
+        let code_line = lines_no_default.iter().find(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            t.contains("<-")
+        });
+        assert!(code_line.is_some());
+        // Should be a single dim span (no tokenization)
+        assert_eq!(code_line.unwrap().spans.len(), 1);
+
+        // With default "r": should get syntax highlighting
+        let lines_r = render_markdown(input, Some("r"));
+        let code_line = lines_r.iter().find(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            t.contains("<-")
+        });
+        assert!(code_line.is_some());
+        let code_line = code_line.unwrap();
+        // Should be tokenized into multiple spans
+        assert!(
+            code_line.spans.len() >= 3,
+            "Default R should tokenize untagged code blocks, got {} spans",
+            code_line.spans.len()
+        );
+        // Operator should be Yellow
+        let op_span = code_line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().contains("<-"));
+        assert_eq!(op_span.unwrap().style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn explicit_lang_overrides_default() {
+        // Explicit language tag should take precedence over default
+        let input = "```python\nprint('hello')\n```";
+        let lines = render_markdown(input, Some("r"));
+        let code_line = lines.iter().find(|l| {
+            let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            t.contains("print")
+        });
+        assert!(code_line.is_some());
+        // Python code block should NOT be R-highlighted, should be dim
+        assert_eq!(
+            code_line.unwrap().spans.len(),
+            1,
+            "Explicit python tag should not use R highlighting even with default_code_lang=r"
         );
     }
 

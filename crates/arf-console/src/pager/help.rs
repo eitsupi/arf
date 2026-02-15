@@ -579,7 +579,7 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
     }
 
     let mut content = HelpContent {
-        lines: render_markdown(content),
+        lines: render_markdown(content, Some("r")),
     };
 
     let config = PagerConfig {
