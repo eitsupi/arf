@@ -9,6 +9,7 @@
 use pulldown_cmark::{CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 /// Render a Markdown string into styled ratatui lines.
 pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
@@ -356,7 +357,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     fn on_inline_code(&mut self, code: CowStr<'a>) {
         if self.in_table {
             self.table_cell_spans
-                .push(Span::styled(format!("`{}`", code), self.styles.code));
+                .push(Span::styled(code.to_string(), self.styles.code));
             return;
         }
         self.emit_prefix_if_needed();
@@ -507,9 +508,12 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         lines
     }
 
-    /// Calculate the display width of a list of spans.
+    /// Calculate the display width of a list of spans using Unicode width.
     fn spans_width(spans: &[Span<'static>]) -> usize {
-        spans.iter().map(|s| s.content.len()).sum()
+        spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum()
     }
 
     fn render_table(&mut self) {
