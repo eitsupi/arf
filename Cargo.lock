@@ -107,6 +107,7 @@ dependencies = [
  "nucleo-matcher",
  "once_cell",
  "portable-pty",
+ "pulldown-cmark",
  "ratatui",
  "reedline",
  "regex",
@@ -131,6 +132,7 @@ dependencies = [
  "log",
  "once_cell",
  "r-vignette-to-md",
+ "rd2qmd-core",
  "thiserror 2.0.17",
 ]
 
@@ -187,6 +189,12 @@ name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
+
+[[package]]
+name = "bytecount"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
 
 [[package]]
 name = "castaway"
@@ -637,6 +645,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
 
 [[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -666,6 +680,15 @@ checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
 dependencies = [
  "rustix",
  "windows-link",
+]
+
+[[package]]
+name = "getopts"
+version = "0.2.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -1130,6 +1153,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
+name = "papergrid"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6978128c8b51d8f4080631ceb2302ab51e32cc6e8615f735ee2f83fd269ae3f1"
+dependencies = [
+ "bytecount",
+ "fnv",
+ "unicode-width",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1297,6 +1331,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulldown-cmark"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e8bbe1a966bd2f362681a44f6edce3c2310ac21e4d5067a6e7ec396297a6ea0"
+dependencies = [
+ "bitflags 2.10.0",
+ "getopts",
+ "memchr",
+ "pulldown-cmark-escape",
+ "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+
+[[package]]
 name = "quote"
 version = "1.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1394,6 +1447,37 @@ dependencies = [
  "time",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "rd-parser"
+version = "0.1.0"
+source = "git+https://github.com/eitsupi/rd2qmd?rev=81023220584d355395fae24030aafe0fe6afa231#81023220584d355395fae24030aafe0fe6afa231"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "rd2qmd-core"
+version = "0.1.0"
+source = "git+https://github.com/eitsupi/rd2qmd?rev=81023220584d355395fae24030aafe0fe6afa231#81023220584d355395fae24030aafe0fe6afa231"
+dependencies = [
+ "rd-parser",
+ "rd2qmd-mdast",
+ "serde",
+ "serde_json",
+ "tabled",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "rd2qmd-mdast"
+version = "0.1.0"
+source = "git+https://github.com/eitsupi/rd2qmd?rev=81023220584d355395fae24030aafe0fe6afa231#81023220584d355395fae24030aafe0fe6afa231"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1848,6 +1932,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabled"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e39a2ee1fbcd360805a771e1b300f78cc88fec7b8d3e2f71cd37bbf23e725c7d"
+dependencies = [
+ "papergrid",
+ "testing_table",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1869,6 +1963,15 @@ dependencies = [
  "futf",
  "mac",
  "utf-8",
+]
+
+[[package]]
+name = "testing_table"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f8daae29995a24f65619e19d8d31dea5b389f3d853d8bf297bbf607cd0014cc"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]

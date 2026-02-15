@@ -373,6 +373,69 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
     }
 }
 
+/// Get help content as Markdown for a specific topic.
+///
+/// This retrieves the raw Rd source from R's help system and converts it
+/// to Markdown using `rd2qmd-core`. The resulting Markdown can be rendered
+/// by a terminal-based Markdown renderer.
+///
+/// # Arguments
+///
+/// * `topic` - The help topic name
+/// * `package` - Optional package name to look in
+///
+/// # Returns
+///
+/// The help content as a Markdown string, or an error if the topic is not found.
+pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<String> {
+    let code = if let Some(pkg) = package {
+        format!(
+            r#"local({{
+    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
+    paths <- as.character(x)
+    if (length(paths) == 0) return(NULL)
+    file <- paths[1L]
+    rd <- utils:::.getHelpFile(file)
+    paste0(as.character(rd), collapse = "")
+}})"#,
+            topic = escape_r_string(topic),
+            pkg = escape_r_string(pkg)
+        )
+    } else {
+        format!(
+            r#"local({{
+    x <- utils::help("{topic}", help_type = "text")
+    paths <- as.character(x)
+    if (length(paths) == 0) return(NULL)
+    file <- paths[1L]
+    rd <- utils:::.getHelpFile(file)
+    paste0(as.character(rd), collapse = "")
+}})"#,
+            topic = escape_r_string(topic)
+        )
+    };
+
+    let rd_content = unsafe {
+        eval_r_to_string(&code)?.ok_or_else(|| {
+            HarpError::RError(arf_libr::RError::EvalError(format!(
+                "No help found for topic '{}'",
+                topic
+            )))
+        })?
+    };
+
+    rd2qmd_core::RdConverter::new(&rd_content)
+        .quarto_code_blocks(false)
+        .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
+        .convert()
+        .map_err(|e| {
+            HarpError::RError(arf_libr::RError::EvalError(format!(
+                "Failed to convert Rd to Markdown: {}",
+                e
+            )))
+        })
+}
+
 /// Sentinel value returned by R when a vignette is in PDF format.
 const PDF_VIGNETTE_SENTINEL: &str = "__PDF_VIGNETTE__";
 

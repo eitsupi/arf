@@ -9,13 +9,12 @@
 
 use crate::config::RColorConfig;
 use crate::editor::mode::EditorStateRef;
-use crate::r_parser::is_atomic_node;
+use crate::r_parser::{is_atomic_node, parse_r};
 use nu_ansi_term::Style;
 use once_cell::sync::Lazy;
 use reedline::{Highlighter, StyledText};
-use std::cell::RefCell;
 use std::collections::HashSet;
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 use super::r_regex::TokenType;
 
@@ -54,26 +53,168 @@ pub struct Token {
     pub token_type: TokenType,
 }
 
+// ---------------------------------------------------------------------------
+// Free functions for tokenization (shared between RTreeSitterHighlighter
+// and the public tokenize_r API).
+// ---------------------------------------------------------------------------
+
+/// Map a tree-sitter node kind to our TokenType.
+fn node_to_token_type(node: &Node, source: &[u8]) -> TokenType {
+    match node.kind() {
+        // Literals
+        "integer" | "float" | "complex" => TokenType::Number,
+        "string" | "string_content" => TokenType::String,
+        "escape_sequence" => TokenType::String,
+
+        // Comments
+        "comment" => TokenType::Comment,
+
+        // Constants - these are named nodes in tree-sitter-r
+        "true" | "false" => TokenType::Constant,
+        "null" | "inf" | "nan" | "na" => TokenType::Constant,
+        "dots" | "dot_dot_i" => TokenType::Constant,
+
+        // Keywords
+        "function" | "if" | "else" | "for" | "while" | "repeat" | "in" | "next" | "break"
+        | "return" => TokenType::Keyword,
+
+        // Operators
+        "?" | ":=" | "=" | "<-" | "<<-" | "->" | "->>" | "~" | "|>" | "||" | "|" | "&&" | "&"
+        | "<" | "<=" | ">" | ">=" | "==" | "!=" | "+" | "-" | "*" | "/" | "::" | ":::" | "**"
+        | "^" | "$" | "@" | ":" | "!" | "\\" | "special" => TokenType::Operator,
+
+        // Punctuation
+        "(" | ")" | "{" | "}" | "[" | "]" | "[[" | "]]" => TokenType::Punctuation,
+        "comma" | ";" => TokenType::Punctuation,
+
+        // Identifiers - check if it's a keyword or constant
+        "identifier" => {
+            let text = node.utf8_text(source).unwrap_or("");
+            if KEYWORDS.contains(text) {
+                TokenType::Keyword
+            } else if CONSTANTS.contains(text) {
+                TokenType::Constant
+            } else {
+                TokenType::Identifier
+            }
+        }
+
+        // Default
+        _ => TokenType::Other,
+    }
+}
+
+/// Recursively visit nodes and collect leaf tokens.
+fn visit_node(cursor: &mut tree_sitter::TreeCursor, source: &[u8], tokens: &mut Vec<Token>) {
+    let node = cursor.node();
+
+    // For atomic nodes, treat as a whole (don't recurse into children)
+    let kind = node.kind();
+    if is_atomic_node(kind) {
+        tokens.push(Token {
+            start: node.start_byte(),
+            end: node.end_byte(),
+            token_type: node_to_token_type(&node, source),
+        });
+        return;
+    }
+
+    // If this is a leaf node (no children), add it as a token
+    if node.child_count() == 0 {
+        let token_type = node_to_token_type(&node, source);
+        // Only add non-trivial tokens
+        if token_type != TokenType::Other || node.start_byte() < node.end_byte() {
+            tokens.push(Token {
+                start: node.start_byte(),
+                end: node.end_byte(),
+                token_type,
+            });
+        }
+    } else {
+        // Recurse into children
+        if cursor.goto_first_child() {
+            loop {
+                visit_node(cursor, source, tokens);
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+            cursor.goto_parent();
+        }
+    }
+}
+
+/// Fill gaps between tokens with whitespace.
+fn fill_gaps(tokens: &[Token], total_len: usize) -> Vec<Token> {
+    let mut result = Vec::new();
+    let mut pos = 0;
+
+    for token in tokens.iter() {
+        // Add whitespace for any gap
+        if token.start > pos {
+            result.push(Token {
+                start: pos,
+                end: token.start,
+                token_type: TokenType::Whitespace,
+            });
+        }
+        result.push(token.clone());
+        pos = token.end;
+    }
+
+    // Add trailing whitespace if needed
+    if pos < total_len {
+        result.push(Token {
+            start: pos,
+            end: total_len,
+            token_type: TokenType::Whitespace,
+        });
+    }
+
+    result
+}
+
+/// Tokenize R source code into a flat list of tokens.
+///
+/// Each token has a byte range and a [`TokenType`]. The tokens cover the
+/// entire input (gaps are filled with `Whitespace` tokens).
+///
+/// Uses the shared thread-local tree-sitter parser from [`crate::r_parser`].
+pub fn tokenize_r(source: &str) -> Vec<Token> {
+    let tree = match parse_r(source) {
+        Some(t) => t,
+        None => {
+            return vec![Token {
+                start: 0,
+                end: source.len(),
+                token_type: TokenType::Other,
+            }];
+        }
+    };
+
+    let source_bytes = source.as_bytes();
+    let mut tokens = Vec::new();
+    let mut cursor = tree.walk();
+
+    visit_node(&mut cursor, source_bytes, &mut tokens);
+    tokens.sort_by_key(|t| t.start);
+    fill_gaps(&tokens, source.len())
+}
+
 /// Tree-sitter based R syntax highlighter.
 ///
 /// This highlighter can optionally sync editor shadow state on every redraw,
 /// keeping the state accurate even after history navigation.
 pub struct RTreeSitterHighlighter {
     config: RColorConfig,
-    parser: RefCell<Parser>,
     /// Optional editor state reference for syncing on redraw.
     editor_state: Option<EditorStateRef>,
 }
 
 impl RTreeSitterHighlighter {
     pub fn new(config: RColorConfig) -> Self {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_r::LANGUAGE.into())
-            .expect("Failed to set tree-sitter-r language");
         RTreeSitterHighlighter {
             config,
-            parser: RefCell::new(parser),
             editor_state: None,
         }
     }
@@ -101,132 +242,6 @@ impl RTreeSitterHighlighter {
             state.uncertain = false;
         }
     }
-
-    /// Parse input and return the tree.
-    fn parse(&self, input: &str) -> Option<Tree> {
-        self.parser.borrow_mut().parse(input.as_bytes(), None)
-    }
-
-    /// Map a tree-sitter node kind to our TokenType.
-    fn node_to_token_type(node: &Node, source: &[u8]) -> TokenType {
-        match node.kind() {
-            // Literals
-            "integer" | "float" | "complex" => TokenType::Number,
-            "string" | "string_content" => TokenType::String,
-            "escape_sequence" => TokenType::String,
-
-            // Comments
-            "comment" => TokenType::Comment,
-
-            // Constants - these are named nodes in tree-sitter-r
-            "true" | "false" => TokenType::Constant,
-            "null" | "inf" | "nan" | "na" => TokenType::Constant,
-            "dots" | "dot_dot_i" => TokenType::Constant,
-
-            // Keywords
-            "function" | "if" | "else" | "for" | "while" | "repeat" | "in" | "next" | "break"
-            | "return" => TokenType::Keyword,
-
-            // Operators
-            "?" | ":=" | "=" | "<-" | "<<-" | "->" | "->>" | "~" | "|>" | "||" | "|" | "&&"
-            | "&" | "<" | "<=" | ">" | ">=" | "==" | "!=" | "+" | "-" | "*" | "/" | "::"
-            | ":::" | "**" | "^" | "$" | "@" | ":" | "!" | "\\" | "special" => TokenType::Operator,
-
-            // Punctuation
-            "(" | ")" | "{" | "}" | "[" | "]" | "[[" | "]]" => TokenType::Punctuation,
-            "comma" | ";" => TokenType::Punctuation,
-
-            // Identifiers - check if it's a keyword or constant
-            "identifier" => {
-                let text = node.utf8_text(source).unwrap_or("");
-                if KEYWORDS.contains(text) {
-                    TokenType::Keyword
-                } else if CONSTANTS.contains(text) {
-                    TokenType::Constant
-                } else {
-                    TokenType::Identifier
-                }
-            }
-
-            // Default
-            _ => TokenType::Other,
-        }
-    }
-
-    /// Recursively visit nodes and collect leaf tokens.
-    fn visit_node(
-        &self,
-        cursor: &mut tree_sitter::TreeCursor,
-        source: &[u8],
-        tokens: &mut Vec<Token>,
-    ) {
-        let node = cursor.node();
-
-        // For atomic nodes, treat as a whole (don't recurse into children)
-        let kind = node.kind();
-        if is_atomic_node(kind) {
-            tokens.push(Token {
-                start: node.start_byte(),
-                end: node.end_byte(),
-                token_type: Self::node_to_token_type(&node, source),
-            });
-            return;
-        }
-
-        // If this is a leaf node (no children), add it as a token
-        if node.child_count() == 0 {
-            let token_type = Self::node_to_token_type(&node, source);
-            // Only add non-trivial tokens
-            if token_type != TokenType::Other || node.start_byte() < node.end_byte() {
-                tokens.push(Token {
-                    start: node.start_byte(),
-                    end: node.end_byte(),
-                    token_type,
-                });
-            }
-        } else {
-            // Recurse into children
-            if cursor.goto_first_child() {
-                loop {
-                    self.visit_node(cursor, source, tokens);
-                    if !cursor.goto_next_sibling() {
-                        break;
-                    }
-                }
-                cursor.goto_parent();
-            }
-        }
-    }
-
-    /// Fill gaps between tokens with whitespace.
-    fn fill_gaps(&self, tokens: &mut [Token], total_len: usize) -> Vec<Token> {
-        let mut result = Vec::new();
-        let mut pos = 0;
-
-        for token in tokens.iter() {
-            // Add whitespace for any gap
-            if token.start > pos {
-                result.push(Token {
-                    start: pos,
-                    end: token.start,
-                    token_type: TokenType::Whitespace,
-                });
-            }
-            result.push(token.clone());
-            pos = token.end;
-        }
-
-        // Add trailing whitespace if needed
-        if pos < total_len {
-            result.push(Token {
-                start: pos,
-                end: total_len,
-                token_type: TokenType::Whitespace,
-            });
-        }
-
-        result
-    }
 }
 
 impl Default for RTreeSitterHighlighter {
@@ -243,17 +258,17 @@ impl Highlighter for RTreeSitterHighlighter {
 
         let mut styled = StyledText::new();
 
-        if let Some(tree) = self.parse(line) {
+        if let Some(tree) = parse_r(line) {
             let source = line.as_bytes();
             let mut tokens = Vec::new();
             let mut cursor = tree.walk();
 
-            // Collect tokens
-            self.visit_node(&mut cursor, source, &mut tokens);
+            // Collect tokens using free functions
+            visit_node(&mut cursor, source, &mut tokens);
 
             // Sort and fill gaps
             tokens.sort_by_key(|t| t.start);
-            let tokens = self.fill_gaps(&mut tokens, source.len());
+            let tokens = fill_gaps(&tokens, source.len());
 
             for token in tokens {
                 if token.start < line.len() && token.end <= line.len() {
@@ -283,24 +298,11 @@ mod tests {
     use nu_ansi_term::Color;
 
     fn get_token_types(input: &str) -> Vec<(String, TokenType)> {
-        let highlighter = RTreeSitterHighlighter::default();
-
-        let tree = highlighter.parse(input).unwrap();
-        let source = input.as_bytes();
-        let mut tokens = Vec::new();
-        let mut cursor = tree.walk();
-
-        highlighter.visit_node(&mut cursor, source, &mut tokens);
-        tokens.sort_by_key(|t| t.start);
-        let tokens = highlighter.fill_gaps(&mut tokens, source.len());
-
-        tokens
+        tokenize_r(input)
             .into_iter()
             .filter(|t| t.token_type != TokenType::Whitespace)
             .map(|t| {
-                let text = std::str::from_utf8(&source[t.start..t.end])
-                    .unwrap()
-                    .to_string();
+                let text = input[t.start..t.end].to_string();
                 (text, t.token_type)
             })
             .collect()

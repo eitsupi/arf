@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// Convert a `nu_ansi_term::Color` to a `ratatui::style::Color`.
-fn nu_ansi_color_to_ratatui(color: nu_ansi_term::Color) -> Color {
+pub(crate) fn nu_ansi_color_to_ratatui(color: nu_ansi_term::Color) -> Color {
     match color {
         nu_ansi_term::Color::Black => Color::Black,
         nu_ansi_term::Color::Red => Color::Red,

@@ -19,7 +19,7 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use arf_harp::help::{HelpTopic, get_help_text, get_help_topics, get_vignette_text};
+use arf_harp::help::{HelpTopic, get_help_markdown, get_help_topics, get_vignette_text};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -245,8 +245,10 @@ demo("{name}", package = "{pkg}")"#,
                                         }
                                         _ => {
                                             // "help" and any other types
-                                            match get_help_text(&topic.topic, Some(&topic.package))
-                                            {
+                                            match get_help_markdown(
+                                                &topic.topic,
+                                                Some(&topic.package),
+                                            ) {
                                                 Ok(text) => {
                                                     if let Err(e) =
                                                         display_help_pager(&title, &text)
@@ -540,218 +542,22 @@ fn visible_result_rows() -> usize {
     (rows as usize).saturating_sub(5).max(3)
 }
 
-/// Sections in R help pages that contain R code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelpSection {
-    /// Normal prose section (no highlighting)
-    Prose,
-    /// Usage section (function signatures)
-    Usage,
-    /// Examples section (R code)
-    Examples,
-}
-
-/// Parse a section header from Rd2txt output.
+/// Display help content (Markdown) in an interactive pager.
 ///
-/// Rd2txt uses a backspace-based "overstrike" formatting for headers.
-/// The format is: `_<BS>U_<BS>s_<BS>a_<BS>g_<BS>e:` where <BS> is backspace (0x08).
-/// This produces bold/underlined text on traditional terminals.
+/// Content is rendered from Markdown to styled ratatui lines using
+/// `pulldown-cmark`. Both help topics (via `rd2qmd`) and vignettes
+/// (via `r-vignette-to-md`) produce Markdown, so this is the unified
+/// rendering path.
 ///
-/// This function extracts the section name if the line matches this pattern.
-fn parse_section_header(line: &str) -> Option<&'static str> {
-    let trimmed = line.trim();
-
-    // Quick check: must end with colon
-    if !trimmed.ends_with(':') {
-        return None;
-    }
-
-    // Check for backspace characters (overstrike formatting)
-    const BACKSPACE: char = '\x08';
-
-    if trimmed.contains(BACKSPACE) {
-        // Overstrike format: _<BS>X_<BS>Y_<BS>Z:
-        // Extract characters that follow backspace
-        let mut decoded = String::new();
-        let chars: Vec<char> = trimmed.chars().collect();
-        let mut i = 0;
-
-        while i < chars.len() {
-            if chars[i] == BACKSPACE && i + 1 < chars.len() {
-                // The character after backspace is the actual character
-                let c = chars[i + 1];
-                if c != ':' && c != BACKSPACE {
-                    decoded.push(c);
-                }
-                i += 2;
-            } else if chars[i] == ':' {
-                break;
-            } else {
-                i += 1;
-            }
-        }
-
-        return match_section_name(&decoded);
-    }
-
-    // Fallback: simple underscore format (for tests): _U_s_a_g_e:
-    if trimmed.starts_with('_') {
-        let mut decoded = String::new();
-        let chars: Vec<char> = trimmed.chars().collect();
-        let mut i = 0;
-
-        while i < chars.len() {
-            if chars[i] == '_' && i + 1 < chars.len() && chars[i + 1] != '_' {
-                i += 1;
-                if i < chars.len() && chars[i] != ':' {
-                    decoded.push(chars[i]);
-                }
-                i += 1;
-            } else if chars[i] == ':' {
-                break;
-            } else {
-                return None;
-            }
-        }
-
-        return match_section_name(&decoded);
-    }
-
-    None
-}
-
-/// Match a decoded section name to a known section.
-fn match_section_name(name: &str) -> Option<&'static str> {
-    match name {
-        "Usage" => Some("Usage"),
-        "Examples" => Some("Examples"),
-        "Description" => Some("Description"),
-        "Arguments" => Some("Arguments"),
-        "Details" => Some("Details"),
-        "Value" => Some("Value"),
-        "References" => Some("References"),
-        "SeeAlso" | "Seealso" | "See also" => Some("See Also"),
-        "Note" => Some("Note"),
-        "Author" | "Authors" => Some("Author"),
-        "Format" => Some("Format"),
-        "Source" => Some("Source"),
-        _ if !name.is_empty() => Some("Other"), // Unknown but valid header
-        _ => None,
-    }
-}
-
-/// Determine the section type for highlighting purposes.
-fn section_type(section_name: Option<&str>) -> HelpSection {
-    match section_name {
-        Some("Usage") => HelpSection::Usage,
-        Some("Examples") => HelpSection::Examples,
-        _ => HelpSection::Prose,
-    }
-}
-
-/// Display help text in an interactive pager.
-///
-/// This function displays the help content in a scrollable pager view,
-/// similar to less. It stays within the alternate screen that the help
-/// browser is already using.
+/// Plain text (demo messages, error messages) also renders fine since
+/// it contains no Markdown syntax.
 fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
+    use super::markdown::render_markdown;
     use super::{PagerAction, PagerConfig, PagerContent, run};
-    use crate::config::RColorConfig;
-    use crate::highlighter::RTreeSitterHighlighter;
-    use ratatui::text::{Line, Span};
-    use reedline::Highlighter;
+    use ratatui::text::Line;
 
-    /// Help content with syntax highlighting for code sections.
     struct HelpContent {
-        /// Original lines of content.
-        lines: Vec<String>,
-        /// Section type for each line.
-        sections: Vec<HelpSection>,
-        /// Tree-sitter highlighter for R code.
-        highlighter: RTreeSitterHighlighter,
-    }
-
-    impl HelpContent {
-        fn new(content: &str) -> Self {
-            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            let mut sections = Vec::with_capacity(lines.len());
-
-            // Parse sections
-            let mut current_section = HelpSection::Prose;
-            for line in &lines {
-                if let Some(section_name) = parse_section_header(line) {
-                    log::debug!(
-                        "help_pager: found section header '{}' -> {:?}",
-                        section_name,
-                        section_type(Some(section_name))
-                    );
-                    current_section = section_type(Some(section_name));
-                    // The header line itself is prose
-                    sections.push(HelpSection::Prose);
-                } else {
-                    sections.push(current_section);
-                }
-            }
-
-            // Debug: count sections
-            let usage_count = sections
-                .iter()
-                .filter(|s| **s == HelpSection::Usage)
-                .count();
-            let examples_count = sections
-                .iter()
-                .filter(|s| **s == HelpSection::Examples)
-                .count();
-            log::debug!(
-                "help_pager: {} usage lines, {} examples lines",
-                usage_count,
-                examples_count
-            );
-
-            HelpContent {
-                lines,
-                sections,
-                highlighter: RTreeSitterHighlighter::new(RColorConfig::default()),
-            }
-        }
-
-        /// Render a line with optional syntax highlighting.
-        fn render_with_highlighting(&self, index: usize, width: usize) -> Line<'static> {
-            use crate::pager::style_convert::styled_text_to_line;
-
-            if index >= self.lines.len() {
-                return Line::from("");
-            }
-
-            let line = &self.lines[index];
-            let section = self.sections[index];
-
-            // Apply syntax highlighting for code sections
-            if matches!(section, HelpSection::Usage | HelpSection::Examples) {
-                // Strip leading whitespace, highlight, then re-add it
-                let leading_spaces = line.len() - line.trim_start().len();
-                let code_part = line.trim_start();
-
-                if code_part.is_empty() {
-                    return Line::from(truncate_to_width(line, width));
-                }
-
-                // Highlight the code part
-                let styled = self.highlighter.highlight(code_part, 0);
-                let mut result_line = styled_text_to_line(&styled);
-
-                // Prepend leading whitespace
-                if leading_spaces > 0 {
-                    result_line
-                        .spans
-                        .insert(0, Span::raw(" ".repeat(leading_spaces)));
-                }
-
-                result_line
-            } else {
-                Line::from(truncate_to_width(line, width))
-            }
-        }
+        lines: Vec<Line<'static>>,
     }
 
     impl PagerContent for HelpContent {
@@ -759,12 +565,11 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
             self.lines.len()
         }
 
-        fn render_line(&self, index: usize, width: usize) -> Line<'static> {
-            self.render_with_highlighting(index, width)
+        fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
+            self.lines.get(index).cloned().unwrap_or_default()
         }
 
         fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<PagerAction> {
-            // Enter also exits the help pager
             if code == KeyCode::Enter {
                 Some(PagerAction::Exit)
             } else {
@@ -773,12 +578,14 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
         }
     }
 
-    let mut content = HelpContent::new(content);
+    let mut content = HelpContent {
+        lines: render_markdown(content, Some("r")),
+    };
 
     let config = PagerConfig {
         title,
         footer_hint: "↑↓/jk scroll  q/Enter/Esc back",
-        manage_alternate_screen: false, // Already in alternate screen from help browser
+        manage_alternate_screen: false,
     };
 
     run(&mut content, &config)
@@ -948,90 +755,5 @@ mod tests {
         // At the end: show last 6 cols = "テスト"
         let (result, _) = scroll_display("日本語テスト", 7, 100);
         assert_eq!(result, "…テスト");
-    }
-
-    // Section parsing tests for help pager highlighting
-
-    #[test]
-    fn test_parse_section_header_examples() {
-        assert_eq!(parse_section_header("_E_x_a_m_p_l_e_s:"), Some("Examples"));
-    }
-
-    #[test]
-    fn test_parse_section_header_usage() {
-        assert_eq!(parse_section_header("_U_s_a_g_e:"), Some("Usage"));
-    }
-
-    #[test]
-    fn test_parse_section_header_description() {
-        assert_eq!(
-            parse_section_header("_D_e_s_c_r_i_p_t_i_o_n:"),
-            Some("Description")
-        );
-    }
-
-    #[test]
-    fn test_parse_section_header_arguments() {
-        assert_eq!(
-            parse_section_header("_A_r_g_u_m_e_n_t_s:"),
-            Some("Arguments")
-        );
-    }
-
-    #[test]
-    fn test_parse_section_header_value() {
-        assert_eq!(parse_section_header("_V_a_l_u_e:"), Some("Value"));
-    }
-
-    #[test]
-    fn test_parse_section_header_not_a_header() {
-        assert_eq!(parse_section_header("This is not a header"), None);
-        assert_eq!(parse_section_header("Examples:"), None);
-        assert_eq!(parse_section_header("_Examples"), None);
-        assert_eq!(parse_section_header(""), None);
-    }
-
-    #[test]
-    fn test_parse_section_header_with_whitespace() {
-        // Headers may have leading whitespace in actual help output
-        assert_eq!(
-            parse_section_header("   _E_x_a_m_p_l_e_s:"),
-            Some("Examples")
-        );
-    }
-
-    #[test]
-    fn test_section_type_code_sections() {
-        assert_eq!(section_type(Some("Examples")), HelpSection::Examples);
-        assert_eq!(section_type(Some("Usage")), HelpSection::Usage);
-    }
-
-    #[test]
-    fn test_section_type_prose_sections() {
-        assert_eq!(section_type(Some("Description")), HelpSection::Prose);
-        assert_eq!(section_type(Some("Arguments")), HelpSection::Prose);
-        assert_eq!(section_type(Some("Value")), HelpSection::Prose);
-        assert_eq!(section_type(None), HelpSection::Prose);
-    }
-
-    #[test]
-    fn test_parse_section_header_overstrike_usage() {
-        // Overstrike format: _<BS>U_<BS>s_<BS>a_<BS>g_<BS>e:
-        // Raw bytes: 5f 08 55 5f 08 73 5f 08 61 5f 08 67 5f 08 65 3a
-        let header = "_\x08U_\x08s_\x08a_\x08g_\x08e:";
-        assert_eq!(parse_section_header(header), Some("Usage"));
-    }
-
-    #[test]
-    fn test_parse_section_header_overstrike_examples() {
-        // _<BS>E_<BS>x_<BS>a_<BS>m_<BS>p_<BS>l_<BS>e_<BS>s:
-        let header = "_\x08E_\x08x_\x08a_\x08m_\x08p_\x08l_\x08e_\x08s:";
-        assert_eq!(parse_section_header(header), Some("Examples"));
-    }
-
-    #[test]
-    fn test_parse_section_header_overstrike_description() {
-        let header = "_\x08D_\x08e_\x08s_\x08c_\x08r_\x08i_\x08p_\x08t_\x08i_\x08o_\x08n:";
-        assert_eq!(parse_section_header(header), Some("Description"));
     }
 }

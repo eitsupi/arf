@@ -8,6 +8,7 @@ description = "High-level R abstractions for safe R object manipulation"
 [dependencies]
 arf-libr.workspace = true
 r-vignette-to-md.workspace = true
+rd2qmd-core.workspace = true
 log.workspace = true
 thiserror.workspace = true
 once_cell.workspace = true

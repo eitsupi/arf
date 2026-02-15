@@ -6,6 +6,7 @@
 mod help;
 pub mod history_browser;
 pub mod history_schema;
+pub(crate) mod markdown;
 pub mod session_info;
 pub(crate) mod style_convert;
 pub(crate) mod text_utils;
@@ -356,7 +357,17 @@ fn render<C: PagerContent>(
         for i in 0..visible_rows {
             let line_idx = scroll_offset + i;
             if line_idx < content.line_count() {
-                lines.push(content.render_line(line_idx, width));
+                let mut line = content.render_line(line_idx, width);
+                // Pad lines with background color (e.g. code blocks) to fill full width.
+                // ratatui's Paragraph only applies Line.style bg to the content width,
+                // so we extend with spaces to make the background span the entire row.
+                if line.style.bg.is_some() {
+                    let current_w: usize = line.spans.iter().map(|s| s.width()).sum();
+                    if current_w < width {
+                        line.spans.push(Span::raw(" ".repeat(width - current_w)));
+                    }
+                }
+                lines.push(line);
             } else {
                 lines.push(Line::from(""));
             }
