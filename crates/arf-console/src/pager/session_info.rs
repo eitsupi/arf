@@ -7,6 +7,8 @@ use crate::external::{formatter, rig};
 use crate::repl::state::PromptRuntimeConfig;
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use std::path::PathBuf;
 
 /// Display session information for the :info command in a pager.
@@ -231,7 +233,7 @@ impl PagerContent for SessionInfoContent {
         self.lines.len()
     }
 
-    fn render_line(&self, index: usize, _width: usize) -> String {
+    fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
         let line = &self.lines[index];
         style_info_line(line)
     }
@@ -259,13 +261,14 @@ impl PagerContent for SessionInfoContent {
     }
 }
 
-/// Apply styling to an info line.
-fn style_info_line(line: &str) -> String {
-    use crossterm::style::Stylize;
-
+/// Apply styling to an info line, returning a ratatui `Line`.
+fn style_info_line(line: &str) -> Line<'static> {
     // Headings (# and ##)
     if line.starts_with("# ") || line.starts_with("## ") {
-        return line.bold().to_string();
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
     }
 
     // Key-value pairs (including environment variables)
@@ -273,11 +276,13 @@ fn style_info_line(line: &str) -> String {
         && !line.starts_with(' ')
     {
         let (key, value) = line.split_at(colon_idx);
-        // Style the key part, keep value plain
-        return format!("{}{}", key.cyan(), value);
+        return Line::from(vec![
+            Span::styled(key.to_string(), Style::default().fg(Color::Cyan)),
+            Span::raw(value.to_string()),
+        ]);
     }
 
-    line.to_string()
+    Line::from(line.to_string())
 }
 
 #[cfg(test)]
@@ -336,50 +341,56 @@ mod tests {
 
     #[test]
     fn test_style_info_line_heading() {
-        let line = "# Session Information";
-        let styled = style_info_line(line);
-        // Should contain ANSI codes for bold
-        assert!(styled.contains("\x1b"), "Heading should be styled");
+        let styled = style_info_line("# Session Information");
+        // Should have bold modifier
+        assert!(
+            styled.spans[0].style.add_modifier.contains(Modifier::BOLD),
+            "Heading should be bold"
+        );
     }
 
     #[test]
     fn test_style_info_line_h2_heading() {
-        let line = "## Environment Variables";
-        let styled = style_info_line(line);
-        // Should contain ANSI codes for bold
-        assert!(styled.contains("\x1b"), "H2 heading should be styled");
+        let styled = style_info_line("## Environment Variables");
+        assert!(
+            styled.spans[0].style.add_modifier.contains(Modifier::BOLD),
+            "H2 heading should be bold"
+        );
     }
 
     #[test]
     fn test_style_info_line_key_value() {
-        let line = "arf version:    0.2.1";
-        let styled = style_info_line(line);
-        // Should contain ANSI codes for cyan key
-        assert!(styled.contains("\x1b"), "Key-value should be styled");
+        let styled = style_info_line("arf version:    0.2.1");
+        // Key part should be cyan
+        assert_eq!(styled.spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(styled.spans[0].content, "arf version");
+        // Value part should be unstyled
+        assert_eq!(styled.spans[1].content, ":    0.2.1");
     }
 
     #[test]
     fn test_style_info_line_env_var() {
-        // Environment variables now use key: value format like other lines
-        let line = "R_LIBS:         /path/to/libs";
-        let styled = style_info_line(line);
-        // Should contain ANSI codes for cyan key
-        assert!(styled.contains("\x1b"), "Env var should be styled");
+        let styled = style_info_line("R_LIBS:         /path/to/libs");
+        assert_eq!(styled.spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(styled.spans[0].content, "R_LIBS");
     }
 
     #[test]
     fn test_style_info_line_empty() {
-        let line = "";
-        let styled = style_info_line(line);
-        assert_eq!(styled, "", "Empty line should remain empty");
+        let styled = style_info_line("");
+        // Empty string produces a Line with no spans
+        assert!(styled.spans.is_empty() || styled.spans[0].content.is_empty());
     }
 
     #[test]
     fn test_style_info_line_plain() {
-        let line = "Some plain text without special formatting";
-        let styled = style_info_line(line);
-        // Plain text without : or = at special positions should not be styled
-        assert_eq!(styled, line);
+        let styled = style_info_line("Some plain text without special formatting");
+        assert_eq!(styled.spans.len(), 1);
+        assert_eq!(
+            styled.spans[0].content,
+            "Some plain text without special formatting"
+        );
+        assert_eq!(styled.spans[0].style, Style::default());
     }
 
     #[test]
