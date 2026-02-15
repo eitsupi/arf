@@ -7,6 +7,7 @@ mod help;
 pub mod history_browser;
 pub mod history_schema;
 pub mod session_info;
+pub(crate) mod style_convert;
 pub(crate) mod text_utils;
 
 pub use help::run_help_browser;
@@ -21,12 +22,17 @@ use crossterm::{
         MouseEventKind,
     },
     queue,
-    style::Stylize,
     terminal::{
         self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
         LeaveAlternateScreen,
     },
 };
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Color as RatColor, Style as RatStyle};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
@@ -160,8 +166,8 @@ pub trait PagerContent {
     fn line_count(&self) -> usize;
 
     /// Render a single line at the given index.
-    /// Returns the styled string to display.
-    fn render_line(&self, index: usize, width: usize) -> String;
+    /// Returns a styled `Line` for ratatui rendering.
+    fn render_line(&self, index: usize, width: usize) -> Line<'static>;
 
     /// Called before rendering to allow content to prepare state.
     /// `scroll_offset` is the first visible line index.
@@ -192,14 +198,15 @@ pub fn run<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Result
 
 /// Inner pager loop.
 fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Result<()> {
-    let mut stdout = io::stdout();
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend)?;
     let mut scroll_offset = 0;
     let mut needs_redraw = true;
 
     loop {
         if needs_redraw {
             content.prepare_render(scroll_offset);
-            render(&mut stdout, content, config, scroll_offset)?;
+            render(&mut terminal, content, config, scroll_offset)?;
             needs_redraw = false;
         }
 
@@ -305,59 +312,67 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
     Ok(())
 }
 
-/// Render the pager content.
+/// Render the pager content using ratatui.
 fn render<C: PagerContent>(
-    stdout: &mut io::Stdout,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     content: &C,
     config: &PagerConfig,
     scroll_offset: usize,
 ) -> io::Result<()> {
-    // Begin synchronized update to prevent flickering
-    queue!(stdout, BeginSynchronizedUpdate)?;
+    terminal.draw(|frame| {
+        let area = frame.area();
+        let width = area.width as usize;
 
-    stdout.execute(cursor::MoveTo(0, 0))?;
-    stdout.execute(cursor::Hide)?;
+        // Layout: header(1) + content(Fill) + footer(1)
+        let [header_area, content_area, footer_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
-    let (cols, rows) = terminal::size().unwrap_or((80, 24));
-    let width = cols as usize;
-    let visible_rows = content_rows_with_height(rows as usize);
+        // Header
+        let header_text = format!(
+            "─ {} [{}/{}] ─",
+            config.title,
+            scroll_offset + 1,
+            content.line_count().max(1)
+        );
+        let padded_header = format!("{:─<width$}", header_text, width = width);
+        let header = Paragraph::new(Span::styled(
+            padded_header,
+            RatStyle::default().fg(RatColor::DarkGray),
+        ));
+        frame.render_widget(header, header_area);
 
-    // Header
-    let header = format!(
-        "─ {} [{}/{}] ─",
-        config.title,
-        scroll_offset + 1,
-        content.line_count().max(1)
-    );
-    let padded_header = format!("{:─<width$}", header, width = width);
-    stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-    println!("\r{}", padded_header.dark_grey());
-
-    // Content
-    for i in 0..visible_rows {
-        stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-        let line_idx = scroll_offset + i;
-        if line_idx < content.line_count() {
-            let line = content.render_line(line_idx, width);
-            println!("\r{}", line);
-        } else {
-            println!("\r");
+        // Content
+        let visible_rows = content_area.height as usize;
+        let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible_rows);
+        for i in 0..visible_rows {
+            let line_idx = scroll_offset + i;
+            if line_idx < content.line_count() {
+                lines.push(content.render_line(line_idx, width));
+            } else {
+                lines.push(Line::from(""));
+            }
         }
-    }
+        let content_widget = Paragraph::new(lines);
+        frame.render_widget(content_widget, content_area);
 
-    // Footer
-    stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-    let footer = if let Some(msg) = content.feedback_message() {
-        format!("─ {} ─", msg)
-    } else {
-        format!("─ {} ─", config.footer_hint)
-    };
-    let padded_footer = format!("{:─<width$}", footer, width = width);
-    println!("\r{}", padded_footer.dark_grey());
+        // Footer
+        let footer_text = if let Some(msg) = content.feedback_message() {
+            format!("─ {} ─", msg)
+        } else {
+            format!("─ {} ─", config.footer_hint)
+        };
+        let padded_footer = format!("{:─<width$}", footer_text, width = width);
+        let footer = Paragraph::new(Span::styled(
+            padded_footer,
+            RatStyle::default().fg(RatColor::DarkGray),
+        ));
+        frame.render_widget(footer, footer_area);
+    })?;
 
-    // End synchronized update
-    queue!(stdout, EndSynchronizedUpdate)?;
-    stdout.flush()?;
     Ok(())
 }
 
@@ -471,7 +486,12 @@ pub(crate) fn render_size_warning(
             let msg_width = text_utils::display_width(msg);
             let padding = width.saturating_sub(msg_width) / 2;
             if msg == title {
-                write!(stdout, "\r{}{}", " ".repeat(padding), msg.yellow().bold())?;
+                write!(
+                    stdout,
+                    "\r{}{}",
+                    " ".repeat(padding),
+                    crossterm::style::Stylize::bold(crossterm::style::Stylize::yellow(msg))
+                )?;
             } else {
                 write!(stdout, "\r{}{}", " ".repeat(padding), msg)?;
             }

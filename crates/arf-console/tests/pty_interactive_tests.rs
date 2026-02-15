@@ -283,10 +283,11 @@ fn test_pty_history_schema_pager() {
         .send_line(":history schema")
         .expect("Should send :history schema");
 
-    // Wait for pager to appear - it should show the header
+    // Wait for pager to appear - it should show the header on line 0
     std::thread::sleep(std::time::Duration::from_millis(500));
     terminal
-        .expect("History Schema")
+        .line(0)
+        .assert_contains("History Schema")
         .expect("Should show pager header");
 
     // Press 'q' to exit the pager
@@ -322,19 +323,21 @@ fn test_pty_history_schema_pager_copy() {
         .send_line(":history schema")
         .expect("Should send :history schema");
 
-    // Wait for pager to appear
+    // Wait for pager to appear (use screen-based assertion)
     std::thread::sleep(std::time::Duration::from_millis(500));
     terminal
-        .expect("History Schema")
+        .line(0)
+        .assert_contains("History Schema")
         .expect("Should show pager header");
 
     // Press 'c' to copy R example
     terminal.send("c").expect("Should send c to copy");
 
-    // Wait for feedback message
+    // Wait for feedback message on the footer line (line 23 = row index for 24-row terminal)
     std::thread::sleep(std::time::Duration::from_millis(200));
     terminal
-        .expect("Copied R example to clipboard")
+        .line(23)
+        .assert_contains("Copied R example to clipboard")
         .expect("Should show copy feedback message");
 
     // Press 'q' to exit the pager
@@ -366,13 +369,16 @@ fn test_pty_history_schema_pager_mouse_scroll() {
         .expect("Should send :history schema");
 
     std::thread::sleep(std::time::Duration::from_millis(500));
+    // Use screen-based assertion for header line
     terminal
-        .expect("History Schema")
+        .line(0)
+        .assert_contains("History Schema")
         .expect("Should show pager header");
 
-    // Verify initial position shows [1/XX]
+    // Verify initial position shows [1/XX] on header line
     terminal
-        .expect("[1/")
+        .line(0)
+        .assert_contains("[1/")
         .expect("Should show position 1 initially");
 
     // Send mouse scroll down event (SGR mouse mode: \x1b[<65;col;rowM)
@@ -385,7 +391,8 @@ fn test_pty_history_schema_pager_mouse_scroll() {
 
     // After scrolling down, position should change to [2/XX]
     terminal
-        .expect("[2/")
+        .line(0)
+        .assert_contains("[2/")
         .expect("Should show position 2 after scroll down");
 
     // Send mouse scroll up event (SGR mouse mode: \x1b[<64;col;rowM)
@@ -398,7 +405,8 @@ fn test_pty_history_schema_pager_mouse_scroll() {
 
     // After scrolling up, position should go back to [1/XX]
     terminal
-        .expect("[1/")
+        .line(0)
+        .assert_contains("[1/")
         .expect("Should show position 1 after scroll up");
 
     // Exit pager

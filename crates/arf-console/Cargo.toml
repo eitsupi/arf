@@ -17,6 +17,7 @@ reedline.workspace = true
 crossterm.workspace = true
 crokey.workspace = true
 nu-ansi-term.workspace = true
+ratatui.workspace = true
 dirs.workspace = true
 serde.workspace = true
 toml.workspace = true

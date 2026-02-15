@@ -6,8 +6,11 @@
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
 use crate::config::history_dir;
 use crate::highlighter::RTreeSitterHighlighter;
+use crate::pager::style_convert::styled_text_to_line;
 use crossterm::event::{KeyCode, KeyModifiers};
 use nu_ansi_term::{Color, Style};
+use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
+use ratatui::text::{Line, Span};
 use reedline::Highlighter;
 use std::cell::{Cell, RefCell};
 use std::io::{self, IsTerminal};
@@ -287,10 +290,10 @@ impl PagerContent for SchemaContent {
         self.lines.len()
     }
 
-    fn render_line(&self, index: usize, _width: usize) -> String {
+    fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
         let line = &self.lines[index];
         let mut state = self.style_state.get();
-        let styled = style_line_with_state(line, &state);
+        let styled = style_line_to_ratatui(line, &state);
         // Update state for the next line
         state.update(line);
         self.style_state.set(state);
@@ -328,152 +331,180 @@ impl PagerContent for SchemaContent {
     }
 }
 
-/// Apply syntax highlighting to a line based on its content and context.
-fn style_line_with_state(line: &str, state: &StyleState) -> String {
-    use crossterm::style::Stylize;
-
-    // Headings
-    if line.starts_with("# ") || line.starts_with("## ") || line.starts_with("### ") {
-        return line.bold().to_string();
-    }
-
-    // Code fence
-    if line.starts_with("```") {
-        return line.dark_grey().to_string();
-    }
-
-    // Path lines
-    if line.starts_with("- R mode:") || line.starts_with("- Shell mode:") {
-        return style_path_line(line);
-    }
-
-    // Index lines
-    if line.starts_with("- idx_") {
-        return style_index_line(line);
-    }
-
-    // Style based on code block context
-    match state.code_block {
-        CodeBlockType::Sql => style_sql_line(line),
-        CodeBlockType::R => style_r_line(line),
-        CodeBlockType::None => line.to_string(),
-    }
-}
-
-/// Style a SQL line with syntax highlighting.
-fn style_sql_line(line: &str) -> String {
-    use crossterm::style::Stylize;
-
-    // CREATE TABLE line
-    if line.starts_with("CREATE TABLE") {
-        return line
-            .replace("CREATE", &"CREATE".blue().bold().to_string())
-            .replace("TABLE", &"TABLE".blue().bold().to_string())
-            .replace("history", &"history".yellow().to_string());
-    }
-
-    // Column definitions
-    if line.starts_with("    ") {
-        let mut result = line.to_string();
-
-        // Find and style the comment part first
-        if let Some(comment_idx) = result.find("--") {
-            let (code_part, comment_part) = result.split_at(comment_idx);
-            let styled_comment = comment_part.dark_grey().italic().to_string();
-            result = format!("{}{}", code_part, styled_comment);
-        }
-
-        // Style SQL keywords (blue bold)
-        result = result
-            .replace(
-                "INTEGER PRIMARY KEY AUTOINCREMENT",
-                &"INTEGER PRIMARY KEY AUTOINCREMENT"
-                    .blue()
-                    .bold()
-                    .to_string(),
-            )
-            .replace("INTEGER", &"INTEGER".blue().bold().to_string())
-            .replace("TEXT NOT NULL", &"TEXT NOT NULL".blue().bold().to_string())
-            .replace("TEXT", &"TEXT".blue().bold().to_string());
-
-        // Style column names (yellow) - they come at the start after spaces
-        let column_names = [
-            "id",
-            "command_line",
-            "start_timestamp",
-            "session_id",
-            "hostname",
-            "cwd",
-            "duration_ms",
-            "exit_status",
-            "more_info",
-        ];
-        for name in column_names {
-            // Match column name at start of trimmed line
-            let pattern = format!("    {}", name);
-            if result.contains(&pattern) {
-                result = result.replace(&pattern, &format!("    {}", name.yellow()));
-            }
-        }
-
-        return result;
-    }
-
-    line.to_string()
-}
-
 thread_local! {
     /// Thread-local tree-sitter R highlighter for schema display.
     static R_HIGHLIGHTER: RefCell<RTreeSitterHighlighter> = RefCell::new(RTreeSitterHighlighter::default());
 }
 
-/// Style an R code line with syntax highlighting using tree-sitter.
-fn style_r_line(line: &str) -> String {
-    // Use tree-sitter based highlighting for accurate tokenization
+// --- ratatui-based style functions (used by PagerContent::render_line) ---
+
+/// Apply syntax highlighting to a line, returning a ratatui `Line`.
+fn style_line_to_ratatui(line: &str, state: &StyleState) -> Line<'static> {
+    // Headings
+    if line.starts_with("# ") || line.starts_with("## ") || line.starts_with("### ") {
+        return Line::from(Span::styled(
+            line.to_string(),
+            RatStyle::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // Code fence
+    if line.starts_with("```") {
+        return Line::from(Span::styled(
+            line.to_string(),
+            RatStyle::default().fg(RatColor::DarkGray),
+        ));
+    }
+
+    // Path lines
+    if line.starts_with("- R mode:") || line.starts_with("- Shell mode:") {
+        return style_path_line_ratatui(line);
+    }
+
+    // Index lines
+    if line.starts_with("- idx_") {
+        return style_index_line_ratatui(line);
+    }
+
+    // Style based on code block context
+    match state.code_block {
+        CodeBlockType::Sql => style_sql_line_ratatui(line),
+        CodeBlockType::R => style_r_line_ratatui(line),
+        CodeBlockType::None => Line::from(line.to_string()),
+    }
+}
+
+/// Style a SQL line for ratatui rendering.
+fn style_sql_line_ratatui(line: &str) -> Line<'static> {
+    let kw = RatStyle::default()
+        .fg(RatColor::Blue)
+        .add_modifier(Modifier::BOLD);
+    let ident = RatStyle::default().fg(RatColor::Yellow);
+    let comment_style = RatStyle::default()
+        .fg(RatColor::DarkGray)
+        .add_modifier(Modifier::ITALIC);
+
+    // CREATE TABLE line
+    if line.starts_with("CREATE TABLE") {
+        return Line::from(vec![
+            Span::styled("CREATE", kw),
+            Span::raw(" "),
+            Span::styled("TABLE", kw),
+            Span::raw(" "),
+            Span::styled("history", ident),
+            Span::raw(" ("),
+        ]);
+    }
+
+    // Closing paren
+    if line == ");" {
+        return Line::from(line.to_string());
+    }
+
+    // Column definitions (lines starting with 4 spaces)
+    if line.starts_with("    ") {
+        let trimmed = line.trim_start();
+        let indent = Span::raw("    ");
+
+        // Split off the comment if present
+        let (code_part, comment_part) = if let Some(idx) = trimmed.find("--") {
+            (&trimmed[..idx], Some(&trimmed[idx..]))
+        } else {
+            (trimmed, None)
+        };
+
+        // Parse "column_name    TYPE [EXTRA]," from code_part
+        let code_trimmed = code_part.trim_end();
+        let has_comma = code_trimmed.ends_with(',');
+        let code_no_comma = code_trimmed.trim_end_matches(',');
+
+        // Split at first run of spaces to separate column name from type
+        let mut spans = vec![indent];
+        if let Some(space_idx) = code_no_comma.find(' ') {
+            let col_name = &code_no_comma[..space_idx];
+            let rest = &code_no_comma[space_idx..];
+            spans.push(Span::styled(col_name.to_string(), ident));
+            spans.push(Span::styled(rest.to_string(), kw));
+        } else {
+            spans.push(Span::styled(code_no_comma.to_string(), ident));
+        }
+
+        if has_comma {
+            spans.push(Span::raw(","));
+        }
+
+        if let Some(comment) = comment_part {
+            // Add spacing that was between code and comment
+            spans.push(Span::styled(comment.to_string(), comment_style));
+        }
+
+        return Line::from(spans);
+    }
+
+    Line::from(line.to_string())
+}
+
+/// Style an R code line for ratatui rendering using tree-sitter.
+fn style_r_line_ratatui(line: &str) -> Line<'static> {
     R_HIGHLIGHTER.with(|highlighter| {
         let styled = highlighter.borrow().highlight(line, 0);
-
-        // Convert StyledText to ANSI string
-        let mut result = String::new();
-        for (style, text) in &styled.buffer {
-            result.push_str(&format!("{}", style.paint(text)));
-        }
-        result
+        styled_text_to_line(&styled)
     })
 }
 
-/// Style a path line (Location section).
-fn style_path_line(line: &str) -> String {
-    use crossterm::style::Stylize;
-
+/// Style a path line for ratatui rendering.
+fn style_path_line_ratatui(line: &str) -> Line<'static> {
     if let Some(colon_idx) = line.find(": ") {
         let (label, path) = line.split_at(colon_idx + 2);
-        format!("{}{}", label, path.green())
+        Line::from(vec![
+            Span::raw(label.to_string()),
+            Span::styled(path.to_string(), RatStyle::default().fg(RatColor::Green)),
+        ])
     } else {
-        line.to_string()
+        Line::from(line.to_string())
     }
 }
 
-/// Style an index line.
-fn style_index_line(line: &str) -> String {
-    use crossterm::style::Stylize;
+/// Style an index line for ratatui rendering.
+fn style_index_line_ratatui(line: &str) -> Line<'static> {
+    let kw = RatStyle::default()
+        .fg(RatColor::Blue)
+        .add_modifier(Modifier::BOLD);
+    let ident = RatStyle::default().fg(RatColor::Yellow);
 
-    // Highlight index name (yellow) and ON keyword (blue)
-    let mut result = line.to_string();
-    result = result.replace(" ON ", &format!(" {} ", "ON".blue().bold()));
+    // Parse: "- idx_name        ON history(column)"
+    if let Some(on_idx) = line.find(" ON ") {
+        let before_on = &line[..on_idx];
+        let after_on = &line[on_idx + 4..]; // skip " ON "
 
-    // Highlight index names
-    let index_names = [
-        "idx_history_time",
-        "idx_history_cwd",
-        "idx_history_exit_status",
-        "idx_history_cmd",
-    ];
-    for name in index_names {
-        result = result.replace(name, &name.yellow().to_string());
+        // before_on: "- idx_name      "
+        // Split into "- " prefix and index name
+        let mut spans = Vec::new();
+        if let Some(idx_start) = before_on.find("idx_") {
+            spans.push(Span::raw(before_on[..idx_start].to_string()));
+            spans.push(Span::styled(
+                before_on[idx_start..].trim_end().to_string(),
+                ident,
+            ));
+            // Preserve spacing between index name and ON
+            let name_end = before_on[idx_start..]
+                .find(' ')
+                .map(|i| idx_start + i)
+                .unwrap_or(before_on.len());
+            let spacing = &before_on[name_end..];
+            spans.push(Span::raw(spacing.to_string()));
+        } else {
+            spans.push(Span::raw(before_on.to_string()));
+        }
+
+        spans.push(Span::styled("ON".to_string(), kw));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(after_on.to_string(), ident));
+
+        Line::from(spans)
+    } else {
+        Line::from(line.to_string())
     }
-
-    result
 }
 
 /// Print the SQLite schema in a code block.
@@ -738,105 +769,112 @@ mod tests {
     }
 
     #[test]
-    fn test_style_sql_line_handles_keywords() {
+    fn test_style_sql_line_ratatui_handles_keywords() {
         let line = "    id              INTEGER PRIMARY KEY AUTOINCREMENT,";
-        let styled = style_sql_line(line);
-
-        // Should contain ANSI codes for styling
-        assert!(
-            styled.len() > line.len(),
-            "Styled line should be longer due to ANSI codes"
-        );
-        // Original text should still be present (somewhere in the styled output)
-        assert!(styled.contains("id") || styled.contains("\x1b")); // Either plain or with escape codes
+        let styled = style_sql_line_ratatui(line);
+        // Should have multiple spans (indent, column name, type, comma)
+        assert!(styled.spans.len() > 1, "SQL line should have styled spans");
+        // Column name "id" should be yellow
+        let has_yellow = styled
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(RatColor::Yellow));
+        assert!(has_yellow, "Column name should be yellow");
     }
 
     #[test]
-    fn test_style_sql_line_handles_comments() {
+    fn test_style_sql_line_ratatui_handles_comments() {
         let line = "    start_timestamp INTEGER,  -- Unix timestamp (nullable)";
-        let styled = style_sql_line(line);
-
-        // Should contain ANSI codes
-        assert!(
-            styled.len() > line.len(),
-            "Styled line should be longer due to ANSI codes"
-        );
+        let styled = style_sql_line_ratatui(line);
+        // Should contain a comment span with italic style
+        let has_italic = styled
+            .spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::ITALIC));
+        assert!(has_italic, "Comment should be italic");
     }
 
     #[test]
-    fn test_style_r_line_handles_keywords() {
-        // Use actual R keywords (if, function, etc.) which are styled by tree-sitter
+    fn test_style_r_line_ratatui_handles_keywords() {
         let line = "if (TRUE) x else y";
-        let styled = style_r_line(line);
-
-        // Should contain ANSI codes for keywords (if, else) and constants (TRUE)
+        let styled = style_r_line_ratatui(line);
+        // Should have multiple styled spans from tree-sitter
         assert!(
-            styled.len() > line.len(),
-            "Styled line should be longer due to ANSI codes"
+            styled.spans.len() > 1,
+            "R line with keywords should have multiple spans"
         );
     }
 
     #[test]
-    fn test_style_r_line_handles_strings() {
+    fn test_style_r_line_ratatui_handles_strings() {
         let line = r#"  "/path/to/db.db""#;
-        let styled = style_r_line(line);
-
-        // Should contain ANSI codes for green string
-        assert!(styled.contains("\x1b"), "Should contain ANSI escape codes");
+        let styled = style_r_line_ratatui(line);
+        assert!(!styled.spans.is_empty(), "Should have spans");
     }
 
     #[test]
-    fn test_style_r_line_handles_operators() {
+    fn test_style_r_line_ratatui_handles_operators() {
         let line = "con <- dbConnect(";
-        let styled = style_r_line(line);
-
-        // Should contain ANSI codes
+        let styled = style_r_line_ratatui(line);
         assert!(
-            styled.len() > line.len(),
-            "Styled line should be longer due to ANSI codes"
+            styled.spans.len() > 1,
+            "R line with operators should have multiple spans"
         );
     }
 
     #[test]
-    fn test_style_path_line() {
+    fn test_style_path_line_ratatui() {
         let line = "- R mode: /home/user/.local/share/arf/history/r.db";
-        let styled = style_path_line(line);
-
-        // Should contain ANSI codes for green path
-        assert!(styled.contains("\x1b"), "Should contain ANSI escape codes");
+        let styled = style_path_line_ratatui(line);
+        // Should have label + green-styled path
+        assert_eq!(styled.spans.len(), 2);
+        assert_eq!(styled.spans[1].style.fg, Some(RatColor::Green));
     }
 
     #[test]
-    fn test_style_index_line() {
+    fn test_style_index_line_ratatui() {
         let line = "- idx_history_time        ON history(start_timestamp)";
-        let styled = style_index_line(line);
-
-        // Should contain ANSI codes
-        assert!(styled.contains("\x1b"), "Should contain ANSI escape codes");
-    }
-
-    #[test]
-    fn test_style_line_with_state_headings() {
-        let state = StyleState::new();
-
-        let h1 = style_line_with_state("# History Database", &state);
-        let h2 = style_line_with_state("## Location", &state);
-        let h2b = style_line_with_state("## Indexes", &state);
-
-        // Headings should be styled (bold)
-        assert!(h1.contains("\x1b"), "H1 should be styled");
-        assert!(h2.contains("\x1b"), "H2 should be styled");
-        assert!(h2b.contains("\x1b"), "H2 should be styled");
-    }
-
-    #[test]
-    fn test_style_line_with_state_code_fence() {
-        let state = StyleState::new();
-
-        let fence = style_line_with_state("```sql", &state);
+        let styled = style_index_line_ratatui(line);
+        // Should have multiple spans
         assert!(
-            fence.contains("\x1b"),
-            "Code fence should be styled (dark grey)"
+            styled.spans.len() > 1,
+            "Index line should have styled spans"
+        );
+        // Should contain ON keyword styled in blue bold
+        let has_blue_bold = styled.spans.iter().any(|s| {
+            s.style.fg == Some(RatColor::Blue)
+                && s.style.add_modifier.contains(Modifier::BOLD)
+                && s.content.as_ref() == "ON"
+        });
+        assert!(has_blue_bold, "ON keyword should be blue bold");
+    }
+
+    #[test]
+    fn test_style_line_to_ratatui_headings() {
+        let state = StyleState::new();
+
+        let h1 = style_line_to_ratatui("# History Database", &state);
+        let h2 = style_line_to_ratatui("## Location", &state);
+
+        assert!(
+            h1.spans[0].style.add_modifier.contains(Modifier::BOLD),
+            "H1 should be bold"
+        );
+        assert!(
+            h2.spans[0].style.add_modifier.contains(Modifier::BOLD),
+            "H2 should be bold"
+        );
+    }
+
+    #[test]
+    fn test_style_line_to_ratatui_code_fence() {
+        let state = StyleState::new();
+
+        let fence = style_line_to_ratatui("```sql", &state);
+        assert_eq!(
+            fence.spans[0].style.fg,
+            Some(RatColor::DarkGray),
+            "Code fence should be dark gray"
         );
     }
 

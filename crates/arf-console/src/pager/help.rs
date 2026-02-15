@@ -658,6 +658,7 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
     use super::{PagerAction, PagerConfig, PagerContent, run};
     use crate::config::RColorConfig;
     use crate::highlighter::RTreeSitterHighlighter;
+    use ratatui::text::{Line, Span};
     use reedline::Highlighter;
 
     /// Help content with syntax highlighting for code sections.
@@ -715,9 +716,11 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
         }
 
         /// Render a line with optional syntax highlighting.
-        fn render_with_highlighting(&self, index: usize, width: usize) -> String {
+        fn render_with_highlighting(&self, index: usize, width: usize) -> Line<'static> {
+            use crate::pager::style_convert::styled_text_to_line;
+
             if index >= self.lines.len() {
-                return String::new();
+                return Line::from("");
             }
 
             let line = &self.lines[index];
@@ -730,21 +733,23 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
                 let code_part = line.trim_start();
 
                 if code_part.is_empty() {
-                    return truncate_to_width(line, width);
+                    return Line::from(truncate_to_width(line, width));
                 }
 
                 // Highlight the code part
                 let styled = self.highlighter.highlight(code_part, 0);
-                let highlighted = styled_text_to_ansi(&styled);
+                let mut result_line = styled_text_to_line(&styled);
 
-                // Reconstruct with leading whitespace
-                let result = format!("{}{}", " ".repeat(leading_spaces), highlighted);
+                // Prepend leading whitespace
+                if leading_spaces > 0 {
+                    result_line
+                        .spans
+                        .insert(0, Span::raw(" ".repeat(leading_spaces)));
+                }
 
-                // For ANSI strings, we can't simply truncate by char count
-                // For now, return as-is (most help lines are reasonably short)
-                result
+                result_line
             } else {
-                truncate_to_width(line, width)
+                Line::from(truncate_to_width(line, width))
             }
         }
     }
@@ -754,7 +759,7 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
             self.lines.len()
         }
 
-        fn render_line(&self, index: usize, width: usize) -> String {
+        fn render_line(&self, index: usize, width: usize) -> Line<'static> {
             self.render_with_highlighting(index, width)
         }
 
@@ -777,35 +782,6 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
     };
 
     run(&mut content, &config)
-}
-
-/// Convert reedline::StyledText to an ANSI-escaped string.
-fn styled_text_to_ansi(styled: &reedline::StyledText) -> String {
-    use nu_ansi_term::Style;
-
-    let mut result = String::new();
-    for (style, text) in &styled.buffer {
-        // Convert reedline style to nu_ansi_term Style
-        let mut ansi_style = Style::new();
-        if let Some(fg) = style.foreground {
-            ansi_style = ansi_style.fg(fg);
-        }
-        if let Some(bg) = style.background {
-            ansi_style = ansi_style.on(bg);
-        }
-        if style.is_bold {
-            ansi_style = ansi_style.bold();
-        }
-        if style.is_italic {
-            ansi_style = ansi_style.italic();
-        }
-        if style.is_underline {
-            ansi_style = ansi_style.underline();
-        }
-
-        result.push_str(&ansi_style.paint(text).to_string());
-    }
-    result
 }
 
 #[cfg(test)]
