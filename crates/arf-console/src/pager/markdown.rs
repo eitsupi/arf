@@ -7,7 +7,7 @@
 //! Reference: `refs/codex/codex-rs/tui2/src/markdown_render.rs`
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
@@ -44,6 +44,8 @@ struct Styles {
     link: Style,
     blockquote_prefix: Style,
     code_block: Style,
+    /// Background color applied to entire code block lines (via `Line::style`).
+    code_block_bg: Color,
 }
 
 impl Default for Styles {
@@ -58,6 +60,7 @@ impl Default for Styles {
             link: Style::new().cyan().underlined(),
             blockquote_prefix: Style::new().green(),
             code_block: Style::new().dim(),
+            code_block_bg: Color::Indexed(236),
         }
     }
 }
@@ -544,6 +547,17 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         self.has_output = true;
     }
 
+    /// Like `flush_line`, but applies the code block background to the entire line.
+    fn flush_code_line(&mut self) {
+        if self.current_spans.is_empty() {
+            return;
+        }
+        let spans = std::mem::take(&mut self.current_spans);
+        let line = Line::from(spans).style(Style::new().bg(self.styles.code_block_bg));
+        self.lines.push(line);
+        self.has_output = true;
+    }
+
     fn push_blank_line(&mut self) {
         self.lines.push(Line::from(""));
     }
@@ -584,7 +598,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 let parts: Vec<&str> = text.split('\n').collect();
                 for (i, part) in parts.iter().enumerate() {
                     if i > 0 {
-                        self.flush_line();
+                        self.flush_code_line();
                         self.emit_prefix_if_needed();
                     }
                     if !part.is_empty() {
@@ -592,13 +606,13 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                     }
                 }
             }
-            self.flush_line();
+            self.flush_code_line();
         } else {
-            // Non-R code blocks: render with dim style (original behavior)
+            // Non-R code blocks: render with dim style
             for line_text in source.split('\n') {
                 self.emit_prefix_if_needed();
                 self.push_span(Span::styled(line_text.to_string(), self.styles.code_block));
-                self.flush_line();
+                self.flush_code_line();
             }
         }
     }
