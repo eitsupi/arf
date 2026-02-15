@@ -150,8 +150,8 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             Event::SoftBreak => self.on_soft_break(),
             Event::HardBreak => self.on_hard_break(),
             Event::Rule => self.on_rule(),
-            Event::Html(html) => self.on_text(html),
-            Event::InlineHtml(html) => self.on_text(html),
+            Event::Html(html) => self.on_html(html),
+            Event::InlineHtml(html) => self.on_inline_html(html),
             Event::FootnoteReference(_)
             | Event::TaskListMarker(_)
             | Event::InlineMath(_)
@@ -376,6 +376,37 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         self.flush_line();
     }
 
+    fn on_html(&mut self, html: CowStr<'a>) {
+        // Block-level HTML: render non-empty lines as plain text
+        for line in html.lines() {
+            if !line.trim().is_empty() {
+                self.emit_prefix_if_needed();
+                self.push_span(Span::raw(line.to_string()));
+                self.flush_line();
+            }
+        }
+    }
+
+    fn on_inline_html(&mut self, html: CowStr<'a>) {
+        // Detect <br>, <br/>, <br /> tags and treat as line break
+        let trimmed = html.trim();
+        if trimmed.eq_ignore_ascii_case("<br>")
+            || trimmed.eq_ignore_ascii_case("<br/>")
+            || trimmed.eq_ignore_ascii_case("<br />")
+        {
+            if self.in_table {
+                // In a table cell, <br> separates sub-lines.
+                // We use a newline character that render_table will split on.
+                self.table_cell_spans.push(Span::raw("\n"));
+            } else {
+                self.flush_line();
+            }
+            return;
+        }
+        // Other inline HTML: render as text
+        self.on_text(html);
+    }
+
     fn on_rule(&mut self) {
         self.flush_line();
         if self.has_output {
@@ -463,51 +494,89 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
 
     // -- table rendering ----------------------------------------------------
 
+    /// Split a cell's spans into sub-lines at `\n` boundaries (from `<br>` tags).
+    fn split_cell_lines(cell: &[Span<'static>]) -> Vec<Vec<Span<'static>>> {
+        let mut lines: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+        for span in cell {
+            if span.content.as_ref() == "\n" {
+                lines.push(Vec::new());
+            } else {
+                lines.last_mut().unwrap().push(span.clone());
+            }
+        }
+        lines
+    }
+
+    /// Calculate the display width of a list of spans.
+    fn spans_width(spans: &[Span<'static>]) -> usize {
+        spans.iter().map(|s| s.content.len()).sum()
+    }
+
     fn render_table(&mut self) {
         if self.table_rows.is_empty() {
             return;
         }
 
-        // Calculate column widths
         let n_cols = self.table_rows.iter().map(|r| r.len()).max().unwrap_or(0);
         if n_cols == 0 {
             return;
         }
 
+        // Pre-split all cells into sub-lines
+        let split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
+            .table_rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| Self::split_cell_lines(cell))
+                    .collect()
+            })
+            .collect();
+
+        // Calculate column widths (max sub-line width across all rows)
         let mut col_widths = vec![0usize; n_cols];
-        for row in &self.table_rows {
-            for (i, cell) in row.iter().enumerate() {
-                let w: usize = cell.iter().map(|s| s.content.len()).sum();
-                col_widths[i] = col_widths[i].max(w);
+        for row in &split_rows {
+            for (col_idx, cell_lines) in row.iter().enumerate() {
+                for sub_line in cell_lines {
+                    let w = Self::spans_width(sub_line);
+                    col_widths[col_idx] = col_widths[col_idx].max(w);
+                }
             }
         }
 
-        // Render each row
-        for (row_idx, row) in self.table_rows.iter().enumerate() {
-            let mut spans: Vec<Span<'static>> = Vec::new();
+        // Render each row (potentially multiple visual lines)
+        for (row_idx, row) in split_rows.iter().enumerate() {
+            let max_sub_lines = row.iter().map(|cell| cell.len()).max().unwrap_or(1);
 
-            // Blockquote prefix
-            for _ in 0..self.blockquote_depth {
-                spans.push(Span::styled("> ", self.styles.blockquote_prefix));
-            }
+            for sub_line_idx in 0..max_sub_lines {
+                let mut spans: Vec<Span<'static>> = Vec::new();
 
-            spans.push(Span::raw("| "));
-            for (col_idx, cell) in row.iter().enumerate() {
-                let cell_width: usize = cell.iter().map(|s| s.content.len()).sum();
-                let target = col_widths.get(col_idx).copied().unwrap_or(0);
-
-                for s in cell {
-                    spans.push(s.clone());
+                for _ in 0..self.blockquote_depth {
+                    spans.push(Span::styled("> ", self.styles.blockquote_prefix));
                 }
-                // Pad to column width
-                let pad = target.saturating_sub(cell_width);
-                if pad > 0 {
-                    spans.push(Span::raw(" ".repeat(pad)));
+
+                spans.push(Span::raw("| "));
+                for (col_idx, cell_lines) in row.iter().enumerate() {
+                    let target = col_widths.get(col_idx).copied().unwrap_or(0);
+
+                    if let Some(sub_line) = cell_lines.get(sub_line_idx) {
+                        let w = Self::spans_width(sub_line);
+                        for s in sub_line {
+                            spans.push(s.clone());
+                        }
+                        let pad = target.saturating_sub(w);
+                        if pad > 0 {
+                            spans.push(Span::raw(" ".repeat(pad)));
+                        }
+                    } else {
+                        // Empty sub-line for this cell
+                        spans.push(Span::raw(" ".repeat(target)));
+                    }
+                    spans.push(Span::raw(" | "));
                 }
-                spans.push(Span::raw(" | "));
+                self.lines.push(Line::from(spans));
+                self.has_output = true;
             }
-            self.lines.push(Line::from(spans));
-            self.has_output = true;
 
             // Separator after header row
             if row_idx == 0 {
@@ -644,6 +713,25 @@ mod tests {
         let input = "before\n\n---\n\nafter";
         let lines = render_plain(input);
         assert!(lines.contains(&"———".to_string()));
+    }
+
+    #[test]
+    fn table_with_br_tags() {
+        let input = "| Arg | Desc |\n|---|---|\n| x | first<br>second |";
+        let lines = render_plain(input);
+        // The cell with <br> should produce two visual rows
+        assert!(lines.len() >= 4); // header + separator + 2 data lines
+        // First data row has "first"
+        assert!(lines[2].contains("first"));
+        // Second data row has "second"
+        assert!(lines[3].contains("second"));
+    }
+
+    #[test]
+    fn inline_html_br_outside_table() {
+        let input = "line one<br>line two";
+        let lines = render_plain(input);
+        assert_eq!(lines, vec!["line one", "line two"]);
     }
 
     #[test]
