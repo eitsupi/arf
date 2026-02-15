@@ -20,12 +20,21 @@ use crate::pager::style_convert::nu_ansi_color_to_ratatui;
 /// `default_code_lang` is used for fenced code blocks that have no language tag.
 /// Pass `Some("r")` when rendering R documentation (help pages, vignettes) so
 /// that untagged code blocks receive R syntax highlighting.
-pub fn render_markdown(input: &str, default_code_lang: Option<&str>) -> Vec<Line<'static>> {
+///
+/// `wrap_width` enables word-wrapping for prose content (paragraphs,
+/// blockquotes, list items).  Code blocks, tables, and headings are never
+/// wrapped.  Pass `None` to disable wrapping (every logical line maps to
+/// exactly one `Line`).
+pub fn render_markdown(
+    input: &str,
+    default_code_lang: Option<&str>,
+    wrap_width: Option<usize>,
+) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()));
+    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()), wrap_width);
     writer.run();
     writer.lines
 }
@@ -113,6 +122,10 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     /// Default language for code blocks without a language tag.
     default_code_lang: Option<String>,
 
+    /// If set, wrap prose lines to this width (code blocks, tables, headings
+    /// are excluded from wrapping).
+    wrap_width: Option<usize>,
+
     /// Stack of inline styles (emphasis, strong, …).
     inline_styles: Vec<Style>,
 
@@ -166,12 +179,13 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
 }
 
 impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
-    fn new(iter: I, default_code_lang: Option<String>) -> Self {
+    fn new(iter: I, default_code_lang: Option<String>, wrap_width: Option<usize>) -> Self {
         Self {
             iter,
             lines: Vec::new(),
             styles: Styles::default(),
             default_code_lang,
+            wrap_width,
             inline_styles: Vec::new(),
             current_spans: Vec::new(),
             in_heading: None,
@@ -547,8 +561,39 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             return;
         }
         let spans = std::mem::take(&mut self.current_spans);
+
+        // Apply word-wrapping for prose content (not code blocks, tables, or headings).
+        if let Some(width) = self.wrap_width
+            && !self.in_code_block
+            && !self.in_table
+            && self.in_heading.is_none()
+        {
+            let indent = self.continuation_indent();
+            let wrapped = super::text_utils::wrap_spans(&spans, width, indent);
+            for line_spans in wrapped {
+                self.lines.push(Line::from(line_spans));
+            }
+            self.has_output = true;
+            return;
+        }
+
         self.lines.push(Line::from(spans));
         self.has_output = true;
+    }
+
+    /// Compute the continuation indent for wrapped lines.
+    ///
+    /// This aligns continuation text under the content start of the
+    /// current context (blockquote prefix + list indentation).
+    fn continuation_indent(&self) -> usize {
+        let mut indent = self.blockquote_depth * 2; // "> " per level
+        if self.list_depth > 0 {
+            // Nesting indent for outer levels
+            indent += self.list_depth.saturating_sub(1) * 2;
+            // Marker width ("- " or "N. ")
+            indent += 2;
+        }
+        indent
     }
 
     /// Like `flush_line`, but applies the code block background to the entire line.
@@ -736,7 +781,7 @@ mod tests {
 
     /// Helper: render markdown and collect line text (without styling).
     fn render_plain(input: &str) -> Vec<String> {
-        render_markdown(input, None)
+        render_markdown(input, None, None)
             .iter()
             .map(|line| {
                 line.spans
@@ -767,7 +812,7 @@ mod tests {
 
     #[test]
     fn emphasis_and_strong() {
-        let lines = render_markdown("*em* **strong**", None);
+        let lines = render_markdown("*em* **strong**", None, None);
         assert_eq!(lines.len(), 1);
         // Check that there are separate spans with appropriate styles
         let spans = &lines[0].spans;
@@ -776,7 +821,7 @@ mod tests {
 
     #[test]
     fn inline_code() {
-        let lines = render_markdown("Use `print()`", None);
+        let lines = render_markdown("Use `print()`", None, None);
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Use print()");
@@ -869,7 +914,7 @@ mod tests {
     #[test]
     fn r_code_block_syntax_highlight() {
         let input = "```r\nx <- 42\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Should produce one line: "x <- 42"
         let text: String = lines
             .iter()
@@ -917,7 +962,7 @@ mod tests {
     #[test]
     fn non_r_code_block_uses_dim_style() {
         let input = "```python\nprint('hello')\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Should produce one line with dim style (not syntax highlighted)
         let code_line = lines.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -943,7 +988,7 @@ mod tests {
     #[test]
     fn r_code_block_multiline() {
         let input = "```r\nif (TRUE) {\n  print(x)\n}\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         let texts: Vec<String> = lines
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
@@ -971,7 +1016,7 @@ mod tests {
     #[test]
     fn r_code_block_with_comments() {
         let input = "```r\n# A comment\nx <- 1\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Comment line should be DarkGray
         let comment_line = lines.iter().find(|l| {
             l.spans
@@ -996,7 +1041,7 @@ mod tests {
         // Code blocks without a language tag should use the default language
         let input = "```\nx <- 42\n```";
         // Without default: no highlighting (dim style)
-        let lines_no_default = render_markdown(input, None);
+        let lines_no_default = render_markdown(input, None, None);
         let code_line = lines_no_default.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("<-")
@@ -1006,7 +1051,7 @@ mod tests {
         assert_eq!(code_line.unwrap().spans.len(), 1);
 
         // With default "r": should get syntax highlighting
-        let lines_r = render_markdown(input, Some("r"));
+        let lines_r = render_markdown(input, Some("r"), None);
         let code_line = lines_r.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("<-")
@@ -1031,7 +1076,7 @@ mod tests {
     fn explicit_lang_overrides_default() {
         // Explicit language tag should take precedence over default
         let input = "```python\nprint('hello')\n```";
-        let lines = render_markdown(input, Some("r"));
+        let lines = render_markdown(input, Some("r"), None);
         let code_line = lines.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("print")

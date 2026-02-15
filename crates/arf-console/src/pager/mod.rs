@@ -186,6 +186,15 @@ pub trait PagerContent {
 
     /// Clear feedback message after display.
     fn clear_feedback(&mut self) {}
+
+    /// Called when the terminal is resized.
+    ///
+    /// Implementations can use this to re-render width-dependent content
+    /// (e.g., re-wrap Markdown text).  Returns `true` if the content
+    /// changed and needs a full redraw.
+    fn on_resize(&mut self, _width: usize, _height: usize) -> bool {
+        false
+    }
 }
 
 /// Run the pager with the given content and configuration.
@@ -307,7 +316,12 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                     }
                     _ => {}
                 },
-                Event::Resize(_, _) => {
+                Event::Resize(w, h) => {
+                    if content.on_resize(w as usize, h as usize) {
+                        // Content changed (e.g., re-wrapped); clamp scroll.
+                        let max_offset = max_scroll_offset(content.line_count());
+                        scroll_offset = scroll_offset.min(max_offset);
+                    }
                     needs_redraw = true;
                 }
                 _ => {}

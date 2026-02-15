@@ -558,6 +558,16 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
 
     struct HelpContent {
         lines: Vec<Line<'static>>,
+        /// Raw Markdown source, kept for re-wrapping on resize.
+        source: String,
+        /// Terminal width used for the last render.
+        last_width: usize,
+    }
+
+    impl HelpContent {
+        fn render_with_width(source: &str, width: usize) -> Vec<Line<'static>> {
+            render_markdown(source, Some("r"), Some(width))
+        }
     }
 
     impl PagerContent for HelpContent {
@@ -576,10 +586,25 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
                 None
             }
         }
+
+        fn on_resize(&mut self, width: usize, _height: usize) -> bool {
+            if width != self.last_width {
+                self.lines = HelpContent::render_with_width(&self.source, width);
+                self.last_width = width;
+                true
+            } else {
+                false
+            }
+        }
     }
 
+    let (cols, _) = terminal::size().unwrap_or((80, 24));
+    let width = cols as usize;
+
     let mut content = HelpContent {
-        lines: render_markdown(content, Some("r")),
+        lines: HelpContent::render_with_width(content, width),
+        source: content.to_string(),
+        last_width: width,
     };
 
     let config = PagerConfig {
