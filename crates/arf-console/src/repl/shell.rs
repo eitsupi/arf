@@ -159,10 +159,12 @@ pub fn restart_process(version: Option<&str>) {
                 Ok(status) => std::process::exit(status.code().unwrap_or(0)),
                 Err(e) => {
                     arf_eprintln!("Error: Failed to wait for restarted process: {}", e);
+                    std::process::exit(1);
                 }
             },
             Err(e) => {
                 arf_eprintln!("Error: Failed to restart: {}", e);
+                std::process::exit(1);
             }
         }
     }
