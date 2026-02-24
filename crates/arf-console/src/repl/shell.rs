@@ -143,8 +143,11 @@ pub fn restart_process(version: Option<&str>) {
 
     #[cfg(not(unix))]
     {
-        // On non-Unix platforms, spawn a new process and exit
-        // This is not as clean as exec(), but works
+        // On non-Unix platforms, spawn a new process and wait for it to exit.
+        // Unlike Unix exec(), this doesn't replace the current process, so we
+        // wait for the child and then exit with its status code. This keeps the
+        // parent alive to hold the terminal session, preventing the shell from
+        // reclaiming control.
         match Command::new(&exe)
             .args(&args)
             .stdin(Stdio::inherit())
@@ -152,12 +155,16 @@ pub fn restart_process(version: Option<&str>) {
             .stderr(Stdio::inherit())
             .spawn()
         {
-            Ok(_) => {
-                // Exit the current process
-                std::process::exit(0);
-            }
+            Ok(mut child) => match child.wait() {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(e) => {
+                    arf_eprintln!("Error: Failed to wait for restarted process: {}", e);
+                    std::process::exit(1);
+                }
+            },
             Err(e) => {
                 arf_eprintln!("Error: Failed to restart: {}", e);
+                std::process::exit(1);
             }
         }
     }
