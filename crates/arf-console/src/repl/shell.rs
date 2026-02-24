@@ -156,7 +156,7 @@ pub fn restart_process(version: Option<&str>) {
             .spawn()
         {
             Ok(mut child) => match child.wait() {
-                Ok(status) => std::process::exit(status.code().unwrap_or(0)),
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
                 Err(e) => {
                     arf_eprintln!("Error: Failed to wait for restarted process: {}", e);
                     std::process::exit(1);
