@@ -767,4 +767,22 @@ mod tests {
         let result = wrap_plain("aaa   bbb", 4, 0);
         assert_eq!(result, vec!["aaa", "bbb"]);
     }
+
+    #[test]
+    fn wrap_spans_line_width_zero_fallback() {
+        // When continuation_indent >= max_width, line_width becomes 0 on
+        // continuation lines.  The fallback should emit one char at a time
+        // rather than dropping text.
+        let spans = vec![Span::raw("abc")];
+        let result = wrap_spans(&spans, 2, 3); // continuation indent (3) > max_width (2)
+        // First line fits "ab" (max_width=2), then continuation lines have
+        // line_width = 2 - 3 = 0, so fallback emits one char at a time.
+        assert_eq!(result.len(), 2); // "ab" + "c"
+        let text: String = result
+            .iter()
+            .map(|line| line.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("|");
+        assert_eq!(text, "ab|c");
+    }
 }

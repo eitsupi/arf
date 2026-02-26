@@ -740,7 +740,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             let total_natural: usize = col_widths.iter().sum();
 
             if total_natural > available && available > 0 {
-                let target_widths = Self::distribute_column_widths(&col_widths, available);
+                let target_widths = distribute_column_widths(&col_widths, available);
 
                 // Re-wrap cells that exceed their target width
                 for row in &mut split_rows {
@@ -814,68 +814,73 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             }
         }
     }
+}
 
-    /// Distribute `available` columns among table columns.
-    ///
-    /// Small columns (those that fit within a fair share) keep their natural
-    /// width; remaining space is divided equally among wider columns.
-    /// Every column gets at least 1 column of width.
-    fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
-        let n = natural.len();
-        if n == 0 {
-            return vec![];
-        }
-
-        // Ensure every column gets at least 1.
-        let min_width = 1;
-        if available <= n * min_width {
-            return vec![min_width; n];
-        }
-
-        let mut result = natural.to_vec();
-        let mut locked = vec![false; n];
-        let mut locked_total = 0usize;
-        let mut unlocked_count = n;
-
-        // Iteratively lock columns whose natural width fits in the fair share.
-        loop {
-            let remaining = available.saturating_sub(locked_total);
-            let share = if unlocked_count > 0 {
-                remaining / unlocked_count
-            } else {
-                0
-            };
-
-            let mut changed = false;
-            for i in 0..n {
-                if !locked[i] && result[i] <= share {
-                    locked[i] = true;
-                    locked_total += result[i];
-                    unlocked_count -= 1;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Distribute remaining space among unlocked (wide) columns.
-        if unlocked_count > 0 {
-            let remaining = available.saturating_sub(locked_total);
-            let share = remaining / unlocked_count;
-            let extra = remaining % unlocked_count;
-            let mut idx = 0;
-            for i in 0..n {
-                if !locked[i] {
-                    result[i] = share + if idx < extra { 1 } else { 0 };
-                    idx += 1;
-                }
-            }
-        }
-
-        result
+/// Distribute `available` columns among table columns.
+///
+/// Small columns (those that fit within a fair share) keep their natural
+/// width; remaining space is divided equally among wider columns.
+/// Every column gets at least 1 column of width.
+fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
+    let n = natural.len();
+    if n == 0 {
+        return vec![];
     }
+
+    // Ensure every column gets at least 1.  When available < n, give
+    // 1 to the first `available` columns and 0 to the rest so that the
+    // sum never exceeds `available`.
+    if available <= n {
+        let mut widths = vec![0usize; n];
+        for w in widths.iter_mut().take(available) {
+            *w = 1;
+        }
+        return widths;
+    }
+
+    let mut result = natural.to_vec();
+    let mut locked = vec![false; n];
+    let mut locked_total = 0usize;
+    let mut unlocked_count = n;
+
+    // Iteratively lock columns whose natural width fits in the fair share.
+    loop {
+        let remaining = available.saturating_sub(locked_total);
+        let share = if unlocked_count > 0 {
+            remaining / unlocked_count
+        } else {
+            0
+        };
+
+        let mut changed = false;
+        for i in 0..n {
+            if !locked[i] && result[i] <= share {
+                locked[i] = true;
+                locked_total += result[i];
+                unlocked_count -= 1;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Distribute remaining space among unlocked (wide) columns.
+    if unlocked_count > 0 {
+        let remaining = available.saturating_sub(locked_total);
+        let share = remaining / unlocked_count;
+        let extra = remaining % unlocked_count;
+        let mut idx = 0;
+        for i in 0..n {
+            if !locked[i] {
+                result[i] = share + if idx < extra { 1 } else { 0 };
+                idx += 1;
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -1291,11 +1296,16 @@ mod tests {
         let input = "This is a long paragraph that will be wrapped at the given width.\n\n```\ncode_line_that_must_not_be_wrapped_ever()\n```";
         let lines = render_wrapped(input, 30);
 
-        // Paragraph lines should all fit within 30 columns
+        // Paragraph lines should all fit within 30 columns and actually wrap
         let code_start = lines
             .iter()
             .position(|l| l.contains("code_line"))
             .expect("Should contain the code line");
+        assert!(
+            code_start > 2,
+            "Paragraph should have wrapped into multiple lines, got {}",
+            code_start
+        );
         for (i, line) in lines.iter().enumerate() {
             if i < code_start && !line.is_empty() {
                 let w = unicode_width::UnicodeWidthStr::width(line.as_str());
@@ -1315,5 +1325,48 @@ mod tests {
             code_line.contains("code_line_that_must_not_be_wrapped_ever()"),
             "Code block should remain intact"
         );
+    }
+
+    #[test]
+    fn distribute_column_widths_empty() {
+        let empty: Vec<usize> = vec![];
+        assert_eq!(distribute_column_widths(&[], 10), empty);
+    }
+
+    #[test]
+    fn distribute_column_widths_single_column() {
+        // Single wide column gets clamped to available
+        assert_eq!(distribute_column_widths(&[20], 10), vec![10]);
+    }
+
+    #[test]
+    fn distribute_column_widths_all_fit() {
+        // All columns fit within their fair share — no redistribution needed
+        assert_eq!(distribute_column_widths(&[3, 3, 3], 12), vec![3, 3, 3]);
+    }
+
+    #[test]
+    fn distribute_column_widths_one_wide() {
+        // One wide column, two narrow. Narrow keep natural, wide gets the rest.
+        let result = distribute_column_widths(&[2, 20, 3], 15);
+        assert_eq!(result[0], 2); // narrow, kept
+        assert_eq!(result[2], 3); // narrow, kept
+        assert_eq!(result[1], 10); // wide, gets 15 - 2 - 3 = 10
+        assert_eq!(result.iter().sum::<usize>(), 15);
+    }
+
+    #[test]
+    fn distribute_column_widths_available_less_than_n() {
+        // available < n_cols: first `available` columns get 1, rest get 0
+        let result = distribute_column_widths(&[5, 10, 15], 2);
+        assert_eq!(result, vec![1, 1, 0]);
+        assert!(result.iter().sum::<usize>() <= 2);
+    }
+
+    #[test]
+    fn distribute_column_widths_available_equals_n() {
+        // available == n_cols: each column gets exactly 1
+        let result = distribute_column_widths(&[5, 10, 15], 3);
+        assert_eq!(result, vec![1, 1, 1]);
     }
 }
