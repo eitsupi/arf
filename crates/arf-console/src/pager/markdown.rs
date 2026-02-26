@@ -20,12 +20,21 @@ use crate::pager::style_convert::nu_ansi_color_to_ratatui;
 /// `default_code_lang` is used for fenced code blocks that have no language tag.
 /// Pass `Some("r")` when rendering R documentation (help pages, vignettes) so
 /// that untagged code blocks receive R syntax highlighting.
-pub fn render_markdown(input: &str, default_code_lang: Option<&str>) -> Vec<Line<'static>> {
+///
+/// `wrap_width` enables word-wrapping for prose content (paragraphs,
+/// blockquotes, list items).  Code blocks, tables, and headings are never
+/// wrapped.  Pass `None` to disable wrapping (every logical line maps to
+/// exactly one `Line`).
+pub fn render_markdown(
+    input: &str,
+    default_code_lang: Option<&str>,
+    wrap_width: Option<usize>,
+) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()));
+    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()), wrap_width);
     writer.run();
     writer.lines
 }
@@ -113,6 +122,10 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     /// Default language for code blocks without a language tag.
     default_code_lang: Option<String>,
 
+    /// If set, wrap prose lines to this width (code blocks, tables, headings
+    /// are excluded from wrapping).
+    wrap_width: Option<usize>,
+
     /// Stack of inline styles (emphasis, strong, …).
     inline_styles: Vec<Style>,
 
@@ -166,12 +179,13 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
 }
 
 impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
-    fn new(iter: I, default_code_lang: Option<String>) -> Self {
+    fn new(iter: I, default_code_lang: Option<String>, wrap_width: Option<usize>) -> Self {
         Self {
             iter,
             lines: Vec::new(),
             styles: Styles::default(),
             default_code_lang,
+            wrap_width,
             inline_styles: Vec::new(),
             current_spans: Vec::new(),
             in_heading: None,
@@ -547,8 +561,49 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             return;
         }
         let spans = std::mem::take(&mut self.current_spans);
+
+        // Apply word-wrapping for prose content (not code blocks, tables, or headings).
+        if let Some(width) = self.wrap_width
+            && !self.in_code_block
+            && !self.in_table
+            && self.in_heading.is_none()
+        {
+            let indent = self.continuation_indent();
+            let wrapped = super::text_utils::wrap_spans(&spans, width, indent);
+            for line_spans in wrapped {
+                self.lines.push(Line::from(line_spans));
+            }
+            self.has_output = true;
+            return;
+        }
+
         self.lines.push(Line::from(spans));
         self.has_output = true;
+    }
+
+    /// Compute the continuation indent for wrapped lines.
+    ///
+    /// This aligns continuation text under the content start of the
+    /// current context (blockquote prefix + list indentation).
+    fn continuation_indent(&self) -> usize {
+        let mut indent = self.blockquote_depth * 2; // "> " per level
+        if self.list_depth > 0 {
+            // Nesting indent for outer levels
+            indent += self.list_depth.saturating_sub(1) * 2;
+            // Marker width: "- " (2) for unordered, "N. " (digits + 2) for ordered
+            if let Some(Some(idx)) = self.list_indices.last() {
+                // Count digits in the current index
+                let digits = if *idx == 0 {
+                    1
+                } else {
+                    (*idx).ilog10() as usize + 1
+                };
+                indent += digits + 2; // "N. "
+            } else {
+                indent += 2; // "- "
+            }
+        }
+        indent
     }
 
     /// Like `flush_line`, but applies the code block background to the entire line.
@@ -654,7 +709,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         }
 
         // Pre-split all cells into sub-lines
-        let split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
+        let mut split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
             .table_rows
             .iter()
             .map(|row| {
@@ -672,6 +727,38 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                     let w = Self::spans_width(sub_line);
                     col_widths[col_idx] = col_widths[col_idx].max(w);
                 }
+            }
+        }
+
+        // If wrap_width is set and the table is too wide, constrain column
+        // widths and re-wrap cell content.
+        if let Some(wrap_width) = self.wrap_width {
+            // Table decoration: "| " prefix (2) + " | " after each column (3 × n_cols)
+            // + blockquote prefix (2 per depth level)
+            let decoration = self.blockquote_depth * 2 + 2 + n_cols * 3;
+            let available = wrap_width.saturating_sub(decoration);
+            let total_natural: usize = col_widths.iter().sum();
+
+            if total_natural > available && available > 0 {
+                let target_widths = distribute_column_widths(&col_widths, available);
+
+                // Re-wrap cells that exceed their target width
+                for row in &mut split_rows {
+                    for (col_idx, cell_lines) in row.iter_mut().enumerate() {
+                        let target = target_widths[col_idx];
+                        if target == 0 {
+                            continue;
+                        }
+                        let mut new_lines: Vec<Vec<Span<'static>>> = Vec::new();
+                        for sub_line in cell_lines.drain(..) {
+                            let wrapped = super::text_utils::wrap_spans(&sub_line, target, 0);
+                            new_lines.extend(wrapped);
+                        }
+                        *cell_lines = new_lines;
+                    }
+                }
+
+                col_widths = target_widths;
             }
         }
 
@@ -729,6 +816,73 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     }
 }
 
+/// Distribute `available` columns among table columns.
+///
+/// Small columns (those that fit within a fair share) keep their natural
+/// width; remaining space is divided equally among wider columns.
+/// Every column gets at least 1 column of width.
+fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
+    let n = natural.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    // Ensure every column gets at least 1.  When available < n, give
+    // 1 to the first `available` columns and 0 to the rest so that the
+    // sum never exceeds `available`.
+    if available <= n {
+        let mut widths = vec![0usize; n];
+        for w in widths.iter_mut().take(available) {
+            *w = 1;
+        }
+        return widths;
+    }
+
+    let mut result = natural.to_vec();
+    let mut locked = vec![false; n];
+    let mut locked_total = 0usize;
+    let mut unlocked_count = n;
+
+    // Iteratively lock columns whose natural width fits in the fair share.
+    loop {
+        let remaining = available.saturating_sub(locked_total);
+        let share = if unlocked_count > 0 {
+            remaining / unlocked_count
+        } else {
+            0
+        };
+
+        let mut changed = false;
+        for i in 0..n {
+            if !locked[i] && result[i] <= share {
+                locked[i] = true;
+                locked_total += result[i];
+                unlocked_count -= 1;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Distribute remaining space among unlocked (wide) columns.
+    if unlocked_count > 0 {
+        let remaining = available.saturating_sub(locked_total);
+        let share = remaining / unlocked_count;
+        let extra = remaining % unlocked_count;
+        let mut idx = 0;
+        for i in 0..n {
+            if !locked[i] {
+                result[i] = share + if idx < extra { 1 } else { 0 };
+                idx += 1;
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,7 +890,7 @@ mod tests {
 
     /// Helper: render markdown and collect line text (without styling).
     fn render_plain(input: &str) -> Vec<String> {
-        render_markdown(input, None)
+        render_markdown(input, None, None)
             .iter()
             .map(|line| {
                 line.spans
@@ -767,7 +921,7 @@ mod tests {
 
     #[test]
     fn emphasis_and_strong() {
-        let lines = render_markdown("*em* **strong**", None);
+        let lines = render_markdown("*em* **strong**", None, None);
         assert_eq!(lines.len(), 1);
         // Check that there are separate spans with appropriate styles
         let spans = &lines[0].spans;
@@ -776,7 +930,7 @@ mod tests {
 
     #[test]
     fn inline_code() {
-        let lines = render_markdown("Use `print()`", None);
+        let lines = render_markdown("Use `print()`", None, None);
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Use print()");
@@ -869,7 +1023,7 @@ mod tests {
     #[test]
     fn r_code_block_syntax_highlight() {
         let input = "```r\nx <- 42\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Should produce one line: "x <- 42"
         let text: String = lines
             .iter()
@@ -917,7 +1071,7 @@ mod tests {
     #[test]
     fn non_r_code_block_uses_dim_style() {
         let input = "```python\nprint('hello')\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Should produce one line with dim style (not syntax highlighted)
         let code_line = lines.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -943,7 +1097,7 @@ mod tests {
     #[test]
     fn r_code_block_multiline() {
         let input = "```r\nif (TRUE) {\n  print(x)\n}\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         let texts: Vec<String> = lines
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
@@ -971,7 +1125,7 @@ mod tests {
     #[test]
     fn r_code_block_with_comments() {
         let input = "```r\n# A comment\nx <- 1\n```";
-        let lines = render_markdown(input, None);
+        let lines = render_markdown(input, None, None);
         // Comment line should be DarkGray
         let comment_line = lines.iter().find(|l| {
             l.spans
@@ -996,7 +1150,7 @@ mod tests {
         // Code blocks without a language tag should use the default language
         let input = "```\nx <- 42\n```";
         // Without default: no highlighting (dim style)
-        let lines_no_default = render_markdown(input, None);
+        let lines_no_default = render_markdown(input, None, None);
         let code_line = lines_no_default.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("<-")
@@ -1006,7 +1160,7 @@ mod tests {
         assert_eq!(code_line.unwrap().spans.len(), 1);
 
         // With default "r": should get syntax highlighting
-        let lines_r = render_markdown(input, Some("r"));
+        let lines_r = render_markdown(input, Some("r"), None);
         let code_line = lines_r.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("<-")
@@ -1031,7 +1185,7 @@ mod tests {
     fn explicit_lang_overrides_default() {
         // Explicit language tag should take precedence over default
         let input = "```python\nprint('hello')\n```";
-        let lines = render_markdown(input, Some("r"));
+        let lines = render_markdown(input, Some("r"), None);
         let code_line = lines.iter().find(|l| {
             let t: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             t.contains("print")
@@ -1056,5 +1210,163 @@ mod tests {
         let input = "First paragraph.\n\nSecond paragraph.";
         let lines = render_plain(input);
         assert_eq!(lines, vec!["First paragraph.", "", "Second paragraph."]);
+    }
+
+    // ── wrap_width ─────────────────────────────────────────────────────
+
+    /// Helper: render with wrapping and collect plain text.
+    fn render_wrapped(input: &str, width: usize) -> Vec<String> {
+        render_markdown(input, None, Some(width))
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wrap_long_paragraph() {
+        let input = "Hello world, this is a long paragraph that should wrap.";
+        let lines = render_wrapped(input, 20);
+        assert!(lines.len() > 1, "Should wrap into multiple lines");
+        for line in &lines {
+            assert!(
+                unicode_width::UnicodeWidthStr::width(line.as_str()) <= 20,
+                "Line too wide: {:?} ({})",
+                line,
+                unicode_width::UnicodeWidthStr::width(line.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_code_block_not_wrapped() {
+        let input =
+            "```\nthis is a very long code line that should not be wrapped at all ever\n```";
+        let lines = render_wrapped(input, 20);
+        let code_text: String = lines
+            .iter()
+            .find(|l| l.contains("this is"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(code_text.len() > 20, "Code block should NOT be wrapped");
+    }
+
+    #[test]
+    fn wrap_table_cells() {
+        let input = "| Arg | Description |\n|---|---|\n| x | A very long description that should be wrapped within the cell |";
+        let lines = render_wrapped(input, 40);
+        // The table should have more rows than the raw 3 (header + sep + 1 data row)
+        // because the long description wraps.
+        assert!(
+            lines.len() > 3,
+            "Table cell should wrap: got {} lines: {:?}",
+            lines.len(),
+            lines
+        );
+        // All lines should fit within the wrap width
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.as_str());
+            assert!(w <= 40, "Table line too wide ({} > 40): {:?}", w, line);
+        }
+    }
+
+    #[test]
+    fn wrap_table_narrow_preserves_content() {
+        let input = "| Name | Value |\n|---|---|\n| foo | bar |";
+        // Wide enough that no wrapping is needed
+        let lines_wide = render_wrapped(input, 80);
+        // Narrow — may wrap but should still contain all content
+        let lines_narrow = render_wrapped(input, 30);
+        let all_text_wide: String = lines_wide.join("");
+        let all_text_narrow: String = lines_narrow.join("");
+        assert!(all_text_narrow.contains("foo"));
+        assert!(all_text_narrow.contains("bar"));
+        assert!(all_text_wide.contains("foo"));
+        assert!(all_text_wide.contains("bar"));
+    }
+
+    #[test]
+    fn wrap_prose_but_not_code_block() {
+        // Integration test: a document with both a paragraph and a code block.
+        // The paragraph should wrap; the code block should not.
+        let input = "This is a long paragraph that will be wrapped at the given width.\n\n```\ncode_line_that_must_not_be_wrapped_ever()\n```";
+        let lines = render_wrapped(input, 30);
+
+        // Paragraph lines should all fit within 30 columns and actually wrap
+        let code_start = lines
+            .iter()
+            .position(|l| l.contains("code_line"))
+            .expect("Should contain the code line");
+        assert!(
+            code_start > 2,
+            "Paragraph should have wrapped into multiple lines, got {}",
+            code_start
+        );
+        for (i, line) in lines.iter().enumerate() {
+            if i < code_start && !line.is_empty() {
+                let w = unicode_width::UnicodeWidthStr::width(line.as_str());
+                assert!(
+                    w <= 30,
+                    "Paragraph line should wrap (line {}: {} cols): {:?}",
+                    i,
+                    w,
+                    line
+                );
+            }
+        }
+
+        // Code block line should NOT be wrapped (wider than 30)
+        let code_line = &lines[code_start];
+        assert!(
+            code_line.contains("code_line_that_must_not_be_wrapped_ever()"),
+            "Code block should remain intact"
+        );
+    }
+
+    #[test]
+    fn distribute_column_widths_empty() {
+        let empty: Vec<usize> = vec![];
+        assert_eq!(distribute_column_widths(&[], 10), empty);
+    }
+
+    #[test]
+    fn distribute_column_widths_single_column() {
+        // Single wide column gets clamped to available
+        assert_eq!(distribute_column_widths(&[20], 10), vec![10]);
+    }
+
+    #[test]
+    fn distribute_column_widths_all_fit() {
+        // All columns fit within their fair share — no redistribution needed
+        assert_eq!(distribute_column_widths(&[3, 3, 3], 12), vec![3, 3, 3]);
+    }
+
+    #[test]
+    fn distribute_column_widths_one_wide() {
+        // One wide column, two narrow. Narrow keep natural, wide gets the rest.
+        let result = distribute_column_widths(&[2, 20, 3], 15);
+        assert_eq!(result[0], 2); // narrow, kept
+        assert_eq!(result[2], 3); // narrow, kept
+        assert_eq!(result[1], 10); // wide, gets 15 - 2 - 3 = 10
+        assert_eq!(result.iter().sum::<usize>(), 15);
+    }
+
+    #[test]
+    fn distribute_column_widths_available_less_than_n() {
+        // available < n_cols: first `available` columns get 1, rest get 0
+        let result = distribute_column_widths(&[5, 10, 15], 2);
+        assert_eq!(result, vec![1, 1, 0]);
+        assert!(result.iter().sum::<usize>() <= 2);
+    }
+
+    #[test]
+    fn distribute_column_widths_available_equals_n() {
+        // available == n_cols: each column gets exactly 1
+        let result = distribute_column_widths(&[5, 10, 15], 3);
+        assert_eq!(result, vec![1, 1, 1]);
     }
 }

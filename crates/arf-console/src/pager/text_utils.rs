@@ -3,6 +3,7 @@
 //! All width calculations use display columns (not character count), so
 //! full-width characters (CJK, some emoji) correctly occupy 2 columns.
 
+use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
 /// Return the display width of a string in terminal columns.
@@ -134,6 +135,168 @@ pub fn pad_to_width(s: &str, width: usize) -> String {
         }
     } else {
         format!("{}{}", s, " ".repeat(width - w))
+    }
+}
+
+/// Wrap a sequence of styled spans to fit within `max_width` display columns.
+///
+/// Returns a `Vec` of lines, where each line is a `Vec<Span>`.  If the total
+/// width of the input fits within `max_width`, returns it as a single-element
+/// vec unchanged.
+///
+/// - Breaks at word boundaries (spaces) and after CJK characters.
+/// - Falls back to character-level wrapping for words longer than the
+///   available width.
+/// - Continuation lines are indented by `continuation_indent` spaces.
+/// - Span styles are preserved across split boundaries.
+pub fn wrap_spans(
+    spans: &[Span<'static>],
+    max_width: usize,
+    continuation_indent: usize,
+) -> Vec<Vec<Span<'static>>> {
+    use ratatui::style::Style;
+    use unicode_width::UnicodeWidthChar;
+
+    if max_width == 0 {
+        return vec![spans.to_vec()];
+    }
+
+    // Fast path: check if wrapping is needed at all.
+    let total_width: usize = spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    if total_width <= max_width {
+        return vec![spans.to_vec()];
+    }
+
+    // Per-character metadata for wrapping decisions.
+    struct CI {
+        ch: char,
+        width: usize,
+        style: Style,
+        is_space: bool,
+        is_cjk: bool,
+    }
+
+    /// Build a `Vec<Span>` from a slice of CI, coalescing adjacent chars
+    /// with the same style.
+    fn build_line(chars: &[CI], is_continuation: bool, indent: usize) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if is_continuation && indent > 0 {
+            spans.push(Span::raw(" ".repeat(indent)));
+        }
+        if chars.is_empty() {
+            return spans;
+        }
+        let mut cur_style = chars[0].style;
+        let mut cur_text = String::new();
+        for ci in chars {
+            if ci.style == cur_style {
+                cur_text.push(ci.ch);
+            } else {
+                if !cur_text.is_empty() {
+                    spans.push(Span::styled(cur_text, cur_style));
+                    cur_text = String::new();
+                }
+                cur_style = ci.style;
+                cur_text.push(ci.ch);
+            }
+        }
+        if !cur_text.is_empty() {
+            spans.push(Span::styled(cur_text, cur_style));
+        }
+        spans
+    }
+
+    let mut chars: Vec<CI> = Vec::new();
+    for span in spans {
+        let style = span.style;
+        for ch in span.content.chars() {
+            let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+            chars.push(CI {
+                ch,
+                width: w,
+                style,
+                is_space: ch == ' ',
+                is_cjk: w == 2,
+            });
+        }
+    }
+
+    let mut result: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut pos = 0;
+
+    while pos < chars.len() {
+        let is_continuation = !result.is_empty();
+        let line_width = if is_continuation {
+            max_width.saturating_sub(continuation_indent)
+        } else {
+            max_width
+        };
+
+        if line_width == 0 {
+            // Continuation indent consumed all available width.
+            // Fall back to wrapping without indent to avoid dropping text.
+            result.push(build_line(&chars[pos..pos + 1], false, 0));
+            pos += 1;
+            continue;
+        }
+
+        let mut col = 0;
+        let mut end = pos;
+        let mut last_break = None;
+
+        while end < chars.len() {
+            let ci = &chars[end];
+            if col + ci.width > line_width {
+                break;
+            }
+            col += ci.width;
+            end += 1;
+
+            if ci.is_space || (ci.is_cjk && end < chars.len()) {
+                last_break = Some(end);
+            }
+        }
+
+        if end == chars.len() {
+            result.push(build_line(
+                &chars[pos..end],
+                is_continuation,
+                continuation_indent,
+            ));
+            break;
+        }
+
+        let split = if let Some(bp) = last_break {
+            if bp > pos { bp } else { end.max(pos + 1) }
+        } else {
+            end.max(pos + 1)
+        };
+
+        // Trim trailing spaces at the break.
+        let mut trim_end = split;
+        while trim_end > pos && chars[trim_end - 1].is_space {
+            trim_end -= 1;
+        }
+
+        result.push(build_line(
+            &chars[pos..trim_end],
+            is_continuation,
+            continuation_indent,
+        ));
+
+        pos = split;
+        while pos < chars.len() && chars[pos].is_space {
+            pos += 1;
+        }
+    }
+
+    if result.is_empty() {
+        vec![spans.to_vec()]
+    } else {
+        result
     }
 }
 
@@ -489,5 +652,137 @@ mod tests {
         let (r2, _) = scroll_display("日本語テスト", 4, 0);
         assert_eq!(display_width(&r2), 4);
         assert_eq!(r2, "日 …");
+    }
+
+    // ── wrap_spans ────────────────────────────────────────────────────
+
+    /// Helper to collect wrapped lines as plain text strings.
+    fn wrap_plain(text: &str, max_width: usize, indent: usize) -> Vec<String> {
+        let spans = vec![Span::raw(text.to_string())];
+        wrap_spans(&spans, max_width, indent)
+            .into_iter()
+            .map(|line| line.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn wrap_no_op_when_fits() {
+        assert_eq!(wrap_plain("hello world", 20, 0), vec!["hello world"]);
+    }
+
+    #[test]
+    fn wrap_at_word_boundary() {
+        assert_eq!(
+            wrap_plain("hello world foo", 12, 0),
+            vec!["hello world", "foo"]
+        );
+    }
+
+    #[test]
+    fn wrap_continuation_indent() {
+        assert_eq!(
+            wrap_plain("hello world foo", 12, 2),
+            vec!["hello world", "  foo"]
+        );
+    }
+
+    #[test]
+    fn wrap_long_word_char_break() {
+        // "abcdefghij" (10 chars) with max_width 5 → char-level wrap
+        assert_eq!(wrap_plain("abcdefghij", 5, 0), vec!["abcde", "fghij"]);
+    }
+
+    #[test]
+    fn wrap_cjk_break() {
+        // "日本語テスト" = 12 cols, max_width 8 → break after a CJK char
+        let result = wrap_plain("日本語テスト", 8, 0);
+        assert_eq!(result.len(), 2);
+        // First line: 日(2)+本(2)+語(2)+テ(2)=8 fits, but テ would make it go over...
+        // Actually: 日(2)=2, 本(2)=4, 語(2)=6, テ(2)=8 → all fit in 8
+        // But then スト doesn't fit, break after テ
+        assert_eq!(result[0], "日本語テ");
+        assert_eq!(result[1], "スト");
+    }
+
+    #[test]
+    fn wrap_preserves_styles() {
+        use ratatui::style::Style;
+        let bold = Style::new().bold();
+        let spans = vec![
+            Span::raw("hello ".to_string()),
+            Span::styled("world foo".to_string(), bold),
+        ];
+        let lines = wrap_spans(&spans, 10, 0);
+        assert_eq!(lines.len(), 2);
+        // First line: "hello " + "worl" (styled) → "hello worl"? No...
+        // "hello " (6) + "world" is 11 total > 10
+        // "hello " (6) + "wor" (9) + "l" (10) + "d" (11) → break after space in "world foo"
+        // Actually "hello world foo" = 15 cols. At 10 cols with word boundary:
+        // "hello" (5) + " " (6) + "world" (11) → overflows at 11
+        // break point after "hello " → first line "hello", second line "world foo"
+        // Wait, let's trace: pos=0, col=0, line_width=10
+        // 'h'(1) col=1, 'e'(1) col=2, 'l'(1) col=3, 'l'(1) col=4, 'o'(1) col=5, ' '(1) col=6 last_break=6
+        // 'w'(1) col=7, 'o'(1) col=8, 'r'(1) col=9, 'l'(1) col=10
+        // 'd'(1) col=11 > 10 → break. end=10. last_break=6. split=6.
+        // trim trailing spaces: chars[5].is_space → trim_end=5
+        // line 1: chars[0..5] = "hello"
+        // pos=6, skip leading spaces: chars[6]='w', no skip
+        // Actually wait, pos=split=6, chars[6]='w' not space → no skip
+        // line 2: "world foo" → fits in 10-indent? yes with indent=0
+        let line1_text: String = lines[0].iter().map(|s| s.content.as_ref()).collect();
+        let line2_text: String = lines[1].iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(line1_text, "hello");
+        assert_eq!(line2_text, "world foo");
+        // Check that "world foo" retains bold style
+        let styled_span = lines[1]
+            .iter()
+            .find(|s| s.content.as_ref().contains("world"));
+        assert!(styled_span.is_some());
+        assert!(
+            styled_span
+                .unwrap()
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn wrap_zero_width_no_panic() {
+        let result = wrap_plain("hello", 0, 0);
+        assert_eq!(result, vec!["hello"]);
+    }
+
+    #[test]
+    fn wrap_empty_input() {
+        let spans: Vec<Span<'static>> = vec![];
+        let result = wrap_spans(&spans, 10, 0);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_empty());
+    }
+
+    #[test]
+    fn wrap_multiple_spaces_collapsed() {
+        // After wrapping at a space, leading spaces on next line are skipped
+        let result = wrap_plain("aaa   bbb", 4, 0);
+        assert_eq!(result, vec!["aaa", "bbb"]);
+    }
+
+    #[test]
+    fn wrap_spans_line_width_zero_fallback() {
+        // When continuation_indent >= max_width, line_width becomes 0 on
+        // continuation lines.  The fallback should emit one char at a time
+        // rather than dropping text.
+        let spans = vec![Span::raw("abc")];
+        let result = wrap_spans(&spans, 2, 3); // continuation indent (3) > max_width (2)
+        // First line fits "ab" (max_width=2), then continuation lines have
+        // line_width = 2 - 3 = 0, so fallback emits one char at a time.
+        assert_eq!(result.len(), 2); // "ab" + "c"
+        let text: String = result
+            .iter()
+            .map(|line| line.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("|");
+        assert_eq!(text, "ab|c");
     }
 }
