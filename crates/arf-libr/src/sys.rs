@@ -183,19 +183,6 @@ fn set_r_path_vars_from_wrapper(r_home: &Path) {
     }
 }
 
-/// Set `R_LIBS_SITE` from `R_HOME` when the env var is not already set.
-///
-/// R's default behaviour (see `?base::libPaths`): when `R_LIBS_SITE` is unset,
-/// R uses `R_HOME/site-library` if it exists.  `R_HOME/library` is always
-/// included as `.Library` and does not need to be set via `R_LIBS_SITE`.
-fn set_r_libs_site_from_r_home(r_home: &Path) {
-    let site_library = r_home.join("site-library");
-    if site_library.exists() {
-        // SAFETY: caller ensures no concurrent env var access
-        unsafe { env::set_var("R_LIBS_SITE", site_library.to_string_lossy().as_ref()) };
-    }
-}
-
 /// Extract a variable assignment from an R wrapper script.
 ///
 /// Looks for lines of the form `VAR_NAME=value` and returns the value with
@@ -731,15 +718,9 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
         unsafe { env::set_var("R_HOME", &r_home) };
     }
 
-    // Set R_LIBS_SITE to match R's default behavior: when unset, R uses
-    // R_HOME/site-library if it exists (see ?base::libPaths). R_HOME/library
-    // is always included as .Library regardless of R_LIBS_SITE.
-    // SAFETY: We're in single-threaded initialization
-    if env::var("R_LIBS_SITE").is_err()
-        && let Ok(r_home) = get_r_home()
-    {
-        set_r_libs_site_from_r_home(&r_home);
-    }
+    // NOTE: R_LIBS_SITE is intentionally NOT set here. R handles it via
+    // Renviron (defaulting to R_HOME/site-library when unset) and .Library
+    // (R_HOME/library) is always included regardless. See GitHub issue #86.
 
     // Set R_DOC_DIR, R_SHARE_DIR, R_INCLUDE_DIR if not already set.
     // These are normally exported by R's shell wrapper script ($R_HOME/bin/R),
@@ -2321,57 +2302,6 @@ export R_DOC_DIR
         match original {
             Some(val) => unsafe { std::env::set_var("R_DOC_DIR", val) },
             None => unsafe { std::env::remove_var("R_DOC_DIR") },
-        }
-    }
-
-    #[test]
-    fn test_set_r_libs_site_uses_site_library_when_present() {
-        // NOTE: This test mutates the process-global R_LIBS_SITE env var.
-        // Save/restore to minimise interference with parallel tests.
-        let original = std::env::var("R_LIBS_SITE").ok();
-
-        // Ensure R_LIBS_SITE is unset before test
-        unsafe { std::env::remove_var("R_LIBS_SITE") };
-
-        // Create a fake R_HOME with a site-library directory
-        let tmp = tempfile::tempdir().unwrap();
-        let site_lib = tmp.path().join("site-library");
-        std::fs::create_dir_all(&site_lib).unwrap();
-
-        set_r_libs_site_from_r_home(tmp.path());
-
-        // R_LIBS_SITE should point to site-library
-        assert_eq!(
-            std::env::var("R_LIBS_SITE").unwrap(),
-            site_lib.to_string_lossy()
-        );
-
-        // Restore
-        match original {
-            Some(val) => unsafe { std::env::set_var("R_LIBS_SITE", val) },
-            None => unsafe { std::env::remove_var("R_LIBS_SITE") },
-        }
-    }
-
-    #[test]
-    fn test_set_r_libs_site_does_nothing_when_no_site_library() {
-        let original = std::env::var("R_LIBS_SITE").ok();
-
-        // Ensure R_LIBS_SITE is unset before test
-        unsafe { std::env::remove_var("R_LIBS_SITE") };
-
-        // Create a fake R_HOME WITHOUT a site-library directory
-        let tmp = tempfile::tempdir().unwrap();
-
-        set_r_libs_site_from_r_home(tmp.path());
-
-        // R_LIBS_SITE should remain unset
-        assert!(std::env::var("R_LIBS_SITE").is_err());
-
-        // Restore
-        match original {
-            Some(val) => unsafe { std::env::set_var("R_LIBS_SITE", val) },
-            None => unsafe { std::env::remove_var("R_LIBS_SITE") },
         }
     }
 }
