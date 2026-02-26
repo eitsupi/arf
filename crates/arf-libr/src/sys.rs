@@ -152,6 +152,7 @@ const R_WRAPPER_ENV_VARS: &[&str] = &["R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR
 ///
 /// Note: ark solves the same problem by spawning
 /// `R --vanilla -s -e "cat(R.home('share'), ...)"` to query the values.
+
 /// Set `R_LIBS_SITE` from `R_HOME` when the env var is not already set.
 ///
 /// R's default behaviour (see `?base::libPaths`): when `R_LIBS_SITE` is unset,
@@ -160,7 +161,7 @@ const R_WRAPPER_ENV_VARS: &[&str] = &["R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR
 fn set_r_libs_site_from_r_home(r_home: &Path) {
     let site_library = r_home.join("site-library");
     if site_library.exists() {
-        // SAFETY: called during single-threaded initialization
+        // SAFETY: caller ensures no concurrent env var access
         unsafe { env::set_var("R_LIBS_SITE", site_library.to_string_lossy().as_ref()) };
     }
 }
