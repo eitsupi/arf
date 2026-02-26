@@ -6,29 +6,12 @@
 
 ### Added
 
-- Help pages now rendered via rd2qmd Markdown pipeline, replacing the broken Rd2txt overstrike-based renderer (#83)
-  - Headings, emphasis, inline code, code blocks, lists, blockquotes, and pipe tables are properly styled
-  - Pipe table `<br>` line breaks supported; columns aligned using Unicode display width
-- R syntax highlighting in pager code blocks for help pages and vignettes (#83)
-  - Uses tree-sitter-r for accurate tokenization, sharing the same grammar as the REPL highlighter
-  - Untagged code blocks in R help pages default to R highlighting
-- Pager Markdown content now word-wraps prose, list items, blockquotes, and table cells to fit terminal width (#89)
-  - Re-wraps on terminal resize
-  - Code blocks and headings are intentionally not wrapped
-- New `r-vignette-to-md` crate for converting Pandoc-generated R vignette HTML to Markdown (#81)
-  - Detects code block languages from Pandoc's `sourceCode` class pattern (R, Python, bash, etc.)
-  - Removes only Pandoc code block anchors (`[](#cb...)`), preserving footnote backrefs and other anchors
-
-### Changed
-
-- Pager rendering engine migrated from raw crossterm to ratatui for improved styling and maintainability (#82)
+- Help pages are now rendered as styled Markdown with syntax-highlighted R code blocks (#83)
+- Pager content word-wraps to fit terminal width and re-wraps on resize (#89)
+- Help browser: vignettes and demos listed in search results can now be opened when selected (#80)
 
 ### Fixed
 
-- Help browser: vignettes and demos listed in search results can now be opened when selected (#80)
-  - Vignettes are converted from HTML to Markdown for display
-  - Demo entries show a message with the command to run in R
-  - PDF vignettes show an explanatory message (cannot be rendered in terminal)
 - **Windows:** Fixed child process not being waited on during restart, which could cause orphaned processes (#84)
 - `R_LIBS_SITE` is no longer incorrectly overridden, fixing site-library discovery on Scoop-installed R (Windows) (#86)
 
