@@ -2,24 +2,17 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-02-27
+
 ### Added
 
-- New `r-vignette-to-md` crate for converting Pandoc-generated R vignette HTML to Markdown
-  - Detects code block languages from Pandoc's `sourceCode` class pattern (R, Python, bash, etc.)
-  - Removes only Pandoc code block anchors (`[](#cb...)`), preserving footnote backrefs and other anchors
-- Help pages now rendered via rd2qmd Markdown pipeline, replacing the broken Rd2txt overstrike-based renderer
-  - Headings, emphasis, inline code, code blocks, lists, blockquotes, and pipe tables are properly styled
-  - Pipe table `<br>` line breaks supported; columns aligned using Unicode display width
-- R syntax highlighting in pager code blocks for help pages and vignettes
-  - Uses tree-sitter-r for accurate tokenization, sharing the same grammar as the REPL highlighter
-  - Untagged code blocks in R help pages default to R highlighting
+- Help pages are now rendered as styled Markdown with syntax-highlighted R code blocks (#83)
+- Help browser: vignettes and demos listed in search results can now be opened when selected (#80)
 
 ### Fixed
 
-- Help browser: vignettes and demos listed in search results can now be opened when selected
-  - Vignettes are converted from HTML to Markdown for display
-  - Demo entries show a message with the command to run in R
-  - PDF vignettes show an explanatory message (cannot be rendered in terminal)
+- **Windows:** Fixed child process not being waited on during restart, which could cause orphaned processes (#84)
+- `R_LIBS_SITE` is no longer incorrectly overridden, fixing site-library discovery on Scoop-installed R (Windows) (#86)
 
 ## [0.2.2] - 2026-02-11
 
