@@ -7,7 +7,6 @@
 ### Added
 
 - Help pages are now rendered as styled Markdown with syntax-highlighted R code blocks (#83)
-- Pager content word-wraps to fit terminal width and re-wraps on resize (#89)
 - Help browser: vignettes and demos listed in search results can now be opened when selected (#80)
 
 ### Fixed
