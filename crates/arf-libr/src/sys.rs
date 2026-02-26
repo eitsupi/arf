@@ -717,14 +717,16 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
         unsafe { env::set_var("R_HOME", &r_home) };
     }
 
-    // Set R_LIBS_SITE to ensure R can find base packages (including compiler for JIT)
+    // Set R_LIBS_SITE to match R's default behavior: when unset, R uses
+    // R_HOME/site-library if it exists (see ?base::libPaths). R_HOME/library
+    // is always included as .Library regardless of R_LIBS_SITE.
     // SAFETY: We're in single-threaded initialization
     if env::var("R_LIBS_SITE").is_err()
         && let Ok(r_home) = get_r_home()
     {
-        let lib_path = r_home.join("library");
-        if lib_path.exists() {
-            unsafe { env::set_var("R_LIBS_SITE", lib_path.to_string_lossy().as_ref()) };
+        let site_library = r_home.join("site-library");
+        if site_library.exists() {
+            unsafe { env::set_var("R_LIBS_SITE", site_library.to_string_lossy().as_ref()) };
         }
     }
 
