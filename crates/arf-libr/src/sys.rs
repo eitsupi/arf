@@ -152,6 +152,7 @@ const R_WRAPPER_ENV_VARS: &[&str] = &["R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR
 ///
 /// Note: ark solves the same problem by spawning
 /// `R --vanilla -s -e "cat(R.home('share'), ...)"` to query the values.
+///
 /// We parse the wrapper script directly instead to avoid the ~300ms R
 /// startup cost, which matters for a terminal application.
 fn set_r_path_vars_from_wrapper(r_home: &Path) {
@@ -717,16 +718,9 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
         unsafe { env::set_var("R_HOME", &r_home) };
     }
 
-    // Set R_LIBS_SITE to ensure R can find base packages (including compiler for JIT)
-    // SAFETY: We're in single-threaded initialization
-    if env::var("R_LIBS_SITE").is_err()
-        && let Ok(r_home) = get_r_home()
-    {
-        let lib_path = r_home.join("library");
-        if lib_path.exists() {
-            unsafe { env::set_var("R_LIBS_SITE", lib_path.to_string_lossy().as_ref()) };
-        }
-    }
+    // NOTE: R_LIBS_SITE is intentionally NOT set here. R handles it via
+    // Renviron (defaulting to R_HOME/site-library when unset) and .Library
+    // (R_HOME/library) is always included regardless. See GitHub issue #86.
 
     // Set R_DOC_DIR, R_SHARE_DIR, R_INCLUDE_DIR if not already set.
     // These are normally exported by R's shell wrapper script ($R_HOME/bin/R),
