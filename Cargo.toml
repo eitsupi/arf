@@ -89,4 +89,8 @@ crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "e81d5d64
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = "s"
