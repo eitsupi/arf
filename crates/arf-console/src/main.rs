@@ -203,18 +203,18 @@ fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, 
                 ConfigLoadError::Read { .. } => ConfigStatus::ReadError,
                 ConfigLoadError::Parse { .. } => ConfigStatus::ParseError,
             };
-            eprintln!("Warning: {}", e);
+            let source_msg = match &e {
+                ConfigLoadError::Read { source, .. } => source.to_string(),
+                ConfigLoadError::Parse { source, .. } => source.to_string(),
+            };
+            eprintln!(
+                "Warning: Failed to load config from {}: {}",
+                path_display, source_msg
+            );
             eprintln!(
                 "         Using default configuration. Run `arf config check` to see details."
             );
-            log::warn!(
-                "Config load error for {}: {}",
-                path_display,
-                match &e {
-                    ConfigLoadError::Read { source, .. } => source.to_string(),
-                    ConfigLoadError::Parse { source, .. } => source.to_string(),
-                }
-            );
+            log::warn!("Config load error for {}: {}", path_display, source_msg);
             (Config::default(), config_path, status)
         }
     }
@@ -233,7 +233,18 @@ fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
     match result {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Warning: {}", e);
+            let (path_display, source_msg) = match &e {
+                ConfigLoadError::Read { path, source } => {
+                    (mask_home_path(path), source.to_string())
+                }
+                ConfigLoadError::Parse { path, source } => {
+                    (mask_home_path(path), source.to_string())
+                }
+            };
+            eprintln!(
+                "Warning: Failed to load config from {}: {}",
+                path_display, source_msg
+            );
             eprintln!("         Using default configuration.");
             Config::default()
         }
@@ -263,9 +274,10 @@ fn handle_config_check(path: Option<&std::path::Path>) -> Result<()> {
     };
 
     if !config_path.exists() {
-        println!("Config file not found: {}", mask_home_path(&config_path));
-        println!("Run `arf config init` to create a default configuration file.");
-        return Ok(());
+        anyhow::bail!(
+            "Config file not found: {}\nRun `arf config init` to create a default configuration file.",
+            mask_home_path(&config_path)
+        );
     }
 
     println!("Checking config file: {}", mask_home_path(&config_path));

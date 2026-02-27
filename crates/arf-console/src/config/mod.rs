@@ -926,4 +926,28 @@ auto_match = false
         assert!(msg.contains("parse"), "Should mention parse: {}", msg);
         assert!(msg.contains("arf.toml"), "Should mention path: {}", msg);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_load_config_from_path_read_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unreadable.toml");
+        std::fs::write(&path, "[editor]\nauto_match = true").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = load_config_from_path(&path);
+        assert!(result.is_err(), "Unreadable file should return Err");
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ConfigLoadError::Read { .. }),
+            "Should be a ReadError: {:?}",
+            err
+        );
+
+        // Restore permissions so tempdir cleanup succeeds
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
 }

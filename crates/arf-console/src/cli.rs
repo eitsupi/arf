@@ -249,7 +249,7 @@ pub enum ConfigAction {
     /// Validate the configuration file
     ///
     /// Check the config file for syntax errors and report any issues.
-    /// Exit code 0 means valid, 1 means errors found.
+    /// Exit code 0 means valid, non-zero means file not found or has errors.
     Check {
         /// Path to configuration file to check (defaults to XDG config location)
         #[arg(short, long, value_hint = ValueHint::FilePath)]
