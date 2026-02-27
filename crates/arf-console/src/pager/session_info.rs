@@ -1,7 +1,7 @@
 //! Session information display.
 
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
-use crate::config::{RSourceStatus, mask_home_path};
+use crate::config::{ConfigStatus, RSourceStatus, mask_home_path};
 use crate::editor::prompt::get_r_version;
 use crate::external::{formatter, rig};
 use crate::repl::state::PromptRuntimeConfig;
@@ -15,6 +15,7 @@ use std::path::PathBuf;
 pub fn display_session_info(
     prompt_config: &PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
+    config_status: ConfigStatus,
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
@@ -22,6 +23,7 @@ pub fn display_session_info(
     let lines = generate_info_lines(
         prompt_config,
         config_path,
+        config_status,
         r_history_path,
         shell_history_path,
         r_source_status,
@@ -44,6 +46,7 @@ pub fn display_session_info(
 fn generate_info_lines(
     prompt_config: &PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
+    config_status: ConfigStatus,
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
@@ -66,7 +69,23 @@ fn generate_info_lines(
     // Config file path
     if let Some(path) = config_path {
         if path.exists() {
-            lines.push(format!("Config file:    {}", mask_home_path(path)));
+            match config_status {
+                ConfigStatus::Ok => {
+                    lines.push(format!("Config file:    {}", mask_home_path(path)));
+                }
+                ConfigStatus::ParseError => {
+                    lines.push(format!(
+                        "Config file:    {} (parse error, using defaults)",
+                        mask_home_path(path)
+                    ));
+                }
+                ConfigStatus::ReadError => {
+                    lines.push(format!(
+                        "Config file:    {} (read error, using defaults)",
+                        mask_home_path(path)
+                    ));
+                }
+            }
         } else {
             lines.push(format!(
                 "Config file:    {} (not found, using defaults)",

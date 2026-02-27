@@ -29,6 +29,64 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Status of config file loading, for display in `:info`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigStatus {
+    /// Config loaded successfully (or no config file exists).
+    Ok,
+    /// Config file could not be read (e.g., permission denied).
+    ReadError,
+    /// Config file has TOML syntax or schema errors.
+    ParseError,
+}
+
+/// Error type for configuration loading failures.
+#[derive(Debug)]
+pub enum ConfigLoadError {
+    /// Failed to read the config file from disk.
+    Read {
+        source: std::io::Error,
+        path: PathBuf,
+    },
+    /// Failed to parse the TOML content.
+    Parse {
+        source: toml::de::Error,
+        path: PathBuf,
+    },
+}
+
+impl std::fmt::Display for ConfigLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigLoadError::Read { source, path } => {
+                write!(
+                    f,
+                    "Failed to read config file {}: {}",
+                    path.display(),
+                    source
+                )
+            }
+            ConfigLoadError::Parse { source, path } => {
+                write!(
+                    f,
+                    "Failed to parse config file {}: {}",
+                    path.display(),
+                    source
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ConfigLoadError::Read { source, .. } => Some(source),
+            ConfigLoadError::Parse { source, .. } => Some(source),
+        }
+    }
+}
+
 /// Application name for XDG directories.
 const APP_NAME: &str = "arf";
 
@@ -93,36 +151,41 @@ pub fn mask_home_path(path: &std::path::Path) -> String {
     path.display().to_string()
 }
 
-/// Load configuration from file, or return defaults if not found.
-pub fn load_config() -> Config {
+/// Load configuration from the default XDG config file.
+///
+/// Returns `Ok(Config::default())` if no config file exists.
+/// Returns `Err` if the file exists but cannot be read or parsed.
+pub fn load_config() -> Result<Config, ConfigLoadError> {
     let Some(config_path) = config_file_path() else {
-        return Config::default();
+        return Ok(Config::default());
     };
 
     if !config_path.exists() {
-        return Config::default();
+        return Ok(Config::default());
     }
 
-    match fs::read_to_string(&config_path) {
-        Ok(content) => toml::from_str(&content).unwrap_or_default(),
-        Err(_) => Config::default(),
-    }
+    load_config_from_path(&config_path)
 }
 
 /// Load configuration from a specific path.
-pub fn load_config_from_path(path: &std::path::Path) -> Config {
+///
+/// Returns `Ok(Config::default())` if the file does not exist.
+/// Returns `Err` if the file exists but cannot be read or parsed.
+pub fn load_config_from_path(path: &std::path::Path) -> Result<Config, ConfigLoadError> {
     if !path.exists() {
         log::warn!("Config file not found: {:?}", path);
-        return Config::default();
+        return Ok(Config::default());
     }
 
-    match fs::read_to_string(path) {
-        Ok(content) => toml::from_str(&content).unwrap_or_default(),
-        Err(e) => {
-            log::warn!("Failed to read config file: {}", e);
-            Config::default()
-        }
-    }
+    let content = fs::read_to_string(path).map_err(|e| ConfigLoadError::Read {
+        source: e,
+        path: path.to_path_buf(),
+    })?;
+
+    toml::from_str(&content).map_err(|e| ConfigLoadError::Parse {
+        source: e,
+        path: path.to_path_buf(),
+    })
 }
 
 /// Generate default configuration as a TOML string with comments.
@@ -800,5 +863,91 @@ show_banner = false
                 masked
             );
         }
+    }
+
+    #[test]
+    fn test_load_config_from_path_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.toml");
+        std::fs::write(&path, "[editor\nauto_match = true").unwrap();
+
+        let result = load_config_from_path(&path);
+        assert!(result.is_err(), "Invalid TOML should return Err");
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ConfigLoadError::Parse { .. }),
+            "Should be a ParseError: {:?}",
+            err
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("bad.toml"),
+            "Error should mention the file path: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_load_config_from_path_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("good.toml");
+        std::fs::write(
+            &path,
+            r#"
+[editor]
+auto_match = false
+"#,
+        )
+        .unwrap();
+
+        let result = load_config_from_path(&path);
+        assert!(result.is_ok(), "Valid TOML should return Ok");
+        let config = result.unwrap();
+        assert!(!config.editor.auto_match);
+    }
+
+    #[test]
+    fn test_load_config_from_path_not_found() {
+        let path = PathBuf::from("/nonexistent/config.toml");
+        let result = load_config_from_path(&path);
+        assert!(result.is_ok(), "Missing file should return Ok(default)");
+        let config = result.unwrap();
+        assert!(config.editor.auto_match, "Should be default config");
+    }
+
+    #[test]
+    fn test_config_load_error_display() {
+        let err = ConfigLoadError::Parse {
+            source: toml::from_str::<Config>("[bad\n").unwrap_err(),
+            path: PathBuf::from("/home/user/.config/arf/arf.toml"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("parse"), "Should mention parse: {}", msg);
+        assert!(msg.contains("arf.toml"), "Should mention path: {}", msg);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_load_config_from_path_read_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unreadable.toml");
+        std::fs::write(&path, "[editor]\nauto_match = true").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = load_config_from_path(&path);
+        assert!(result.is_err(), "Unreadable file should return Err");
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ConfigLoadError::Read { .. }),
+            "Should be a ReadError: {:?}",
+            err
+        );
+
+        // Restore permissions so tempdir cleanup succeeds
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 }
