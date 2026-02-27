@@ -1,7 +1,7 @@
 //! Meta command processing.
 
 use crate::completion::path::expand_tilde;
-use crate::config::RSourceStatus;
+use crate::config::{ConfigStatus, RSourceStatus};
 use crate::external::formatter;
 use crate::pager::{
     HistoryBrowserResult, HistoryDbMode, display_session_info, run_help_browser,
@@ -34,7 +34,7 @@ pub fn process_meta_command(
     input: &str,
     prompt_config: &mut PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
-    config_load_ok: bool,
+    config_status: ConfigStatus,
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
@@ -212,7 +212,7 @@ pub fn process_meta_command(
             display_session_info(
                 prompt_config,
                 config_path,
-                config_load_ok,
+                config_status,
                 r_history_path,
                 shell_history_path,
                 r_source_status,
@@ -513,7 +513,7 @@ mod tests {
             input,
             config,
             config_path,
-            true, // config_load_ok
+            ConfigStatus::Ok,
             r_history_path,
             shell_history_path,
             status,
@@ -876,7 +876,7 @@ mod tests {
             &format!(":cd {}", tmp.path().display()),
             &mut config,
             &None,
-            true,
+            ConfigStatus::Ok,
             &None,
             &None,
             &status,
@@ -897,7 +897,7 @@ mod tests {
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
             &None,
-            true,
+            ConfigStatus::Ok,
             &None,
             &None,
             &status,
@@ -910,7 +910,7 @@ mod tests {
             ":popd",
             &mut config,
             &None,
-            true,
+            ConfigStatus::Ok,
             &None,
             &None,
             &status,

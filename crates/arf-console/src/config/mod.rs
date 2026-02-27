@@ -29,6 +29,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Status of config file loading, for display in `:info`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigStatus {
+    /// Config loaded successfully (or no config file exists).
+    Ok,
+    /// Config file could not be read (e.g., permission denied).
+    ReadError,
+    /// Config file has TOML syntax or schema errors.
+    ParseError,
+}
+
 /// Error type for configuration loading failures.
 #[derive(Debug)]
 pub enum ConfigLoadError {

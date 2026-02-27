@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource};
 use config::{
-    Config, ConfigLoadError, RSource, RSourceMode, RSourceStatus, config_file_path,
+    Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
 };
 use repl::Repl;
@@ -79,7 +79,7 @@ fn run() -> Result<()> {
 
     // Load configuration (from file or default)
     // Track the config path for :info command display
-    let (mut config, config_path, config_load_ok) = load_config_with_fallback(&cli);
+    let (mut config, config_path, config_status) = load_config_with_fallback(&cli);
     log::debug!("Loaded config: {:?}", config);
 
     // Apply CLI overrides
@@ -173,7 +173,7 @@ fn run() -> Result<()> {
     }
 
     // Create and run the REPL
-    let mut repl = Repl::new(config, config_path, config_load_ok, r_source_status)?;
+    let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
     repl.run()?;
 
     Ok(())
@@ -181,9 +181,9 @@ fn run() -> Result<()> {
 
 /// Load configuration with fallback to defaults on error.
 ///
-/// Prints a warning to stderr if the config file has parse errors.
-/// Returns `(config, config_path, config_load_ok)`.
-fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, bool) {
+/// Prints a warning to stderr if the config file has errors.
+/// Returns `(config, config_path, config_status)`.
+fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, ConfigStatus) {
     let (result, config_path) = if let Some(path) = &cli.config {
         (load_config_from_path(path), Some(path.clone()))
     } else {
@@ -192,12 +192,16 @@ fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, 
     };
 
     match result {
-        Ok(config) => (config, config_path, true),
+        Ok(config) => (config, config_path, ConfigStatus::Ok),
         Err(e) => {
             let path_display = match &e {
                 ConfigLoadError::Read { path, .. } | ConfigLoadError::Parse { path, .. } => {
                     mask_home_path(path)
                 }
+            };
+            let status = match &e {
+                ConfigLoadError::Read { .. } => ConfigStatus::ReadError,
+                ConfigLoadError::Parse { .. } => ConfigStatus::ParseError,
             };
             eprintln!("Warning: {}", e);
             eprintln!(
@@ -211,7 +215,27 @@ fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, 
                     ConfigLoadError::Parse { source, .. } => source.to_string(),
                 }
             );
-            (Config::default(), config_path, false)
+            (Config::default(), config_path, status)
+        }
+    }
+}
+
+/// Load config with a warning on error, falling back to defaults.
+///
+/// Used by subcommands (history, script) where config loading is not the
+/// primary operation but errors should still be visible.
+fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
+    let result = if let Some(path) = config_path {
+        load_config_from_path(path)
+    } else {
+        load_config()
+    };
+    match result {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Warning: {}", e);
+            eprintln!("         Using default configuration.");
+            Config::default()
         }
     }
 }
@@ -252,13 +276,10 @@ fn handle_config_check(path: Option<&std::path::Path>) -> Result<()> {
             Ok(())
         }
         Err(ConfigLoadError::Parse { source, .. }) => {
-            eprintln!("Config file has errors:\n");
-            eprintln!("  {}", source);
-            std::process::exit(1);
+            anyhow::bail!("Config file has errors:\n\n  {}", source);
         }
         Err(ConfigLoadError::Read { source, .. }) => {
-            eprintln!("Could not read config file: {}", source);
-            std::process::exit(1);
+            anyhow::bail!("Could not read config file: {}", source);
         }
     }
 }
@@ -322,11 +343,7 @@ fn handle_history_import(
     use reedline::SqliteBackedHistory;
 
     // Load config (respecting --config flag if provided)
-    let config = if let Some(path) = config_path {
-        load_config_from_path(path).unwrap_or_default()
-    } else {
-        load_config().unwrap_or_default()
-    };
+    let config = load_config_or_warn(config_path);
 
     // Resolve effective history directory (CLI --history-dir takes precedence)
     // Required for actual imports and for dry-run with dedup (needs DB access)
@@ -536,11 +553,7 @@ fn handle_history_export(
     use history::export::export_history;
 
     // Load config (respecting --config flag if provided)
-    let config = if let Some(path) = config_path {
-        load_config_from_path(path).unwrap_or_default()
-    } else {
-        load_config().unwrap_or_default()
-    };
+    let config = load_config_or_warn(config_path);
 
     // Resolve effective history directory
     let history_dir = cli_history_dir
@@ -582,11 +595,7 @@ fn handle_history_export(
 /// Run in script execution mode (non-interactive).
 fn run_script(cli: &Cli) -> Result<()> {
     // Load configuration (from file or default)
-    let config = if let Some(config_path) = &cli.config {
-        load_config_from_path(config_path).unwrap_or_default()
-    } else {
-        load_config().unwrap_or_default()
-    };
+    let config = load_config_or_warn(cli.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
     setup_r(

@@ -1,8 +1,8 @@
 //! REPL state management.
 
 use crate::config::{
-    HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig, RSourceStatus,
-    SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
+    ConfigStatus, HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig,
+    RSourceStatus, SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
 };
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
@@ -108,8 +108,8 @@ pub struct ReplState {
     pub should_exit: bool,
     /// Path to the config file (for :info command).
     pub config_path: Option<PathBuf>,
-    /// Whether the config file was loaded successfully (false if parse error occurred).
-    pub config_load_ok: bool,
+    /// Status of config file loading (for :info display).
+    pub config_status: ConfigStatus,
     /// Path to the R history database (for :history commands).
     pub r_history_path: Option<PathBuf>,
     /// Path to the Shell history database (for :history commands).
