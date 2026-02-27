@@ -108,6 +108,8 @@ pub struct ReplState {
     pub should_exit: bool,
     /// Path to the config file (for :info command).
     pub config_path: Option<PathBuf>,
+    /// Whether the config file was loaded successfully (false if parse error occurred).
+    pub config_load_ok: bool,
     /// Path to the R history database (for :history commands).
     pub r_history_path: Option<PathBuf>,
     /// Path to the Shell history database (for :history commands).

@@ -29,10 +29,12 @@ pub enum MetaCommandResult {
 }
 
 /// Process a meta command (starting with `:`) and return the result.
+#[allow(clippy::too_many_arguments)]
 pub fn process_meta_command(
     input: &str,
     prompt_config: &mut PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
+    config_load_ok: bool,
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
@@ -210,6 +212,7 @@ pub fn process_meta_command(
             display_session_info(
                 prompt_config,
                 config_path,
+                config_load_ok,
                 r_history_path,
                 shell_history_path,
                 r_source_status,
@@ -510,6 +513,7 @@ mod tests {
             input,
             config,
             config_path,
+            true, // config_load_ok
             r_history_path,
             shell_history_path,
             status,
@@ -872,6 +876,7 @@ mod tests {
             &format!(":cd {}", tmp.path().display()),
             &mut config,
             &None,
+            true,
             &None,
             &None,
             &status,
@@ -892,6 +897,7 @@ mod tests {
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
             &None,
+            true,
             &None,
             &None,
             &status,
@@ -904,6 +910,7 @@ mod tests {
             ":popd",
             &mut config,
             &None,
+            true,
             &None,
             &None,
             &status,

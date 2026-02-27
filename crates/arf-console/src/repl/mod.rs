@@ -76,6 +76,8 @@ pub struct Repl {
     config: Config,
     /// Path to the config file (if specified via --config, or the default XDG path).
     config_path: Option<std::path::PathBuf>,
+    /// Whether the config file was loaded successfully (false if parse error occurred).
+    config_load_ok: bool,
     /// How R was resolved at startup (determines if :switch is available).
     r_source_status: RSourceStatus,
     r_initialized: bool,
@@ -93,6 +95,7 @@ impl Repl {
     pub fn new(
         config: Config,
         config_path: Option<std::path::PathBuf>,
+        config_load_ok: bool,
         r_source_status: RSourceStatus,
     ) -> Result<Self> {
         // Check if R is initialized
@@ -109,6 +112,7 @@ impl Repl {
         Ok(Repl {
             config,
             config_path,
+            config_load_ok,
             r_source_status,
             r_initialized,
             prompt_formatter,
@@ -348,6 +352,7 @@ impl Repl {
                 prompt_config,
                 should_exit: false,
                 config_path: self.config_path.clone(),
+                config_load_ok: self.config_load_ok,
                 r_history_path,
                 shell_history_path,
                 r_source_status: self.r_source_status.clone(),
@@ -530,6 +535,7 @@ impl Repl {
                         &line,
                         &mut prompt_config,
                         &self.config_path,
+                        self.config_load_ok,
                         &r_history_path,
                         &shell_history_path,
                         &self.r_source_status,
@@ -813,6 +819,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &line,
                         &mut state.prompt_config,
                         &state.config_path,
+                        state.config_load_ok,
                         &state.r_history_path,
                         &state.shell_history_path,
                         &state.r_source_status,
