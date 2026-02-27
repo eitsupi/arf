@@ -194,27 +194,29 @@ fn load_config_with_fallback(cli: &Cli) -> (Config, Option<std::path::PathBuf>, 
     match result {
         Ok(config) => (config, config_path, ConfigStatus::Ok),
         Err(e) => {
-            let path_display = match &e {
-                ConfigLoadError::Read { path, .. } | ConfigLoadError::Parse { path, .. } => {
-                    mask_home_path(path)
-                }
-            };
-            let status = match &e {
-                ConfigLoadError::Read { .. } => ConfigStatus::ReadError,
-                ConfigLoadError::Parse { .. } => ConfigStatus::ParseError,
-            };
-            let source_msg = match &e {
-                ConfigLoadError::Read { source, .. } => source.to_string(),
-                ConfigLoadError::Parse { source, .. } => source.to_string(),
+            let (raw_path, masked_path, source_msg, status) = match &e {
+                ConfigLoadError::Read { path, source } => (
+                    path.display().to_string(),
+                    mask_home_path(path),
+                    source.to_string(),
+                    ConfigStatus::ReadError,
+                ),
+                ConfigLoadError::Parse { path, source } => (
+                    path.display().to_string(),
+                    mask_home_path(path),
+                    source.to_string(),
+                    ConfigStatus::ParseError,
+                ),
             };
             eprintln!(
                 "Warning: Failed to load config from {}: {}",
-                path_display, source_msg
+                masked_path, source_msg
             );
             eprintln!(
                 "         Using default configuration. Run `arf config check` to see details."
             );
-            log::warn!("Config load error for {}: {}", path_display, source_msg);
+            // Log with unmasked path for debugging
+            log::warn!("Config load error for {}: {}", raw_path, source_msg);
             (Config::default(), config_path, status)
         }
     }
