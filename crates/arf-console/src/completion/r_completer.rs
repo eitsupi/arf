@@ -244,6 +244,15 @@ fn detect_library_context(
         return None;
     }
 
+    // Skip member access operators: obj$library( or env@require( are not real calls
+    let func_start = before_paren.len() - func_name.len();
+    if func_start > 0 {
+        let preceding_char = before_paren[..func_start].chars().next_back();
+        if matches!(preceding_char, Some('$' | '@')) {
+            return None;
+        }
+    }
+
     // Check if it matches any configured function name
     if !func_names.iter().any(|f| f == func_name) {
         return None;
@@ -1277,5 +1286,33 @@ mod tests {
         let mid_byte = e_pos + 1; // middle of 'é'
         assert!(!line.is_char_boundary(mid_byte));
         assert_eq!(detect_library_context(line, mid_byte, &lib_funcs()), None);
+    }
+
+    #[test]
+    fn test_detect_library_context_member_access_skipped() {
+        // obj$library( and env@require( are member accesses, not function calls
+        assert_eq!(
+            detect_library_context("obj$library(dpl", 15, &lib_funcs()),
+            None
+        );
+        assert_eq!(
+            detect_library_context("env@require(gg", 14, &lib_funcs()),
+            None
+        );
+    }
+
+    #[test]
+    fn test_detect_library_context_namespace_in_arg() {
+        // library(pkg::something) — partial stops at `:`, span covers full range.
+        // This is invalid R, but documenting the behavior: partial is "pkg",
+        // span is start_pos..cursor_pos (covering "pkg::something").
+        let result = detect_library_context("library(pkg::something", 22, &lib_funcs());
+        assert_eq!(
+            result,
+            Some(LibraryContext {
+                partial: "pkg".to_string(),
+                start_pos: 8,
+            })
+        );
     }
 }
