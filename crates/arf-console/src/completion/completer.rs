@@ -669,6 +669,8 @@ struct NamespaceExportCache {
 struct NamespaceFuzzyCache {
     /// The full input used for this cache (e.g., "pkg::partial").
     input: String,
+    /// Start position of the namespace token in the line.
+    start_pos: usize,
     /// Cached suggestions.
     suggestions: Vec<Suggestion>,
     /// When the cache was created.
@@ -814,9 +816,10 @@ impl Completer for RCompleter {
         {
             let input = &line[ns_token.start_pos..pos];
 
-            // Debounce: reuse cached results if same input within debounce window
+            // Debounce: reuse cached results if same input at same position within window
             if let Some(cache) = &self.namespace_fuzzy_cache
                 && cache.input == input
+                && cache.start_pos == ns_token.start_pos
                 && cache.timestamp.elapsed() < Duration::from_millis(self.debounce_ms)
             {
                 return cache.suggestions.clone();
@@ -827,6 +830,7 @@ impl Completer for RCompleter {
             // Cache the results
             self.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
                 input: input.to_string(),
+                start_pos: ns_token.start_pos,
                 suggestions: suggestions.clone(),
                 timestamp: Instant::now(),
             });
@@ -2277,6 +2281,7 @@ mod tests {
         let mut completer = RCompleter::new();
         completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
             input: "dplyr::filt".to_string(),
+            start_pos: 0,
             suggestions: vec![],
             timestamp: Instant::now(),
         });
