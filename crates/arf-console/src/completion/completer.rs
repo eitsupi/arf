@@ -41,6 +41,7 @@ impl CombinedCompleter {
             auto_paren_limit,
             rig_enabled,
             false,
+            vec!["library".to_string(), "require".to_string()],
         )
     }
 
@@ -51,6 +52,7 @@ impl CombinedCompleter {
         auto_paren_limit: usize,
         rig_enabled: bool,
         fuzzy_namespace: bool,
+        package_functions: Vec<String>,
     ) -> Self {
         // Build exclusion list: always exclude `:r` in R mode
         let mut exclusions: Vec<&'static str> = vec!["r"];
@@ -66,6 +68,7 @@ impl CombinedCompleter {
                 debounce_ms,
                 auto_paren_limit,
                 fuzzy_namespace,
+                package_functions,
             ),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }

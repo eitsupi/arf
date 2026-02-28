@@ -37,22 +37,44 @@ pub struct ExperimentalConfig {
     #[serde(default)]
     pub prompt_duration: PromptDurationConfig,
 
-    /// Namespace completion configuration (e.g., `pkg::func`).
+    /// R code completion configuration (fuzzy matching, package functions).
     #[serde(default)]
-    pub completion_namespace: CompletionNamespaceConfig,
+    pub r_completion: RCompletionConfig,
 }
 
-/// Configuration for package namespace completion (`pkg::func`).
+/// Configuration for R code completion (namespace and library fuzzy matching).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-#[derive(Default)]
-pub struct CompletionNamespaceConfig {
-    /// Enable fuzzy matching for package namespace completions.
+pub struct RCompletionConfig {
+    /// Enable fuzzy matching for R code completions.
     ///
     /// When enabled, typing `pkg::partial` uses fuzzy matching against all
     /// exported names from the package, so `sf::geo` can match `sf::st_geometry`.
+    /// Also enables fuzzy matching for `library()`/`require()` package names.
     /// When disabled (default), only R's built-in prefix matching is used.
     pub fuzzy: bool,
+
+    /// Function names that trigger package-name completion.
+    ///
+    /// When fuzzy matching is enabled, typing inside a call to one of these
+    /// functions will complete against installed package names.
+    /// Default: `["library", "require"]`.
+    /// Users can add custom functions like `"box::use"`.
+    #[serde(default = "default_package_functions")]
+    pub package_functions: Vec<String>,
+}
+
+fn default_package_functions() -> Vec<String> {
+    vec!["library".to_string(), "require".to_string()]
+}
+
+impl Default for RCompletionConfig {
+    fn default() -> Self {
+        Self {
+            fuzzy: false,
+            package_functions: default_package_functions(),
+        }
+    }
 }
 
 /// Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.
@@ -137,8 +159,8 @@ struct ExperimentalConfigSchema {
     /// Command duration configuration for the `{duration}` prompt placeholder.
     pub prompt_duration: PromptDurationConfig,
 
-    /// Namespace completion configuration (e.g., `pkg::func`).
-    pub completion_namespace: CompletionNamespaceConfig,
+    /// R code completion configuration (fuzzy matching, package functions).
+    pub r_completion: RCompletionConfig,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -304,7 +326,11 @@ mod tests {
         assert!(!config.history_forget.enabled);
         assert!(config.completion_min_chars.is_none());
         assert!(config.prompt_spinner.frames.is_empty()); // Disabled by default
-        assert!(!config.completion_namespace.fuzzy); // Disabled by default
+        assert!(!config.r_completion.fuzzy); // Disabled by default
+        assert_eq!(
+            config.r_completion.package_functions,
+            vec!["library".to_string(), "require".to_string()]
+        );
     }
 
     #[test]
@@ -327,5 +353,49 @@ frames = ""
 "#;
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
         assert!(config.experimental.prompt_spinner.frames.is_empty());
+    }
+
+    #[test]
+    fn test_r_completion_default() {
+        let config = RCompletionConfig::default();
+        assert!(!config.fuzzy);
+        assert_eq!(
+            config.package_functions,
+            vec!["library".to_string(), "require".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_r_completion() {
+        let toml_str = r#"
+[experimental.r_completion]
+fuzzy = true
+package_functions = ["library", "require", "box::use"]
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(config.experimental.r_completion.fuzzy);
+        assert_eq!(
+            config.experimental.r_completion.package_functions,
+            vec![
+                "library".to_string(),
+                "require".to_string(),
+                "box::use".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_r_completion_fuzzy_only() {
+        // When only fuzzy is specified, package_functions should use defaults
+        let toml_str = r#"
+[experimental.r_completion]
+fuzzy = true
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(config.experimental.r_completion.fuzzy);
+        assert_eq!(
+            config.experimental.r_completion.package_functions,
+            vec!["library".to_string(), "require".to_string()]
+        );
     }
 }

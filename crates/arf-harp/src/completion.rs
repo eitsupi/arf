@@ -247,7 +247,7 @@ fn extract_identifier_before_cursor(before_cursor: &str) -> Option<String> {
 }
 
 /// Get the list of installed packages with caching.
-fn get_installed_packages() -> HarpResult<Vec<String>> {
+pub fn get_installed_packages() -> HarpResult<Vec<String>> {
     // Check cache first
     if let Ok(cache) = PACKAGE_CACHE.lock()
         && let Some(last_updated) = cache.last_updated
