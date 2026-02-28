@@ -1135,10 +1135,13 @@ impl RCompleter {
 
 /// Check if an R name requires backtick quoting (non-syntactic name).
 ///
-/// Names that start with a letter or `.` followed by a non-digit, and contain
-/// only alphanumeric, `.`, or `_` characters are syntactic. Everything else
-/// (operators like `%>%`, names starting with `_` or digits, names with
-/// special characters) requires backtick quoting.
+/// Names that start with an ASCII letter or `.` followed by a non-digit, and
+/// contain only ASCII alphanumeric, `.`, or `_` characters are syntactic.
+/// Everything else (operators like `%>%`, names starting with `_` or digits,
+/// names with non-ASCII or special characters) requires backtick quoting.
+///
+/// This is intentionally conservative (ASCII-only) to match R's default
+/// parser behavior where non-ASCII identifiers require backtick quoting.
 fn needs_backtick_quoting(name: &str) -> bool {
     if name.is_empty() {
         return false;
