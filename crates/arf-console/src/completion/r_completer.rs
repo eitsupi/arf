@@ -202,7 +202,7 @@ struct LibraryContext {
 /// - A `)` in a string *before* the target `(` is never reached, since the scan
 ///   stops at the nearest unmatched `(`.
 ///
-/// The same design is used by `arf_harp::completion::detect_library_context`.
+/// The same approach is used in `arf-harp/src/completion.rs`.
 fn detect_library_context(
     line: &str,
     cursor_pos: usize,
