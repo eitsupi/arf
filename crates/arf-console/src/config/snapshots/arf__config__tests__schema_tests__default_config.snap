@@ -102,5 +102,9 @@ color = "Cyan"
 format = "{value} "
 threshold_ms = 2000
 
-[experimental.completion_namespace]
+[experimental.r_completion]
 fuzzy = false
+package_functions = [
+    "library",
+    "require",
+]

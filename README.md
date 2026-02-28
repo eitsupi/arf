@@ -237,16 +237,24 @@ completion_min_chars = 3  # Show completions after 3 characters
 
 When not set, completion requires pressing Tab (the default behavior). This is similar to radian's `complete_while_typing` feature.
 
-### Fuzzy namespace completion
+### Fuzzy R completion
 
-Use fuzzy matching for `pkg::func` completions. When enabled, typing `sf::geo` can match `sf::st_geometry` instead of only prefix matches. **Disabled by default.**
+Use fuzzy matching for R code completions. When enabled, typing `sf::geo` can match `sf::st_geometry` and `library(dpl` can match `dplyr`. **Disabled by default.**
 
 ```toml
-[experimental.completion_namespace]
+[experimental.r_completion]
 fuzzy = true
 ```
 
 Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
+
+The `package_functions` option controls which function calls trigger package-name fuzzy completion (defaults to `["library", "require"]`). Users can add custom functions like `"box::use"`:
+
+```toml
+[experimental.r_completion]
+fuzzy = true
+package_functions = ["library", "require", "box::use"]
+```
 
 ### History forget
 

@@ -129,8 +129,9 @@ enabled = false            # Auto-remove failed commands from history
 delay = 2                  # Keep last N failed commands for retry
 on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 
-[experimental.completion_namespace]
-fuzzy = false              # Fuzzy matching for pkg::func completions
+[experimental.r_completion]
+fuzzy = false              # Fuzzy matching for pkg::func and library() completions
+package_functions = ["library", "require"]  # Functions that trigger package name completion
 
 [experimental.prompt_spinner]
 frames = ""                # Animation frames (empty = disabled)
