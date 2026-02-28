@@ -217,6 +217,8 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
     terminal.hide_cursor()?;
     let mut scroll_offset = 0;
     let mut needs_redraw = true;
+    let (_, initial_rows) = terminal::size().unwrap_or((80, 24));
+    let mut term_height = initial_rows as usize;
 
     loop {
         if needs_redraw {
@@ -268,7 +270,8 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                         (KeyCode::Down, _)
                         | (KeyCode::Char('j'), KeyModifiers::NONE)
                         | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                            let max_offset = max_scroll_offset(content.line_count());
+                            let max_offset =
+                                max_scroll_offset_with_height(content.line_count(), term_height);
                             if scroll_offset < max_offset {
                                 scroll_offset += 1;
                             }
@@ -276,7 +279,7 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
 
                         // Page up
                         (KeyCode::PageUp, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                            let page_size = content_rows();
+                            let page_size = content_rows_with_height(term_height);
                             scroll_offset = scroll_offset.saturating_sub(page_size);
                         }
 
@@ -284,8 +287,9 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                         (KeyCode::PageDown, _)
                         | (KeyCode::Char(' '), KeyModifiers::NONE)
                         | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                            let page_size = content_rows();
-                            let max_offset = max_scroll_offset(content.line_count());
+                            let page_size = content_rows_with_height(term_height);
+                            let max_offset =
+                                max_scroll_offset_with_height(content.line_count(), term_height);
                             scroll_offset = (scroll_offset + page_size).min(max_offset);
                         }
 
@@ -296,7 +300,8 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
 
                         // End
                         (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
-                            scroll_offset = max_scroll_offset(content.line_count());
+                            scroll_offset =
+                                max_scroll_offset_with_height(content.line_count(), term_height);
                         }
 
                         _ => {}
@@ -309,7 +314,8 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                     }
                     MouseEventKind::ScrollDown => {
                         needs_redraw = true;
-                        let max_offset = max_scroll_offset(content.line_count());
+                        let max_offset =
+                            max_scroll_offset_with_height(content.line_count(), term_height);
                         if scroll_offset < max_offset {
                             scroll_offset += 1;
                         }
@@ -317,9 +323,11 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                     _ => {}
                 },
                 Event::Resize(w, h) => {
-                    if content.on_resize(w as usize, h as usize) {
+                    term_height = h as usize;
+                    if content.on_resize(w as usize, term_height) {
                         // Content changed (e.g., re-wrapped); clamp scroll.
-                        let max_offset = max_scroll_offset(content.line_count());
+                        let max_offset =
+                            max_scroll_offset_with_height(content.line_count(), term_height);
                         scroll_offset = scroll_offset.min(max_offset);
                     }
                     needs_redraw = true;
@@ -406,21 +414,15 @@ fn render<C: PagerContent>(
     Ok(())
 }
 
-/// Get the number of content rows available.
-fn content_rows() -> usize {
-    let (_, rows) = terminal::size().unwrap_or((80, 24));
-    content_rows_with_height(rows as usize)
-}
-
 /// Get the number of content rows for a given terminal height.
 fn content_rows_with_height(height: usize) -> usize {
     // Reserve 2 lines for header and footer
     height.saturating_sub(2)
 }
 
-/// Calculate max scroll offset for given line count.
-fn max_scroll_offset(line_count: usize) -> usize {
-    line_count.saturating_sub(content_rows())
+/// Calculate max scroll offset for given line count and terminal height.
+fn max_scroll_offset_with_height(line_count: usize, height: usize) -> usize {
+    line_count.saturating_sub(content_rows_with_height(height))
 }
 
 /// OSC 52 clipboard command for copying text via terminal escape sequence.

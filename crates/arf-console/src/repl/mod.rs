@@ -236,11 +236,12 @@ impl Repl {
         // Set up combined completer (R + meta commands) if completion is enabled
         // When rig is not enabled, :switch is excluded from completion
         if self.config.completion.enabled {
-            let completer = Box::new(CombinedCompleter::with_settings_and_rig(
+            let completer = Box::new(CombinedCompleter::with_settings_full(
                 self.config.completion.timeout_ms,
                 self.config.completion.debounce_ms,
                 self.config.completion.auto_paren_limit,
                 self.r_source_status.rig_enabled(),
+                self.config.experimental.completion_namespace.fuzzy,
             ));
             line_editor = line_editor.with_completer(completer);
 

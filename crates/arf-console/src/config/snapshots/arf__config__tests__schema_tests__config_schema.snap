@@ -68,6 +68,9 @@ expression: schema
       "$ref": "#/$defs/ExperimentalConfig",
       "default": {
         "completion_min_chars": null,
+        "completion_namespace": {
+          "fuzzy": false
+        },
         "history_forget": {
           "delay": 2,
           "enabled": false,
@@ -1414,6 +1417,17 @@ expression: schema
         }
       }
     },
+    "CompletionNamespaceConfig": {
+      "description": "Configuration for package namespace completion (`pkg::func`).",
+      "type": "object",
+      "properties": {
+        "fuzzy": {
+          "description": "Enable fuzzy matching for package namespace completions.\n\nWhen enabled, typing `pkg::partial` uses fuzzy matching against all\nexported names from the package, so `sf::geo` can match `sf::st_geometry`.\nWhen disabled (default), only R's built-in prefix matching is used.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
     "EditorConfig": {
       "description": "Editor configuration.",
       "type": "object",
@@ -1483,6 +1497,13 @@ expression: schema
           "format": "uint",
           "default": null,
           "minimum": 0
+        },
+        "completion_namespace": {
+          "description": "Namespace completion configuration (e.g., `pkg::func`).",
+          "$ref": "#/$defs/CompletionNamespaceConfig",
+          "default": {
+            "fuzzy": false
+          }
         },
         "history_forget": {
           "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",

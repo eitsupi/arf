@@ -129,6 +129,9 @@ enabled = false            # Auto-remove failed commands from history
 delay = 2                  # Keep last N failed commands for retry
 on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 
+[experimental.completion_namespace]
+fuzzy = false              # Fuzzy matching for pkg::func completions
+
 [experimental.prompt_spinner]
 frames = ""                # Animation frames (empty = disabled)
 color = "Cyan"             # Spinner color
