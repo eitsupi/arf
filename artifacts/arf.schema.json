@@ -64,6 +64,7 @@
       "$ref": "#/$defs/ExperimentalConfig",
       "default": {
         "completion_min_chars": null,
+        "fuzzy_namespace_completion": false,
         "history_forget": {
           "delay": 2,
           "enabled": false,
@@ -1479,6 +1480,11 @@
           "format": "uint",
           "default": null,
           "minimum": 0
+        },
+        "fuzzy_namespace_completion": {
+          "description": "Enable fuzzy matching for package namespace completions.\n\nWhen enabled, typing `pkg::partial` uses fuzzy matching against all\nexported names from the package, so `sf::geo` can match `sf::st_geometry`.\nWhen disabled (default), only R's built-in prefix matching is used.",
+          "type": "boolean",
+          "default": false
         },
         "history_forget": {
           "description": "Sponge-like automatic removal of failed commands from history.\n\nSimilar to fish's sponge plugin, this feature removes commands that\nproduced errors from the history after a configurable delay.",

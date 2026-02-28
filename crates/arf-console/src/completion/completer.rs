@@ -5,6 +5,7 @@ use crate::external::rig;
 use crate::fuzzy::fuzzy_match;
 use reedline::{Completer, Span, Suggestion};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tree_sitter::{Parser, Tree};
 
@@ -518,6 +519,23 @@ impl CombinedCompleter {
         auto_paren_limit: usize,
         rig_enabled: bool,
     ) -> Self {
+        Self::with_settings_full(
+            timeout_ms,
+            debounce_ms,
+            auto_paren_limit,
+            rig_enabled,
+            false,
+        )
+    }
+
+    /// Create a new CombinedCompleter with all settings.
+    pub fn with_settings_full(
+        timeout_ms: u64,
+        debounce_ms: u64,
+        auto_paren_limit: usize,
+        rig_enabled: bool,
+        fuzzy_namespace: bool,
+    ) -> Self {
         // Build exclusion list: always exclude `:r` in R mode
         let mut exclusions: Vec<&'static str> = vec!["r"];
 
@@ -527,7 +545,12 @@ impl CombinedCompleter {
         }
 
         CombinedCompleter {
-            r_completer: RCompleter::with_settings(timeout_ms, debounce_ms, auto_paren_limit),
+            r_completer: RCompleter::with_settings_full(
+                timeout_ms,
+                debounce_ms,
+                auto_paren_limit,
+                fuzzy_namespace,
+            ),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }
     }
@@ -560,6 +583,88 @@ struct CompletionCache {
     timestamp: Instant,
 }
 
+/// Parsed `pkg::partial` or `pkg:::partial` token from user input.
+#[derive(Debug, PartialEq)]
+struct NamespaceToken {
+    /// Package name (e.g., "sf").
+    package: String,
+    /// Partial function name after `::` (e.g., "geo"). May be empty.
+    partial: String,
+    /// Whether `:::` was used (internal access).
+    triple_colon: bool,
+    /// Byte position in the line where the token starts (beginning of `pkg`).
+    start_pos: usize,
+}
+
+/// Parse a `pkg::partial` or `pkg:::partial` pattern from the text before the cursor.
+///
+/// Returns `None` if no namespace pattern is found.
+fn parse_namespace_token(line: &str, cursor_pos: usize) -> Option<NamespaceToken> {
+    let before_cursor = &line[..cursor_pos.min(line.len())];
+
+    // Find `::` or `:::` by scanning backwards from cursor
+    // First, extract the partial (identifier chars at the end)
+    let partial: String = before_cursor
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '.' || *c == '_')
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    let before_partial = &before_cursor[..before_cursor.len() - partial.len()];
+
+    // Check for `:::` or `::`
+    let (triple_colon, before_colons) = if let Some(rest) = before_partial.strip_suffix(":::") {
+        (true, rest)
+    } else if let Some(rest) = before_partial.strip_suffix("::") {
+        (false, rest)
+    } else {
+        return None;
+    };
+
+    // Extract package name (identifier chars before the colons)
+    let package: String = before_colons
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '.' || *c == '_')
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    if package.is_empty() {
+        return None;
+    }
+
+    // Validate: R identifiers can't start with a digit
+    if package.chars().next()?.is_ascii_digit() {
+        return None;
+    }
+
+    let colon_len = if triple_colon { 3 } else { 2 };
+    let start_pos = before_colons.len() - package.len();
+
+    // Sanity check: start_pos should be within bounds
+    if start_pos + package.len() + colon_len + partial.len() > cursor_pos {
+        return None;
+    }
+
+    Some(NamespaceToken {
+        package,
+        partial,
+        triple_colon,
+        start_pos,
+    })
+}
+
+/// Cache entry for namespace exports.
+struct NamespaceExportCache {
+    exports: Vec<String>,
+    timestamp: Instant,
+}
+
 /// R code completer using R's built-in completion functions.
 pub struct RCompleter {
     /// Timeout in milliseconds for R completion (0 = no timeout).
@@ -570,6 +675,10 @@ pub struct RCompleter {
     auto_paren_limit: usize,
     /// Cached completion results.
     cache: Option<CompletionCache>,
+    /// Whether fuzzy namespace completion is enabled.
+    fuzzy_namespace: bool,
+    /// Per-package cache of namespace exports.
+    namespace_cache: HashMap<String, NamespaceExportCache>,
 }
 
 impl RCompleter {
@@ -580,16 +689,25 @@ impl RCompleter {
             debounce_ms: 100,
             auto_paren_limit: 50,
             cache: None,
+            fuzzy_namespace: false,
+            namespace_cache: HashMap::new(),
         }
     }
 
-    /// Create a new RCompleter with custom settings.
-    pub fn with_settings(timeout_ms: u64, debounce_ms: u64, auto_paren_limit: usize) -> Self {
+    /// Create a new RCompleter with all settings including fuzzy namespace.
+    pub fn with_settings_full(
+        timeout_ms: u64,
+        debounce_ms: u64,
+        auto_paren_limit: usize,
+        fuzzy_namespace: bool,
+    ) -> Self {
         RCompleter {
             timeout_ms,
             debounce_ms,
             auto_paren_limit,
             cache: None,
+            fuzzy_namespace,
+            namespace_cache: HashMap::new(),
         }
     }
 
@@ -652,6 +770,7 @@ impl RCompleter {
     /// Invalidate the cache.
     fn invalidate_cache(&mut self) {
         self.cache = None;
+        self.namespace_cache.clear();
     }
 }
 
@@ -670,6 +789,13 @@ impl Completer for RCompleter {
         // - Hidden files shown last
         if let Some(ctx) = detect_string_context(line, pos) {
             return complete_path_in_string(line, pos, &ctx);
+        }
+
+        // Fuzzy namespace completion: intercept pkg::partial before R's built-in
+        if self.fuzzy_namespace
+            && let Some(ns_token) = parse_namespace_token(line, pos)
+        {
+            return self.complete_namespace_fuzzy(&ns_token, pos);
         }
 
         // Get the token being completed (for filtering and span calculation)
@@ -796,6 +922,119 @@ impl RCompleter {
         let mut result = checked;
         result.resize(completions.len(), false);
         result
+    }
+
+    /// Cache duration for namespace exports (5 minutes).
+    const NAMESPACE_CACHE_DURATION: Duration = Duration::from_secs(300);
+
+    /// Get exports for a package, using the per-package cache.
+    fn get_cached_exports(&mut self, pkg: &str, triple_colon: bool) -> Vec<String> {
+        // Check cache
+        if let Some(entry) = self.namespace_cache.get(pkg)
+            && entry.timestamp.elapsed() < Self::NAMESPACE_CACHE_DURATION
+        {
+            return entry.exports.clone();
+        }
+
+        // Fetch from R
+        let exports =
+            arf_harp::completion::get_namespace_exports(pkg, triple_colon).unwrap_or_default();
+
+        // Store in cache
+        self.namespace_cache.insert(
+            pkg.to_string(),
+            NamespaceExportCache {
+                exports: exports.clone(),
+                timestamp: Instant::now(),
+            },
+        );
+
+        exports
+    }
+
+    /// Complete `pkg::partial` using fuzzy matching against namespace exports.
+    fn complete_namespace_fuzzy(
+        &mut self,
+        ns_token: &NamespaceToken,
+        pos: usize,
+    ) -> Vec<Suggestion> {
+        let exports = self.get_cached_exports(&ns_token.package, ns_token.triple_colon);
+
+        if exports.is_empty() {
+            return vec![];
+        }
+
+        let colons = if ns_token.triple_colon { ":::" } else { "::" };
+        let prefix = format!("{}{}", ns_token.package, colons);
+        let prefix_len = prefix.len();
+
+        // Match exports against partial
+        let matched: Vec<(String, Option<Vec<usize>>, u32)> = if ns_token.partial.is_empty() {
+            // Empty partial: return all exports, sorted alphabetically
+            let mut all: Vec<_> = exports.into_iter().map(|e| (e, None, 0u32)).collect();
+            all.sort_by(|a, b| a.0.cmp(&b.0));
+            all
+        } else {
+            // Fuzzy match against partial
+            let mut results: Vec<_> = exports
+                .into_iter()
+                .filter_map(|export| {
+                    fuzzy_match(&ns_token.partial, &export).map(|m| {
+                        // Offset indices by prefix length (pkg::)
+                        let indices: Vec<usize> =
+                            m.indices.iter().map(|i| i + prefix_len).collect();
+                        (export, Some(indices), m.score)
+                    })
+                })
+                .collect();
+            // Sort by score descending
+            results.sort_by(|a, b| b.2.cmp(&a.2));
+            results
+        };
+
+        if matched.is_empty() {
+            return vec![];
+        }
+
+        // Check function types for auto-paren
+        let check_names: Vec<String> = matched
+            .iter()
+            .take(self.auto_paren_limit)
+            .map(|(export, _, _)| format!("{}{}", prefix, export))
+            .collect();
+        let check_refs: Vec<&str> = check_names.iter().map(|s| s.as_str()).collect();
+        let is_function = arf_harp::completion::check_if_functions(&check_refs).unwrap_or_default();
+
+        let span = Span {
+            start: ns_token.start_pos,
+            end: pos,
+        };
+
+        matched
+            .iter()
+            .enumerate()
+            .map(|(i, (export, indices, _score))| {
+                let is_func = is_function.get(i).copied().unwrap_or(false);
+                let base_value = format!("{}{}", prefix, export);
+
+                let (value, extra_info) = if is_func && !has_special_suffix(export) {
+                    (format!("{}()", base_value), Some("function".to_string()))
+                } else {
+                    (base_value, None)
+                };
+
+                Suggestion {
+                    value,
+                    display_override: None,
+                    description: extra_info,
+                    extra: None,
+                    span,
+                    append_whitespace: false,
+                    style: None,
+                    match_indices: indices.clone(),
+                }
+            })
+            .collect()
     }
 }
 
@@ -1657,6 +1896,88 @@ mod tests {
             suggestions.iter().any(|s| s.value == "src/inner/"),
             "Should list src/inner/, got: {:?}",
             suggestions.iter().map(|s| &s.value).collect::<Vec<_>>()
+        );
+    }
+
+    // --- Namespace token parsing tests ---
+
+    #[test]
+    fn test_parse_namespace_token_basic() {
+        let result = parse_namespace_token("sf::geo", 7);
+        assert_eq!(
+            result,
+            Some(NamespaceToken {
+                package: "sf".to_string(),
+                partial: "geo".to_string(),
+                triple_colon: false,
+                start_pos: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_namespace_token_triple_colon() {
+        let result = parse_namespace_token("pkg:::func", 10);
+        assert_eq!(
+            result,
+            Some(NamespaceToken {
+                package: "pkg".to_string(),
+                partial: "func".to_string(),
+                triple_colon: true,
+                start_pos: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_namespace_token_empty_partial() {
+        let result = parse_namespace_token("stats::", 7);
+        assert_eq!(
+            result,
+            Some(NamespaceToken {
+                package: "stats".to_string(),
+                partial: "".to_string(),
+                triple_colon: false,
+                start_pos: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_namespace_token_in_expression() {
+        let result = parse_namespace_token("x <- dplyr::filt", 16);
+        assert_eq!(
+            result,
+            Some(NamespaceToken {
+                package: "dplyr".to_string(),
+                partial: "filt".to_string(),
+                triple_colon: false,
+                start_pos: 5,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_namespace_token_no_match() {
+        // No :: at all
+        assert_eq!(parse_namespace_token("hello", 5), None);
+        // Just colons at end (no package)
+        assert_eq!(parse_namespace_token("::", 2), None);
+        // Empty line
+        assert_eq!(parse_namespace_token("", 0), None);
+    }
+
+    #[test]
+    fn test_parse_namespace_token_dotted_package() {
+        let result = parse_namespace_token("data.table::set", 15);
+        assert_eq!(
+            result,
+            Some(NamespaceToken {
+                package: "data.table".to_string(),
+                partial: "set".to_string(),
+                triple_colon: false,
+                start_pos: 0,
+            })
         );
     }
 }

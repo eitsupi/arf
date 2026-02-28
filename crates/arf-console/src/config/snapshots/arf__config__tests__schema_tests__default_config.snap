@@ -89,6 +89,9 @@ insert = "LightGreen"
 normal = "LightYellow"
 non_vi = "Default"
 
+[experimental]
+fuzzy_namespace_completion = false
+
 [experimental.history_forget]
 enabled = false
 delay = 2

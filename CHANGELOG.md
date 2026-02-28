@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental fuzzy matching for package namespace completions (`experimental.fuzzy_namespace_completion`)
+
 ## [0.2.3] - 2026-02-27
 
 ### Added

@@ -355,6 +355,89 @@ fn fetch_installed_packages() -> HarpResult<Vec<String>> {
     }
 }
 
+/// Get the exported names from a package's namespace.
+///
+/// Evaluates `getNamespaceExports("pkg")` in R. If `triple_colon` is true,
+/// returns all names (including internal); otherwise only exported names.
+///
+/// Returns an empty vector on error (e.g., package not installed).
+pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<String>> {
+    let _guard = SuppressStderrGuard::new();
+
+    let lib = r_library()?;
+    let mut protect = RProtect::new();
+
+    // For `:::`, list all namespace objects (including internals).
+    // For `::`, only exported names.
+    let code = if triple_colon {
+        format!(
+            r#"
+            tryCatch({{
+                ls(asNamespace("{pkg}"))
+            }}, error = function(e) character(0))
+            "#,
+            pkg = escape_r_string(pkg),
+        )
+    } else {
+        format!(
+            r#"
+            tryCatch({{
+                getNamespaceExports("{pkg}")
+            }}, error = function(e) character(0))
+            "#,
+            pkg = escape_r_string(pkg),
+        )
+    };
+
+    unsafe {
+        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
+            expected: "valid UTF-8".to_string(),
+            actual: "string with null byte".to_string(),
+        })?;
+
+        let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
+
+        let mut status = ParseStatus::Null;
+        let parsed = protect.protect((lib.r_parsevector)(
+            code_sexp,
+            -1,
+            &mut status,
+            r_nil_value()?,
+        ));
+
+        if status != ParseStatus::Ok {
+            return Ok(vec![]);
+        }
+
+        let n_expr = (lib.rf_length)(parsed);
+        if n_expr == 0 {
+            return Ok(vec![]);
+        }
+
+        let expr = (lib.vector_elt)(parsed, 0);
+        let global_env = *lib.r_globalenv;
+
+        let mut payload = EvalPayload {
+            expr,
+            env: global_env,
+            result: None,
+        };
+
+        let success = (lib.r_toplevelexec)(
+            Some(eval_callback),
+            &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
+        );
+
+        if success == 0 || payload.result.is_none() {
+            return Ok(vec![]);
+        }
+
+        let result = protect.protect(payload.result.unwrap());
+
+        extract_string_vector(result)
+    }
+}
+
 /// Get completions for the given line at the specified cursor position.
 ///
 /// Returns a list of completion candidates.
