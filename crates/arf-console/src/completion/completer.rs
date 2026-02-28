@@ -991,6 +991,13 @@ impl RCompleter {
         let exports =
             arf_harp::completion::get_namespace_exports(pkg, triple_colon).unwrap_or_default();
 
+        // Don't cache empty results so completions recover immediately
+        // once the package becomes available
+        if exports.is_empty() {
+            self.namespace_cache.remove(&cache_key);
+            return;
+        }
+
         // Evict expired entries before inserting
         let ttl = Self::NAMESPACE_CACHE_DURATION;
         self.namespace_cache

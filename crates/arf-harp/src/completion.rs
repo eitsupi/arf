@@ -393,7 +393,7 @@ pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<St
 
     unsafe {
         let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
-            expected: "valid UTF-8".to_string(),
+            expected: "string without null bytes".to_string(),
             actual: "string with null byte".to_string(),
         })?;
 
