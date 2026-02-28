@@ -963,38 +963,47 @@ impl RCompleter {
     /// Cache duration for namespace exports (5 minutes).
     const NAMESPACE_CACHE_DURATION: Duration = Duration::from_secs(300);
 
-    /// Get exports for a package, using the per-package cache.
-    ///
-    /// Cache key includes `::` vs `:::` distinction since they return
-    /// different sets of names (exported-only vs all namespace objects).
-    fn get_cached_exports(&mut self, pkg: &str, triple_colon: bool) -> Vec<String> {
-        let cache_key = if triple_colon {
+    /// Build the cache key for a package namespace lookup.
+    fn namespace_cache_key(pkg: &str, triple_colon: bool) -> String {
+        if triple_colon {
             format!("{}:::", pkg)
         } else {
             format!("{}::", pkg)
-        };
+        }
+    }
+
+    /// Ensure exports for a package are cached, fetching from R if needed.
+    ///
+    /// Cache key includes `::` vs `:::` distinction since they return
+    /// different sets of names (exported-only vs all namespace objects).
+    /// Expired entries for other packages are evicted on each insert.
+    fn ensure_namespace_cached(&mut self, pkg: &str, triple_colon: bool) {
+        let cache_key = Self::namespace_cache_key(pkg, triple_colon);
 
         // Check cache
         if let Some(entry) = self.namespace_cache.get(&cache_key)
             && entry.timestamp.elapsed() < Self::NAMESPACE_CACHE_DURATION
         {
-            return entry.exports.clone();
+            return;
         }
 
         // Fetch from R
         let exports =
             arf_harp::completion::get_namespace_exports(pkg, triple_colon).unwrap_or_default();
 
+        // Evict expired entries before inserting
+        let ttl = Self::NAMESPACE_CACHE_DURATION;
+        self.namespace_cache
+            .retain(|_, v| v.timestamp.elapsed() < ttl);
+
         // Store in cache
         self.namespace_cache.insert(
             cache_key,
             NamespaceExportCache {
-                exports: exports.clone(),
+                exports,
                 timestamp: Instant::now(),
             },
         );
-
-        exports
     }
 
     /// Complete `pkg::partial` using fuzzy matching against namespace exports.
@@ -1003,11 +1012,13 @@ impl RCompleter {
         ns_token: &NamespaceToken,
         pos: usize,
     ) -> Vec<Suggestion> {
-        let exports = self.get_cached_exports(&ns_token.package, ns_token.triple_colon);
-
-        if exports.is_empty() {
-            return vec![];
-        }
+        // Ensure exports are cached, then borrow to avoid cloning the full list
+        self.ensure_namespace_cached(&ns_token.package, ns_token.triple_colon);
+        let cache_key = Self::namespace_cache_key(&ns_token.package, ns_token.triple_colon);
+        let exports = match self.namespace_cache.get(&cache_key) {
+            Some(entry) if !entry.exports.is_empty() => &entry.exports,
+            _ => return vec![],
+        };
 
         let colons = if ns_token.triple_colon { ":::" } else { "::" };
         let prefix = format!("{}{}", ns_token.package, colons);
@@ -1016,24 +1027,27 @@ impl RCompleter {
         // Match exports against partial
         let matched: Vec<(String, Option<Vec<usize>>, u32)> = if ns_token.partial.is_empty() {
             // Empty partial: return all exports, sorted alphabetically
-            let mut all: Vec<_> = exports.into_iter().map(|e| (e, None, 0u32)).collect();
+            let mut all: Vec<_> = exports
+                .iter()
+                .map(|e| (e.clone(), None, 0u32))
+                .collect();
             all.sort_by(|a, b| a.0.cmp(&b.0));
             all
         } else {
-            // Fuzzy match against partial
+            // Fuzzy match against partial (only clone matching exports)
             let mut results: Vec<_> = exports
-                .into_iter()
+                .iter()
                 .filter_map(|export| {
-                    fuzzy_match(&ns_token.partial, &export).map(|m| {
+                    fuzzy_match(&ns_token.partial, export).map(|m| {
                         // Offset indices by prefix length (pkg::)
                         let indices: Vec<usize> =
                             m.indices.iter().map(|i| i + prefix_len).collect();
-                        (export, Some(indices), m.score)
+                        (export.clone(), Some(indices), m.score)
                     })
                 })
                 .collect();
-            // Sort by score descending
-            results.sort_by(|a, b| b.2.cmp(&a.2));
+            // Sort by score descending, then export name ascending for deterministic ties
+            results.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
             results
         };
 
