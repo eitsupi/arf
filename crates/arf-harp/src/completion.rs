@@ -355,12 +355,14 @@ fn fetch_installed_packages() -> HarpResult<Vec<String>> {
     }
 }
 
-/// Get the exported names from a package's namespace.
+/// Get the names from a package's namespace.
 ///
-/// Evaluates `getNamespaceExports("pkg")` in R. If `triple_colon` is true,
-/// returns all names (including internal); otherwise only exported names.
+/// For `::` access (`triple_colon = false`), returns exported names via
+/// `getNamespaceExports()`. For `:::` access (`triple_colon = true`),
+/// returns all namespace objects (including internals) via `ls(asNamespace(), all.names = TRUE)`.
 ///
-/// Returns an empty vector on error (e.g., package not installed).
+/// Returns an empty vector if the R evaluation fails (e.g., package not
+/// installed). May return `Err` if the R runtime itself is unavailable.
 pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<String>> {
     let _guard = SuppressStderrGuard::new();
 
@@ -373,7 +375,7 @@ pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<St
         format!(
             r#"
             tryCatch({{
-                ls(asNamespace("{pkg}"))
+                ls(asNamespace("{pkg}"), all.names = TRUE)
             }}, error = function(e) character(0))
             "#,
             pkg = escape_r_string(pkg),

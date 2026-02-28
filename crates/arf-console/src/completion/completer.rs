@@ -665,6 +665,16 @@ struct NamespaceExportCache {
     timestamp: Instant,
 }
 
+/// Cache for fuzzy namespace completion results (debounce).
+struct NamespaceFuzzyCache {
+    /// The full input used for this cache (e.g., "pkg::partial").
+    input: String,
+    /// Cached suggestions.
+    suggestions: Vec<Suggestion>,
+    /// When the cache was created.
+    timestamp: Instant,
+}
+
 /// R code completer using R's built-in completion functions.
 pub struct RCompleter {
     /// Timeout in milliseconds for R completion (0 = no timeout).
@@ -679,6 +689,8 @@ pub struct RCompleter {
     fuzzy_namespace: bool,
     /// Per-package cache of namespace exports.
     namespace_cache: HashMap<String, NamespaceExportCache>,
+    /// Debounce cache for fuzzy namespace completion results.
+    namespace_fuzzy_cache: Option<NamespaceFuzzyCache>,
 }
 
 impl RCompleter {
@@ -691,6 +703,7 @@ impl RCompleter {
             cache: None,
             fuzzy_namespace: false,
             namespace_cache: HashMap::new(),
+            namespace_fuzzy_cache: None,
         }
     }
 
@@ -708,6 +721,7 @@ impl RCompleter {
             cache: None,
             fuzzy_namespace,
             namespace_cache: HashMap::new(),
+            namespace_fuzzy_cache: None,
         }
     }
 
@@ -797,7 +811,26 @@ impl Completer for RCompleter {
         if self.fuzzy_namespace
             && let Some(ns_token) = parse_namespace_token(line, pos)
         {
-            return self.complete_namespace_fuzzy(&ns_token, pos);
+            let input = &line[ns_token.start_pos..pos];
+
+            // Debounce: reuse cached results if same input within debounce window
+            if let Some(cache) = &self.namespace_fuzzy_cache
+                && cache.input == input
+                && cache.timestamp.elapsed() < Duration::from_millis(self.debounce_ms)
+            {
+                return cache.suggestions.clone();
+            }
+
+            let suggestions = self.complete_namespace_fuzzy(&ns_token, pos);
+
+            // Cache the results
+            self.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+                input: input.to_string(),
+                suggestions: suggestions.clone(),
+                timestamp: Instant::now(),
+            });
+
+            return suggestions;
         }
 
         // Get the token being completed (for filtering and span calculation)
@@ -1007,26 +1040,45 @@ impl RCompleter {
             return vec![];
         }
 
-        // Check function types for auto-paren
-        let check_names: Vec<String> = matched
+        // Build qualified names with backtick quoting for non-syntactic names
+        let qualified: Vec<(String, Option<Vec<usize>>)> = matched
+            .iter()
+            .map(|(export, indices, _)| {
+                if needs_backtick_quoting(export) {
+                    // Backtick-quoted: pkg::`name`
+                    let value = format!("{}`{}`", prefix, export);
+                    // Offset indices: prefix_len + 1 (for opening backtick)
+                    let adjusted = indices
+                        .as_ref()
+                        .map(|idxs| idxs.iter().map(|&i| i + 1).collect());
+                    (value, adjusted)
+                } else {
+                    let value = format!("{}{}", prefix, export);
+                    (value, indices.clone())
+                }
+            })
+            .collect();
+
+        // Check function types for auto-paren (using qualified names)
+        let check_names: Vec<&str> = qualified
             .iter()
             .take(self.auto_paren_limit)
-            .map(|(export, _, _)| format!("{}{}", prefix, export))
+            .map(|(name, _)| name.as_str())
             .collect();
-        let check_refs: Vec<&str> = check_names.iter().map(|s| s.as_str()).collect();
-        let is_function = arf_harp::completion::check_if_functions(&check_refs).unwrap_or_default();
+        let is_function =
+            arf_harp::completion::check_if_functions(&check_names).unwrap_or_default();
 
         let span = Span {
             start: ns_token.start_pos,
             end: pos,
         };
 
-        matched
-            .iter()
+        qualified
+            .into_iter()
+            .zip(matched.iter())
             .enumerate()
-            .map(|(i, (export, indices, _score))| {
+            .map(|(i, ((base_value, indices), (export, _, _)))| {
                 let is_func = is_function.get(i).copied().unwrap_or(false);
-                let base_value = format!("{}{}", prefix, export);
 
                 let (value, extra_info) = if is_func && !has_special_suffix(export) {
                     (format!("{}()", base_value), Some("function".to_string()))
@@ -1042,11 +1094,53 @@ impl RCompleter {
                     span,
                     append_whitespace: false,
                     style: None,
-                    match_indices: indices.clone(),
+                    match_indices: indices,
                 }
             })
             .collect()
     }
+}
+
+/// Check if an R name requires backtick quoting (non-syntactic name).
+///
+/// Names that start with a letter or `.` followed by a non-digit, and contain
+/// only alphanumeric, `.`, or `_` characters are syntactic. Everything else
+/// (operators like `%>%`, names starting with `_` or digits, names with
+/// special characters) requires backtick quoting.
+fn needs_backtick_quoting(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+
+    // Must start with a letter or '.'
+    if !first.is_ascii_alphabetic() && first != '.' {
+        return true;
+    }
+
+    // If starts with '.', second char must not be a digit
+    if first == '.'
+        && let Some(second) = chars.next()
+    {
+        if second.is_ascii_digit() {
+            return true;
+        }
+        // Check remaining chars after second
+        if !second.is_alphanumeric() && second != '.' && second != '_' {
+            return true;
+        }
+    }
+
+    // All remaining characters must be alphanumeric, '.', or '_'
+    for c in chars {
+        if !c.is_alphanumeric() && c != '.' && c != '_' {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Check if a completion has a special suffix that means it shouldn't get parentheses.
@@ -1990,5 +2084,28 @@ mod tests {
                 start_pos: 0,
             })
         );
+    }
+
+    // --- Backtick quoting tests ---
+
+    #[test]
+    fn test_needs_backtick_quoting() {
+        // Syntactic names: no quoting needed
+        assert!(!needs_backtick_quoting("filter"));
+        assert!(!needs_backtick_quoting("st_geometry"));
+        assert!(!needs_backtick_quoting("data.frame"));
+        assert!(!needs_backtick_quoting(".internal"));
+        assert!(!needs_backtick_quoting("my_func"));
+
+        // Non-syntactic names: quoting needed
+        assert!(needs_backtick_quoting("%>%"));
+        assert!(needs_backtick_quoting("%in%"));
+        assert!(needs_backtick_quoting("+.gg"));
+        assert!(needs_backtick_quoting("[.data.frame"));
+        assert!(needs_backtick_quoting("_private"));
+        assert!(needs_backtick_quoting(".2bad"));
+
+        // Empty
+        assert!(!needs_backtick_quoting(""));
     }
 }
