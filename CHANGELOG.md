@@ -7,10 +7,6 @@
 - Experimental fuzzy matching for `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 
-### Changed
-
-- Renamed config section `experimental.completion_namespace` to `experimental.r_completion`
-
 ## [0.2.3] - 2026-02-27
 
 ### Added
