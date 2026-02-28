@@ -787,6 +787,7 @@ impl RCompleter {
     /// preserved since package exports are stable and use TTL-based expiry.
     fn invalidate_cache(&mut self) {
         self.cache = None;
+        self.namespace_fuzzy_cache = None;
     }
 }
 
@@ -1128,14 +1129,14 @@ fn needs_backtick_quoting(name: &str) -> bool {
             return true;
         }
         // Check remaining chars after second
-        if !second.is_alphanumeric() && second != '.' && second != '_' {
+        if !second.is_ascii_alphanumeric() && second != '.' && second != '_' {
             return true;
         }
     }
 
     // All remaining characters must be alphanumeric, '.', or '_'
     for c in chars {
-        if !c.is_alphanumeric() && c != '.' && c != '_' {
+        if !c.is_ascii_alphanumeric() && c != '.' && c != '_' {
             return true;
         }
     }
@@ -2104,6 +2105,15 @@ mod tests {
         assert!(needs_backtick_quoting("[.data.frame"));
         assert!(needs_backtick_quoting("_private"));
         assert!(needs_backtick_quoting(".2bad"));
+
+        // Edge cases: single dot and dotdot are syntactic
+        assert!(!needs_backtick_quoting("."));
+        assert!(!needs_backtick_quoting(".."));
+
+        // Unicode: R syntactic names are ASCII-only, so Unicode requires quoting
+        assert!(needs_backtick_quoting("données"));
+        assert!(needs_backtick_quoting("日本語"));
+        assert!(needs_backtick_quoting("café"));
 
         // Empty
         assert!(!needs_backtick_quoting(""));
