@@ -1072,6 +1072,18 @@ impl RCompleter {
             return vec![];
         }
 
+        // Filter out names containing backticks — R does not support escaping
+        // backticks inside backtick-quoted identifiers, so such names cannot
+        // be represented as valid R syntax in completions.
+        let matched: Vec<_> = matched
+            .into_iter()
+            .filter(|(export, _, _)| !export.contains('`'))
+            .collect();
+
+        if matched.is_empty() {
+            return vec![];
+        }
+
         // Build qualified names with backtick quoting for non-syntactic names
         let qualified: Vec<(String, Option<Vec<usize>>)> = matched
             .iter()
@@ -2148,6 +2160,10 @@ mod tests {
         assert!(needs_backtick_quoting("données"));
         assert!(needs_backtick_quoting("日本語"));
         assert!(needs_backtick_quoting("café"));
+
+        // Names with backticks: quoting needed (but unrepresentable in R syntax)
+        assert!(needs_backtick_quoting("a`b"));
+        assert!(needs_backtick_quoting("`"));
 
         // Empty
         assert!(!needs_backtick_quoting(""));
