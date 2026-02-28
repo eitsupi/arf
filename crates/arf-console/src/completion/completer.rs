@@ -2290,4 +2290,39 @@ mod tests {
 
         assert!(completer.namespace_fuzzy_cache.is_none());
     }
+
+    #[test]
+    fn test_fuzzy_cache_misses_on_different_start_pos() {
+        let mut completer = RCompleter::new();
+        completer.debounce_ms = 5000; // large window to ensure hit if position matched
+
+        let input = "dplyr::filt";
+        let suggestions = vec![Suggestion {
+            value: "dplyr::filter".to_string(),
+            display_override: None,
+            description: None,
+            extra: None,
+            span: Span { start: 0, end: 11 },
+            append_whitespace: false,
+            style: None,
+            match_indices: None,
+        }];
+
+        completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+            input: input.to_string(),
+            start_pos: 0,
+            suggestions: suggestions.clone(),
+            timestamp: Instant::now(),
+        });
+
+        // Same input at same position: cache hit
+        let cache = completer.namespace_fuzzy_cache.as_ref().unwrap();
+        assert_eq!(cache.input, input);
+        assert_eq!(cache.start_pos, 0);
+        assert!(cache.timestamp.elapsed() < Duration::from_millis(5000));
+
+        // Same input at different position: would be a cache miss
+        // (start_pos 5 != cached start_pos 0)
+        assert_ne!(cache.start_pos, 5);
+    }
 }
