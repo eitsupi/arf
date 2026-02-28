@@ -89,9 +89,6 @@ insert = "LightGreen"
 normal = "LightYellow"
 non_vi = "Default"
 
-[experimental]
-fuzzy_namespace_completion = false
-
 [experimental.history_forget]
 enabled = false
 delay = 2
@@ -104,3 +101,6 @@ color = "Cyan"
 [experimental.prompt_duration]
 format = "{value} "
 threshold_ms = 2000
+
+[experimental.completion_namespace]
+fuzzy = false

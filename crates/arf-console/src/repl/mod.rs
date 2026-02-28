@@ -241,7 +241,7 @@ impl Repl {
                 self.config.completion.debounce_ms,
                 self.config.completion.auto_paren_limit,
                 self.r_source_status.rig_enabled(),
-                self.config.experimental.fuzzy_namespace_completion,
+                self.config.experimental.completion_namespace.fuzzy,
             ));
             line_editor = line_editor.with_completer(completer);
 

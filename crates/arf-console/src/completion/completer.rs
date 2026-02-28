@@ -767,10 +767,12 @@ impl RCompleter {
         }
     }
 
-    /// Invalidate the cache.
+    /// Invalidate the completion cache.
+    ///
+    /// Only clears the debounce/prefix cache. Namespace export cache is
+    /// preserved since package exports are stable and use TTL-based expiry.
     fn invalidate_cache(&mut self) {
         self.cache = None;
-        self.namespace_cache.clear();
     }
 }
 
@@ -928,9 +930,18 @@ impl RCompleter {
     const NAMESPACE_CACHE_DURATION: Duration = Duration::from_secs(300);
 
     /// Get exports for a package, using the per-package cache.
+    ///
+    /// Cache key includes `::` vs `:::` distinction since they return
+    /// different sets of names (exported-only vs all namespace objects).
     fn get_cached_exports(&mut self, pkg: &str, triple_colon: bool) -> Vec<String> {
+        let cache_key = if triple_colon {
+            format!("{}:::", pkg)
+        } else {
+            format!("{}::", pkg)
+        };
+
         // Check cache
-        if let Some(entry) = self.namespace_cache.get(pkg)
+        if let Some(entry) = self.namespace_cache.get(&cache_key)
             && entry.timestamp.elapsed() < Self::NAMESPACE_CACHE_DURATION
         {
             return entry.exports.clone();
@@ -942,7 +953,7 @@ impl RCompleter {
 
         // Store in cache
         self.namespace_cache.insert(
-            pkg.to_string(),
+            cache_key,
             NamespaceExportCache {
                 exports: exports.clone(),
                 timestamp: Instant::now(),

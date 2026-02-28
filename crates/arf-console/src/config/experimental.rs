@@ -37,13 +37,22 @@ pub struct ExperimentalConfig {
     #[serde(default)]
     pub prompt_duration: PromptDurationConfig,
 
+    /// Namespace completion configuration (e.g., `pkg::func`).
+    #[serde(default)]
+    pub completion_namespace: CompletionNamespaceConfig,
+}
+
+/// Configuration for package namespace completion (`pkg::func`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+#[derive(Default)]
+pub struct CompletionNamespaceConfig {
     /// Enable fuzzy matching for package namespace completions.
     ///
     /// When enabled, typing `pkg::partial` uses fuzzy matching against all
     /// exported names from the package, so `sf::geo` can match `sf::st_geometry`.
     /// When disabled (default), only R's built-in prefix matching is used.
-    #[serde(default)]
-    pub fuzzy_namespace_completion: bool,
+    pub fuzzy: bool,
 }
 
 /// Schema-only version of `SpinnerConfig` that avoids depending on `nu_ansi_term::Color`.
@@ -128,12 +137,8 @@ struct ExperimentalConfigSchema {
     /// Command duration configuration for the `{duration}` prompt placeholder.
     pub prompt_duration: PromptDurationConfig,
 
-    /// Enable fuzzy matching for package namespace completions.
-    ///
-    /// When enabled, typing `pkg::partial` uses fuzzy matching against all
-    /// exported names from the package, so `sf::geo` can match `sf::st_geometry`.
-    /// When disabled (default), only R's built-in prefix matching is used.
-    pub fuzzy_namespace_completion: bool,
+    /// Namespace completion configuration (e.g., `pkg::func`).
+    pub completion_namespace: CompletionNamespaceConfig,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -299,7 +304,7 @@ mod tests {
         assert!(!config.history_forget.enabled);
         assert!(config.completion_min_chars.is_none());
         assert!(config.prompt_spinner.frames.is_empty()); // Disabled by default
-        assert!(!config.fuzzy_namespace_completion); // Disabled by default
+        assert!(!config.completion_namespace.fuzzy); // Disabled by default
     }
 
     #[test]
