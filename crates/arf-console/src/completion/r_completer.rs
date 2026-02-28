@@ -1257,12 +1257,15 @@ mod tests {
 
     #[test]
     fn test_detect_library_context_non_ascii() {
-        // Non-ASCII characters in the partial
+        // 'é' is alphanumeric per Rust's char::is_alphanumeric, so it's included in the partial
         let result = detect_library_context("library(données", 16, &lib_funcs());
-        // "données" contains non-identifier chars (é), so partial is "donn"
-        // (take_while stops at non-alphanumeric ASCII)
-        // Actually, é is alphanumeric in Rust's char::is_alphanumeric, so it should be included
-        assert!(result.is_some());
+        assert_eq!(
+            result,
+            Some(LibraryContext {
+                partial: "données".to_string(),
+                start_pos: 8,
+            })
+        );
     }
 
     #[test]
