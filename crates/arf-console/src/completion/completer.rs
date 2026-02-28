@@ -972,11 +972,39 @@ impl RCompleter {
         }
     }
 
+    /// Store namespace exports in the cache.
+    ///
+    /// Empty results are not cached so that completions recover immediately
+    /// once a package becomes available. Any previously cached (now-stale)
+    /// entry for the same key is removed in that case.
+    ///
+    /// Expired entries for other packages are evicted on each insert.
+    fn store_namespace_exports(&mut self, pkg: &str, triple_colon: bool, exports: Vec<String>) {
+        let cache_key = Self::namespace_cache_key(pkg, triple_colon);
+
+        if exports.is_empty() {
+            self.namespace_cache.remove(&cache_key);
+            return;
+        }
+
+        // Evict expired entries before inserting
+        let ttl = Self::NAMESPACE_CACHE_DURATION;
+        self.namespace_cache
+            .retain(|_, v| v.timestamp.elapsed() < ttl);
+
+        self.namespace_cache.insert(
+            cache_key,
+            NamespaceExportCache {
+                exports,
+                timestamp: Instant::now(),
+            },
+        );
+    }
+
     /// Ensure exports for a package are cached, fetching from R if needed.
     ///
     /// Cache key includes `::` vs `:::` distinction since they return
     /// different sets of names (exported-only vs all namespace objects).
-    /// Expired entries for other packages are evicted on each insert.
     fn ensure_namespace_cached(&mut self, pkg: &str, triple_colon: bool) {
         let cache_key = Self::namespace_cache_key(pkg, triple_colon);
 
@@ -991,26 +1019,7 @@ impl RCompleter {
         let exports =
             arf_harp::completion::get_namespace_exports(pkg, triple_colon).unwrap_or_default();
 
-        // Don't cache empty results so completions recover immediately
-        // once the package becomes available
-        if exports.is_empty() {
-            self.namespace_cache.remove(&cache_key);
-            return;
-        }
-
-        // Evict expired entries before inserting
-        let ttl = Self::NAMESPACE_CACHE_DURATION;
-        self.namespace_cache
-            .retain(|_, v| v.timestamp.elapsed() < ttl);
-
-        // Store in cache
-        self.namespace_cache.insert(
-            cache_key,
-            NamespaceExportCache {
-                exports,
-                timestamp: Instant::now(),
-            },
-        );
+        self.store_namespace_exports(pkg, triple_colon, exports);
     }
 
     /// Complete `pkg::partial` using fuzzy matching against namespace exports.
@@ -2135,5 +2144,121 @@ mod tests {
 
         // Empty
         assert!(!needs_backtick_quoting(""));
+    }
+
+    // --- Namespace cache tests ---
+
+    #[test]
+    fn test_namespace_cache_key_format() {
+        assert_eq!(RCompleter::namespace_cache_key("dplyr", false), "dplyr::");
+        assert_eq!(RCompleter::namespace_cache_key("dplyr", true), "dplyr:::");
+    }
+
+    #[test]
+    fn test_store_namespace_exports_caches_non_empty() {
+        let mut completer = RCompleter::new();
+        let exports = vec!["filter".to_string(), "mutate".to_string()];
+        completer.store_namespace_exports("dplyr", false, exports.clone());
+
+        let cached = completer.namespace_cache.get("dplyr::").unwrap();
+        assert_eq!(cached.exports, exports);
+    }
+
+    #[test]
+    fn test_store_namespace_exports_skips_empty() {
+        let mut completer = RCompleter::new();
+        completer.store_namespace_exports("nonexistent", false, vec![]);
+
+        assert!(!completer.namespace_cache.contains_key("nonexistent::"));
+    }
+
+    #[test]
+    fn test_store_namespace_exports_removes_stale_on_empty() {
+        let mut completer = RCompleter::new();
+
+        // First store a valid entry
+        completer.store_namespace_exports("pkg", false, vec!["func".to_string()]);
+        assert!(completer.namespace_cache.contains_key("pkg::"));
+
+        // Storing empty should remove the existing entry
+        completer.store_namespace_exports("pkg", false, vec![]);
+        assert!(!completer.namespace_cache.contains_key("pkg::"));
+    }
+
+    #[test]
+    fn test_store_namespace_exports_evicts_expired() {
+        let mut completer = RCompleter::new();
+
+        // Insert an already-expired entry
+        completer.namespace_cache.insert(
+            "old_pkg::".to_string(),
+            NamespaceExportCache {
+                exports: vec!["old_func".to_string()],
+                timestamp: Instant::now() - Duration::from_secs(600),
+            },
+        );
+
+        // Store a new entry — should evict the expired one
+        completer.store_namespace_exports("new_pkg", false, vec!["new_func".to_string()]);
+
+        assert!(!completer.namespace_cache.contains_key("old_pkg::"));
+        assert!(completer.namespace_cache.contains_key("new_pkg::"));
+    }
+
+    #[test]
+    fn test_store_namespace_exports_keeps_fresh_entries() {
+        let mut completer = RCompleter::new();
+
+        // Insert a fresh entry for another package
+        completer.store_namespace_exports("pkg_a", false, vec!["func_a".to_string()]);
+
+        // Store a second package
+        completer.store_namespace_exports("pkg_b", false, vec!["func_b".to_string()]);
+
+        // Both should still be present
+        assert!(completer.namespace_cache.contains_key("pkg_a::"));
+        assert!(completer.namespace_cache.contains_key("pkg_b::"));
+    }
+
+    #[test]
+    fn test_separate_cache_for_double_and_triple_colon() {
+        let mut completer = RCompleter::new();
+        completer.store_namespace_exports("pkg", false, vec!["exported".to_string()]);
+        completer.store_namespace_exports(
+            "pkg",
+            true,
+            vec!["exported".to_string(), "internal".to_string()],
+        );
+
+        let double = completer.namespace_cache.get("pkg::").unwrap();
+        assert_eq!(double.exports, vec!["exported"]);
+
+        let triple = completer.namespace_cache.get("pkg:::").unwrap();
+        assert_eq!(triple.exports, vec!["exported", "internal"]);
+    }
+
+    #[test]
+    fn test_invalidate_cache_preserves_namespace_cache() {
+        let mut completer = RCompleter::new();
+        completer.store_namespace_exports("dplyr", false, vec!["filter".to_string()]);
+
+        completer.invalidate_cache();
+
+        // Namespace export cache uses TTL-based expiry, not cleared by invalidate_cache
+        assert!(completer.namespace_cache.contains_key("dplyr::"));
+    }
+
+    #[test]
+    fn test_invalidate_cache_clears_fuzzy_namespace_cache() {
+        let mut completer = RCompleter::new();
+        completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+            input: "dplyr::filt".to_string(),
+            suggestions: vec![],
+            timestamp: Instant::now(),
+        });
+
+        completer.invalidate_cache();
+
+        assert!(completer.namespace_fuzzy_cache.is_none());
     }
 }
