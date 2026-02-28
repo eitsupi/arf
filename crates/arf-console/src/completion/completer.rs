@@ -2354,4 +2354,19 @@ mod tests {
         let completer = RCompleter::new();
         assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
     }
+
+    #[test]
+    fn test_fuzzy_cache_miss_when_expired() {
+        let mut completer = RCompleter::new();
+        completer.debounce_ms = 0; // zero window: always expired
+
+        completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+            input: "dplyr::filt".to_string(),
+            start_pos: 0,
+            suggestions: vec![],
+            timestamp: Instant::now(),
+        });
+
+        assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
+    }
 }
