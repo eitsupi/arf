@@ -983,6 +983,10 @@ impl RCompleter {
         let cache_key = Self::namespace_cache_key(pkg, triple_colon);
 
         if exports.is_empty() {
+            // Remove any existing entry — this handles the case where a package
+            // was previously available (cached with non-empty exports) but has
+            // since been unloaded or removed mid-session. Without this, stale
+            // non-empty results would persist until TTL expiry.
             self.namespace_cache.remove(&cache_key);
             return;
         }
