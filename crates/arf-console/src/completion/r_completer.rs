@@ -208,7 +208,11 @@ fn detect_library_context(
     cursor_pos: usize,
     func_names: &[String],
 ) -> Option<LibraryContext> {
-    let before_cursor = &line[..cursor_pos.min(line.len())];
+    let pos = cursor_pos.min(line.len());
+    if !line.is_char_boundary(pos) {
+        return None;
+    }
+    let before_cursor = &line[..pos];
 
     // Find the last unmatched opening parenthesis before cursor
     let mut paren_depth = 0;
@@ -1236,5 +1240,39 @@ mod tests {
     fn test_detect_library_context_single_quote_skipped() {
         let result = detect_library_context("library('dpl", 12, &lib_funcs());
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_detect_library_context_stray_colons_no_match() {
+        // Stray colons before function name — no match (benign)
+        assert_eq!(
+            detect_library_context("x:library(dpl", 13, &lib_funcs()),
+            None
+        );
+        assert_eq!(
+            detect_library_context(":::library(dpl", 14, &lib_funcs()),
+            None
+        );
+    }
+
+    #[test]
+    fn test_detect_library_context_non_ascii() {
+        // Non-ASCII characters in the partial
+        let result = detect_library_context("library(données", 16, &lib_funcs());
+        // "données" contains non-identifier chars (é), so partial is "donn"
+        // (take_while stops at non-alphanumeric ASCII)
+        // Actually, é is alphanumeric in Rust's char::is_alphanumeric, so it should be included
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_detect_library_context_utf8_boundary_safety() {
+        // cursor_pos in the middle of a multi-byte char should return None, not panic
+        let line = "library(données";
+        // 'é' is 2 bytes in UTF-8, find a mid-byte position
+        let e_pos = line.find('é').unwrap();
+        let mid_byte = e_pos + 1; // middle of 'é'
+        assert!(!line.is_char_boundary(mid_byte));
+        assert_eq!(detect_library_context(line, mid_byte, &lib_funcs()), None);
     }
 }
