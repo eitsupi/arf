@@ -4,4 +4,7 @@
 
 pub mod completer;
 pub mod menu;
+mod meta;
 pub(crate) mod path;
+mod r_completer;
+mod string_context;
