@@ -237,6 +237,17 @@ completion_min_chars = 3  # Show completions after 3 characters
 
 When not set, completion requires pressing Tab (the default behavior). This is similar to radian's `complete_while_typing` feature.
 
+### Fuzzy namespace completion
+
+Use fuzzy matching for `pkg::func` completions. When enabled, typing `sf::geo` can match `sf::st_geometry` instead of only prefix matches. **Disabled by default.**
+
+```toml
+[experimental.completion_namespace]
+fuzzy = true
+```
+
+Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
+
 ### History forget
 
 Automatically remove commands that produced errors from history. Similar to fish's [sponge](https://github.com/meaningful-ooo/sponge) plugin.
