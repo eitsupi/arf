@@ -190,6 +190,19 @@ struct LibraryContext {
 /// - Function name doesn't match any in `func_names`
 /// - There's a comma after `(` (not first argument)
 /// - The argument starts with a quote (string argument)
+///
+/// # Limitation
+///
+/// The backward parenthesis scan does not track string literal boundaries, so a `)` inside
+/// a string literal is counted as a real closing paren. In theory this could miscount
+/// paren depth, but in practice it is unreachable for `library()`/`require()` because:
+/// - These functions take a bare symbol as the first argument, not nested expressions.
+/// - Any nested call containing a string with `)` would also contain commas,
+///   which triggers the early `None` return (first-argument-only guard).
+/// - A `)` in a string *before* the target `(` is never reached, since the scan
+///   stops at the nearest unmatched `(`.
+///
+/// The same design is used by `arf_harp::completion::detect_library_context`.
 fn detect_library_context(
     line: &str,
     cursor_pos: usize,
