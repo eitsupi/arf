@@ -1027,10 +1027,7 @@ impl RCompleter {
         // Match exports against partial
         let matched: Vec<(String, Option<Vec<usize>>, u32)> = if ns_token.partial.is_empty() {
             // Empty partial: return all exports, sorted alphabetically
-            let mut all: Vec<_> = exports
-                .iter()
-                .map(|e| (e.clone(), None, 0u32))
-                .collect();
+            let mut all: Vec<_> = exports.iter().map(|e| (e.clone(), None, 0u32)).collect();
             all.sort_by(|a, b| a.0.cmp(&b.0));
             all
         } else {
