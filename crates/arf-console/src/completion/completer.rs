@@ -2198,7 +2198,8 @@ mod tests {
             "old_pkg::".to_string(),
             NamespaceExportCache {
                 exports: vec!["old_func".to_string()],
-                timestamp: Instant::now() - Duration::from_secs(600),
+                timestamp: Instant::now()
+                    - (RCompleter::NAMESPACE_CACHE_DURATION + Duration::from_secs(1)),
             },
         );
 
