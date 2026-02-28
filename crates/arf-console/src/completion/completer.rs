@@ -817,12 +817,13 @@ impl Completer for RCompleter {
             let input = &line[ns_token.start_pos..pos];
 
             // Debounce: reuse cached results if same input at same position within window
-            if let Some(cache) = &self.namespace_fuzzy_cache
-                && cache.input == input
-                && cache.start_pos == ns_token.start_pos
-                && cache.timestamp.elapsed() < Duration::from_millis(self.debounce_ms)
-            {
-                return cache.suggestions.clone();
+            if self.is_namespace_fuzzy_cache_hit(input, ns_token.start_pos) {
+                return self
+                    .namespace_fuzzy_cache
+                    .as_ref()
+                    .unwrap()
+                    .suggestions
+                    .clone();
             }
 
             let suggestions = self.complete_namespace_fuzzy(&ns_token, pos);
@@ -973,6 +974,17 @@ impl RCompleter {
             format!("{}:::", pkg)
         } else {
             format!("{}::", pkg)
+        }
+    }
+
+    /// Check whether the namespace fuzzy cache has a valid hit for the given input and position.
+    fn is_namespace_fuzzy_cache_hit(&self, input: &str, start_pos: usize) -> bool {
+        if let Some(cache) = &self.namespace_fuzzy_cache {
+            cache.input == input
+                && cache.start_pos == start_pos
+                && cache.timestamp.elapsed() < Duration::from_millis(self.debounce_ms)
+        } else {
+            false
         }
     }
 
@@ -2292,37 +2304,54 @@ mod tests {
     }
 
     #[test]
-    fn test_fuzzy_cache_misses_on_different_start_pos() {
+    fn test_fuzzy_cache_hit_same_input_and_position() {
         let mut completer = RCompleter::new();
-        completer.debounce_ms = 5000; // large window to ensure hit if position matched
-
-        let input = "dplyr::filt";
-        let suggestions = vec![Suggestion {
-            value: "dplyr::filter".to_string(),
-            display_override: None,
-            description: None,
-            extra: None,
-            span: Span { start: 0, end: 11 },
-            append_whitespace: false,
-            style: None,
-            match_indices: None,
-        }];
+        completer.debounce_ms = 5000;
 
         completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
-            input: input.to_string(),
+            input: "dplyr::filt".to_string(),
             start_pos: 0,
-            suggestions: suggestions.clone(),
+            suggestions: vec![],
             timestamp: Instant::now(),
         });
 
-        // Same input at same position: cache hit
-        let cache = completer.namespace_fuzzy_cache.as_ref().unwrap();
-        assert_eq!(cache.input, input);
-        assert_eq!(cache.start_pos, 0);
-        assert!(cache.timestamp.elapsed() < Duration::from_millis(5000));
+        assert!(completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
+    }
 
-        // Same input at different position: would be a cache miss
-        // (start_pos 5 != cached start_pos 0)
-        assert_ne!(cache.start_pos, 5);
+    #[test]
+    fn test_fuzzy_cache_miss_different_start_pos() {
+        let mut completer = RCompleter::new();
+        completer.debounce_ms = 5000;
+
+        completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+            input: "dplyr::filt".to_string(),
+            start_pos: 0,
+            suggestions: vec![],
+            timestamp: Instant::now(),
+        });
+
+        // Same input text but at a different position: must miss
+        assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 5));
+    }
+
+    #[test]
+    fn test_fuzzy_cache_miss_different_input() {
+        let mut completer = RCompleter::new();
+        completer.debounce_ms = 5000;
+
+        completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+            input: "dplyr::filt".to_string(),
+            start_pos: 0,
+            suggestions: vec![],
+            timestamp: Instant::now(),
+        });
+
+        assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filte", 0));
+    }
+
+    #[test]
+    fn test_fuzzy_cache_miss_when_empty() {
+        let completer = RCompleter::new();
+        assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
     }
 }
