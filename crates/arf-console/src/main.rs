@@ -108,10 +108,14 @@ fn run() -> Result<()> {
     // History configuration: CLI flag overrides default XDG location
     if cli.no_history {
         config.history.disabled = true;
-    } else if let Some(history_dir) = &cli.history_dir
-        && !history_dir.as_os_str().is_empty()
-    {
-        config.history.dir = Some(history_dir.clone());
+    } else if let Some(history_dir) = &cli.history_dir {
+        if history_dir.as_os_str().is_empty() {
+            eprintln!(
+                "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
+            );
+        } else {
+            config.history.dir = Some(history_dir.clone());
+        }
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
@@ -364,7 +368,15 @@ fn handle_history_import(
     // Resolve effective history directory (CLI --history-dir takes precedence)
     // Required for actual imports and for dry-run with dedup (needs DB access)
     let history_dir = cli_history_dir
-        .filter(|p| !p.as_os_str().is_empty())
+        .filter(|p| {
+            let ok = !p.as_os_str().is_empty();
+            if !ok {
+                eprintln!(
+                    "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
+                );
+            }
+            ok
+        })
         .cloned()
         .or(config.history.dir.clone())
         .or_else(config::history_dir);
@@ -574,7 +586,15 @@ fn handle_history_export(
 
     // Resolve effective history directory
     let history_dir = cli_history_dir
-        .filter(|p| !p.as_os_str().is_empty())
+        .filter(|p| {
+            let ok = !p.as_os_str().is_empty();
+            if !ok {
+                eprintln!(
+                    "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
+                );
+            }
+            ok
+        })
         .cloned()
         .or(config.history.dir.clone())
         .or_else(config::history_dir)
