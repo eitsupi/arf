@@ -308,6 +308,10 @@ format = "{status}R {version}> "
 format = "[{cwd_short}] r> "
 # Result: "[project] r> "
 
+# Add a blank line before the prompt
+# (double-quoted strings interpret \n as a newline)
+format = "\n{status}R {version}> "
+
 # Custom shell mode prompt
 shell_format = "{shell}:{cwd_short}$ "
 # Result: "bash:project$ "
