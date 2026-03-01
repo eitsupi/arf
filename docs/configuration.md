@@ -311,6 +311,9 @@ format = "[{cwd_short}] r> "
 # Custom shell mode prompt
 shell_format = "{shell}:{cwd_short}$ "
 # Result: "bash:project$ "
+
+# Add a blank line before the prompt (\n becomes a newline)
+format = "\n{status}R {version}> "
 ```
 
 ## Command Status Indicator
