@@ -243,9 +243,9 @@ impl MetaCommandCompleter {
             }
             (1, true) => {
                 // Command complete with trailing space - check for subcommands
-                // Strip `!` suffix so `:switch!` and `:switch` both get version completions
-                let cmd = parts[0].strip_suffix('!').unwrap_or(parts[0]);
-                if cmd == "switch" {
+                let cmd = parts[0];
+                // Strip `!` suffix so `:switch!` gets version completions like `:switch`
+                if cmd == "switch" || cmd == "switch!" {
                     // Complete with R versions from rig
                     self.complete_switch_versions(line, pos, leading_whitespace, "")
                 } else if cmd == "history" {
@@ -257,9 +257,9 @@ impl MetaCommandCompleter {
             }
             (2, false) => {
                 // Typing subcommand argument
-                let cmd = parts[0].strip_suffix('!').unwrap_or(parts[0]);
+                let cmd = parts[0];
                 let partial = parts[1];
-                if cmd == "switch" {
+                if cmd == "switch" || cmd == "switch!" {
                     self.complete_switch_versions(line, pos, leading_whitespace, partial)
                 } else if cmd == "history" {
                     self.complete_history_subcommands(pos, partial)
@@ -269,7 +269,7 @@ impl MetaCommandCompleter {
             }
             (2, true) => {
                 // Two parts complete with trailing space - check for third level
-                let cmd = parts[0].strip_suffix('!').unwrap_or(parts[0]);
+                let cmd = parts[0];
                 let subcmd = parts[1];
                 if cmd == "history" && subcmd == "clear" {
                     // Complete with clear targets (r, shell, all)
@@ -283,7 +283,7 @@ impl MetaCommandCompleter {
             }
             (3, false) => {
                 // Typing third argument
-                let cmd = parts[0].strip_suffix('!').unwrap_or(parts[0]);
+                let cmd = parts[0];
                 let subcmd = parts[1];
                 let partial = parts[2];
                 if cmd == "history" && subcmd == "clear" {
@@ -965,10 +965,46 @@ mod tests {
     }
 
     #[test]
+    fn test_meta_command_switch_bang_subcommand_completion() {
+        // ":switch! " should enter the version completion branch (same as ":switch ")
+        // Without rig installed, both return empty, but the key thing is they take
+        // the same code path (not falling through to the default empty vec).
+        let mut completer = MetaCommandCompleter::new();
+        let switch_suggestions = completer.complete(":switch ", 8);
+        let switch_bang_suggestions = completer.complete(":switch! ", 9);
+        assert_eq!(
+            switch_suggestions.len(),
+            switch_bang_suggestions.len(),
+            ":switch! should produce the same version completions as :switch"
+        );
+
+        // Partial version input should also work
+        let switch_partial = completer.complete(":switch 4", 9);
+        let switch_bang_partial = completer.complete(":switch! 4", 10);
+        assert_eq!(
+            switch_partial.len(),
+            switch_bang_partial.len(),
+            ":switch! with partial version should match :switch"
+        );
+    }
+
+    #[test]
     fn test_meta_command_switch_bang_no_subcommands_for_reprex() {
         // ":reprex " should have no subcommands (no false match from strip_suffix)
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completer.complete(":reprex ", 8);
         assert!(suggestions.is_empty(), ":reprex should have no subcommands");
+    }
+
+    #[test]
+    fn test_meta_command_history_bang_no_subcommands() {
+        // ":history! " should NOT offer history subcommands (history! is not a valid command)
+        let mut completer = MetaCommandCompleter::new();
+        let suggestions = completer.complete(":history! ", 10);
+        assert!(
+            suggestions.is_empty(),
+            ":history! should not offer subcommands, got: {:?}",
+            suggestions.iter().map(|s| &s.value).collect::<Vec<_>>()
+        );
     }
 }
