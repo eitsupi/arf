@@ -183,11 +183,11 @@ fn generate_info_lines(
     // Format: "VAR_NAME:       value" with aligned colons
     let env_vars = [
         ("ARF_HISTORY_DIR", "ARF_HISTORY_DIR: "),
-        ("R_LIBS", "R_LIBS:         "),
-        ("R_LIBS_USER", "R_LIBS_USER:    "),
-        ("R_LIBS_SITE", "R_LIBS_SITE:    "),
-        ("R_PROFILE", "R_PROFILE:      "),
-        ("R_ENVIRON", "R_ENVIRON:      "),
+        ("R_LIBS", "R_LIBS:          "),
+        ("R_LIBS_USER", "R_LIBS_USER:     "),
+        ("R_LIBS_SITE", "R_LIBS_SITE:     "),
+        ("R_PROFILE", "R_PROFILE:       "),
+        ("R_ENVIRON", "R_ENVIRON:       "),
     ];
     let mut has_env = false;
     for (var, label) in &env_vars {
