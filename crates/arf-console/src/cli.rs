@@ -2,6 +2,7 @@
 
 use crate::external::rig;
 use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{Shell, generate};
 use std::io;
@@ -123,7 +124,13 @@ pub struct Cli {
     /// R history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.
     ///
     /// Config: history.dir
-    #[arg(long = "history-dir", value_hint = ValueHint::DirPath, env = "ARF_HISTORY_DIR", hide_short_help = true)]
+    #[arg(
+        long = "history-dir",
+        value_hint = ValueHint::DirPath,
+        env = "ARF_HISTORY_DIR",
+        hide_short_help = true,
+        value_parser = clap::builder::NonEmptyStringValueParser::new().map(PathBuf::from),
+    )]
     pub history_dir: Option<PathBuf>,
 
     /// Disable history (no history saved or loaded)
@@ -422,5 +429,18 @@ mod tests {
     fn test_help_history_export_snapshot() {
         let help = Cli::generate_help_string(&["history", "export"]);
         insta::assert_snapshot!("help_history_export", help);
+    }
+
+    #[test]
+    fn test_help_long_snapshot() {
+        let mut cmd = Cli::command();
+        let help = cmd.render_long_help().to_string();
+        insta::assert_snapshot!("help_long", help);
+    }
+
+    #[test]
+    fn test_history_dir_rejects_empty_string() {
+        let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
+        assert!(result.is_err(), "empty --history-dir should be rejected");
     }
 }
