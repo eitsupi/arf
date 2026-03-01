@@ -146,8 +146,8 @@ pub fn process_meta_command(
             // Extract version argument
             let version = parts.get(1).map(|s| s.to_string());
             if version.is_none() {
-                arf_println!("Usage: :switch <version>");
-                arf_println!("Example: :switch 4.4 or :switch release");
+                arf_println!("Usage: :{cmd} <version>");
+                arf_println!("Example: :{cmd} 4.4 or :{cmd} release");
                 return Some(MetaCommandResult::Handled);
             }
             let force = cmd == "switch!";
