@@ -47,17 +47,7 @@ fn run() -> Result<()> {
     traps::register_trap_handlers();
 
     // Parse command-line arguments
-    let mut cli = Cli::parse();
-
-    // Sanitize empty history dir (e.g. ARF_HISTORY_DIR="") to None with a warning
-    if cli
-        .history_dir
-        .as_ref()
-        .is_some_and(|p| p.as_os_str().is_empty())
-    {
-        eprintln!("Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring.");
-        cli.history_dir = None;
-    }
+    let cli = Cli::parse();
 
     // Handle subcommands first
     match &cli.command {
