@@ -433,8 +433,7 @@ mod tests {
 
     #[test]
     fn test_help_long_snapshot() {
-        let mut cmd = Cli::command();
-        let help = cmd.render_long_help().to_string();
+        let help = Cli::generate_help_string(&[]);
         insta::assert_snapshot!("help_long", help);
     }
 
