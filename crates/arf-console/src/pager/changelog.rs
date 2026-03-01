@@ -13,6 +13,7 @@ const CHANGELOG_SOURCE: &str = include_str!(concat!(env!("OUT_DIR"), "/CHANGELOG
 pub fn display_changelog() {
     if let Err(e) = display_changelog_inner() {
         log::error!("changelog pager error: {}", e);
+        eprintln!("Error: failed to open changelog pager: {}", e);
     }
 }
 
