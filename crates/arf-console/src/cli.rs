@@ -123,13 +123,13 @@ pub struct Cli {
     /// R history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.
     ///
     /// Config: history.dir
-    #[arg(long = "history-dir", value_hint = ValueHint::DirPath, env = "ARF_HISTORY_DIR", hide = true)]
+    #[arg(long = "history-dir", value_hint = ValueHint::DirPath, env = "ARF_HISTORY_DIR", hide_short_help = true)]
     pub history_dir: Option<PathBuf>,
 
     /// Disable history (no history saved or loaded)
     ///
     /// Config: history.disabled
-    #[arg(long = "no-history", hide = true)]
+    #[arg(long = "no-history", hide_short_help = true)]
     pub no_history: bool,
 
     /// Subcommands
