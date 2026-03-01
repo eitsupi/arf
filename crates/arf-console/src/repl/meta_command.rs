@@ -4,7 +4,7 @@ use crate::completion::path::expand_tilde;
 use crate::config::{ConfigStatus, RSourceStatus};
 use crate::external::formatter;
 use crate::pager::{
-    HistoryBrowserResult, HistoryDbMode, display_session_info, run_help_browser,
+    HistoryBrowserResult, HistoryDbMode, display_changelog, display_session_info, run_help_browser,
     run_history_browser, text_utils,
 };
 use reedline::{History, SqliteBackedHistory};
@@ -223,6 +223,10 @@ pub fn process_meta_command(
             );
             Some(MetaCommandResult::Handled)
         }
+        "changelog" => {
+            display_changelog();
+            Some(MetaCommandResult::Handled)
+        }
         "cd" => {
             let path_arg = trimmed[1..].strip_prefix("cd").unwrap_or("").trim();
             match meta_cd(path_arg) {
@@ -265,6 +269,7 @@ pub fn process_meta_command(
             println!("#   :restart!      - Restart without confirmation");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
             println!("#   :switch! <ver> - Switch without confirmation");
+            println!("#   :changelog     - Show arf changelog");
             println!("#   :commands      - Show this list");
             println!("#   :quit          - Exit arf");
             Some(MetaCommandResult::Handled)

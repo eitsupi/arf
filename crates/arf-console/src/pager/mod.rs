@@ -3,6 +3,7 @@
 //! This module provides pager functionality for displaying scrollable content,
 //! help browser, history browser, and history schema viewer.
 
+mod changelog;
 mod help;
 pub mod history_browser;
 pub mod history_schema;
@@ -11,6 +12,7 @@ pub mod session_info;
 pub(crate) mod style_convert;
 pub(crate) mod text_utils;
 
+pub use changelog::display_changelog;
 pub use help::run_help_browser;
 pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};
 pub use session_info::display_session_info;

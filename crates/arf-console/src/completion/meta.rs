@@ -98,6 +98,11 @@ const META_COMMANDS: &[MetaCommandDef] = &[
         takes_argument: true,
     },
     MetaCommandDef {
+        name: "changelog",
+        description: "Show arf changelog",
+        takes_argument: false,
+    },
+    MetaCommandDef {
         name: "history",
         description: "Manage command history",
         takes_argument: true,
