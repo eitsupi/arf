@@ -47,7 +47,17 @@ fn run() -> Result<()> {
     traps::register_trap_handlers();
 
     // Parse command-line arguments
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Sanitize empty history dir (e.g. ARF_HISTORY_DIR="") to None with a warning
+    if cli
+        .history_dir
+        .as_ref()
+        .is_some_and(|p| p.as_os_str().is_empty())
+    {
+        eprintln!("Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring.");
+        cli.history_dir = None;
+    }
 
     // Handle subcommands first
     match &cli.command {
@@ -109,13 +119,7 @@ fn run() -> Result<()> {
     if cli.no_history {
         config.history.disabled = true;
     } else if let Some(history_dir) = &cli.history_dir {
-        if history_dir.as_os_str().is_empty() {
-            eprintln!(
-                "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
-            );
-        } else {
-            config.history.dir = Some(history_dir.clone());
-        }
+        config.history.dir = Some(history_dir.clone());
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
@@ -368,15 +372,6 @@ fn handle_history_import(
     // Resolve effective history directory (CLI --history-dir takes precedence)
     // Required for actual imports and for dry-run with dedup (needs DB access)
     let history_dir = cli_history_dir
-        .filter(|p| {
-            let ok = !p.as_os_str().is_empty();
-            if !ok {
-                eprintln!(
-                    "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
-                );
-            }
-            ok
-        })
         .cloned()
         .or(config.history.dir.clone())
         .or_else(config::history_dir);
@@ -586,15 +581,6 @@ fn handle_history_export(
 
     // Resolve effective history directory
     let history_dir = cli_history_dir
-        .filter(|p| {
-            let ok = !p.as_os_str().is_empty();
-            if !ok {
-                eprintln!(
-                    "Warning: --history-dir / ARF_HISTORY_DIR is set to an empty string, ignoring."
-                );
-            }
-            ok
-        })
         .cloned()
         .or(config.history.dir.clone())
         .or_else(config::history_dir)
