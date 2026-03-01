@@ -11,6 +11,17 @@
 //! Copyright (c) 2024 Posit Software, PBC
 
 fn main() {
+    // Copy CHANGELOG.md to OUT_DIR for embedding in binary
+    let changelog_path = std::path::Path::new("../../CHANGELOG.md");
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let dest = std::path::Path::new(&out_dir).join("CHANGELOG.md");
+    if changelog_path.exists() {
+        std::fs::copy(changelog_path, &dest).expect("Failed to copy CHANGELOG.md");
+    } else {
+        std::fs::write(&dest, "Changelog not available.").expect("Failed to write fallback");
+    }
+    println!("cargo:rerun-if-changed=../../CHANGELOG.md");
+
     // Re-run if manifest files change
     println!("cargo:rerun-if-changed=resources/manifest");
 
