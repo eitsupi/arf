@@ -4,6 +4,7 @@
 
 ### Added
 
+- `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `[history] dir` > XDG default)
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 - `:restart!` and `:switch!` commands to skip confirmation prompt

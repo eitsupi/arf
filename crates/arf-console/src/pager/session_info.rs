@@ -182,6 +182,7 @@ fn generate_info_lines(
     // R-related environment variables
     // Format: "VAR_NAME:       value" with aligned colons
     let env_vars = [
+        ("ARF_HISTORY_DIR", "ARF_HISTORY_DIR: "),
         ("R_LIBS", "R_LIBS:         "),
         ("R_LIBS_USER", "R_LIBS_USER:    "),
         ("R_LIBS_SITE", "R_LIBS_SITE:    "),

@@ -572,6 +572,23 @@ disabled = false       # Disable history
 dir = "/custom/path"   # Custom history directory (optional)
 ```
 
+### Environment Variable
+
+The `ARF_HISTORY_DIR` environment variable can be used to override the history directory. This is useful for devcontainer Features that persist history via Docker volumes.
+
+```bash
+export ARF_HISTORY_DIR=/dc/arf-history
+```
+
+### Priority Order
+
+The history directory is resolved with the following priority (highest first):
+
+1. CLI `--history-dir`
+2. `ARF_HISTORY_DIR` environment variable
+3. TOML `[history] dir`
+4. XDG default
+
 ### CLI Options
 
 ```bash
@@ -627,7 +644,7 @@ Command-line options take precedence over config file settings:
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |
 | `--no-history` | `history.disabled` |
-| `--history-dir` | `history.dir` |
+| `--history-dir` / `ARF_HISTORY_DIR` | `history.dir` |
 
 Example:
 ```bash
