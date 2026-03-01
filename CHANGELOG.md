@@ -6,6 +6,7 @@
 
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
+- `:restart!` and `:switch!` commands to skip confirmation prompt
 
 ## [0.2.3] - 2026-02-27
 

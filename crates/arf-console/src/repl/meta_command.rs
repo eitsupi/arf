@@ -118,11 +118,14 @@ pub fn process_meta_command(
             }
             Some(MetaCommandResult::ShellExecuted)
         }
-        "restart" => {
-            if confirm_action(&format!(
-                "{} Restart R session? Current session will be lost.",
-                ARF_PREFIX
-            )) {
+        "restart" | "restart!" => {
+            let force = cmd == "restart!";
+            if force
+                || confirm_action(&format!(
+                    "{} Restart R session? Current session will be lost.",
+                    ARF_PREFIX
+                ))
+            {
                 arf_println!("Restarting R session...");
                 Some(MetaCommandResult::Restart(None))
             } else {
@@ -130,7 +133,7 @@ pub fn process_meta_command(
                 Some(MetaCommandResult::Handled)
             }
         }
-        "switch" => {
+        "switch" | "switch!" => {
             // :switch requires rig to be enabled at startup
             if !r_source_status.rig_enabled() {
                 arf_println!("Error: :switch requires rig to be available at startup.");
@@ -143,12 +146,13 @@ pub fn process_meta_command(
             // Extract version argument
             let version = parts.get(1).map(|s| s.to_string());
             if version.is_none() {
-                arf_println!("Usage: :switch <version>");
-                arf_println!("Example: :switch 4.4 or :switch release");
+                arf_println!("Usage: :{cmd} <version>");
+                arf_println!("Example: :{cmd} 4.4 or :{cmd} release");
                 return Some(MetaCommandResult::Handled);
             }
+            let force = cmd == "switch!";
             let ver = version.as_ref().unwrap();
-            if confirm_action(&format!("Restart with R {}?", ver)) {
+            if force || confirm_action(&format!("Restart with R {}?", ver)) {
                 arf_println!("Restarting with R {}...", ver);
                 Some(MetaCommandResult::Restart(version))
             } else {
@@ -258,7 +262,9 @@ pub fn process_meta_command(
             );
             println!("#   :history       - History management (browse, clear, schema)");
             println!("#   :restart       - Restart R session");
+            println!("#   :restart!      - Restart without confirmation");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
+            println!("#   :switch! <ver> - Switch without confirmation");
             println!("#   :commands      - Show this list");
             println!("#   :quit          - Exit arf");
             Some(MetaCommandResult::Handled)
@@ -946,5 +952,61 @@ mod tests {
     #[test]
     fn test_dir_command_hint_empty() {
         assert!(dir_command_hint("").is_none());
+    }
+
+    // --- Force (!) option tests ---
+
+    #[test]
+    fn test_process_meta_command_restart_force() {
+        let mut config = create_test_prompt_config();
+        let status = default_r_source_status();
+        // :restart! should skip confirmation and return Restart directly
+        let result = call_meta(":restart!", &mut config, &None, &None, &None, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Restart(None))));
+    }
+
+    #[test]
+    fn test_process_meta_command_restart_force_with_whitespace() {
+        let mut config = create_test_prompt_config();
+        let status = default_r_source_status();
+        let result = call_meta("  :restart!  ", &mut config, &None, &None, &None, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Restart(None))));
+    }
+
+    #[test]
+    fn test_process_meta_command_switch_force() {
+        let mut config = create_test_prompt_config();
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+        };
+        let result = call_meta(
+            ":switch! 4.4",
+            &mut config,
+            &None,
+            &None,
+            &None,
+            &status_rig,
+        );
+        assert!(matches!(result, Some(MetaCommandResult::Restart(Some(ref v))) if v == "4.4"));
+    }
+
+    #[test]
+    fn test_process_meta_command_switch_force_no_version() {
+        let mut config = create_test_prompt_config();
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+        };
+        // :switch! without version should still show usage
+        let result = call_meta(":switch!", &mut config, &None, &None, &None, &status_rig);
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+    }
+
+    #[test]
+    fn test_process_meta_command_unknown_with_bang() {
+        let mut config = create_test_prompt_config();
+        let status = default_r_source_status();
+        // :shell! is not a valid command (! only supported on restart/switch)
+        let result = call_meta(":shell!", &mut config, &None, &None, &None, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
     }
 }
