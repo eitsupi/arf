@@ -373,12 +373,6 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 - If you set a custom error handler via `options(error = ...)`, arf will chain to your handler, but arf's handler takes precedence. Your handler will still be called after arf records the error.
 - There is a slight performance overhead (~microseconds) on each prompt due to R API calls for checking and resetting error state. This is negligible in practice but may be noticeable in benchmarks.
 
-### Windows Terminal flickering in TUI pagers
-
-The help browser and other TUI pagers may flicker when scrolling in **Windows Terminal 1.23 and earlier**. This is because Windows Terminal stable versions do not support [Synchronized Output (DEC mode 2026)](https://github.com/microsoft/terminal/issues/8331), which prevents screen tearing during rapid updates.
-
-**Workaround**: Install [Windows Terminal Preview](https://aka.ms/terminal-preview) (1.24+), which includes Synchronized Output support.
-
 ## Related Projects
 
 - [radian](https://github.com/randy3k/radian) — A 21st century R console written in Python. arf draws inspiration from radian's design philosophy.
