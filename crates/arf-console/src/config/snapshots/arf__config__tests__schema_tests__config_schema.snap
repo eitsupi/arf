@@ -134,6 +134,13 @@ expression: schema
         }
       }
     },
+    "r": {
+      "description": "R runtime configuration.",
+      "$ref": "#/$defs/RConfig",
+      "default": {
+        "auto_width": true
+      }
+    },
     "startup": {
       "$ref": "#/$defs/StartupConfig",
       "default": {
@@ -1721,6 +1728,17 @@ expression: schema
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "RConfig": {
+      "description": "R runtime configuration.\n\nControls R-specific behavior such as automatic option synchronization.",
+      "type": "object",
+      "properties": {
+        "auto_width": {
+          "description": "Automatically sync R's `options(width)` with the terminal width.\n\nWhen enabled (default), R's `options(width)` is set to match the terminal\ncolumns at startup and updated dynamically on resize. This ensures output\nfrom functions like `str()`, `print()`, and tibble printing uses the full\navailable terminal width instead of R's default of 80.",
+          "type": "boolean",
+          "default": true
         }
       }
     },

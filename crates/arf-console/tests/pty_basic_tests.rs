@@ -625,3 +625,57 @@ fn test_pty_width_synced_at_startup() {
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Test that R's options(width) is NOT synced when auto_width is disabled.
+///
+/// With `[r] auto_width = false`, R should keep its default width (80)
+/// regardless of terminal size. Since the PTY is also 80 columns, we verify
+/// that setting a custom width in R is preserved (not overwritten by sync).
+#[test]
+#[cfg(unix)]
+fn test_pty_width_not_synced_when_disabled() {
+    use std::io::Write;
+
+    // Create config with auto_width disabled
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("arf.toml");
+    let mut config_file =
+        std::fs::File::create(&config_path).expect("Failed to create config file");
+    writeln!(
+        config_file,
+        r#"
+[r]
+auto_width = false
+"#
+    )
+    .expect("Failed to write config");
+
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match", "--config", &config_path_str])
+            .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Set a custom width that differs from terminal size
+    terminal
+        .send_line("options(width = 42)")
+        .expect("Should set custom width");
+    terminal
+        .clear_and_expect("> ")
+        .expect("Should return to prompt");
+
+    // Wait a bit for idle callbacks to fire (if they would sync, they'd overwrite 42)
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Verify the custom width is preserved (not overwritten by auto_width sync)
+    terminal
+        .send_line("getOption('width')")
+        .expect("Should send getOption");
+    terminal
+        .clear_and_expect("[1] 42")
+        .expect("Custom width should be preserved when auto_width is disabled");
+
+    terminal.quit().expect("Should quit cleanly");
+}

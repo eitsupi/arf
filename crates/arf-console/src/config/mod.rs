@@ -7,6 +7,7 @@ mod experimental;
 mod history;
 mod mode;
 pub(crate) mod prompt;
+mod r;
 mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
@@ -22,6 +23,7 @@ pub use mode::ModeConfig;
 pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
+pub use r::RConfig;
 pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
 
 use schemars::JsonSchema;
@@ -100,6 +102,8 @@ pub struct Config {
     pub prompt: PromptConfig,
     pub completion: CompletionConfig,
     pub history: HistoryConfig,
+    /// R runtime configuration.
+    pub r: RConfig,
     /// Mode-specific static configuration (not changeable at runtime).
     /// For initial mode state (enabled/disabled), see `startup.mode`.
     pub mode: ModeConfig,
@@ -296,6 +300,38 @@ mod tests {
             RSource::Mode(RSourceMode::Auto)
         ));
         assert!(config.startup.show_banner);
+    }
+
+    #[test]
+    fn test_default_r_auto_width() {
+        let config = Config::default();
+        assert!(
+            config.r.auto_width,
+            "auto_width should be enabled by default"
+        );
+    }
+
+    #[test]
+    fn test_parse_r_auto_width_disabled() {
+        let toml_str = r#"
+[r]
+auto_width = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.r.auto_width);
+    }
+
+    #[test]
+    fn test_parse_r_auto_width_default_when_omitted() {
+        let toml_str = r#"
+[editor]
+mode = "vi"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(
+            config.r.auto_width,
+            "auto_width should default to true when [r] section is omitted"
+        );
     }
 
     #[test]

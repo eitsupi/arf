@@ -57,6 +57,9 @@ auto_paren_limit = 50
 menu_max_height = 15
 disabled = false
 
+[r]
+auto_width = true
+
 [mode.reprex]
 comment = "#> "
 

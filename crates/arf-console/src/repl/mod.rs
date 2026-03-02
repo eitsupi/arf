@@ -335,12 +335,15 @@ impl Repl {
         // Set up idle callback to process R events during input waiting.
         // This allows graphics windows (plot(), help browser) to remain responsive
         // while the user is typing or the editor is waiting for input.
-        // Also syncs R's options(width) with terminal size on resize.
+        // Also syncs R's options(width) with terminal size on resize (if enabled).
+        let auto_width = self.config.r.auto_width;
         line_editor = line_editor
             .with_poll_interval(std::time::Duration::from_millis(33))
-            .with_idle_callback(Box::new(|| {
+            .with_idle_callback(Box::new(move || {
                 arf_libr::process_r_events();
-                sync_r_width();
+                if auto_width {
+                    sync_r_width();
+                }
             }));
 
         // Create shell line editor with separate history
@@ -432,7 +435,9 @@ impl Repl {
 
         // Sync R's options(width) with the current terminal width.
         // Dynamic resize is handled by the idle callback above.
-        sync_r_width();
+        if self.config.r.auto_width {
+            sync_r_width();
+        }
 
         // Set up the ReadConsole callback
         arf_libr::set_read_console_callback(read_console_callback);

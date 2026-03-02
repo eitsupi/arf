@@ -92,6 +92,9 @@ menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
 disabled = false           # Disable history entirely
 # dir = "/custom/path"     # Custom history directory (optional)
 
+[r]
+auto_width = true          # Sync R's options(width) with terminal size
+
 [mode.reprex]
 comment = "#> "            # Comment prefix for reprex output
 
@@ -141,6 +144,17 @@ color = "Cyan"             # Spinner color
 format = "{value} "        # Duration display format ({value} = time string)
 threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 ```
+
+## Auto Width
+
+When `auto_width` is enabled (default), arf automatically syncs R's `options(width)` with the terminal width at startup and on resize. This ensures output from functions like `str()`, `print()`, and tibble printing uses the full available terminal width instead of R's default of 80 columns.
+
+```toml
+[r]
+auto_width = true  # default
+```
+
+Set to `false` if you prefer to manage `options(width)` manually (e.g., via `.Rprofile`).
 
 ## Auto Suggestions
 

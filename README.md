@@ -172,6 +172,10 @@ mode_indicator = "prefix"   # "prefix", "suffix", or "none"
 symbol = { error = "✗ " }   # success = "" (empty) by default
 override_prompt_color = false
 
+# R runtime configuration
+[r]
+auto_width = true       # Sync options(width) with terminal size
+
 # Reprex static configuration
 [mode.reprex]
 comment = "#> "
