@@ -70,11 +70,14 @@ const MAX_R_WIDTH: u16 = 10000;
 fn sync_r_width() {
     let (cols, _) = terminal::size().unwrap_or((80, 24));
     let clamped = cols.clamp(MIN_R_WIDTH, MAX_R_WIDTH);
-    let prev = LAST_TERMINAL_WIDTH.swap(clamped, Ordering::Relaxed);
+    let prev = LAST_TERMINAL_WIDTH.load(Ordering::Relaxed);
     if prev != clamped {
         let code = format!("options(width = {})", clamped);
-        if let Err(e) = arf_harp::eval_string_with_visibility(&code) {
-            log::warn!("Failed to set R width option: {:?}", e);
+        match arf_harp::eval_string_with_visibility(&code) {
+            Ok(_) => {
+                LAST_TERMINAL_WIDTH.store(clamped, Ordering::Relaxed);
+            }
+            Err(e) => log::warn!("Failed to set R width option: {:?}", e),
         }
     }
 }
@@ -428,7 +431,7 @@ impl Repl {
         }
 
         // Sync R's options(width) with the current terminal width.
-        // Also handles dynamic resize via the idle callback below.
+        // Dynamic resize is handled by the idle callback above.
         sync_r_width();
 
         // Set up the ReadConsole callback
