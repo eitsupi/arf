@@ -32,6 +32,7 @@ use reedline::{
 };
 use std::cell::RefCell;
 use std::io;
+use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::editor::keybindings::{
     add_auto_match_keybindings, add_common_keybindings, add_key_map_keybindings,
@@ -49,6 +50,33 @@ use state::{PromptRuntimeConfig, ReplState};
 // This allows the ReadConsole callback to access the line editor.
 thread_local! {
     static REPL_STATE: RefCell<Option<ReplState>> = const { RefCell::new(None) };
+}
+
+/// Last known terminal width for detecting resize.
+/// Updated by `sync_r_width()` to avoid redundant R calls.
+static LAST_TERMINAL_WIDTH: AtomicU16 = AtomicU16::new(0);
+
+/// Minimum width for R's `options(width)`, matching radian's behavior.
+const MIN_R_WIDTH: u16 = 20;
+
+/// Maximum width for R's `options(width)`. R enforces a hard maximum of 10000.
+const MAX_R_WIDTH: u16 = 10000;
+
+/// Sync R's `options(width)` with the current terminal width.
+///
+/// Compares the current terminal columns against the last known width.
+/// If changed, updates R's width option. Called both at startup and
+/// periodically from the idle callback to handle terminal resize.
+fn sync_r_width() {
+    let (cols, _) = terminal::size().unwrap_or((80, 24));
+    let clamped = cols.clamp(MIN_R_WIDTH, MAX_R_WIDTH);
+    let prev = LAST_TERMINAL_WIDTH.swap(clamped, Ordering::Relaxed);
+    if prev != clamped {
+        let code = format!("options(width = {})", clamped);
+        if let Err(e) = arf_harp::eval_string_with_visibility(&code) {
+            log::warn!("Failed to set R width option: {:?}", e);
+        }
+    }
 }
 
 /// Prefix for arf messages to distinguish them from R output.
@@ -304,10 +332,12 @@ impl Repl {
         // Set up idle callback to process R events during input waiting.
         // This allows graphics windows (plot(), help browser) to remain responsive
         // while the user is typing or the editor is waiting for input.
+        // Also syncs R's options(width) with terminal size on resize.
         line_editor = line_editor
             .with_poll_interval(std::time::Duration::from_millis(33))
             .with_idle_callback(Box::new(|| {
                 arf_libr::process_r_events();
+                sync_r_width();
             }));
 
         // Create shell line editor with separate history
@@ -396,6 +426,10 @@ impl Repl {
                 }
             }
         }
+
+        // Sync R's options(width) with the current terminal width.
+        // Also handles dynamic resize via the idle callback below.
+        sync_r_width();
 
         // Set up the ReadConsole callback
         arf_libr::set_read_console_callback(read_console_callback);

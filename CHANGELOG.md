@@ -4,6 +4,7 @@
 
 ### Added
 
+- R's `options(width)` is now synced with the terminal width at startup and dynamically on resize (#104)
 - `:changelog` meta command to view the arf changelog in the built-in Markdown pager
 - `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `[history] dir` > XDG default)
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
