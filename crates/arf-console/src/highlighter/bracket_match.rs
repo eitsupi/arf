@@ -35,7 +35,9 @@ pub fn find_matching_bracket(buffer: &str, cursor: usize, tree: &Tree) -> Option
     let bytes = buffer.as_bytes();
 
     // Case 1: cursor is ON a bracket
-    if cursor < bytes.len() && let Some(m) = try_match_at(bytes, cursor, tree) {
+    if cursor < bytes.len()
+        && let Some(m) = try_match_at(bytes, cursor, tree)
+    {
         return Some(m);
     }
 
@@ -156,11 +158,8 @@ fn scan_backward(
 /// Check if the given byte position is inside a string or comment node.
 fn is_in_string_or_comment(tree: &Tree, byte_pos: usize) -> bool {
     let root = tree.root_node();
-    let point = tree_sitter::Point {
-        row: 0,
-        column: byte_pos,
-    };
-    let node = root.descendant_for_point_range(point, point);
+    // Use byte-based lookup (not point-based) so multi-line input works correctly.
+    let node = root.descendant_for_byte_range(byte_pos, byte_pos);
 
     match node {
         Some(n) => is_string_or_comment_kind(n.kind()),
@@ -299,5 +298,42 @@ mod tests {
         let m = match_at("{ x }", 5).unwrap();
         assert_eq!(m.cursor_bracket, 4);
         assert_eq!(m.matching_bracket, 0);
+    }
+
+    // Multi-line tests
+
+    #[test]
+    fn test_multiline_braces() {
+        // "if (x) {\n  y\n}"
+        let input = "if (x) {\n  y\n}";
+        // '{' is at byte 7, '}' is at byte 13
+        let m = match_at(input, 7).unwrap();
+        assert_eq!(m.cursor_bracket, 7);
+        assert_eq!(m.matching_bracket, 13);
+
+        // From closing brace
+        let m = match_at(input, 13).unwrap();
+        assert_eq!(m.cursor_bracket, 13);
+        assert_eq!(m.matching_bracket, 7);
+    }
+
+    #[test]
+    fn test_multiline_bracket_in_string() {
+        // Bracket in string on second line should be skipped
+        let input = "paste(\n  \"(\",\n  x\n)";
+        // '(' at byte 5, ')' at byte 18
+        let m = match_at(input, 5).unwrap();
+        assert_eq!(m.cursor_bracket, 5);
+        assert_eq!(m.matching_bracket, 18);
+    }
+
+    #[test]
+    fn test_multiline_bracket_in_comment() {
+        // Bracket in comment on second line should be skipped
+        let input = "f(\n# )\nx)";
+        // '(' at byte 1, ')' at byte 8
+        let m = match_at(input, 1).unwrap();
+        assert_eq!(m.cursor_bracket, 1);
+        assert_eq!(m.matching_bracket, 8);
     }
 }

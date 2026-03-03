@@ -672,4 +672,56 @@ mod tests {
             Some(Some(Color::Magenta))
         );
     }
+
+    #[test]
+    fn test_bracket_highlight_applied() {
+        let config = RColorConfig {
+            punctuation: Color::Magenta,
+            matching_bracket: Color::LightYellow,
+            ..Default::default()
+        };
+        // Enable bracket highlighting
+        let highlighter = RTreeSitterHighlighter::new(config, true);
+        // Cursor on '(' at position 1 in "f(x)"
+        let styled = highlighter.highlight("f(x)", 1);
+
+        // Find the segment containing '(' and verify it has the highlight background
+        let mut offset = 0;
+        for (style, text) in &styled.buffer {
+            if offset <= 1 && offset + text.len() > 1 {
+                assert_eq!(
+                    style.background,
+                    Some(Color::LightYellow),
+                    "Opening bracket should have highlight background"
+                );
+                assert_eq!(
+                    style.foreground,
+                    Some(Color::Magenta),
+                    "Opening bracket should preserve foreground color"
+                );
+                break;
+            }
+            offset += text.len();
+        }
+    }
+
+    #[test]
+    fn test_bracket_highlight_disabled() {
+        let config = RColorConfig {
+            matching_bracket: Color::LightYellow,
+            ..Default::default()
+        };
+        // Disable bracket highlighting
+        let highlighter = RTreeSitterHighlighter::new(config, false);
+        let styled = highlighter.highlight("f(x)", 1);
+
+        // No segment should have the highlight background
+        for (style, _) in &styled.buffer {
+            assert_ne!(
+                style.background,
+                Some(Color::LightYellow),
+                "Bracket highlight should not be applied when disabled"
+            );
+        }
+    }
 }
