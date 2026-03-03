@@ -58,7 +58,7 @@ expression: schema
       "default": {
         "auto_match": true,
         "auto_suggestions": "all",
-        "highlight_matching_bracket": true,
+        "highlight_matching_bracket": false,
         "key_map": {
           "Alt-Hyphen": " <- ",
           "Alt-p": " |> "
@@ -1510,7 +1510,7 @@ expression: schema
         "highlight_matching_bracket": {
           "description": "Highlight matching bracket when cursor is on a bracket.",
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "key_map": {
           "description": "Keyboard shortcuts that insert text.\nFormat: \"modifier-key\" = \"text to insert\"\nExamples: \"alt-hyphen\" = \" <- \", \"alt-p\" = \" |> \"",

@@ -18,7 +18,7 @@ autoformat = false
 [editor]
 mode = "emacs"
 auto_match = true
-highlight_matching_bracket = true
+highlight_matching_bracket = false
 auto_suggestions = "all"
 
 [editor.key_map]

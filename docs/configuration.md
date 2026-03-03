@@ -51,6 +51,7 @@ autoformat = false      # Enable auto-formatting (requires air)
 [editor]
 mode = "emacs"          # Editing mode: "emacs" or "vi"
 auto_match = true       # Auto-close brackets and quotes
+highlight_matching_bracket = false  # Highlight matching bracket pair
 auto_suggestions = "all" # History suggestions: "none", "all", or "cwd"
 
 # Keyboard shortcuts (crokey format)
@@ -108,6 +109,7 @@ constant = "LightCyan"
 operator = "Yellow"
 punctuation = "Default"
 identifier = "Default"
+matching_bracket = "LightYellow"  # Background color for matching bracket highlight
 
 [colors.meta]
 command = "Magenta"
@@ -144,6 +146,20 @@ color = "Cyan"             # Spinner color
 format = "{value} "        # Duration display format ({value} = time string)
 threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 ```
+
+## Bracket Highlighting
+
+arf can highlight matching bracket pairs (`()`, `[]`, `{}`) when the cursor is on or immediately after a bracket. Both brackets are highlighted with a background color while preserving the syntax foreground color. The matching is syntax-aware via tree-sitter — brackets inside strings and comments are correctly ignored.
+
+```toml
+[editor]
+highlight_matching_bracket = true
+
+[colors.r]
+matching_bracket = "LightYellow"  # Background color for both brackets
+```
+
+This feature is disabled by default. Set `matching_bracket` to `"Default"` to disable the background color while keeping bracket detection active.
 
 ## Auto Width
 
@@ -281,6 +297,7 @@ string = { Rgb = [0, 255, 128] }    # RGB values 0-255
 | `operator` | +, -, <-, \|>, etc. | Yellow |
 | `punctuation` | Brackets, commas, semicolons | Default |
 | `identifier` | Variable and function names | Default |
+| `matching_bracket` | Background color for matching bracket highlight | LightYellow |
 
 ### Prompt Colors
 

@@ -193,7 +193,7 @@ impl Default for EditorConfig {
         EditorConfig {
             mode: EditorMode::Emacs,
             auto_match: true,
-            highlight_matching_bracket: true,
+            highlight_matching_bracket: false,
             auto_suggestions: AutoSuggestions::All,
             key_map: default_key_map(),
         }
