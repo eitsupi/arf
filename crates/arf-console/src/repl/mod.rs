@@ -68,9 +68,29 @@ const MAX_R_WIDTH: u16 = 10000;
 /// If changed, updates R's width option. Called both at startup and
 /// periodically from the idle callback to handle terminal resize.
 fn sync_r_width() {
-    let (cols, _) = terminal::size().unwrap_or((80, 24));
-    let clamped = cols.clamp(MIN_R_WIDTH, MAX_R_WIDTH);
     let prev = LAST_TERMINAL_WIDTH.load(Ordering::Relaxed);
+
+    let (cols, _) = match terminal::size() {
+        Ok(size) => size,
+        Err(e) => {
+            if prev != 0 {
+                // Already have a known width; treat as transient failure.
+                log::debug!(
+                    "Failed to read terminal size (transient); keeping previous width: {:?}",
+                    e
+                );
+                return;
+            }
+            // No previous width recorded; fall back to a reasonable default.
+            log::debug!(
+                "Failed to read terminal size; falling back to default width: {:?}",
+                e
+            );
+            (80, 24)
+        }
+    };
+
+    let clamped = cols.clamp(MIN_R_WIDTH, MAX_R_WIDTH);
     if prev != clamped {
         let code = format!("options(width = {})", clamped);
         match arf_harp::eval_string_with_visibility(&code) {
