@@ -687,8 +687,10 @@ mod tests {
 
         // Find the segment containing '(' and verify it has the highlight background
         let mut offset = 0;
+        let mut found = false;
         for (style, text) in &styled.buffer {
             if offset <= 1 && offset + text.len() > 1 {
+                found = true;
                 assert_eq!(
                     style.background,
                     Some(Color::LightYellow),
@@ -703,6 +705,7 @@ mod tests {
             }
             offset += text.len();
         }
+        assert!(found, "Should have found a segment containing the bracket");
     }
 
     #[test]
