@@ -97,7 +97,7 @@ fn sync_r_width() {
             Ok(_) => {
                 LAST_TERMINAL_WIDTH.store(clamped, Ordering::Relaxed);
             }
-            Err(e) => log::warn!("Failed to set R width option: {:?}", e),
+            Err(e) => log::debug!("Failed to set R width option: {:?}", e),
         }
     }
 }

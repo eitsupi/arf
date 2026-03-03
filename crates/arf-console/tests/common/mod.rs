@@ -232,9 +232,8 @@ impl Terminal {
                             let (cursor_row, cursor_col) = screen.cursor_position();
                             state.screen.cursor_row = cursor_row;
                             state.screen.cursor_col = cursor_col;
-                            for row in 0..DEFAULT_ROWS {
-                                let row_content =
-                                    screen.contents_between(row, 0, row, DEFAULT_COLS - 1);
+                            for row in 0..rows {
+                                let row_content = screen.contents_between(row, 0, row, cols - 1);
                                 state.screen.lines[row as usize] = row_content;
                             }
                         }
