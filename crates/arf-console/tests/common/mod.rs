@@ -102,6 +102,7 @@ impl Terminal {
 
     /// Spawn arf with additional arguments and a custom terminal size.
     pub fn spawn_with_size(args: &[&str], rows: u16, cols: u16) -> Result<Self, String> {
+        assert!(rows > 0 && cols > 0, "PTY size must be non-zero");
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
         let pty_system = native_pty_system();
