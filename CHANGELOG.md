@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-03-03
+
 ### Added
 
 - Matching bracket highlighting: when cursor is on or after a bracket (`()`, `[]`, `{}`), both brackets are highlighted with a background color. Syntax-aware via tree-sitter (skips brackets in strings/comments). Configurable via `[editor] highlight_matching_bracket` (default: `false`) and `[colors.r] matching_bracket` (default: `"LightYellow"`) (#106)
@@ -11,6 +13,10 @@
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 - `:restart!` and `:switch!` commands to skip confirmation prompt
+
+### Changed
+
+- Config file parse errors are now reported on startup instead of silently falling back to defaults. `:info` shows the error type, and `arf config check` subcommand provides detailed validation with line/column info (#91)
 
 ## [0.2.3] - 2026-02-27
 
