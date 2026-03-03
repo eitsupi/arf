@@ -342,8 +342,11 @@ impl Repl {
 
         // Set up syntax highlighter (R code + meta commands)
         // Pass editor_state so highlighter can sync shadow state on every redraw
-        let highlighter = CombinedHighlighter::new(self.config.colors.clone())
-            .with_editor_state(editor_state.clone());
+        let highlighter = CombinedHighlighter::new(
+            self.config.colors.clone(),
+            self.config.editor.highlight_matching_bracket,
+        )
+        .with_editor_state(editor_state.clone());
         line_editor = line_editor.with_highlighter(Box::new(highlighter));
 
         // Set up history-based autosuggestion (fish/nushell style)

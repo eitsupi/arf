@@ -6,6 +6,7 @@
 //! The highlighter also synchronizes editor shadow state on every redraw,
 //! keeping the state accurate even after history navigation.
 
+pub mod bracket_match;
 mod meta_command;
 mod r_regex;
 mod r_tree_sitter;
@@ -29,10 +30,10 @@ pub struct CombinedHighlighter {
 }
 
 impl CombinedHighlighter {
-    pub fn new(config: ColorsConfig) -> Self {
+    pub fn new(config: ColorsConfig, highlight_matching_bracket: bool) -> Self {
         CombinedHighlighter {
             meta_highlighter: MetaCommandHighlighter::new(config.meta),
-            r_highlighter: RTreeSitterHighlighter::new(config.r),
+            r_highlighter: RTreeSitterHighlighter::new(config.r, highlight_matching_bracket),
         }
     }
 
@@ -49,7 +50,7 @@ impl CombinedHighlighter {
 
 impl Default for CombinedHighlighter {
     fn default() -> Self {
-        Self::new(ColorsConfig::default())
+        Self::new(ColorsConfig::default(), true)
     }
 }
 

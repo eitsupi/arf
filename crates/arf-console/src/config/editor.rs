@@ -140,6 +140,8 @@ pub struct EditorConfig {
     pub mode: EditorMode,
     /// Auto-close brackets and quotes.
     pub auto_match: bool,
+    /// Highlight matching bracket when cursor is on a bracket.
+    pub highlight_matching_bracket: bool,
     /// History-based autosuggestions mode (fish/nushell style).
     ///
     /// String values: `"none"`, `"all"`, `"cwd"`
@@ -191,6 +193,7 @@ impl Default for EditorConfig {
         EditorConfig {
             mode: EditorMode::Emacs,
             auto_match: true,
+            highlight_matching_bracket: false,
             auto_suggestions: AutoSuggestions::All,
             key_map: default_key_map(),
         }

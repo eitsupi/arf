@@ -115,7 +115,8 @@ impl JsonSchema for ColorsConfig {
                         "constant": color_prop!("Color for constants (TRUE, FALSE, NULL, NA, etc.)"),
                         "operator": color_prop!("Color for operators"),
                         "punctuation": color_prop!("Color for punctuation"),
-                        "identifier": color_prop!("Color for identifiers")
+                        "identifier": color_prop!("Color for identifiers"),
+                        "matching_bracket": color_prop!("Background color for matching bracket highlighting", default = "LightYellow")
                     }
                 },
                 "meta": {
@@ -186,6 +187,12 @@ pub struct RColorConfig {
     pub punctuation: Color,
     /// Color for identifiers (variable and function names).
     pub identifier: Color,
+    /// Background color for matching bracket highlighting.
+    ///
+    /// When the cursor is on a bracket, both it and its matching bracket
+    /// are highlighted with this background color.
+    /// Set to "Default" to disable the background highlight.
+    pub matching_bracket: Color,
 }
 
 impl Default for RColorConfig {
@@ -199,6 +206,7 @@ impl Default for RColorConfig {
             operator: Color::Yellow,
             punctuation: Color::Default,
             identifier: Color::Default,
+            matching_bracket: Color::LightYellow,
         }
     }
 }

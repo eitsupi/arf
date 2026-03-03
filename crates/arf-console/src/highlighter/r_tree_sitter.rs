@@ -10,12 +10,13 @@
 use crate::config::RColorConfig;
 use crate::editor::mode::EditorStateRef;
 use crate::r_parser::{is_atomic_node, parse_r};
-use nu_ansi_term::Style;
+use nu_ansi_term::{Color, Style};
 use once_cell::sync::Lazy;
 use reedline::{Highlighter, StyledText};
 use std::collections::HashSet;
 use tree_sitter::Node;
 
+use super::bracket_match::find_matching_bracket;
 use super::r_regex::TokenType;
 
 /// Reserved keywords in R.
@@ -207,14 +208,16 @@ pub fn tokenize_r(source: &str) -> Vec<Token> {
 /// keeping the state accurate even after history navigation.
 pub struct RTreeSitterHighlighter {
     config: RColorConfig,
+    highlight_matching_bracket: bool,
     /// Optional editor state reference for syncing on redraw.
     editor_state: Option<EditorStateRef>,
 }
 
 impl RTreeSitterHighlighter {
-    pub fn new(config: RColorConfig) -> Self {
+    pub fn new(config: RColorConfig, highlight_matching_bracket: bool) -> Self {
         RTreeSitterHighlighter {
             config,
+            highlight_matching_bracket,
             editor_state: None,
         }
     }
@@ -246,7 +249,7 @@ impl RTreeSitterHighlighter {
 
 impl Default for RTreeSitterHighlighter {
     fn default() -> Self {
-        Self::new(RColorConfig::default())
+        Self::new(RColorConfig::default(), true)
     }
 }
 
@@ -258,13 +261,15 @@ impl Highlighter for RTreeSitterHighlighter {
 
         let mut styled = StyledText::new();
 
-        if let Some(tree) = parse_r(line) {
+        let tree = parse_r(line);
+
+        if let Some(ref tree) = tree {
             let source = line.as_bytes();
             let mut tokens = Vec::new();
-            let mut cursor = tree.walk();
+            let mut tree_cursor = tree.walk();
 
             // Collect tokens using free functions
-            visit_node(&mut cursor, source, &mut tokens);
+            visit_node(&mut tree_cursor, source, &mut tokens);
 
             // Sort and fill gaps
             tokens.sort_by_key(|t| t.start);
@@ -287,8 +292,50 @@ impl Highlighter for RTreeSitterHighlighter {
             styled.push((Style::new(), String::new()));
         }
 
+        // Apply bracket highlighting after normal syntax highlighting.
+        // This overlays a background color on the matching bracket pair
+        // while preserving the existing foreground syntax color.
+        if self.highlight_matching_bracket
+            && self.config.matching_bracket != Color::Default
+            && let Some(ref tree) = tree
+            && let Some(bracket) = find_matching_bracket(line, cursor, tree)
+        {
+            let bg = self.config.matching_bracket;
+            apply_bracket_highlight(&mut styled, bracket.cursor_bracket, bg);
+            apply_bracket_highlight(&mut styled, bracket.matching_bracket, bg);
+        }
+
         styled
     }
+}
+
+/// Apply bracket highlight to a single byte position in the styled text.
+///
+/// Reads the existing style at the position and merges it with the highlight
+/// background color, preserving the existing foreground color.
+fn apply_bracket_highlight(styled: &mut StyledText, pos: usize, highlight_bg: Color) {
+    // Find the existing style at the byte position
+    let existing_style = {
+        let mut offset = 0;
+        let mut found = None;
+        for (style, text) in &styled.buffer {
+            let end = offset + text.len();
+            if pos >= offset && pos < end {
+                found = Some(*style);
+                break;
+            }
+            offset = end;
+        }
+        found.unwrap_or_default()
+    };
+
+    // Merge: keep existing foreground, set new background
+    let merged = Style {
+        background: Some(highlight_bg),
+        ..existing_style
+    };
+
+    styled.style_range(pos, pos + 1, merged);
 }
 
 #[cfg(test)]
@@ -399,7 +446,7 @@ mod tests {
             keyword: Color::Red,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("if", 0);
 
         // Find the "if" segment and verify it has Red foreground
@@ -421,7 +468,7 @@ mod tests {
             string: Color::Yellow,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight(r#""hello""#, 0);
 
         let string_segment = styled
@@ -442,7 +489,7 @@ mod tests {
             number: Color::Blue,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("42", 0);
 
         let number_segment = styled
@@ -463,7 +510,7 @@ mod tests {
             comment: Color::Cyan,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("# comment", 0);
 
         let comment_segment = styled
@@ -484,7 +531,7 @@ mod tests {
             constant: Color::Magenta,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("TRUE", 0);
 
         let constant_segment = styled
@@ -505,7 +552,7 @@ mod tests {
             operator: Color::Green,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("x <- 1", 0);
 
         let operator_segment = styled
@@ -526,7 +573,7 @@ mod tests {
             identifier: Color::White,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("myvar", 0);
 
         let identifier_segment = styled
@@ -549,7 +596,7 @@ mod tests {
             punctuation: Color::Default,
             ..Default::default()
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("x()", 0);
 
         // Identifier 'x' should have no foreground color
@@ -587,8 +634,9 @@ mod tests {
             comment: Color::DarkGray,
             string: Color::Cyan,
             punctuation: Color::Magenta,
+            matching_bracket: Color::LightYellow,
         };
-        let highlighter = RTreeSitterHighlighter::new(config);
+        let highlighter = RTreeSitterHighlighter::new(config, false);
         let styled = highlighter.highlight("if (x <- 1) TRUE", 0);
 
         // Check keyword
@@ -623,5 +671,60 @@ mod tests {
             paren_seg.map(|(s, _)| s.foreground),
             Some(Some(Color::Magenta))
         );
+    }
+
+    #[test]
+    fn test_bracket_highlight_applied() {
+        let config = RColorConfig {
+            punctuation: Color::Magenta,
+            matching_bracket: Color::LightYellow,
+            ..Default::default()
+        };
+        // Enable bracket highlighting
+        let highlighter = RTreeSitterHighlighter::new(config, true);
+        // Cursor on '(' at position 1 in "f(x)"
+        let styled = highlighter.highlight("f(x)", 1);
+
+        // Find the segment containing '(' and verify it has the highlight background
+        let mut offset = 0;
+        let mut found = false;
+        for (style, text) in &styled.buffer {
+            if offset <= 1 && offset + text.len() > 1 {
+                found = true;
+                assert_eq!(
+                    style.background,
+                    Some(Color::LightYellow),
+                    "Opening bracket should have highlight background"
+                );
+                assert_eq!(
+                    style.foreground,
+                    Some(Color::Magenta),
+                    "Opening bracket should preserve foreground color"
+                );
+                break;
+            }
+            offset += text.len();
+        }
+        assert!(found, "Should have found a segment containing the bracket");
+    }
+
+    #[test]
+    fn test_bracket_highlight_disabled() {
+        let config = RColorConfig {
+            matching_bracket: Color::LightYellow,
+            ..Default::default()
+        };
+        // Disable bracket highlighting
+        let highlighter = RTreeSitterHighlighter::new(config, false);
+        let styled = highlighter.highlight("f(x)", 1);
+
+        // No segment should have the highlight background
+        for (style, _) in &styled.buffer {
+            assert_ne!(
+                style.background,
+                Some(Color::LightYellow),
+                "Bracket highlight should not be applied when disabled"
+            );
+        }
     }
 }
