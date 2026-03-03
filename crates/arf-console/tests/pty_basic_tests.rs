@@ -603,13 +603,14 @@ frames = ""
 
 /// Test that R's options(width) is synced with the terminal width at startup.
 ///
-/// The PTY is created with DEFAULT_COLS (80) columns.
-/// After startup, getOption("width") should return 80.
+/// Uses a non-default PTY width (120 columns) so that the test actually
+/// validates the sync behavior rather than coincidentally matching R's
+/// default width of 80.
 #[test]
 #[cfg(unix)]
 fn test_pty_width_synced_at_startup() {
     let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
+        Terminal::spawn_with_size(&["--no-auto-match"], 24, 120).expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -618,10 +619,10 @@ fn test_pty_width_synced_at_startup() {
         .send_line("getOption('width')")
         .expect("Should send getOption");
 
-    // DEFAULT_COLS is 80, so R should report 80
+    // PTY is 120 columns, so R should report 120 (not the default 80)
     terminal
-        .clear_and_expect("[1] 80")
-        .expect("R width should match terminal columns (80)");
+        .clear_and_expect("[1] 120")
+        .expect("R width should match terminal columns (120)");
 
     terminal.quit().expect("Should quit cleanly");
 }

@@ -356,6 +356,10 @@ impl Repl {
         // This allows graphics windows (plot(), help browser) to remain responsive
         // while the user is typing or the editor is waiting for input.
         // Also syncs R's options(width) with terminal size on resize (if enabled).
+        //
+        // Safety note: This callback runs inside R's ReadConsole callback, but calling
+        // R via R_ToplevelExec from here is the standard embedded-R pattern. R explicitly
+        // supports this, and radian uses the same approach (setoption() in its inputhook).
         let auto_width = self.config.r.auto_width;
         line_editor = line_editor
             .with_poll_interval(std::time::Duration::from_millis(33))
