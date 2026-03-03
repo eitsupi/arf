@@ -18,6 +18,7 @@ autoformat = false
 [editor]
 mode = "emacs"
 auto_match = true
+highlight_matching_bracket = true
 auto_suggestions = "all"
 
 [editor.key_map]
@@ -72,6 +73,7 @@ constant = "LightCyan"
 operator = "Yellow"
 punctuation = "Default"
 identifier = "Default"
+matching_bracket = "LightYellow"
 
 [colors.meta]
 command = "Magenta"

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Matching bracket highlighting: when cursor is on or after a bracket (`()`, `[]`, `{}`), both brackets are highlighted with a background color. Syntax-aware via tree-sitter (skips brackets in strings/comments). Configurable via `[editor] highlight_matching_bracket` (default: `true`) and `[colors.r] matching_bracket` (default: `"LightYellow"`) (#106)
 - R's `options(width)` is now synced with the terminal width at startup and dynamically on resize, configurable via `[r] auto_width` (default: `true`) (#104)
 - `:changelog` meta command to view the arf changelog in the built-in Markdown pager
 - `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `[history] dir` > XDG default)
