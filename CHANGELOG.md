@@ -14,6 +14,10 @@
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 - `:restart!` and `:switch!` commands to skip confirmation prompt
 
+### Changed
+
+- Config file parse errors are now reported on startup instead of silently falling back to defaults. `:info` shows the error type, and `arf config check` subcommand provides detailed validation with line/column info (#91)
+
 ## [0.2.3] - 2026-02-27
 
 ### Added
