@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-03-03
+
 ### Added
 
 - Matching bracket highlighting: when cursor is on or after a bracket (`()`, `[]`, `{}`), both brackets are highlighted with a background color. Syntax-aware via tree-sitter (skips brackets in strings/comments). Configurable via `[editor] highlight_matching_bracket` (default: `false`) and `[colors.r] matching_bracket` (default: `"LightYellow"`) (#106)
