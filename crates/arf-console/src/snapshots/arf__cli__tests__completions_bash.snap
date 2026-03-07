@@ -108,7 +108,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -c -q -h -V --eval --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-readline --no-restore-history --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history help"
+            opts="-e -c -q -h -V --eval --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --no-readline --no-restore-history --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

@@ -103,6 +103,14 @@ pub struct Cli {
     #[arg(long = "interactive", hide = true)]
     pub interactive: bool,
 
+    /// [R] Don't echo input (no-op, arf controls its own echo)
+    #[arg(long = "no-echo", hide_short_help = true)]
+    pub no_echo: bool,
+
+    /// [R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)
+    #[arg(long = "slave", hide = true)]
+    pub slave: bool,
+
     /// [R] Don't use readline (no-op)
     #[arg(long = "no-readline", hide = true)]
     pub no_readline: bool,

@@ -4,7 +4,7 @@ expression: completions
 ---
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_arf_global_optspecs
-	string join \n e/eval= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
+	string join \n e/eval= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-echo slave no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
 end
 
 function __fish_arf_needs_command
@@ -47,6 +47,8 @@ complete -c arf -n "__fish_arf_needs_command" -l no-environ -d '[R] Don\'t read 
 complete -c arf -n "__fish_arf_needs_command" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'
 complete -c arf -n "__fish_arf_needs_command" -l no-init-file -d '[R] Don\'t read the user\'s .Rprofile'
 complete -c arf -n "__fish_arf_needs_command" -l interactive -d '[R] Force R to run interactively (no-op, always interactive)'
+complete -c arf -n "__fish_arf_needs_command" -l no-echo -d '[R] Don\'t echo input (no-op, arf controls its own echo)'
+complete -c arf -n "__fish_arf_needs_command" -l slave -d '[R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)'
 complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'

@@ -78,6 +78,9 @@ Options:
       --no-init-file
           [R] Don't read the user's .Rprofile
 
+      --no-echo
+          [R] Don't echo input (no-op, arf controls its own echo)
+
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
           

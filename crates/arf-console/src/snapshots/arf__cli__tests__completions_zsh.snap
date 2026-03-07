@@ -41,6 +41,8 @@ _arf() {
 '--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \
 '--no-init-file[\[R\] Don'\''t read the user'\''s .Rprofile]' \
 '--interactive[\[R\] Force R to run interactively (no-op, always interactive)]' \
+'--no-echo[\[R\] Don'\''t echo input (no-op, arf controls its own echo)]' \
+'--slave[\[R\] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)]' \
 '--no-readline[\[R\] Don'\''t use readline (no-op)]' \
 '--no-restore-history[\[R\] Don'\''t restore history (no-op)]' \
 '--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \

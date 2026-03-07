@@ -47,6 +47,8 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--no-site-file', '--no-site-file', [CompletionResultType]::ParameterName, '[R] Don''t read the site-wide Rprofile')
             [CompletionResult]::new('--no-init-file', '--no-init-file', [CompletionResultType]::ParameterName, '[R] Don''t read the user''s .Rprofile')
             [CompletionResult]::new('--interactive', '--interactive', [CompletionResultType]::ParameterName, '[R] Force R to run interactively (no-op, always interactive)')
+            [CompletionResult]::new('--no-echo', '--no-echo', [CompletionResultType]::ParameterName, '[R] Don''t echo input (no-op, arf controls its own echo)')
+            [CompletionResult]::new('--slave', '--slave', [CompletionResultType]::ParameterName, '[R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)')
             [CompletionResult]::new('--no-readline', '--no-readline', [CompletionResultType]::ParameterName, '[R] Don''t use readline (no-op)')
             [CompletionResult]::new('--no-restore-history', '--no-restore-history', [CompletionResultType]::ParameterName, '[R] Don''t restore history (no-op)')
             [CompletionResult]::new('--no-auto-match', '--no-auto-match', [CompletionResultType]::ParameterName, 'Disable auto-matching of brackets and quotes (for testing)')
