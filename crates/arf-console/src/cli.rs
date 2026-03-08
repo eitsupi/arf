@@ -14,12 +14,16 @@ use std::path::PathBuf;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// R script file to execute (non-interactive mode)
-    #[arg(value_hint = ValueHint::FilePath)]
+    #[arg(value_hint = ValueHint::FilePath, conflicts_with = "file")]
     pub script: Option<PathBuf>,
 
     /// Evaluate R expression and exit
     #[arg(short = 'e', long = "eval")]
     pub eval: Option<String>,
+
+    /// [R] Take input from FILE (same as positional SCRIPT argument)
+    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, conflicts_with = "script", hide_short_help = true)]
+    pub file: Option<PathBuf>,
 
     /// Enable reprex mode (no prompt, output prefixed with #>)
     ///
@@ -110,6 +114,54 @@ pub struct Cli {
     /// [R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)
     #[arg(long = "slave", hide = true)]
     pub slave: bool,
+
+    /// [R] Restore previously saved objects (opposite of --no-restore)
+    #[arg(long = "restore", conflicts_with_all = ["no_restore", "no_restore_data"], hide = true)]
+    pub restore: bool,
+
+    /// [R] Print more information about progress (no-op)
+    #[arg(long = "verbose", hide = true)]
+    pub verbose: bool,
+
+    /// [R] Specify encoding to be used for stdin (no-op)
+    #[arg(long = "encoding", hide = true)]
+    pub encoding: Option<String>,
+
+    /// [R] Set max number of connections to N
+    #[arg(long = "max-connections", hide = true)]
+    pub max_connections: Option<u32>,
+
+    /// [R] Set max size of protect stack to N
+    #[arg(long = "max-ppsize", hide = true)]
+    pub max_ppsize: Option<u32>,
+
+    /// [R] Set min number of fixed size obj's ("cons cells") to N
+    #[arg(long = "min-nsize", hide = true)]
+    pub min_nsize: Option<String>,
+
+    /// [R] Set vector heap minimum to N bytes; '4M' = 4 MegaB
+    #[arg(long = "min-vsize", hide = true)]
+    pub min_vsize: Option<String>,
+
+    /// [R] Run R through debugger NAME (no-op)
+    #[arg(short = 'd', long = "debugger", hide = true)]
+    pub debugger: Option<String>,
+
+    /// [R] Pass ARGS as arguments to the debugger (no-op)
+    #[arg(long = "debugger-args", hide = true)]
+    pub debugger_args: Option<String>,
+
+    /// [R] Use TYPE as GUI (no-op)
+    #[arg(short = 'g', long = "gui", hide = true)]
+    pub gui: Option<String>,
+
+    /// [R] Specify a sub-architecture (no-op)
+    #[arg(long = "arch", hide = true)]
+    pub arch: Option<String>,
+
+    /// [R] Skip the rest of the command line (remaining args are ignored)
+    #[arg(long = "args", hide = true, num_args = 0)]
+    pub r_args_marker: bool,
 
     /// [R] Don't use readline (no-op)
     #[arg(long = "no-readline", hide = true)]
@@ -326,6 +378,11 @@ impl Cli {
         Some(values)
     }
 
+    /// Returns the script file path from either `-f`/`--file` or the positional argument.
+    pub fn script_file(&self) -> Option<&PathBuf> {
+        self.script.as_ref().or(self.file.as_ref())
+    }
+
     /// Generate R initialization arguments based on CLI flags.
     ///
     /// Returns a vector of R arguments like ["--quiet", "--no-save", "--no-restore"].
@@ -362,11 +419,25 @@ impl Cli {
                 args.push("--no-save".to_string());
             }
 
-            if self.restore_data {
-                args.push("--restore-data".to_string());
+            if self.restore_data || self.restore {
+                args.push("--restore".to_string());
             } else {
                 args.push("--no-restore-data".to_string());
             }
+        }
+
+        // Memory tuning flags - forward to R
+        if let Some(n) = self.max_connections {
+            args.push(format!("--max-connections={n}"));
+        }
+        if let Some(n) = self.max_ppsize {
+            args.push(format!("--max-ppsize={n}"));
+        }
+        if let Some(ref n) = self.min_nsize {
+            args.push(format!("--min-nsize={n}"));
+        }
+        if let Some(ref n) = self.min_vsize {
+            args.push(format!("--min-vsize={n}"));
         }
 
         // Always interactive (Unix only - Windows uses Rstart.r_interactive)

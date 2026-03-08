@@ -65,7 +65,7 @@ fn run() -> Result<()> {
     }
 
     // Check if we're in script execution mode
-    let script_mode = cli.eval.is_some() || cli.script.is_some();
+    let script_mode = cli.eval.is_some() || cli.script_file().is_some();
 
     if script_mode {
         // Script execution mode - no REPL, just run code and exit
@@ -635,7 +635,7 @@ fn run_script(cli: &Cli) -> Result<()> {
     // Get the code to execute
     let code = if let Some(eval_code) = &cli.eval {
         eval_code.clone()
-    } else if let Some(script_path) = &cli.script {
+    } else if let Some(script_path) = cli.script_file() {
         fs::read_to_string(script_path)
             .with_context(|| format!("Failed to read script file: {}", script_path.display()))?
     } else {

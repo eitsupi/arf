@@ -21,10 +21,23 @@ _arf() {
     _arguments "${_arguments_options[@]}" : \
 '-e+[Evaluate R expression and exit]:EVAL:_default' \
 '--eval=[Evaluate R expression and exit]:EVAL:_default' \
+'()-f+[\[R\] Take input from FILE (same as positional SCRIPT argument)]:FILE:_files' \
+'()--file=[\[R\] Take input from FILE (same as positional SCRIPT argument)]:FILE:_files' \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \
 '(--with-r-version)--r-home=[Explicit R_HOME path (overrides r_source config)]:R_HOME:_files -/' \
+'--encoding=[\[R\] Specify encoding to be used for stdin (no-op)]:ENCODING:_default' \
+'--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
+'--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
+'--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
+'--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
+'-d+[\[R\] Run R through debugger NAME (no-op)]:DEBUGGER:_default' \
+'--debugger=[\[R\] Run R through debugger NAME (no-op)]:DEBUGGER:_default' \
+'--debugger-args=[\[R\] Pass ARGS as arguments to the debugger (no-op)]:DEBUGGER_ARGS:_default' \
+'-g+[\[R\] Use TYPE as GUI (no-op)]:GUI:_default' \
+'--gui=[\[R\] Use TYPE as GUI (no-op)]:GUI:_default' \
+'--arch=[\[R\] Specify a sub-architecture (no-op)]:ARCH:_default' \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
 '--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
@@ -43,6 +56,9 @@ _arf() {
 '--interactive[\[R\] Force R to run interactively (no-op, always interactive)]' \
 '--no-echo[\[R\] Don'\''t echo input (no-op, arf controls its own echo)]' \
 '--slave[\[R\] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)]' \
+'(--no-restore --no-restore-data)--restore[\[R\] Restore previously saved objects (opposite of --no-restore)]' \
+'--verbose[\[R\] Print more information about progress (no-op)]' \
+'--args[\[R\] Skip the rest of the command line (remaining args are ignored)]' \
 '--no-readline[\[R\] Don'\''t use readline (no-op)]' \
 '--no-restore-history[\[R\] Don'\''t restore history (no-op)]' \
 '--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \

@@ -4,7 +4,7 @@ expression: completions
 ---
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_arf_global_optspecs
-	string join \n e/eval= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-echo slave no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
+	string join \n e/eval= f/file= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-echo slave restore verbose encoding= max-connections= max-ppsize= min-nsize= min-vsize= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
 end
 
 function __fish_arf_needs_command
@@ -29,9 +29,19 @@ function __fish_arf_using_subcommand
 end
 
 complete -c arf -n "__fish_arf_needs_command" -s e -l eval -d 'Evaluate R expression and exit' -r
+complete -c arf -n "__fish_arf_needs_command" -s f -l file -d '[R] Take input from FILE (same as positional SCRIPT argument)' -r -F
 complete -c arf -n "__fish_arf_needs_command" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
 complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_needs_command" -l encoding -d '[R] Specify encoding to be used for stdin (no-op)' -r
+complete -c arf -n "__fish_arf_needs_command" -l max-connections -d '[R] Set max number of connections to N' -r
+complete -c arf -n "__fish_arf_needs_command" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
+complete -c arf -n "__fish_arf_needs_command" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
+complete -c arf -n "__fish_arf_needs_command" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
+complete -c arf -n "__fish_arf_needs_command" -s d -l debugger -d '[R] Run R through debugger NAME (no-op)' -r
+complete -c arf -n "__fish_arf_needs_command" -l debugger-args -d '[R] Pass ARGS as arguments to the debugger (no-op)' -r
+complete -c arf -n "__fish_arf_needs_command" -s g -l gui -d '[R] Use TYPE as GUI (no-op)' -r
+complete -c arf -n "__fish_arf_needs_command" -l arch -d '[R] Specify a sub-architecture (no-op)' -r
 complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_needs_command" -l reprex -d 'Enable reprex mode (no prompt, output prefixed with #>)'
 complete -c arf -n "__fish_arf_needs_command" -l auto-format -d 'Enable auto-formatting of R code in reprex mode (requires Air CLI)'
@@ -49,6 +59,9 @@ complete -c arf -n "__fish_arf_needs_command" -l no-init-file -d '[R] Don\'t rea
 complete -c arf -n "__fish_arf_needs_command" -l interactive -d '[R] Force R to run interactively (no-op, always interactive)'
 complete -c arf -n "__fish_arf_needs_command" -l no-echo -d '[R] Don\'t echo input (no-op, arf controls its own echo)'
 complete -c arf -n "__fish_arf_needs_command" -l slave -d '[R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)'
+complete -c arf -n "__fish_arf_needs_command" -l restore -d '[R] Restore previously saved objects (opposite of --no-restore)'
+complete -c arf -n "__fish_arf_needs_command" -l verbose -d '[R] Print more information about progress (no-op)'
+complete -c arf -n "__fish_arf_needs_command" -l args -d '[R] Skip the rest of the command line (remaining args are ignored)'
 complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'
