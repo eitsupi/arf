@@ -159,7 +159,9 @@ pub struct Cli {
     #[arg(long = "arch", hide = true)]
     pub arch: Option<String>,
 
-    /// [R] Skip the rest of the command line (remaining args are ignored)
+    /// [R] In R, skip the rest of the command line.
+    /// arf accepts this flag for compatibility but does NOT consume trailing arguments;
+    /// unknown flags after --args will still cause a parse error.
     #[arg(long = "args", hide = true, num_args = 0)]
     pub r_args_marker: bool,
 

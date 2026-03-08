@@ -61,7 +61,7 @@ complete -c arf -n "__fish_arf_needs_command" -l no-echo -d '[R] Don\'t echo inp
 complete -c arf -n "__fish_arf_needs_command" -l slave -d '[R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)'
 complete -c arf -n "__fish_arf_needs_command" -l restore -d '[R] Restore previously saved objects (opposite of --no-restore)'
 complete -c arf -n "__fish_arf_needs_command" -l verbose -d '[R] Print more information about progress (no-op)'
-complete -c arf -n "__fish_arf_needs_command" -l args -d '[R] Skip the rest of the command line (remaining args are ignored)'
+complete -c arf -n "__fish_arf_needs_command" -l args -d '[R] In R, skip the rest of the command line. arf accepts this flag for compatibility but does NOT consume trailing arguments; unknown flags after --args will still cause a parse error'
 complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'

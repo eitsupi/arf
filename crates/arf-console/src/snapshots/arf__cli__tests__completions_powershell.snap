@@ -64,7 +64,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--slave', '--slave', [CompletionResultType]::ParameterName, '[R] Combine --quiet --no-save --no-restore (deprecated in R 4.0, use --no-echo)')
             [CompletionResult]::new('--restore', '--restore', [CompletionResultType]::ParameterName, '[R] Restore previously saved objects (opposite of --no-restore)')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, '[R] Print more information about progress (no-op)')
-            [CompletionResult]::new('--args', '--args', [CompletionResultType]::ParameterName, '[R] Skip the rest of the command line (remaining args are ignored)')
+            [CompletionResult]::new('--args', '--args', [CompletionResultType]::ParameterName, '[R] In R, skip the rest of the command line. arf accepts this flag for compatibility but does NOT consume trailing arguments; unknown flags after --args will still cause a parse error')
             [CompletionResult]::new('--no-readline', '--no-readline', [CompletionResultType]::ParameterName, '[R] Don''t use readline (no-op)')
             [CompletionResult]::new('--no-restore-history', '--no-restore-history', [CompletionResultType]::ParameterName, '[R] Don''t restore history (no-op)')
             [CompletionResult]::new('--no-auto-match', '--no-auto-match', [CompletionResultType]::ParameterName, 'Disable auto-matching of brackets and quotes (for testing)')
