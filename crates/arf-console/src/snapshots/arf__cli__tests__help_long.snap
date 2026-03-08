@@ -20,6 +20,9 @@ Options:
   -e, --eval <EVAL>
           Evaluate R expression and exit
 
+  -f, --file <FILE>
+          [R] Take input from FILE (same as positional SCRIPT argument)
+
       --reprex
           Enable reprex mode (no prompt, output prefixed with #>)
           

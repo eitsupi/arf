@@ -1004,13 +1004,19 @@ mod tests {
     fn test_store_namespace_exports_evicts_expired() {
         let mut completer = RCompleter::new();
 
-        // Insert an already-expired entry
+        // Insert an already-expired entry.
+        // Use checked_sub to avoid overflow on Windows where Instant is relative to boot time
+        // (system uptime may be shorter than cache duration in CI).
+        let expired_duration = RCompleter::NAMESPACE_CACHE_DURATION + Duration::from_secs(1);
+        let Some(expired_timestamp) = Instant::now().checked_sub(expired_duration) else {
+            // System uptime too short to create an expired entry; skip test
+            return;
+        };
         completer.namespace_cache.insert(
             "old_pkg::".to_string(),
             NamespaceExportCache {
                 exports: vec!["old_func".to_string()],
-                timestamp: Instant::now()
-                    - (RCompleter::NAMESPACE_CACHE_DURATION + Duration::from_secs(1)),
+                timestamp: expired_timestamp,
             },
         );
 
