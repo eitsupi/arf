@@ -13,7 +13,10 @@ use protocol::{
     INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
     UserInputResult,
 };
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
@@ -25,10 +28,21 @@ static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>
 static IPC_PENDING_INPUT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 /// Whether R is currently busy evaluating (not waiting for input).
-static R_IS_AT_PROMPT: OnceLock<std::sync::atomic::AtomicBool> = OnceLock::new();
+static R_IS_AT_PROMPT: OnceLock<AtomicBool> = OnceLock::new();
 
-fn r_is_at_prompt() -> &'static std::sync::atomic::AtomicBool {
-    R_IS_AT_PROMPT.get_or_init(|| std::sync::atomic::AtomicBool::new(false))
+fn r_is_at_prompt() -> &'static AtomicBool {
+    R_IS_AT_PROMPT.get_or_init(|| AtomicBool::new(false))
+}
+
+/// Break signal shared with reedline to interrupt `read_line()`.
+static BREAK_SIGNAL: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+/// Get or create the break signal for reedline integration.
+/// Pass the returned `Arc` to `Reedline::with_break_signal()`.
+pub fn break_signal() -> Arc<AtomicBool> {
+    BREAK_SIGNAL
+        .get_or_init(|| Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
 /// Start the IPC server and set up channels.
@@ -150,6 +164,14 @@ fn handle_request(request: IpcRequest) {
             }
 
             *guard = Some(code);
+
+            // Fire the break signal to interrupt reedline's read_line() loop.
+            // This causes read_line() to return Signal::ExternalBreak, allowing
+            // the REPL to consume the pending input.
+            if let Some(signal) = BREAK_SIGNAL.get() {
+                signal.store(true, Ordering::Relaxed);
+            }
+
             let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
         }
     }

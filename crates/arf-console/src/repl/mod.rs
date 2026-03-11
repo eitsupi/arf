@@ -365,6 +365,7 @@ impl Repl {
         // supports this, and radian uses the same approach (setoption() in its inputhook).
         let auto_width = self.config.r.auto_width;
         line_editor = line_editor
+            .with_break_signal(crate::ipc::break_signal())
             .with_poll_interval(std::time::Duration::from_millis(33))
             .with_idle_callback(Box::new(move || {
                 arf_libr::process_r_events();
@@ -660,6 +661,10 @@ impl Repl {
                     let _ = io::stdout().execute(terminal::Clear(ClearType::FromCursorDown));
                     println!("\nGoodbye!");
                     break;
+                }
+                Ok(_) => {
+                    // ExternalBreak or future variants: ignore in standalone mode
+                    continue;
                 }
                 Err(err) => {
                     eprintln!("Error: {}", err);
@@ -1048,6 +1053,33 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     state.should_exit = true;
                     return None;
                 }
+                Ok(Signal::ExternalBreak(_)) => {
+                    // IPC user_input triggered a break signal.
+                    // Consume the pending input and pass it to R.
+                    if let Some(code) = crate::ipc::take_ipc_pending_input() {
+                        // Echo the injected code so it appears on the prompt line,
+                        // just like user-typed input would.
+                        println!("{code}");
+
+                        // Save to history (reedline only saves on Signal::Success)
+                        if !code.is_empty() {
+                            let entry = reedline::HistoryItem::from_command_line(&code);
+                            let _ = editor.history_mut().save(entry);
+                        }
+
+                        // Start spinner and duration tracking, same as Success path
+                        if !code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(code);
+                    }
+                    // No pending input (spurious signal), continue waiting
+                    continue;
+                }
+                Ok(_) => continue,
                 Err(err) => {
                     eprintln!("Error: {}", err);
                     state.should_exit = true;
