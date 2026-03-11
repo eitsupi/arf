@@ -122,6 +122,8 @@ pub struct ReplState {
     pub sponge_queue: SpongeQueue,
     /// Directory stack for :pushd/:popd navigation.
     pub dir_stack: Vec<PathBuf>,
+    /// Bottom margin to keep prompt away from terminal bottom.
+    pub bottom_margin: crate::config::BottomMargin,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

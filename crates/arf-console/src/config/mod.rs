@@ -12,7 +12,7 @@ mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
 pub use completion::CompletionConfig;
-pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
+pub use editor::{AutoSuggestions, BottomMargin, EditorConfig, EditorMode};
 pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, SpinnerConfig,
 };
@@ -985,5 +985,41 @@ auto_match = false
 
         // Restore permissions so tempdir cleanup succeeds
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    #[test]
+    fn test_default_bottom_margin() {
+        let config = Config::default();
+        assert_eq!(config.editor.bottom_margin, BottomMargin::Disabled);
+    }
+
+    #[test]
+    fn test_parse_bottom_margin_fixed() {
+        let toml_str = r#"
+[editor]
+bottom_margin = { fixed = 10 }
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.bottom_margin, BottomMargin::Fixed(10));
+    }
+
+    #[test]
+    fn test_parse_bottom_margin_proportional() {
+        let toml_str = r#"
+[editor]
+bottom_margin = { proportional = 0.5 }
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.bottom_margin, BottomMargin::Proportional(0.5));
+    }
+
+    #[test]
+    fn test_parse_bottom_margin_disabled() {
+        let toml_str = r#"
+[editor]
+bottom_margin = "disabled"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.editor.bottom_margin, BottomMargin::Disabled);
     }
 }

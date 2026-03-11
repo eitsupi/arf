@@ -10,8 +10,8 @@ pub(crate) mod state;
 use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::config::{
-    AutoSuggestions, Config, ConfigStatus, EditorMode, ModeIndicatorPosition, RSourceStatus,
-    history_dir,
+    AutoSuggestions, BottomMargin, Config, ConfigStatus, EditorMode, ModeIndicatorPosition,
+    RSourceStatus, history_dir,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
@@ -20,7 +20,7 @@ use crate::highlighter::{CombinedHighlighter, MetaCommandHighlighter};
 use crate::history::FuzzyHistory;
 use anyhow::Result;
 use crossterm::{
-    ExecutableCommand,
+    ExecutableCommand, cursor,
     style::Stylize,
     terminal::{self, ClearType},
 };
@@ -32,6 +32,7 @@ use reedline::{
 };
 use std::cell::RefCell;
 use std::io;
+use std::io::Write;
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::editor::keybindings::{
@@ -99,6 +100,53 @@ fn sync_r_width() {
             }
             Err(e) => log::debug!("Failed to set R width option: {:?}", e),
         }
+    }
+}
+
+/// Ensure the prompt maintains a margin from the bottom of the terminal.
+///
+/// Supports fixed lines or proportional fraction of terminal height.
+///
+/// - `BottomMargin::Disabled`: No margin (default)
+/// - `BottomMargin::Fixed(n)`: Reserve n lines at bottom
+/// - `BottomMargin::Proportional(f)`: Reserve bottom f fraction (0.0-1.0)
+fn ensure_bottom_margin(margin: BottomMargin) {
+    let Ok((_, term_rows)) = terminal::size() else {
+        return;
+    };
+
+    let target_row = match margin {
+        BottomMargin::Disabled => return,
+        BottomMargin::Fixed(lines) => {
+            if lines == 0 {
+                return;
+            }
+            term_rows.saturating_sub(lines.clamp(0, term_rows))
+        }
+        BottomMargin::Proportional(fraction) => {
+            if fraction >= 1.0 {
+                return;
+            }
+            (term_rows as f32 * fraction.clamp(0.0, 1.0)) as u16
+        }
+    };
+
+    let Ok((_, cursor_row)) = cursor::position() else {
+        return;
+    };
+
+    // If cursor is at or below the target row, we need to scroll up and move cursor
+    if cursor_row >= target_row {
+        let lines_to_scroll = cursor_row.saturating_sub(target_row) + 1;
+
+        // Scroll terminal up to create space, then move cursor to target row
+        let mut stdout = io::stdout();
+        if lines_to_scroll > 0 {
+            let _ = stdout.execute(terminal::ScrollUp(lines_to_scroll));
+        }
+        // Move cursor to the target row (column 0)
+        let _ = stdout.execute(cursor::MoveTo(0, target_row));
+        let _ = stdout.flush();
     }
 }
 
@@ -429,6 +477,7 @@ impl Repl {
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
+                bottom_margin: self.config.editor.bottom_margin,
             });
         });
 
@@ -598,6 +647,9 @@ impl Repl {
         let mut dir_stack: Vec<std::path::PathBuf> = Vec::new();
 
         loop {
+            // Apply bottom margin to keep prompt away from terminal bottom
+            ensure_bottom_margin(self.config.editor.bottom_margin);
+
             match line_editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
                     let trimmed = line.trim();
@@ -878,6 +930,12 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
             // The idle callback will continue processing events at ~30fps while waiting for input,
             // keeping graphics windows (plot(), help browser) responsive.
             arf_libr::process_r_events();
+
+            // Apply bottom margin to keep prompt away from terminal bottom
+            // Only for command prompts, not continuation or menu prompts
+            if is_r_command_prompt(r_prompt) {
+                ensure_bottom_margin(state.bottom_margin);
+            }
 
             // Track whether we're in a non-standard prompt mode (menu selection, etc.)
             let is_menu_prompt = !is_r_command_prompt(r_prompt) && !r_prompt.starts_with('+');

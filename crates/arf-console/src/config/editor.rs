@@ -132,6 +132,167 @@ impl<'de> Deserialize<'de> for AutoSuggestions {
     }
 }
 
+/// Bottom margin configuration to keep prompt away from terminal bottom.
+///
+/// Controls how much space to reserve at the bottom of the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Default, JsonSchema)]
+#[schemars(schema_with = "bottom_margin_schema")]
+pub enum BottomMargin {
+    /// Fixed number of lines to reserve at bottom.
+    Fixed(u16),
+    /// Fraction of terminal height (0.0-1.0).
+    Proportional(f32),
+    /// Disabled (default) - no bottom margin.
+    #[default]
+    Disabled,
+}
+
+impl fmt::Display for BottomMargin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BottomMargin::Fixed(n) => write!(f, "fixed({})", n),
+            BottomMargin::Proportional(v) => write!(f, "proportional({})", v),
+            BottomMargin::Disabled => write!(f, "disabled"),
+        }
+    }
+}
+
+/// Custom JSON schema for BottomMargin.
+fn bottom_margin_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "Bottom margin to keep prompt away from terminal bottom. Can be a string \"disabled\" or an object with type and value.",
+        "oneOf": [
+            {
+                "type": "string",
+                "enum": ["disabled"],
+                "description": "Disabled (default) - no bottom margin"
+            },
+            {
+                "type": "object",
+                "description": "Fixed number of lines to reserve at bottom",
+                "properties": {
+                    "fixed": {
+                        "type": "integer",
+                        "description": "Number of lines to reserve at bottom (0 to terminal height)",
+                        "minimum": 0
+                    }
+                },
+                "required": ["fixed"],
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "description": "Fraction of terminal height to reserve",
+                "properties": {
+                    "proportional": {
+                        "type": "number",
+                        "description": "Fraction of terminal height (0.0 = top, 1.0 = bottom/disabled)",
+                        "minimum": 0.0,
+                        "maximum": 1.0
+                    }
+                },
+                "required": ["proportional"],
+                "additionalProperties": false
+            }
+        ],
+        "default": "disabled"
+    })
+}
+
+// Serialize BottomMargin - can be string "disabled" or object with fixed/proportional.
+impl Serialize for BottomMargin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        match self {
+            BottomMargin::Disabled => serializer.serialize_str("disabled"),
+            BottomMargin::Fixed(n) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("fixed", n)?;
+                map.end()
+            }
+            BottomMargin::Proportional(v) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("proportional", v)?;
+                map.end()
+            }
+        }
+    }
+}
+
+// Deserialize BottomMargin - accepts "disabled" string or object with fixed/proportional.
+impl<'de> Deserialize<'de> for BottomMargin {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+
+        struct BottomMarginVisitor;
+
+        impl<'de> Visitor<'de> for BottomMarginVisitor {
+            type Value = BottomMargin;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "a string \"disabled\" or an object with \"fixed\" or \"proportional\" key",
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<BottomMargin, E>
+            where
+                E: de::Error,
+            {
+                match value.to_lowercase().as_str() {
+                    "disabled" => Ok(BottomMargin::Disabled),
+                    _ => Err(de::Error::unknown_variant(value, &["disabled"])),
+                }
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<BottomMargin, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut fixed: Option<u16> = None;
+                let mut proportional: Option<f32> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "fixed" => {
+                            if fixed.is_some() {
+                                return Err(de::Error::duplicate_field("fixed"));
+                            }
+                            fixed = Some(map.next_value()?);
+                        }
+                        "proportional" => {
+                            if proportional.is_some() {
+                                return Err(de::Error::duplicate_field("proportional"));
+                            }
+                            proportional = Some(map.next_value()?);
+                        }
+                        _ => {
+                            return Err(de::Error::unknown_field(&key, &["fixed", "proportional"]));
+                        }
+                    }
+                }
+
+                match (fixed, proportional) {
+                    (Some(n), None) => Ok(BottomMargin::Fixed(n)),
+                    (None, Some(v)) => Ok(BottomMargin::Proportional(v)),
+                    (None, None) => Err(de::Error::missing_field("fixed or proportional")),
+                    (Some(_), Some(_)) => Err(de::Error::custom(
+                        "cannot specify both fixed and proportional",
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(BottomMarginVisitor)
+    }
+}
+
 /// Editor configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
@@ -159,6 +320,13 @@ pub struct EditorConfig {
     #[serde(default = "default_key_map")]
     #[schemars(schema_with = "key_map_schema")]
     pub key_map: BTreeMap<KeyCombination, String>,
+    /// Bottom margin to keep prompt away from terminal bottom.
+    ///
+    /// - `disabled`: No margin (default)
+    /// - `{ fixed = 10 }`: Reserve 10 lines at bottom
+    /// - `{ proportional = 0.5 }`: Reserve bottom 50% of terminal
+    #[serde(default)]
+    pub bottom_margin: BottomMargin,
 }
 
 fn default_key_map() -> BTreeMap<KeyCombination, String> {
@@ -196,6 +364,7 @@ impl Default for EditorConfig {
             highlight_matching_bracket: false,
             auto_suggestions: AutoSuggestions::All,
             key_map: default_key_map(),
+            bottom_margin: BottomMargin::default(),
         }
     }
 }
