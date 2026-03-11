@@ -8,7 +8,7 @@ use crate::ipc::protocol::{
     EvaluateParams, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse,
     JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, UserInputParams,
 };
-use crate::ipc::session::{SessionInfo, remove_session, sessions_dir, write_session};
+use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -20,6 +20,9 @@ static SERVER_HANDLE: OnceLock<Mutex<Option<ServerState>>> = OnceLock::new();
 struct ServerState {
     cancel_token: CancellationToken,
     join_handle: std::thread::JoinHandle<()>,
+    /// Socket path (used on Unix for cleanup; on Windows, named pipes are
+    /// cleaned up automatically when the server is dropped).
+    #[cfg_attr(windows, allow(dead_code))]
     socket_path: String,
 }
 
@@ -128,6 +131,7 @@ pub fn stop_server() {
 fn get_socket_path(pid: u32) -> String {
     #[cfg(unix)]
     {
+        use crate::ipc::session::sessions_dir;
         if let Some(dir) = sessions_dir() {
             let _ = std::fs::create_dir_all(&dir);
             dir.join(format!("{pid}.sock")).display().to_string()

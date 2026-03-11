@@ -25,25 +25,21 @@ mod ipc_tests {
             if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().is_some_and(|ext| ext == "json") {
-                        if let Ok(contents) = std::fs::read_to_string(&path) {
-                            if let Ok(info) = serde_json::from_str::<serde_json::Value>(&contents) {
-                                // Filter by PID if specified
-                                if let Some(target_pid) = pid {
-                                    if info.get("pid").and_then(|v| v.as_u64())
-                                        != Some(u64::from(target_pid))
-                                    {
-                                        continue;
-                                    }
-                                }
-                                if let Some(socket) =
-                                    info.get("socket_path").and_then(|v| v.as_str())
-                                {
-                                    // Verify the socket is connectable
-                                    if UnixStream::connect(socket).is_ok() {
-                                        return Some(socket.to_string());
-                                    }
-                                }
+                    if path.extension().is_some_and(|ext| ext == "json")
+                        && let Ok(contents) = std::fs::read_to_string(&path)
+                        && let Ok(info) = serde_json::from_str::<serde_json::Value>(&contents)
+                    {
+                        // Filter by PID if specified
+                        if let Some(target_pid) = pid
+                            && info.get("pid").and_then(|v| v.as_u64())
+                                != Some(u64::from(target_pid))
+                        {
+                            continue;
+                        }
+                        if let Some(socket) = info.get("socket_path").and_then(|v| v.as_str()) {
+                            // Verify the socket is connectable
+                            if UnixStream::connect(socket).is_ok() {
+                                return Some(socket.to_string());
                             }
                         }
                     }
