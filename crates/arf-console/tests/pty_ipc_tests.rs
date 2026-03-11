@@ -15,8 +15,9 @@ mod ipc_tests {
     use std::time::{Duration, Instant};
 
     /// Find the IPC socket path by scanning the session directory.
-    /// Retries until a session file appears or timeout is reached.
-    fn find_socket_path(timeout: Duration) -> Option<String> {
+    /// Filters by PID to avoid connecting to the wrong session in parallel test runs.
+    /// Retries until a matching session file appears or timeout is reached.
+    fn find_socket_path(pid: Option<u32>, timeout: Duration) -> Option<String> {
         let sessions_dir = dirs::cache_dir()?.join("arf").join("sessions");
         let start = Instant::now();
 
@@ -27,6 +28,14 @@ mod ipc_tests {
                     if path.extension().is_some_and(|ext| ext == "json") {
                         if let Ok(contents) = std::fs::read_to_string(&path) {
                             if let Ok(info) = serde_json::from_str::<serde_json::Value>(&contents) {
+                                // Filter by PID if specified
+                                if let Some(target_pid) = pid {
+                                    if info.get("pid").and_then(|v| v.as_u64())
+                                        != Some(u64::from(target_pid))
+                                    {
+                                        continue;
+                                    }
+                                }
                                 if let Some(socket) =
                                     info.get("socket_path").and_then(|v| v.as_str())
                                 {
@@ -67,8 +76,7 @@ mod ipc_tests {
              Content-Type: application/json\r\n\
              Content-Length: {}\r\n\
              Connection: close\r\n\
-             \r\n\
-             {}",
+             \r\n{}",
             body.len(),
             body
         );
@@ -119,7 +127,7 @@ mod ipc_tests {
             .expect("Should show prompt after startup");
 
         // Find the IPC socket (may take a moment for the session file to appear)
-        let socket_path = find_socket_path(Duration::from_secs(10))
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
             .expect("Should find IPC socket path in session directory");
 
         // Send user_input via IPC — this should trigger the break signal,

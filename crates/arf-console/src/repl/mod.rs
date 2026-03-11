@@ -1073,6 +1073,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             state.prompt_config.start_spinner();
                         }
 
+                        // Strip Windows CRs, same as Success path
+                        #[cfg(windows)]
+                        let code = arf_libr::strip_cr(&code).into_owned();
+
                         crate::ipc::set_r_at_prompt(false);
                         return Some(code);
                     }
