@@ -1,4 +1,4 @@
-//! IPC server that listens on a Unix socket (or TCP fallback).
+//! IPC server that listens on a Unix socket (or named pipe on Windows).
 //!
 //! Runs in a dedicated thread with a tokio current_thread runtime.
 //! Each connection is handled as a simple HTTP-like JSON-RPC endpoint:
@@ -124,17 +124,24 @@ pub fn stop_server() {
     }
 }
 
-/// Get the socket path for a given PID.
+/// Get the socket/pipe path for a given PID.
 fn get_socket_path(pid: u32) -> String {
-    if let Some(dir) = sessions_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        dir.join(format!("{pid}.sock")).display().to_string()
-    } else {
-        // Fallback to temp dir
-        std::env::temp_dir()
-            .join(format!("arf-{pid}.sock"))
-            .display()
-            .to_string()
+    #[cfg(unix)]
+    {
+        if let Some(dir) = sessions_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            dir.join(format!("{pid}.sock")).display().to_string()
+        } else {
+            // Fallback to temp dir
+            std::env::temp_dir()
+                .join(format!("arf-{pid}.sock"))
+                .display()
+                .to_string()
+        }
+    }
+    #[cfg(windows)]
+    {
+        format!(r"\\.\pipe\arf-ipc-{pid}")
     }
 }
 
@@ -179,23 +186,32 @@ async fn run_server(
 
 #[cfg(windows)]
 async fn run_server(
-    _socket_path: &str,
+    socket_path: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
-    // On Windows, fall back to TCP on localhost
-    let addr = format!("127.0.0.1:{}", get_tcp_port(std::process::id()));
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    log::info!("IPC server listening on {}", addr);
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    log::info!("IPC server listening on {}", socket_path);
+
+    // Create the first pipe instance
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(socket_path)?;
 
     loop {
         tokio::select! {
-            result = listener.accept() => {
+            result = server.connect() => {
                 match result {
-                    Ok((stream, _addr)) => {
+                    Ok(()) => {
                         let tx = tx.clone();
+                        let connected = server;
+
+                        // Create a new pipe instance for the next connection
+                        server = ServerOptions::new().create(socket_path)?;
+
                         tokio::spawn(async move {
-                            if let Err(e) = handle_connection(stream, tx).await {
+                            if let Err(e) = handle_connection(connected, tx).await {
                                 log::debug!("IPC connection error: {}", e);
                             }
                         });
@@ -215,12 +231,6 @@ async fn run_server(
         }
     }
     Ok(())
-}
-
-#[cfg(windows)]
-fn get_tcp_port(pid: u32) -> u16 {
-    // Use a deterministic port based on PID in the dynamic range
-    (49152 + (pid % 16383)) as u16
 }
 
 /// Handle a single connection: read request, dispatch, respond.

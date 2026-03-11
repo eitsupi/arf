@@ -160,22 +160,21 @@ pub fn cmd_status(pid: Option<u32>) -> Result<()> {
 fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRpcResponse> {
     let body = serde_json::to_string(request)?;
 
-    let http_request = format!(
-        "POST / HTTP/1.1\r\n\
-         Host: localhost\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        body.len(),
-        body
-    );
-
     #[cfg(unix)]
     {
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
+
+        let http_request = format!(
+            "POST / HTTP/1.1\r\n\
+             Host: localhost\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Connection: close\r\n\
+             \r\n{}",
+            body.len(),
+            body
+        );
 
         let mut stream = UnixStream::connect(socket_path)
             .with_context(|| format!("Failed to connect to {socket_path}"))?;
@@ -191,23 +190,23 @@ fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRp
 
     #[cfg(windows)]
     {
+        use std::fs::OpenOptions;
         use std::io::{Read, Write};
-        use std::net::TcpStream;
 
-        let addr = if socket_path.contains(':') {
-            socket_path.to_string()
-        } else {
-            format!("127.0.0.1:{}", extract_port_from_path(socket_path))
-        };
+        // Connect to named pipe — pipes appear in the \\.\pipe\ namespace
+        let mut pipe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(socket_path)
+            .with_context(|| format!("Failed to connect to {socket_path}"))?;
 
-        let mut stream =
-            TcpStream::connect(&addr).with_context(|| format!("Failed to connect to {addr}"))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
-        stream.write_all(http_request.as_bytes())?;
-        stream.shutdown(std::net::Shutdown::Write)?;
+        // Send raw JSON (no HTTP wrapping) — the server detects complete
+        // JSON and stops reading, so no write shutdown is needed.
+        pipe.write_all(body.as_bytes())?;
+        pipe.flush()?;
 
         let mut response_buf = Vec::new();
-        stream.read_to_end(&mut response_buf)?;
+        pipe.read_to_end(&mut response_buf)?;
 
         parse_http_response(&response_buf)
     }
@@ -224,14 +223,4 @@ fn parse_http_response(data: &[u8]) -> Result<JsonRpcResponse> {
     };
 
     serde_json::from_str(body).context("Failed to parse JSON-RPC response")
-}
-
-#[cfg(windows)]
-fn extract_port_from_path(path: &str) -> u16 {
-    std::path::Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .and_then(|s| s.parse::<u32>().ok())
-        .map(|pid| (49152 + (pid % 16383)) as u16)
-        .unwrap_or(49152)
 }
