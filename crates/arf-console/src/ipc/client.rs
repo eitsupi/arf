@@ -190,25 +190,38 @@ fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRp
 
     #[cfg(windows)]
     {
-        use std::fs::OpenOptions;
-        use std::io::{Read, Write};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::windows::named_pipe::ClientOptions;
 
-        // Connect to named pipe — pipes appear in the \\.\pipe\ namespace
-        let mut pipe = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(socket_path)
-            .with_context(|| format!("Failed to connect to {socket_path}"))?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("Failed to create tokio runtime")?;
 
-        // Send raw JSON (no HTTP wrapping) — the server detects complete
-        // JSON and stops reading, so no write shutdown is needed.
-        pipe.write_all(body.as_bytes())?;
-        pipe.flush()?;
+        rt.block_on(async {
+            let mut pipe = ClientOptions::new()
+                .open(socket_path)
+                .with_context(|| format!("Failed to connect to {socket_path}"))?;
 
-        let mut response_buf = Vec::new();
-        pipe.read_to_end(&mut response_buf)?;
+            // Send raw JSON (no HTTP wrapping) — the server detects complete
+            // JSON and stops reading, so no write shutdown is needed.
+            pipe.write_all(body.as_bytes()).await?;
+            pipe.flush().await?;
 
-        parse_http_response(&response_buf)
+            // Read response with timeout (300s, same as Unix)
+            let mut response_buf = Vec::new();
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(300),
+                pipe.read_to_end(&mut response_buf),
+            )
+            .await
+            {
+                Ok(result) => result?,
+                Err(_) => anyhow::bail!("Request timed out after 300 seconds"),
+            };
+
+            parse_http_response(&response_buf)
+        })
     }
 }
 
