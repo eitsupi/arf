@@ -1,0 +1,237 @@
+//! IPC client for the `arf ipc` subcommand.
+//!
+//! Uses synchronous std I/O — no tokio runtime needed on the client side.
+
+use crate::ipc::protocol::JsonRpcResponse;
+use crate::ipc::session::{find_session, list_sessions};
+use anyhow::{Context, Result};
+
+/// List all active arf sessions.
+pub fn cmd_list() -> Result<()> {
+    let sessions = list_sessions();
+
+    if sessions.is_empty() {
+        println!("No active arf sessions found.");
+        println!("Start arf with --with-ipc to enable IPC.");
+        return Ok(());
+    }
+
+    println!("{:<8} {:<12} CWD", "PID", "R VERSION");
+    println!("{}", "-".repeat(60));
+    for session in &sessions {
+        println!(
+            "{:<8} {:<12} {}",
+            session.pid,
+            session.r_version.as_deref().unwrap_or("?"),
+            session.cwd
+        );
+    }
+
+    Ok(())
+}
+
+/// Resolve a session or return a descriptive error.
+fn resolve_session(pid: Option<u32>) -> Result<crate::ipc::session::SessionInfo> {
+    find_session(pid).ok_or_else(|| {
+        if let Some(p) = pid {
+            anyhow::anyhow!("No active arf session with PID {p}")
+        } else {
+            let sessions = list_sessions();
+            if sessions.is_empty() {
+                anyhow::anyhow!("No active arf sessions. Start arf with --with-ipc to enable IPC.")
+            } else {
+                anyhow::anyhow!(
+                    "Multiple arf sessions running. Specify --pid to select one.\n\
+                     Use `arf ipc list` to see active sessions."
+                )
+            }
+        }
+    })
+}
+
+/// Evaluate R code in a running arf session.
+pub fn cmd_eval(code: &str, pid: Option<u32>) -> Result<()> {
+    let session = resolve_session(pid)?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "evaluate",
+        "params": { "code": code }
+    });
+
+    let response = send_request(&session.socket_path, &request)?;
+
+    if let Some(error) = response.error {
+        eprintln!("Error: {} (code {})", error.message, error.code);
+        std::process::exit(1);
+    }
+
+    if let Some(result) = response.result {
+        if let Some(stdout) = result
+            .get("stdout")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            print!("{stdout}");
+            if !stdout.ends_with('\n') {
+                println!();
+            }
+        }
+
+        if let Some(stderr) = result
+            .get("stderr")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            eprint!("{stderr}");
+            if !stderr.ends_with('\n') {
+                eprintln!();
+            }
+        }
+
+        if let Some(value) = result
+            .get("value")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            println!("{value}");
+        }
+
+        if let Some(error) = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            eprintln!("Error in R: {error}");
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+/// Send code as user input to a running arf session.
+pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
+    let session = resolve_session(pid)?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "user_input",
+        "params": { "code": code }
+    });
+
+    let response = send_request(&session.socket_path, &request)?;
+
+    if let Some(error) = response.error {
+        eprintln!("Error: {} (code {})", error.message, error.code);
+        std::process::exit(1);
+    }
+
+    if let Some(result) = response.result
+        && result.get("accepted").and_then(|v| v.as_bool()) == Some(true)
+    {
+        println!("Input accepted.");
+    }
+
+    Ok(())
+}
+
+/// Show status of a specific session.
+pub fn cmd_status(pid: Option<u32>) -> Result<()> {
+    let session = find_session(pid).ok_or_else(|| {
+        anyhow::anyhow!("No matching arf session found. Use `arf ipc list` to see active sessions.")
+    })?;
+
+    println!("PID:        {}", session.pid);
+    println!(
+        "R version:  {}",
+        session.r_version.as_deref().unwrap_or("unknown")
+    );
+    println!("Socket:     {}", session.socket_path);
+    println!("CWD:        {}", session.cwd);
+    println!("Started:    {}", session.started_at);
+
+    Ok(())
+}
+
+/// Send a JSON-RPC request to the socket and return the response.
+fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRpcResponse> {
+    let body = serde_json::to_string(request)?;
+
+    let http_request = format!(
+        "POST / HTTP/1.1\r\n\
+         Host: localhost\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        body.len(),
+        body
+    );
+
+    #[cfg(unix)]
+    {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        let mut stream = UnixStream::connect(socket_path)
+            .with_context(|| format!("Failed to connect to {socket_path}"))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
+        stream.write_all(http_request.as_bytes())?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+
+        let mut response_buf = Vec::new();
+        stream.read_to_end(&mut response_buf)?;
+
+        parse_http_response(&response_buf)
+    }
+
+    #[cfg(windows)]
+    {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+
+        let addr = if socket_path.contains(':') {
+            socket_path.to_string()
+        } else {
+            format!("127.0.0.1:{}", extract_port_from_path(socket_path))
+        };
+
+        let mut stream =
+            TcpStream::connect(&addr).with_context(|| format!("Failed to connect to {addr}"))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
+        stream.write_all(http_request.as_bytes())?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+
+        let mut response_buf = Vec::new();
+        stream.read_to_end(&mut response_buf)?;
+
+        parse_http_response(&response_buf)
+    }
+}
+
+/// Parse an HTTP response and extract the JSON body.
+fn parse_http_response(data: &[u8]) -> Result<JsonRpcResponse> {
+    let text = String::from_utf8_lossy(data);
+
+    let body = if let Some(pos) = text.find("\r\n\r\n") {
+        &text[pos + 4..]
+    } else {
+        &text
+    };
+
+    serde_json::from_str(body).context("Failed to parse JSON-RPC response")
+}
+
+#[cfg(windows)]
+fn extract_port_from_path(path: &str) -> u16 {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.parse::<u32>().ok())
+        .map(|pid| (49152 + (pid % 16383)) as u16)
+        .unwrap_or(49152)
+}

@@ -371,6 +371,7 @@ impl Repl {
                 if auto_width {
                     sync_r_width();
                 }
+                crate::ipc::poll_ipc_requests();
             }));
 
         // Create shell line editor with separate history
@@ -803,6 +804,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
         // This is called when R has finished evaluating and wants new input.
         // Continuation prompts (starting with '+') mean we're still in the same expression.
         // Non-command prompts (menus, etc.) should also not trigger exit status updates.
+        // Track prompt state for IPC: R is now idle and waiting for input
+        if is_r_command_prompt(r_prompt) {
+            crate::ipc::set_r_at_prompt(true);
+        }
+
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
             let had_error = if state.line_editor.has_last_command_context() {
                 let had_error = arf_libr::command_had_error();
@@ -849,6 +855,26 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 
             // Reset error state for the next command
             arf_libr::reset_command_error_state();
+        }
+
+        // Check for IPC-injected input before entering the reedline input loop.
+        // This allows external tools to send code that appears in the REPL.
+        if is_r_command_prompt(r_prompt)
+            && !state.prompt_config.is_shell_enabled()
+            && let Some(code) = crate::ipc::take_ipc_pending_input()
+        {
+            // Display the injected input with an agent> prefix
+            let prompt_str = "agent> ";
+            println!("{}{}", prompt_str.dark_cyan(), code);
+
+            // Start spinner and record timing (same as normal input)
+            if !code.is_empty() {
+                state.prompt_config.set_command_start();
+                state.prompt_config.start_spinner();
+            }
+
+            crate::ipc::set_r_at_prompt(false);
+            return Some(code);
         }
 
         loop {
@@ -991,6 +1017,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // Use the shared strip_cr function from arf_libr.
                     #[cfg(windows)]
                     let code = arf_libr::strip_cr(&code).into_owned();
+
+                    // Mark R as busy (no longer at prompt) for IPC
+                    crate::ipc::set_r_at_prompt(false);
 
                     // Return the (possibly formatted) code to R
                     return Some(code);

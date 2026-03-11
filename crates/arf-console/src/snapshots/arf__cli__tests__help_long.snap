@@ -10,6 +10,7 @@ Commands:
   completions  Generate shell completion scripts
   config       Configuration management
   history      History management
+  ipc          Interact with a running arf session via IPC
   help         Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -83,6 +84,9 @@ Options:
 
       --no-echo
           [R] Don't echo input (no-op, arf controls its own echo)
+
+      --with-ipc
+          Enable IPC server for external tool access (AI agents, vscode-R, etc.)
 
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)

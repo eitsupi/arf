@@ -61,6 +61,7 @@ _arf() {
 '--args[\[R\] In R, skip the rest of the command line. arf accepts this flag for compatibility but does NOT consume trailing arguments; unknown flags after --args will still cause a parse error]' \
 '--no-readline[\[R\] Don'\''t use readline (no-op)]' \
 '--no-restore-history[\[R\] Don'\''t restore history (no-op)]' \
+'--with-ipc[Enable IPC server for external tool access (AI agents, vscode-R, etc.)]' \
 '--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \
 '--no-completion[Disable completion menu (for testing)]' \
 '--no-history[Disable history (no history saved or loaded)]' \
@@ -228,6 +229,89 @@ esac
     ;;
 esac
 ;;
+(ipc)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_arf__ipc_commands" \
+"*::: :->ipc" \
+&& ret=0
+
+    case $state in
+    (ipc)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-ipc-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(eval)
+_arguments "${_arguments_options[@]}" : \
+'--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':code -- R code to evaluate:_default' \
+&& ret=0
+;;
+(send)
+_arguments "${_arguments_options[@]}" : \
+'--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':code -- R code to send:_default' \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+'--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__ipc__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-ipc-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(eval)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(send)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_arf__help_commands" \
@@ -296,6 +380,38 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(ipc)
+_arguments "${_arguments_options[@]}" : \
+":: :_arf__help__ipc_commands" \
+"*::: :->ipc" \
+&& ret=0
+
+    case $state in
+    (ipc)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:arf-help-ipc-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(eval)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(send)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -315,6 +431,7 @@ _arf_commands() {
 'completions:Generate shell completion scripts' \
 'config:Configuration management' \
 'history:History management' \
+'ipc:Interact with a running arf session via IPC' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf commands' commands "$@"
@@ -373,6 +490,7 @@ _arf__help_commands() {
 'completions:Generate shell completion scripts' \
 'config:Configuration management' \
 'history:History management' \
+'ipc:Interact with a running arf session via IPC' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf help commands' commands "$@"
@@ -429,6 +547,36 @@ _arf__help__history__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf help history schema commands' commands "$@"
 }
+(( $+functions[_arf__help__ipc_commands] )) ||
+_arf__help__ipc_commands() {
+    local commands; commands=(
+'list:List active arf sessions' \
+'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
+'send:Send code as user input to a running session (shown in REPL)' \
+'status:Show status of a running arf session' \
+    )
+    _describe -t commands 'arf help ipc commands' commands "$@"
+}
+(( $+functions[_arf__help__ipc__eval_commands] )) ||
+_arf__help__ipc__eval_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc eval commands' commands "$@"
+}
+(( $+functions[_arf__help__ipc__list_commands] )) ||
+_arf__help__ipc__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc list commands' commands "$@"
+}
+(( $+functions[_arf__help__ipc__send_commands] )) ||
+_arf__help__ipc__send_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc send commands' commands "$@"
+}
+(( $+functions[_arf__help__ipc__status_commands] )) ||
+_arf__help__ipc__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc status commands' commands "$@"
+}
 (( $+functions[_arf__history_commands] )) ||
 _arf__history_commands() {
     local commands; commands=(
@@ -483,6 +631,73 @@ _arf__history__import_commands() {
 _arf__history__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf history schema commands' commands "$@"
+}
+(( $+functions[_arf__ipc_commands] )) ||
+_arf__ipc_commands() {
+    local commands; commands=(
+'list:List active arf sessions' \
+'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
+'send:Send code as user input to a running session (shown in REPL)' \
+'status:Show status of a running arf session' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf ipc commands' commands "$@"
+}
+(( $+functions[_arf__ipc__eval_commands] )) ||
+_arf__ipc__eval_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc eval commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help_commands] )) ||
+_arf__ipc__help_commands() {
+    local commands; commands=(
+'list:List active arf sessions' \
+'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
+'send:Send code as user input to a running session (shown in REPL)' \
+'status:Show status of a running arf session' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'arf ipc help commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help__eval_commands] )) ||
+_arf__ipc__help__eval_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help eval commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help__help_commands] )) ||
+_arf__ipc__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help help commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help__list_commands] )) ||
+_arf__ipc__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help list commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help__send_commands] )) ||
+_arf__ipc__help__send_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help send commands' commands "$@"
+}
+(( $+functions[_arf__ipc__help__status_commands] )) ||
+_arf__ipc__help__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help status commands' commands "$@"
+}
+(( $+functions[_arf__ipc__list_commands] )) ||
+_arf__ipc__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc list commands' commands "$@"
+}
+(( $+functions[_arf__ipc__send_commands] )) ||
+_arf__ipc__send_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc send commands' commands "$@"
+}
+(( $+functions[_arf__ipc__status_commands] )) ||
+_arf__ipc__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc status commands' commands "$@"
 }
 
 if [ "$funcstack[1]" = "_arf" ]; then

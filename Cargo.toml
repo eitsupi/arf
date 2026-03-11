@@ -74,6 +74,9 @@ rpassword = "7"
 # Schema generation
 schemars = "1.2"
 
+# Async runtime (IPC server)
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros", "time"] }
+
 # Testing
 insta = "1.46"
 portable-pty = "0.9"

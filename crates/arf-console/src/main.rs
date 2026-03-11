@@ -8,6 +8,7 @@ mod external;
 mod fuzzy;
 mod highlighter;
 mod history;
+mod ipc;
 mod pager;
 pub(crate) mod r_parser;
 mod repl;
@@ -18,7 +19,7 @@ mod test_utils;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource};
+use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction};
 use config::{
     Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
@@ -60,6 +61,9 @@ fn run() -> Result<()> {
         }
         Some(Commands::History { action }) => {
             return handle_history_command(action, cli.config.as_ref(), cli.history_dir.as_ref());
+        }
+        Some(Commands::Ipc { action }) => {
+            return handle_ipc_command(action);
         }
         None => {}
     }
@@ -172,9 +176,26 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
+    // Start IPC server if requested
+    if cli.with_ipc {
+        match ipc::start_server() {
+            Ok(path) => {
+                log::info!("IPC server started on {}", path);
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to start IPC server: {}", e);
+            }
+        }
+    }
+
     // Create and run the REPL
     let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
     repl.run()?;
+
+    // Cleanup IPC server on exit
+    if cli.with_ipc {
+        ipc::stop_server();
+    }
 
     Ok(())
 }
@@ -333,6 +354,15 @@ fn handle_history_command(
             r_table,
             shell_table,
         } => handle_history_export(file, r_table, shell_table, config_path, cli_history_dir),
+    }
+}
+
+fn handle_ipc_command(action: &IpcAction) -> Result<()> {
+    match action {
+        IpcAction::List => ipc::client::cmd_list(),
+        IpcAction::Eval { code, pid } => ipc::client::cmd_eval(code, *pid),
+        IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
+        IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
     }
 }
 

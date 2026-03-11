@@ -250,6 +250,37 @@ pub fn process_meta_command(
             }
             Some(MetaCommandResult::Handled)
         }
+        "ipc" => {
+            let subcmd = parts.get(1).copied().unwrap_or("status");
+            match subcmd {
+                "start" => match crate::ipc::start_server() {
+                    Ok(path) => arf_println!("IPC server started: {}", path),
+                    Err(e) => arf_println!("Failed to start IPC server: {}", e),
+                },
+                "stop" => {
+                    crate::ipc::stop_server();
+                    arf_println!("IPC server stopped.");
+                }
+                "status" => {
+                    let sessions = crate::ipc::session::list_sessions();
+                    let my_pid = std::process::id();
+                    let my_session = sessions.iter().find(|s| s.pid == my_pid);
+                    if let Some(session) = my_session {
+                        arf_println!("IPC server is running.");
+                        println!("#   Socket: {}", session.socket_path);
+                        println!("#   PID:    {}", session.pid);
+                    } else {
+                        arf_println!(
+                            "IPC server is not running. Use :ipc start or --with-ipc flag."
+                        );
+                    }
+                }
+                _ => {
+                    arf_println!("Unknown :ipc subcommand. Available: start, stop, status");
+                }
+            }
+            Some(MetaCommandResult::Handled)
+        }
         "commands" | "cmds" => {
             arf_println!("Available commands:");
             println!("#   :help          - Search R help");
@@ -269,6 +300,7 @@ pub fn process_meta_command(
             println!("#   :restart!      - Restart without confirmation");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
             println!("#   :switch! <ver> - Switch without confirmation");
+            println!("#   :ipc           - IPC server management (start, stop, status)");
             println!("#   :changelog     - Show arf changelog");
             println!("#   :commands      - Show this list");
             println!("#   :quit          - Exit arf");

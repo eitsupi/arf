@@ -173,6 +173,10 @@ pub struct Cli {
     #[arg(long = "no-restore-history", hide = true)]
     pub no_restore_history: bool,
 
+    /// Enable IPC server for external tool access (AI agents, vscode-R, etc.)
+    #[arg(long = "with-ipc")]
+    pub with_ipc: bool,
+
     /// Disable auto-matching of brackets and quotes (for testing)
     #[arg(long = "no-auto-match", hide = true)]
     pub no_auto_match: bool,
@@ -223,6 +227,39 @@ pub enum Commands {
     History {
         #[command(subcommand)]
         action: HistoryAction,
+    },
+    /// Interact with a running arf session via IPC
+    Ipc {
+        #[command(subcommand)]
+        action: IpcAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IpcAction {
+    /// List active arf sessions
+    List,
+    /// Evaluate R code in a running session (output captured, not shown in REPL)
+    Eval {
+        /// R code to evaluate
+        code: String,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
+    /// Send code as user input to a running session (shown in REPL)
+    Send {
+        /// R code to send
+        code: String,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
+    /// Show status of a running arf session
+    Status {
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
     },
 }
 

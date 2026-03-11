@@ -4,7 +4,7 @@ expression: completions
 ---
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_arf_global_optspecs
-	string join \n e/eval= f/file= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-echo slave restore verbose encoding= max-connections= max-ppsize= min-nsize= min-vsize= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history no-auto-match no-completion history-dir= no-history h/help V/version
+	string join \n e/eval= f/file= reprex auto-format c/config= no-banner with-r-version= r-home= vanilla q/quiet no-save save no-restore no-restore-data restore-data no-environ no-site-file no-init-file interactive no-echo slave restore verbose encoding= max-connections= max-ppsize= min-nsize= min-vsize= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history with-ipc no-auto-match no-completion history-dir= no-history h/help V/version
 end
 
 function __fish_arf_needs_command
@@ -64,6 +64,7 @@ complete -c arf -n "__fish_arf_needs_command" -l verbose -d '[R] Print more info
 complete -c arf -n "__fish_arf_needs_command" -l args -d '[R] In R, skip the rest of the command line. arf accepts this flag for compatibility but does NOT consume trailing arguments; unknown flags after --args will still cause a parse error'
 complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
+complete -c arf -n "__fish_arf_needs_command" -l with-ipc -d 'Enable IPC server for external tool access (AI agents, vscode-R, etc.)'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'
 complete -c arf -n "__fish_arf_needs_command" -l no-completion -d 'Disable completion menu (for testing)'
 complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Disable history (no history saved or loaded)'
@@ -72,6 +73,7 @@ complete -c arf -n "__fish_arf_needs_command" -s V -l version -d 'Print version'
 complete -c arf -n "__fish_arf_needs_command" -a "completions" -d 'Generate shell completion scripts'
 complete -c arf -n "__fish_arf_needs_command" -a "config" -d 'Configuration management'
 complete -c arf -n "__fish_arf_needs_command" -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_needs_command" -a "ipc" -d 'Interact with a running arf session via IPC'
 complete -c arf -n "__fish_arf_needs_command" -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand completions" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init check help" -s h -l help -d 'Print help'
@@ -110,12 +112,35 @@ complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcomm
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "import" -d 'Import history from another source (experimental)'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "export" -d 'Export history to a unified SQLite file (experimental)'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "completions" -d 'Generate shell completion scripts'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "config" -d 'Configuration management'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "history" -d 'History management'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -f -a "list" -d 'List active arf sessions'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, not shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -f -a "send" -d 'Send code as user input to a running session (shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -f -a "status" -d 'Show status of a running arf session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from list" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from send" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from send" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from status" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "list" -d 'List active arf sessions'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, not shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "send" -d 'Send code as user input to a running session (shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show status of a running arf session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "completions" -d 'Generate shell completion scripts'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "config" -d 'Configuration management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "ipc" -d 'Interact with a running arf session via IPC'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "init" -d 'Generate a default configuration file'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "check" -d 'Validate the configuration file'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "schema" -d 'Display history database schema and example R code'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "import" -d 'Import history from another source (experimental)'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "export" -d 'Export history to a unified SQLite file (experimental)'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "list" -d 'List active arf sessions'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "eval" -d 'Evaluate R code in a running session (output captured, not shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "send" -d 'Send code as user input to a running session (shown in REPL)'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "status" -d 'Show status of a running arf session'
