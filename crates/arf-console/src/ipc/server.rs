@@ -10,7 +10,18 @@ use crate::ipc::protocol::{
 };
 use crate::ipc::session::{SessionInfo, remove_session, sessions_dir, write_session};
 use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_util::sync::CancellationToken;
+
+/// Global shutdown token and join handle for the server thread.
+static SERVER_HANDLE: OnceLock<Mutex<Option<ServerState>>> = OnceLock::new();
+
+struct ServerState {
+    cancel_token: CancellationToken,
+    join_handle: std::thread::JoinHandle<()>,
+    socket_path: String,
+}
 
 /// Start the IPC server in a background thread.
 ///
@@ -26,9 +37,10 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     }
 
     let path = socket_path.clone();
-    let tx_clone = tx;
+    let cancel_token = CancellationToken::new();
+    let token_clone = cancel_token.clone();
 
-    std::thread::Builder::new()
+    let join_handle = std::thread::Builder::new()
         .name("arf-ipc-server".into())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -37,11 +49,20 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
-                if let Err(e) = run_server(&path, tx_clone).await {
+                if let Err(e) = run_server(&path, tx, token_clone).await {
                     log::error!("IPC server error: {}", e);
                 }
             });
         })?;
+
+    // Store handle for later shutdown
+    let state = ServerState {
+        cancel_token,
+        join_handle,
+        socket_path: socket_path.clone(),
+    };
+    let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
+    *handle_store.lock().unwrap() = Some(state);
 
     // Write session metadata
     let cwd = std::env::current_dir()
@@ -49,7 +70,8 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
         .unwrap_or_default();
 
     let r_version = {
-        let tmpfile = std::env::temp_dir().join(".arf_ipc_rver.txt");
+        let pid = std::process::id();
+        let tmpfile = std::env::temp_dir().join(format!(".arf_ipc_rver_{pid}.txt"));
         let tmppath = tmpfile.display().to_string().replace('\\', "/");
         let code =
             format!(r#"writeLines(paste0(R.version$major, ".", R.version$minor), "{tmppath}")"#);
@@ -74,19 +96,30 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     Ok(socket_path)
 }
 
-/// Stop the IPC server (cleanup).
+/// Stop the IPC server gracefully.
 pub fn stop_server() {
-    let pid = std::process::id();
-    let socket_path = get_socket_path(pid);
+    let handle_store = match SERVER_HANDLE.get() {
+        Some(h) => h,
+        None => return,
+    };
 
-    // Remove socket file
-    #[cfg(unix)]
-    {
-        let _ = std::fs::remove_file(&socket_path);
+    let state = handle_store.lock().unwrap().take();
+    if let Some(state) = state {
+        // Signal the server to stop
+        state.cancel_token.cancel();
+
+        // Remove socket file so accept() fails (unblocks the loop)
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&state.socket_path);
+        }
+
+        // Wait for the server thread to finish (with timeout)
+        let _ = state.join_handle.join();
+
+        // Remove session metadata
+        remove_session(std::process::id());
     }
-
-    // Remove session metadata
-    remove_session(pid);
 }
 
 /// Get the socket path for a given PID.
@@ -105,49 +138,81 @@ fn get_socket_path(pid: u32) -> String {
 
 /// Run the actual server loop.
 #[cfg(unix)]
-async fn run_server(socket_path: &str, tx: mpsc::Sender<IpcRequest>) -> std::io::Result<()> {
+async fn run_server(
+    socket_path: &str,
+    tx: mpsc::Sender<IpcRequest>,
+    cancel: CancellationToken,
+) -> std::io::Result<()> {
     let listener = tokio::net::UnixListener::bind(socket_path)?;
     log::info!("IPC server listening on {}", socket_path);
 
     loop {
-        match listener.accept().await {
-            Ok((stream, _addr)) => {
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, tx).await {
-                        log::debug!("IPC connection error: {}", e);
+        tokio::select! {
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, _addr)) => {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_connection(stream, tx).await {
+                                log::debug!("IPC connection error: {}", e);
+                            }
+                        });
                     }
-                });
+                    Err(e) => {
+                        if cancel.is_cancelled() {
+                            break;
+                        }
+                        log::warn!("IPC accept error: {}", e);
+                    }
+                }
             }
-            Err(e) => {
-                log::warn!("IPC accept error: {}", e);
+            _ = cancel.cancelled() => {
+                log::info!("IPC server shutting down");
+                break;
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(windows)]
-async fn run_server(socket_path: &str, tx: mpsc::Sender<IpcRequest>) -> std::io::Result<()> {
+async fn run_server(
+    _socket_path: &str,
+    tx: mpsc::Sender<IpcRequest>,
+    cancel: CancellationToken,
+) -> std::io::Result<()> {
     // On Windows, fall back to TCP on localhost
     let addr = format!("127.0.0.1:{}", get_tcp_port(std::process::id()));
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     log::info!("IPC server listening on {}", addr);
 
     loop {
-        match listener.accept().await {
-            Ok((stream, _addr)) => {
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, tx).await {
-                        log::debug!("IPC connection error: {}", e);
+        tokio::select! {
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, _addr)) => {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_connection(stream, tx).await {
+                                log::debug!("IPC connection error: {}", e);
+                            }
+                        });
                     }
-                });
+                    Err(e) => {
+                        if cancel.is_cancelled() {
+                            break;
+                        }
+                        log::warn!("IPC accept error: {}", e);
+                    }
+                }
             }
-            Err(e) => {
-                log::warn!("IPC accept error: {}", e);
+            _ = cancel.cancelled() => {
+                log::info!("IPC server shutting down");
+                break;
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(windows)]

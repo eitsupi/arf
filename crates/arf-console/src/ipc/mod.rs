@@ -16,7 +16,9 @@ use protocol::{
 use std::sync::{Mutex, OnceLock};
 
 /// Channel receiver for IPC requests (server → main thread).
-static IPC_RECEIVER: OnceLock<Mutex<std::sync::mpsc::Receiver<IpcRequest>>> = OnceLock::new();
+/// Wrapped in Option so it can be replaced on restart.
+static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>>>> =
+    OnceLock::new();
 
 /// Pending user input from IPC `user_input` method.
 /// Consumed by `read_console_callback` on the next R command prompt.
@@ -31,14 +33,23 @@ fn r_is_at_prompt() -> &'static std::sync::atomic::AtomicBool {
 
 /// Start the IPC server and set up channels.
 ///
-/// Called from `main.rs` when `--with-ipc` is specified.
+/// Called from `main.rs` when `--with-ipc` is specified,
+/// or from `:ipc start` meta command.
 pub fn start_server() -> std::io::Result<String> {
     let (tx, rx) = std::sync::mpsc::channel();
 
-    // Store receiver for polling from idle callback
-    IPC_RECEIVER
-        .set(Mutex::new(rx))
-        .map_err(|_| std::io::Error::other("IPC already initialized"))?;
+    // Store receiver for polling from idle callback.
+    // If OnceLock is already set (from a previous stop/start), replace the inner value.
+    match IPC_RECEIVER.get() {
+        Some(existing) => {
+            *existing.lock().unwrap() = Some(rx);
+        }
+        None => {
+            IPC_RECEIVER
+                .set(Mutex::new(Some(rx)))
+                .map_err(|_| std::io::Error::other("IPC receiver already initialized"))?;
+        }
+    }
 
     // Initialize pending input storage
     let _ = IPC_PENDING_INPUT.get_or_init(|| Mutex::new(None));
@@ -48,6 +59,10 @@ pub fn start_server() -> std::io::Result<String> {
 
 /// Stop the IPC server (cleanup on exit).
 pub fn stop_server() {
+    // Drop the receiver so the server thread's mpsc::send fails
+    if let Some(receiver) = IPC_RECEIVER.get() {
+        *receiver.lock().unwrap() = None;
+    }
     server::stop_server();
 }
 
@@ -64,7 +79,12 @@ pub fn poll_ipc_requests() {
 
     let rx = match receiver.try_lock() {
         Ok(rx) => rx,
-        Err(_) => return, // Already locked (shouldn't happen in single-threaded context)
+        Err(_) => return,
+    };
+
+    let rx = match rx.as_ref() {
+        Some(rx) => rx,
+        None => return, // IPC stopped
     };
 
     // Process all pending requests
@@ -88,8 +108,14 @@ fn handle_request(request: IpcRequest) {
                 return;
             }
 
-            // Evaluate with output capture
+            // Mark R as busy during evaluation to prevent concurrent requests
+            r_is_at_prompt().store(false, std::sync::atomic::Ordering::Relaxed);
+
             let result = capture::evaluate_with_capture(&code);
+
+            // Restore prompt state after evaluation
+            r_is_at_prompt().store(true, std::sync::atomic::Ordering::Relaxed);
+
             let _ = reply.send(IpcResponse::Evaluate(result));
         }
         IpcMethod::UserInput { code } => {

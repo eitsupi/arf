@@ -76,6 +76,7 @@ schemars = "1.2"
 
 # Async runtime (IPC server)
 tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros", "time"] }
+tokio-util = "0.7"
 
 # Testing
 insta = "1.46"
