@@ -66,10 +66,10 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
     )
     .con <- file('{tmppath}', open = "wb")
     writeLines(.header, .con, sep = "\n")
-    if (nchar(.s_out) > 0L) writeBin(charToRaw(.s_out), .con)
-    if (nchar(.s_err) > 0L) writeBin(charToRaw(.s_err), .con)
-    if (!is.null(.s_val) && nchar(.s_val) > 0L) writeBin(charToRaw(.s_val), .con)
-    if (!is.null(.s_errmsg) && nchar(.s_errmsg) > 0L) writeBin(charToRaw(.s_errmsg), .con)
+    if (nchar(.s_out, type = "bytes") > 0L) writeBin(charToRaw(.s_out), .con)
+    if (nchar(.s_err, type = "bytes") > 0L) writeBin(charToRaw(.s_err), .con)
+    if (!is.null(.s_val) && nchar(.s_val, type = "bytes") > 0L) writeBin(charToRaw(.s_val), .con)
+    if (!is.null(.s_errmsg) && nchar(.s_errmsg, type = "bytes") > 0L) writeBin(charToRaw(.s_errmsg), .con)
     close(.con)
 }})"#
     );

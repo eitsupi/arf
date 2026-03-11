@@ -105,7 +105,9 @@ pub fn stop_server() {
 
     let state = handle_store.lock().unwrap().take();
     if let Some(state) = state {
-        // Signal the server to stop
+        // Signal the server to stop; in-flight connection handlers will be
+        // dropped when the tokio runtime shuts down (acceptable for local IPC).
+        log::debug!("Shutting down IPC server, in-flight connections will be dropped");
         state.cancel_token.cancel();
 
         // Remove socket file so accept() fails (unblocks the loop)
@@ -114,7 +116,7 @@ pub fn stop_server() {
             let _ = std::fs::remove_file(&state.socket_path);
         }
 
-        // Wait for the server thread to finish (with timeout)
+        // Wait for the server thread to finish
         let _ = state.join_handle.join();
 
         // Remove session metadata
