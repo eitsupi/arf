@@ -104,6 +104,188 @@ mod ipc_tests {
         serde_json::from_str(json_body).map_err(|e| format!("Parse failed: {e}: {json_body}"))
     }
 
+    /// Helper to spawn arf with IPC and return (terminal, socket_path).
+    fn spawn_ipc_session() -> (Terminal, String) {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc"]).expect("Failed to spawn arf with IPC");
+
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path in session directory");
+
+        (terminal, socket_path)
+    }
+
+    /// Test that IPC `evaluate` captures stdout, value, and error correctly.
+    ///
+    /// Verifies the WriteConsoleEx callback capture approach:
+    /// - cat() output goes to stdout (via WriteConsoleEx)
+    /// - visible value is captured via capture.output(print())
+    /// - errors are captured via tryCatch
+    /// - ANSI escapes are stripped from captured output
+    #[test]
+    fn test_ipc_evaluate_capture() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        // Test 1: Simple value capture
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "1 + 1" }),
+        )
+        .expect("evaluate should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert_eq!(
+            result.get("value").and_then(|v| v.as_str()),
+            Some("[1] 2"),
+            "should capture printed value"
+        );
+        assert!(
+            result.get("error").is_none() || result.get("error").and_then(|v| v.as_str()).is_none(),
+            "should have no error"
+        );
+
+        // Test 2: stdout capture via cat()
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "cat('hello_stdout\\n')" }),
+        )
+        .expect("evaluate should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert!(
+            result
+                .get("stdout")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("hello_stdout")),
+            "should capture stdout from cat(): {result:?}"
+        );
+
+        // Test 3: Error capture
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "stop('test_error_msg')" }),
+        )
+        .expect("evaluate should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert!(
+            result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("test_error_msg")),
+            "should capture error message: {result:?}"
+        );
+
+        // Test 4: Mixed stdout + value
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "cat('before\\n'); 42" }),
+        )
+        .expect("evaluate should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert!(
+            result
+                .get("stdout")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("before")),
+            "should capture stdout: {result:?}"
+        );
+        assert_eq!(
+            result.get("value").and_then(|v| v.as_str()),
+            Some("[1] 42"),
+            "should capture value: {result:?}"
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that `visible=true` shows output in the REPL terminal.
+    #[test]
+    fn test_ipc_evaluate_visible() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        // Clear output buffer so we can detect new output
+        terminal.clear_buffer().expect("clear buffer");
+
+        // Evaluate with visible=true
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "cat('visible_marker\\n'); 99", "visible": true }),
+        )
+        .expect("evaluate should succeed");
+
+        // Verify the response still has the captured data
+        let result = response.get("result").expect("should have result");
+        assert!(
+            result
+                .get("stdout")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("visible_marker")),
+            "response should contain stdout: {result:?}"
+        );
+        assert_eq!(
+            result.get("value").and_then(|v| v.as_str()),
+            Some("[1] 99"),
+            "response should contain value: {result:?}"
+        );
+
+        // Verify the output also appeared in the REPL terminal
+        terminal
+            .expect("visible_marker")
+            .expect("stdout should appear in REPL terminal with visible=true");
+        terminal
+            .expect("[1] 99")
+            .expect("value should appear in REPL terminal with visible=true");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that `visible=false` (default) does NOT show output in the REPL terminal.
+    #[test]
+    fn test_ipc_evaluate_silent() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        // Clear buffer
+        terminal.clear_buffer().expect("clear buffer");
+
+        // Evaluate with visible=false (default)
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "cat('silent_marker')" }),
+        )
+        .expect("evaluate should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert!(
+            result
+                .get("stdout")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("silent_marker")),
+            "response should contain stdout even in silent mode: {result:?}"
+        );
+
+        // Wait a bit and verify the output did NOT appear in the terminal
+        std::thread::sleep(Duration::from_millis(500));
+        let output = terminal.get_output().expect("get output");
+        assert!(
+            !output.contains("silent_marker"),
+            "stdout should NOT appear in terminal with visible=false, but got: {output}"
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
     /// Test that IPC `user_input` injects code into the R REPL.
     ///
     /// This verifies the full break signal flow:
