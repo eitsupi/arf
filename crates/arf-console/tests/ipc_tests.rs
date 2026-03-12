@@ -102,9 +102,7 @@ impl IpcTestProcess {
                     ) {
                         if c == 'n'
                             && (params.is_empty()
-                                || (params.len() == 1
-                                    && params[0].len() == 1
-                                    && params[0][0] == 6))
+                                || (params.len() == 1 && params[0].len() == 1 && params[0][0] == 6))
                         {
                             let _ = self.tx.send(());
                         }
@@ -236,8 +234,7 @@ fn find_socket_path(pid: Option<u32>, timeout: Duration) -> Option<String> {
                     && let Ok(info) = serde_json::from_str::<serde_json::Value>(&contents)
                 {
                     if let Some(target_pid) = pid
-                        && info.get("pid").and_then(|v| v.as_u64())
-                            != Some(u64::from(target_pid))
+                        && info.get("pid").and_then(|v| v.as_u64()) != Some(u64::from(target_pid))
                     {
                         continue;
                     }
@@ -306,10 +303,7 @@ fn send_ipc_request(
 /// `\r\n\r\n` as JSON. This works because we send `Connection: close` and the
 /// server closes the connection after responding.
 #[cfg(unix)]
-fn send_ipc_request_unix(
-    socket_path: &str,
-    body: &str,
-) -> Result<serde_json::Value, String> {
+fn send_ipc_request_unix(socket_path: &str, body: &str) -> Result<serde_json::Value, String> {
     use std::os::unix::net::UnixStream;
 
     let http_request = format!(
@@ -351,10 +345,7 @@ fn send_ipc_request_unix(
 }
 
 #[cfg(windows)]
-fn send_ipc_request_windows(
-    socket_path: &str,
-    body: &str,
-) -> Result<serde_json::Value, String> {
+fn send_ipc_request_windows(socket_path: &str, body: &str) -> Result<serde_json::Value, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::windows::named_pipe::ClientOptions;
 
@@ -399,8 +390,14 @@ fn send_ipc_request_windows(
 // Tests
 // ===========================================================================
 
+// On Windows, crossterm's cursor::position() uses WinAPI which doesn't work
+// inside ConPTY. This prevents reedline from initializing, so arf never
+// reaches the prompt and the IPC server never starts. True Windows IPC
+// testing requires a headless mode (no reedline, just R + IPC server).
+
 /// Test that IPC `evaluate` captures a visible R value.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_value() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -422,6 +419,7 @@ fn test_ipc_evaluate_value() {
 
 /// Test that IPC `evaluate` captures stdout from `cat()`.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_stdout() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -444,6 +442,7 @@ fn test_ipc_evaluate_stdout() {
 
 /// Test that IPC `evaluate` captures R errors via `tryCatch`.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_error() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -466,6 +465,7 @@ fn test_ipc_evaluate_error() {
 
 /// Test that IPC `evaluate` captures both stdout and value in a mixed expression.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_mixed() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -496,6 +496,7 @@ fn test_ipc_evaluate_mixed() {
 /// Unlike pty_ipc_tests, we cannot verify the output appeared in the terminal.
 /// We only verify the JSON-RPC response contains the expected captured data.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_visible() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -525,6 +526,7 @@ fn test_ipc_evaluate_visible() {
 
 /// Test that IPC `user_input` is accepted when R is at the prompt.
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_user_input() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -547,6 +549,7 @@ fn test_ipc_user_input() {
 
 /// Test that sequential evaluations work correctly (no stale state).
 #[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_sequential() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
