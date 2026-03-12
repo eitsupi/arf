@@ -2,6 +2,17 @@
 //!
 //! Provides a JSON-RPC 2.0 interface over Unix sockets (or TCP on Windows)
 //! for AI agents, vscode-R, and other tools to interact with R.
+//!
+//! ## Mutual exclusion between console and IPC input
+//!
+//! All IPC operations that could conflict with console input (user_input,
+//! evaluate with visible=true/false) are routed through reedline's ExternalBreak
+//! mechanism. This allows the REPL to check the editor buffer before accepting
+//! or rejecting the operation:
+//!
+//! 1. Idle callback receives IPC request → stores in `PENDING_IPC_OPERATION` → fires break signal
+//! 2. Reedline returns `Signal::ExternalBreak(buffer)` with current editor buffer
+//! 3. REPL checks buffer: empty → accept operation, non-empty → reject with `USER_IS_TYPING`
 
 mod capture;
 pub mod client;
@@ -10,8 +21,8 @@ pub mod server;
 pub mod session;
 
 use protocol::{
-    EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, UserInputResult,
+    EvaluateResult, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT, USER_IS_TYPING,
+    UserInputResult,
 };
 use std::sync::{
     Arc, Mutex, OnceLock,
@@ -23,9 +34,13 @@ use std::sync::{
 static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>>>> =
     OnceLock::new();
 
-/// Pending user input from IPC `user_input` method.
-/// Consumed by `read_console_callback` on the next R command prompt.
-static IPC_PENDING_INPUT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+/// Pending IPC operation waiting for ExternalBreak to check the editor buffer.
+/// At most one operation can be pending at a time.
+static PENDING_IPC_OPERATION: OnceLock<Mutex<Option<PendingIpcOperation>>> = OnceLock::new();
+
+fn pending_ipc_operation() -> &'static Mutex<Option<PendingIpcOperation>> {
+    PENDING_IPC_OPERATION.get_or_init(|| Mutex::new(None))
+}
 
 /// Whether R is currently busy evaluating (not waiting for input).
 static R_IS_AT_PROMPT: OnceLock<AtomicBool> = OnceLock::new();
@@ -49,6 +64,31 @@ struct PendingVisibleEval {
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
     PENDING_VISIBLE_EVAL.get_or_init(|| Mutex::new(None))
+}
+
+/// An IPC operation waiting for ExternalBreak buffer check.
+pub struct PendingIpcOperation {
+    pub kind: PendingIpcKind,
+    pub code: String,
+}
+
+/// The kind of pending IPC operation, carrying its reply channel.
+pub enum PendingIpcKind {
+    /// Silent evaluate: run R code in the REPL thread with output capture.
+    /// Reply is sent immediately after evaluation completes.
+    SilentEvaluate {
+        reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    },
+    /// Visible evaluate: inject code into REPL, capture output via WriteConsoleEx.
+    /// Reply is deferred until R returns to the prompt.
+    VisibleEvaluate {
+        reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    },
+    /// User input: inject code into REPL as if the user typed it.
+    /// Reply is sent when the operation is accepted or rejected.
+    UserInput {
+        reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    },
 }
 
 /// Get or create the break signal for reedline integration.
@@ -79,8 +119,8 @@ pub fn start_server() -> std::io::Result<String> {
         }
     }
 
-    // Initialize pending input storage
-    let _ = IPC_PENDING_INPUT.get_or_init(|| Mutex::new(None));
+    // Initialize pending operation storage
+    let _ = pending_ipc_operation();
 
     server::start_server(tx)
 }
@@ -97,8 +137,9 @@ pub fn stop_server() {
 /// Poll for and handle IPC requests.
 ///
 /// Called from the reedline idle callback (~33ms interval).
-/// Only processes `evaluate` requests here; `user_input` is handled
-/// by storing the code for the next `read_console_callback`.
+/// Requests are not processed immediately — they are stored in
+/// `PENDING_IPC_OPERATION` and the break signal is fired so that
+/// the ExternalBreak handler can check the editor buffer first.
 pub fn poll_ipc_requests() {
     // Check if a visible evaluate has completed (R returned to prompt)
     check_visible_eval_completion();
@@ -196,8 +237,29 @@ fn check_visible_eval_completion() {
 }
 
 /// Handle a single IPC request on the main thread.
+///
+/// Instead of processing requests directly, stores them in `PENDING_IPC_OPERATION`
+/// and fires the break signal. The actual processing happens in the ExternalBreak
+/// handler in the REPL, which can check the editor buffer for mutual exclusion.
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
+
+    // Reject if there's already a pending operation waiting for ExternalBreak
+    if pending_ipc_operation()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+    {
+        let code = match &method {
+            IpcMethod::Evaluate { .. } => R_BUSY,
+            IpcMethod::UserInput { .. } => R_BUSY,
+        };
+        let _ = reply.send(IpcResponse::Error {
+            code,
+            message: "Another IPC operation is pending".to_string(),
+        });
+        return;
+    }
 
     match method {
         IpcMethod::Evaluate { code, visible } => {
@@ -210,20 +272,17 @@ fn handle_request(request: IpcRequest) {
                 return;
             }
 
-            if visible {
-                // Visible evaluate: inject code into REPL and capture output.
-                // The code appears at the prompt, R evaluates it normally, and
-                // output is both shown in the terminal AND captured for the response.
-                handle_visible_evaluate(code, reply);
+            let kind = if visible {
+                PendingIpcKind::VisibleEvaluate { reply }
             } else {
-                // Silent evaluate: run in idle callback with full capture
-                r_is_at_prompt().store(false, Ordering::Release);
+                PendingIpcKind::SilentEvaluate { reply }
+            };
 
-                let result = capture::evaluate_with_capture(&code);
-
-                r_is_at_prompt().store(true, Ordering::Release);
-                let _ = reply.send(IpcResponse::Evaluate(result));
-            }
+            // Store operation and fire break signal
+            *pending_ipc_operation()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(PendingIpcOperation { kind, code });
+            fire_break_signal();
         }
         IpcMethod::UserInput { code } => {
             // Check if R is at the prompt
@@ -235,70 +294,60 @@ fn handle_request(request: IpcRequest) {
                 return;
             }
 
-            // Check if there's already pending input
-            let pending = IPC_PENDING_INPUT.get_or_init(|| Mutex::new(None));
-            let mut guard = match pending.try_lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    let _ = reply.send(IpcResponse::Error {
-                        code: INPUT_ALREADY_PENDING,
-                        message: "Input already pending".to_string(),
-                    });
-                    return;
-                }
-            };
-
-            if guard.is_some() {
-                let _ = reply.send(IpcResponse::Error {
-                    code: INPUT_ALREADY_PENDING,
-                    message: "Previous input not yet consumed".to_string(),
-                });
-                return;
-            }
-
-            *guard = Some(code);
-
-            // Fire the break signal to interrupt reedline's read_line() loop.
-            // This causes read_line() to return Signal::ExternalBreak, allowing
-            // the REPL to consume the pending input.
-            if let Some(signal) = BREAK_SIGNAL.get() {
-                signal.store(true, Ordering::Relaxed);
-            }
-
-            let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
+            // Store operation and fire break signal
+            *pending_ipc_operation()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(PendingIpcOperation {
+                kind: PendingIpcKind::UserInput { reply },
+                code,
+            });
+            fire_break_signal();
         }
     }
 }
 
-/// Handle a visible evaluate request.
-///
-/// Instead of evaluating in the idle callback, we inject the code into the REPL
-/// (same as user_input) and start the WriteConsoleEx capture. The reply is deferred
-/// until R returns to the prompt, at which point `check_visible_eval_completion`
-/// collects the captured output and sends the response.
-fn handle_visible_evaluate(code: String, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
-    // Check if there's already pending input
-    let pending_input = IPC_PENDING_INPUT.get_or_init(|| Mutex::new(None));
-    let mut input_guard = match pending_input.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            let _ = reply.send(IpcResponse::Error {
-                code: INPUT_ALREADY_PENDING,
-                message: "Input already pending".to_string(),
-            });
-            return;
-        }
-    };
-
-    if input_guard.is_some() {
-        let _ = reply.send(IpcResponse::Error {
-            code: INPUT_ALREADY_PENDING,
-            message: "Previous input not yet consumed".to_string(),
-        });
-        return;
+/// Fire the break signal to interrupt reedline's `read_line()` loop.
+fn fire_break_signal() {
+    if let Some(signal) = BREAK_SIGNAL.get() {
+        signal.store(true, Ordering::Relaxed);
     }
+}
 
-    // Mark R as busy to reject concurrent requests
+// ── Public API for the REPL ──────────────────────────────────────────────
+
+/// Take the pending IPC operation (if any).
+///
+/// Called from the REPL's ExternalBreak handler and fast-path to process
+/// the stored operation after checking the editor buffer.
+pub fn take_pending_ipc_operation() -> Option<PendingIpcOperation> {
+    pending_ipc_operation()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+}
+
+/// Reject a pending IPC operation because the user is typing.
+///
+/// Sends a `USER_IS_TYPING` error response to the IPC client.
+pub fn reject_operation_user_typing(op: PendingIpcOperation) {
+    let message = "User is typing in the console".to_string();
+    match op.kind {
+        PendingIpcKind::SilentEvaluate { reply }
+        | PendingIpcKind::VisibleEvaluate { reply }
+        | PendingIpcKind::UserInput { reply } => {
+            let _ = reply.send(IpcResponse::Error {
+                code: USER_IS_TYPING,
+                message,
+            });
+        }
+    }
+}
+
+/// Set up a visible evaluate: start capture and store the deferred reply.
+///
+/// Called from the REPL after the buffer check passes. The reply will be
+/// sent later by `check_visible_eval_completion` when R returns to the prompt.
+pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
     r_is_at_prompt().store(false, Ordering::Release);
 
     // Start WriteConsoleEx capture (visible=true → also print to terminal)
@@ -311,26 +360,25 @@ fn handle_visible_evaluate(code: String, reply: tokio::sync::oneshot::Sender<Ipc
         reply,
         started_at: std::time::Instant::now(),
     });
-
-    // Inject code into REPL
-    *input_guard = Some(code);
-
-    // Fire break signal to interrupt read_line()
-    if let Some(signal) = BREAK_SIGNAL.get() {
-        signal.store(true, Ordering::Relaxed);
-    }
-
-    // Reply is NOT sent here — deferred until evaluation completes
 }
 
-/// Take pending IPC input (if any).
+/// Run a silent evaluate and send the reply.
 ///
-/// Called from `read_console_callback` to inject IPC-provided input
-/// into the R evaluation loop.
-pub fn take_ipc_pending_input() -> Option<String> {
-    let pending = IPC_PENDING_INPUT.get()?;
-    let mut guard = pending.try_lock().ok()?;
-    guard.take()
+/// Called from the REPL after the buffer check passes. Runs R code with
+/// full output capture (stdout/stderr via WriteConsoleEx, value/error via
+/// temp file). The response is sent synchronously before returning.
+pub fn run_silent_eval(code: &str, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
+    r_is_at_prompt().store(false, Ordering::Release);
+
+    let result = capture::evaluate_with_capture(code);
+
+    r_is_at_prompt().store(true, Ordering::Release);
+    let _ = reply.send(IpcResponse::Evaluate(result));
+}
+
+/// Accept a user_input operation: send the success reply.
+pub fn accept_user_input(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
+    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
 }
 
 /// Mark that R is now at the command prompt (idle, ready for input).

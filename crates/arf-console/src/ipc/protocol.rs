@@ -66,7 +66,7 @@ pub const INVALID_PARAMS: i32 = -32602;
 // Application-specific error codes
 pub const R_BUSY: i32 = -32000;
 pub const R_NOT_AT_PROMPT: i32 = -32001;
-pub const INPUT_ALREADY_PENDING: i32 = -32002;
+pub const USER_IS_TYPING: i32 = -32002;
 
 /// Parameters for the `evaluate` method.
 #[derive(Debug, Deserialize)]
