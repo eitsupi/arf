@@ -10,8 +10,8 @@ pub mod server;
 pub mod session;
 
 use protocol::{
-    INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
-    UserInputResult,
+    EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
+    R_NOT_AT_PROMPT, UserInputResult,
 };
 use std::sync::{
     Arc, Mutex, OnceLock,
@@ -36,6 +36,19 @@ fn r_is_at_prompt() -> &'static AtomicBool {
 
 /// Break signal shared with reedline to interrupt `read_line()`.
 static BREAK_SIGNAL: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+/// Pending visible evaluate: reply channel waiting for REPL evaluation to complete.
+/// When set, the WriteConsoleEx callback is capturing output. The reply is sent
+/// once R returns to the prompt (detected by `check_visible_eval_completion`).
+static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceLock::new();
+
+struct PendingVisibleEval {
+    reply: tokio::sync::oneshot::Sender<IpcResponse>,
+}
+
+fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
+    PENDING_VISIBLE_EVAL.get_or_init(|| Mutex::new(None))
+}
 
 /// Get or create the break signal for reedline integration.
 /// Pass the returned `Arc` to `Reedline::with_break_signal()`.
@@ -86,6 +99,9 @@ pub fn stop_server() {
 /// Only processes `evaluate` requests here; `user_input` is handled
 /// by storing the code for the next `read_console_callback`.
 pub fn poll_ipc_requests() {
+    // Check if a visible evaluate has completed (R returned to prompt)
+    check_visible_eval_completion();
+
     let receiver = match IPC_RECEIVER.get() {
         Some(r) => r,
         None => return, // IPC not started
@@ -107,6 +123,40 @@ pub fn poll_ipc_requests() {
     }
 }
 
+/// Check if a pending visible evaluate has completed.
+///
+/// A visible evaluate injects code into the REPL (like user_input) and waits
+/// for the result. When R returns to the prompt, the evaluation is done and
+/// we can collect captured output and send the reply.
+fn check_visible_eval_completion() {
+    // Only complete when R is back at the prompt
+    if !r_is_at_prompt().load(Ordering::Relaxed) {
+        return;
+    }
+
+    let mut guard = match pending_visible_eval().try_lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+
+    if let Some(pending) = guard.take() {
+        // Finish WriteConsoleEx capture and collect output
+        let (stdout, stderr) = arf_libr::finish_ipc_capture();
+
+        let result = EvaluateResult {
+            stdout,
+            stderr,
+            // In visible mode, auto-printed values are in stdout and errors in stderr.
+            // Structured value/error fields are not available because the code runs
+            // through normal REPL evaluation (no tryCatch wrapper).
+            value: None,
+            error: None,
+        };
+
+        let _ = pending.reply.send(IpcResponse::Evaluate(result));
+    }
+}
+
 /// Handle a single IPC request on the main thread.
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
@@ -114,7 +164,7 @@ fn handle_request(request: IpcRequest) {
     match method {
         IpcMethod::Evaluate { code, visible } => {
             // Check if R is at the prompt (idle)
-            if !r_is_at_prompt().load(std::sync::atomic::Ordering::Relaxed) {
+            if !r_is_at_prompt().load(Ordering::Relaxed) {
                 let _ = reply.send(IpcResponse::Error {
                     code: R_BUSY,
                     message: "R is busy".to_string(),
@@ -122,19 +172,24 @@ fn handle_request(request: IpcRequest) {
                 return;
             }
 
-            // Mark R as busy during evaluation to prevent concurrent requests
-            r_is_at_prompt().store(false, std::sync::atomic::Ordering::Relaxed);
+            if visible {
+                // Visible evaluate: inject code into REPL and capture output.
+                // The code appears at the prompt, R evaluates it normally, and
+                // output is both shown in the terminal AND captured for the response.
+                handle_visible_evaluate(code, reply);
+            } else {
+                // Silent evaluate: run in idle callback with full capture
+                r_is_at_prompt().store(false, Ordering::Relaxed);
 
-            let result = capture::evaluate_with_capture(&code, visible);
+                let result = capture::evaluate_with_capture(&code);
 
-            // Restore prompt state after evaluation
-            r_is_at_prompt().store(true, std::sync::atomic::Ordering::Relaxed);
-
-            let _ = reply.send(IpcResponse::Evaluate(result));
+                r_is_at_prompt().store(true, Ordering::Relaxed);
+                let _ = reply.send(IpcResponse::Evaluate(result));
+            }
         }
         IpcMethod::UserInput { code } => {
             // Check if R is at the prompt
-            if !r_is_at_prompt().load(std::sync::atomic::Ordering::Relaxed) {
+            if !r_is_at_prompt().load(Ordering::Relaxed) {
                 let _ = reply.send(IpcResponse::Error {
                     code: R_NOT_AT_PROMPT,
                     message: "R is not at the command prompt".to_string(),
@@ -177,6 +232,54 @@ fn handle_request(request: IpcRequest) {
     }
 }
 
+/// Handle a visible evaluate request.
+///
+/// Instead of evaluating in the idle callback, we inject the code into the REPL
+/// (same as user_input) and start the WriteConsoleEx capture. The reply is deferred
+/// until R returns to the prompt, at which point `check_visible_eval_completion`
+/// collects the captured output and sends the response.
+fn handle_visible_evaluate(code: String, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
+    // Check if there's already pending input
+    let pending_input = IPC_PENDING_INPUT.get_or_init(|| Mutex::new(None));
+    let mut input_guard = match pending_input.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            let _ = reply.send(IpcResponse::Error {
+                code: INPUT_ALREADY_PENDING,
+                message: "Input already pending".to_string(),
+            });
+            return;
+        }
+    };
+
+    if input_guard.is_some() {
+        let _ = reply.send(IpcResponse::Error {
+            code: INPUT_ALREADY_PENDING,
+            message: "Previous input not yet consumed".to_string(),
+        });
+        return;
+    }
+
+    // Mark R as busy to reject concurrent requests
+    r_is_at_prompt().store(false, Ordering::Relaxed);
+
+    // Start WriteConsoleEx capture (visible=true → also print to terminal)
+    arf_libr::start_ipc_capture(true);
+
+    // Store reply channel — will be consumed by check_visible_eval_completion
+    *pending_visible_eval().lock().unwrap() = Some(PendingVisibleEval { reply });
+
+    // Inject code into REPL
+    *input_guard = Some(code);
+
+    // Fire break signal to interrupt read_line()
+    if let Some(signal) = BREAK_SIGNAL.get() {
+        signal.store(true, Ordering::Relaxed);
+    }
+
+    // Reply is NOT sent here — deferred until evaluation completes
+}
+
 /// Take pending IPC input (if any).
 ///
 /// Called from `read_console_callback` to inject IPC-provided input
@@ -189,5 +292,5 @@ pub fn take_ipc_pending_input() -> Option<String> {
 
 /// Mark that R is now at the command prompt (idle, ready for input).
 pub fn set_r_at_prompt(at_prompt: bool) {
-    r_is_at_prompt().store(at_prompt, std::sync::atomic::Ordering::Relaxed);
+    r_is_at_prompt().store(at_prompt, Ordering::Relaxed);
 }

@@ -29,17 +29,13 @@ fn unique_tmp_path() -> std::path::PathBuf {
 ///   `<header_line>\n<value><error>`
 /// Header format: `value_len error_len`
 /// A length of -1 means the field is NULL/absent.
-pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
+pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
     let escaped = code.replace('\\', "\\\\").replace('\'', "\\'");
 
     let tmpfile = unique_tmp_path();
     let tmppath = tmpfile.display().to_string().replace('\\', "/");
 
-    let visible_r = if visible { "TRUE" } else { "FALSE" };
-
     // R code: tryCatch + withVisible for value/error, stdout/stderr via callback.
-    // When .arf_visible is TRUE, value is also printed to the console (WriteConsoleEx)
-    // so it appears in the REPL terminal alongside captured stdout/stderr.
     let capture_code = format!(
         r#"local({{
     .res <- tryCatch(
@@ -52,8 +48,6 @@ pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
         NULL
     }}
     .s_err <- .res$error
-    if ({visible_r} && !is.null(.s_val)) cat(.s_val, "\n", sep = "")
-    if ({visible_r} && !is.null(.s_err)) message(.s_err)
     .header <- paste(
         if (is.null(.s_val)) -1L else nchar(.s_val, type = "bytes"),
         if (is.null(.s_err)) -1L else nchar(.s_err, type = "bytes")
@@ -67,7 +61,7 @@ pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
     );
 
     // Start capturing via WriteConsoleEx callback
-    arf_libr::start_ipc_capture(visible);
+    arf_libr::start_ipc_capture(false);
 
     let eval_result = arf_harp::eval_string(&capture_code);
 

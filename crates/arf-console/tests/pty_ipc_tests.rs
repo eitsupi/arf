@@ -208,7 +208,13 @@ mod ipc_tests {
         terminal.quit().expect("Should quit cleanly");
     }
 
-    /// Test that `visible=true` shows output in the REPL terminal.
+    /// Test that `visible=true` injects code into the REPL and captures output.
+    ///
+    /// This verifies the "blocking send" behavior:
+    /// 1. Code is injected into the REPL prompt (like user_input/send)
+    /// 2. R evaluates it normally, output appears in the terminal
+    /// 3. IPC client blocks until evaluation completes
+    /// 4. Response contains captured stdout/stderr from WriteConsoleEx
     #[test]
     fn test_ipc_evaluate_visible() {
         let (mut terminal, socket_path) = spawn_ipc_session();
@@ -216,7 +222,7 @@ mod ipc_tests {
         // Clear output buffer so we can detect new output
         terminal.clear_buffer().expect("clear buffer");
 
-        // Evaluate with visible=true
+        // Evaluate with visible=true — code should appear at the prompt
         let response = send_ipc_request(
             &socket_path,
             "evaluate",
@@ -224,28 +230,36 @@ mod ipc_tests {
         )
         .expect("evaluate should succeed");
 
-        // Verify the response still has the captured data
+        // Verify the response has captured data
         let result = response.get("result").expect("should have result");
+        // In visible mode, all output (including auto-printed value) is in stdout
+        let stdout = result.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
         assert!(
-            result
-                .get("stdout")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| s.contains("visible_marker")),
-            "response should contain stdout: {result:?}"
+            stdout.contains("visible_marker"),
+            "response stdout should contain cat() output: {result:?}"
         );
-        assert_eq!(
-            result.get("value").and_then(|v| v.as_str()),
-            Some("[1] 99"),
-            "response should contain value: {result:?}"
+        assert!(
+            stdout.contains("[1] 99"),
+            "response stdout should contain auto-printed value: {result:?}"
+        );
+        // Structured value/error are not available in visible mode
+        assert!(
+            result.get("value").is_none() || result.get("value").and_then(|v| v.as_str()).is_none(),
+            "visible mode should not have structured value: {result:?}"
         );
 
-        // Verify the output also appeared in the REPL terminal
+        // Verify the output appeared in the REPL terminal
         terminal
             .expect("visible_marker")
             .expect("stdout should appear in REPL terminal with visible=true");
         terminal
             .expect("[1] 99")
             .expect("value should appear in REPL terminal with visible=true");
+
+        // Verify REPL returns to prompt after visible evaluate
+        terminal
+            .wait_for_prompt()
+            .expect("Should return to prompt after visible evaluate");
 
         terminal.quit().expect("Should quit cleanly");
     }
