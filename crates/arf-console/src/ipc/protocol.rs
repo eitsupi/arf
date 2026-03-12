@@ -72,6 +72,8 @@ pub const INPUT_ALREADY_PENDING: i32 = -32002;
 #[derive(Debug, Deserialize)]
 pub struct EvaluateParams {
     pub code: String,
+    #[serde(default)]
+    pub visible: bool,
 }
 
 /// Result of the `evaluate` method.
@@ -105,7 +107,7 @@ pub struct IpcRequest {
 
 /// IPC method variants for internal dispatch.
 pub enum IpcMethod {
-    Evaluate { code: String },
+    Evaluate { code: String, visible: bool },
     UserInput { code: String },
 }
 

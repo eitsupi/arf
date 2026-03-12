@@ -112,7 +112,7 @@ fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
     match method {
-        IpcMethod::Evaluate { code } => {
+        IpcMethod::Evaluate { code, visible } => {
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = reply.send(IpcResponse::Error {
@@ -125,7 +125,7 @@ fn handle_request(request: IpcRequest) {
             // Mark R as busy during evaluation to prevent concurrent requests
             r_is_at_prompt().store(false, std::sync::atomic::Ordering::Relaxed);
 
-            let result = capture::evaluate_with_capture(&code);
+            let result = capture::evaluate_with_capture(&code, visible);
 
             // Restore prompt state after evaluation
             r_is_at_prompt().store(true, std::sync::atomic::Ordering::Relaxed);

@@ -1,9 +1,9 @@
 //! Output capture for the `evaluate` IPC method.
 //!
-//! Uses R's `sink()` + `textConnection` to capture stdout/stderr,
-//! and `tryCatch(withVisible(...))` for value/error capture.
-//! R writes raw text to a length-prefixed temp file; Rust reads it back
-//! and constructs the JSON response. This avoids any JSON escaping in R.
+//! Uses the WriteConsoleEx callback (`arf_libr::start_ipc_capture`) to capture
+//! stdout/stderr, and `tryCatch(withVisible(...))` + `capture.output(print(...))`
+//! for value/error capture. R writes value+error metadata to a temp file;
+//! Rust reads it back and constructs the JSON response.
 
 use crate::ipc::protocol::EvaluateResult;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,69 +22,65 @@ fn unique_tmp_path() -> std::path::PathBuf {
 ///
 /// Runs on the R main thread (called from idle callback).
 ///
-/// Protocol: R writes a binary file with 4 length-prefixed fields:
-///   `<header_line>\n<stdout><stderr><value><error>`
-/// Header format: `stdout_len stderr_len value_len error_len`
+/// stdout/stderr are captured via the WriteConsoleEx callback.
+/// value and error are written to a temp file by R code.
+///
+/// Protocol: R writes a binary file with 2 length-prefixed fields:
+///   `<header_line>\n<value><error>`
+/// Header format: `value_len error_len`
 /// A length of -1 means the field is NULL/absent.
-pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
+pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
     let escaped = code.replace('\\', "\\\\").replace('\'', "\\'");
 
     let tmpfile = unique_tmp_path();
     let tmppath = tmpfile.display().to_string().replace('\\', "/");
 
-    // R captures output via sink/textConnection, then writes raw text with length header.
-    // Rust handles all JSON construction — no escaping needed in R.
+    // R code: tryCatch + withVisible for value/error, stdout/stderr via callback
     let capture_code = format!(
         r#"local({{
-    .stdout_con <- textConnection(".arf_out", open = "w", local = TRUE)
-    .stderr_con <- textConnection(".arf_err", open = "w", local = TRUE)
-    sink(.stdout_con, type = "output")
-    sink(.stderr_con, type = "message")
     .res <- tryCatch(
         withVisible(eval(parse(text = '{escaped}'), envir = globalenv())),
         error = function(e) list(value = NULL, visible = FALSE, error = conditionMessage(e))
     )
-    sink(type = "message")
-    sink(type = "output")
-    close(.stderr_con)
-    close(.stdout_con)
-    .s_out <- paste(get(".arf_out"), collapse = "\n")
-    .s_err <- paste(get(".arf_err"), collapse = "\n")
-    .s_val <- if (!is.null(.res$error)) {{
-        NULL
-    }} else if (.res$visible) {{
+    .s_val <- if (is.null(.res$error) && .res$visible) {{
         paste(utils::capture.output(print(.res$value)), collapse = "\n")
     }} else {{
         NULL
     }}
-    .s_errmsg <- .res$error
+    .s_err <- .res$error
     .header <- paste(
-        nchar(.s_out, type = "bytes"),
-        nchar(.s_err, type = "bytes"),
         if (is.null(.s_val)) -1L else nchar(.s_val, type = "bytes"),
-        if (is.null(.s_errmsg)) -1L else nchar(.s_errmsg, type = "bytes")
+        if (is.null(.s_err)) -1L else nchar(.s_err, type = "bytes")
     )
     .con <- file('{tmppath}', open = "wb")
     writeLines(.header, .con, sep = "\n")
-    if (nchar(.s_out, type = "bytes") > 0L) writeBin(charToRaw(.s_out), .con)
-    if (nchar(.s_err, type = "bytes") > 0L) writeBin(charToRaw(.s_err), .con)
     if (!is.null(.s_val) && nchar(.s_val, type = "bytes") > 0L) writeBin(charToRaw(.s_val), .con)
-    if (!is.null(.s_errmsg) && nchar(.s_errmsg, type = "bytes") > 0L) writeBin(charToRaw(.s_errmsg), .con)
+    if (!is.null(.s_err) && nchar(.s_err, type = "bytes") > 0L) writeBin(charToRaw(.s_err), .con)
     close(.con)
 }})"#
     );
 
-    match arf_harp::eval_string(&capture_code) {
+    // Start capturing via WriteConsoleEx callback
+    arf_libr::start_ipc_capture(visible);
+
+    let eval_result = arf_harp::eval_string(&capture_code);
+
+    // Stop capturing and collect stdout/stderr
+    let (stdout, stderr) = arf_libr::finish_ipc_capture();
+
+    match eval_result {
         Ok(_) => {
-            let result = parse_capture_file(&tmpfile);
+            let mut result = parse_capture_file(&tmpfile);
             let _ = std::fs::remove_file(&tmpfile);
+            result.stdout = stdout;
+            result.stderr = stderr;
             result
         }
         Err(e) => {
             let _ = std::fs::remove_file(&tmpfile);
             EvaluateResult {
-                stdout: String::new(),
-                stderr: String::new(),
+                stdout,
+                stderr,
                 value: None,
                 error: Some(format!("Failed to evaluate: {e}")),
             }
@@ -92,7 +88,7 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
     }
 }
 
-/// Parse the length-prefixed capture file into an EvaluateResult.
+/// Parse the capture file into an EvaluateResult (value + error only).
 fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
     let data = match std::fs::read(path) {
         Ok(d) => d,
@@ -125,7 +121,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
         .filter_map(|s| s.parse().ok())
         .collect();
 
-    if lengths.len() != 4 {
+    if lengths.len() != 2 {
         return EvaluateResult {
             stdout: String::new(),
             stderr: String::new(),
@@ -150,14 +146,12 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
         Some(s)
     };
 
-    let stdout = read_field(&mut offset, lengths[0]).unwrap_or_default();
-    let stderr = read_field(&mut offset, lengths[1]).unwrap_or_default();
-    let value = read_field(&mut offset, lengths[2]);
-    let error = read_field(&mut offset, lengths[3]);
+    let value = read_field(&mut offset, lengths[0]);
+    let error = read_field(&mut offset, lengths[1]);
 
     EvaluateResult {
-        stdout,
-        stderr,
+        stdout: String::new(),
+        stderr: String::new(),
         value,
         error,
     }
@@ -173,20 +167,18 @@ mod tests {
         let tmpdir = std::env::temp_dir();
         let path = tmpdir.join(".arf_test_capture.dat");
 
-        // Simulate R output: stdout="hello", stderr="", value="[1] 42", error=NULL
-        let stdout = b"hello";
+        // Simulate R output: value="[1] 42", error=NULL
         let value = b"[1] 42";
-        let header = format!("{} 0 {} -1\n", stdout.len(), value.len());
+        let header = format!("{} -1\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
-        file.write_all(stdout).unwrap();
         file.write_all(value).unwrap();
         drop(file);
 
         let result = parse_capture_file(&path);
         let _ = std::fs::remove_file(&path);
 
-        assert_eq!(result.stdout, "hello");
+        assert_eq!(result.stdout, "");
         assert_eq!(result.stderr, "");
         assert_eq!(result.value.as_deref(), Some("[1] 42"));
         assert!(result.error.is_none());
@@ -198,7 +190,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_err.dat");
 
         let error_msg = b"object 'x' not found";
-        let header = format!("0 0 -1 {}\n", error_msg.len());
+        let header = format!("-1 {}\n", error_msg.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(error_msg).unwrap();
@@ -214,25 +206,44 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_capture_file_with_special_chars() {
+    fn test_parse_capture_file_with_value_and_error_none() {
         let tmpdir = std::env::temp_dir();
-        let path = tmpdir.join(".arf_test_capture_special.dat");
+        let path = tmpdir.join(".arf_test_capture_val.dat");
 
-        // Content with quotes, newlines, backslashes, and control chars
-        let stdout = b"line1\nline2\t\"quoted\"\\\x08\x0c";
-        let header = format!("{} 0 -1 -1\n", stdout.len());
+        // value present, error absent
+        let value = b"[1] \"hello\"";
+        let header = format!("{} -1\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
-        file.write_all(stdout).unwrap();
+        file.write_all(value).unwrap();
         drop(file);
 
         let result = parse_capture_file(&path);
         let _ = std::fs::remove_file(&path);
 
-        assert_eq!(result.stdout, "line1\nline2\t\"quoted\"\\\x08\x0c");
-        // Verify it serializes to valid JSON (the whole point of Rust-side construction)
+        assert_eq!(result.value.as_deref(), Some("[1] \"hello\""));
+        assert!(result.error.is_none());
+        // Verify JSON serialization
         let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("line1\\nline2"));
+        assert!(json.contains("hello"));
+    }
+
+    #[test]
+    fn test_parse_capture_file_both_absent() {
+        let tmpdir = std::env::temp_dir();
+        let path = tmpdir.join(".arf_test_capture_empty.dat");
+
+        // Both value and error absent (invisible result, no error)
+        let header = "-1 -1\n";
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(header.as_bytes()).unwrap();
+        drop(file);
+
+        let result = parse_capture_file(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(result.value.is_none());
+        assert!(result.error.is_none());
     }
 
     #[test]

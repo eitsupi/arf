@@ -846,7 +846,7 @@ _arf() {
             return 0
             ;;
         arf__ipc__eval)
-            opts="-h --pid --help <CODE>"
+            opts="-h --pid --visible --help <CODE>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

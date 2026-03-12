@@ -347,7 +347,10 @@ async fn dispatch_request(
                     );
                 }
             };
-            IpcMethod::Evaluate { code: params.code }
+            IpcMethod::Evaluate {
+                code: params.code,
+                visible: params.visible,
+            }
         }
         "user_input" => {
             let params: UserInputParams = match serde_json::from_value(request.params) {

@@ -246,6 +246,9 @@ pub enum IpcAction {
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
+        /// Also show output in the REPL terminal
+        #[arg(long)]
+        visible: bool,
     },
     /// Send code as user input to a running session (shown in REPL)
     Send {

@@ -360,7 +360,7 @@ fn handle_history_command(
 fn handle_ipc_command(action: &IpcAction) -> Result<()> {
     match action {
         IpcAction::List => ipc::client::cmd_list(),
-        IpcAction::Eval { code, pid } => ipc::client::cmd_eval(code, *pid),
+        IpcAction::Eval { code, pid, visible } => ipc::client::cmd_eval(code, *pid, *visible),
         IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
         IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
     }

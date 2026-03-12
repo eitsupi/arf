@@ -252,6 +252,7 @@ _arguments "${_arguments_options[@]}" : \
 (eval)
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'--visible[Also show output in the REPL terminal]' \
 '-h[Print help]' \
 '--help[Print help]' \
 ':code -- R code to evaluate:_default' \
