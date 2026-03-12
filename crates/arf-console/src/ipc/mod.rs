@@ -21,8 +21,8 @@ pub mod server;
 pub mod session;
 
 use protocol::{
-    EvaluateResult, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT, USER_IS_TYPING,
-    UserInputResult,
+    EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
+    R_NOT_AT_PROMPT, USER_IS_TYPING, UserInputResult,
 };
 use std::sync::{
     Arc, Mutex, OnceLock,
@@ -244,18 +244,16 @@ fn check_visible_eval_completion() {
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
-    // Reject if there's already a pending operation waiting for ExternalBreak
+    // Reject if there's already a pending operation waiting for ExternalBreak.
+    // Uses INPUT_ALREADY_PENDING (not R_BUSY) so clients can distinguish
+    // "R is evaluating" from "another IPC request is queued."
     if pending_ipc_operation()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .is_some()
     {
-        let code = match &method {
-            IpcMethod::Evaluate { .. } => R_BUSY,
-            IpcMethod::UserInput { .. } => R_BUSY,
-        };
         let _ = reply.send(IpcResponse::Error {
-            code,
+            code: INPUT_ALREADY_PENDING,
             message: "Another IPC operation is pending".to_string(),
         });
         return;

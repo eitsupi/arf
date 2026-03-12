@@ -874,9 +874,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
             };
             match op.kind {
                 PendingIpcKind::SilentEvaluate { reply } => {
-                    // Run silent evaluate directly — no buffer conflict possible
+                    // Run silent evaluate directly — no buffer conflict possible.
+                    // Unlike visible eval / user_input, silent eval does not return
+                    // code to R. It runs synchronously here and then falls through
+                    // to the reedline loop below to wait for user input.
                     run_silent_eval(&op.code, reply);
-                    // Don't return to R — fall through to reedline loop
                 }
                 PendingIpcKind::VisibleEvaluate { reply } => {
                     setup_visible_eval(reply);
@@ -1083,7 +1085,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             run_silent_eval, setup_visible_eval,
                         };
 
-                        // If the user has typed something, reject the IPC operation
+                        // If the user has typed something, reject the IPC operation.
+                        // We use trim() because reedline may include trailing whitespace
+                        // in the buffer; whitespace-only input is treated as empty.
                         if !buffer.trim().is_empty() {
                             reject_operation_user_typing(op);
                             continue;
@@ -1097,76 +1101,59 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             println!("{}{}", "agent> ".dark_cyan(), code);
                         };
 
-                        match op.kind {
-                            PendingIpcKind::SilentEvaluate { reply } => {
-                                // Show visual indicator, run eval, then return to reedline
-                                {
-                                    let mut out = io::stdout();
-                                    let _ = out.execute(crossterm::cursor::MoveToColumn(0));
-                                    let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
-                                    print!("{}", "[evaluating...]".dark_cyan());
-                                    let _ = out.flush();
-                                }
-
-                                run_silent_eval(&op.code, reply);
-
-                                // Clear the indicator — reedline will repaint the prompt
-                                {
-                                    let mut out = io::stdout();
-                                    let _ = out.execute(crossterm::cursor::MoveToColumn(0));
-                                    let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
-                                }
-
-                                // `continue` returns to the reedline loop which repaints the prompt
-                                continue;
+                        // Silent evaluate: run in-place and return to reedline
+                        if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
+                            // Show visual indicator, run eval, then return to reedline
+                            {
+                                let mut out = io::stdout();
+                                let _ = out.execute(crossterm::cursor::MoveToColumn(0));
+                                let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
+                                print!("{}", "[evaluating...]".dark_cyan());
+                                let _ = out.flush();
                             }
+
+                            run_silent_eval(&op.code, reply);
+
+                            // Clear the indicator — reedline will repaint the prompt
+                            {
+                                let mut out = io::stdout();
+                                let _ = out.execute(crossterm::cursor::MoveToColumn(0));
+                                let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
+                            }
+
+                            continue;
+                        }
+
+                        // Visible evaluate / user input: accept, inject code into REPL
+                        match op.kind {
                             PendingIpcKind::VisibleEvaluate { reply } => {
                                 setup_visible_eval(reply);
-                                clear_and_show_agent_prompt(&op.code);
-
-                                // Save to history
-                                if !op.code.is_empty() {
-                                    let entry = reedline::HistoryItem::from_command_line(&op.code);
-                                    let _ = editor.history_mut().save(entry);
-                                }
-
-                                if !op.code.is_empty() {
-                                    state.prompt_config.set_command_start();
-                                    state.prompt_config.start_spinner();
-                                }
-
-                                #[cfg(windows)]
-                                let code = arf_libr::strip_cr(&op.code).into_owned();
-                                #[cfg(not(windows))]
-                                let code = op.code;
-
-                                crate::ipc::set_r_at_prompt(false);
-                                return Some(code);
                             }
                             PendingIpcKind::UserInput { reply } => {
                                 accept_user_input(reply);
-                                clear_and_show_agent_prompt(&op.code);
-
-                                // Save to history
-                                if !op.code.is_empty() {
-                                    let entry = reedline::HistoryItem::from_command_line(&op.code);
-                                    let _ = editor.history_mut().save(entry);
-                                }
-
-                                if !op.code.is_empty() {
-                                    state.prompt_config.set_command_start();
-                                    state.prompt_config.start_spinner();
-                                }
-
-                                #[cfg(windows)]
-                                let code = arf_libr::strip_cr(&op.code).into_owned();
-                                #[cfg(not(windows))]
-                                let code = op.code;
-
-                                crate::ipc::set_r_at_prompt(false);
-                                return Some(code);
                             }
+                            PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
                         }
+
+                        clear_and_show_agent_prompt(&op.code);
+
+                        if !op.code.is_empty() {
+                            let entry = reedline::HistoryItem::from_command_line(&op.code);
+                            let _ = editor.history_mut().save(entry);
+                        }
+
+                        if !op.code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+
+                        #[cfg(windows)]
+                        let code = arf_libr::strip_cr(&op.code).into_owned();
+                        #[cfg(not(windows))]
+                        let code = op.code;
+
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(code);
                     }
                     // No pending operation (spurious signal), continue waiting
                     continue;
