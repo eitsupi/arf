@@ -44,6 +44,7 @@ static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceL
 
 struct PendingVisibleEval {
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    started_at: std::time::Instant,
 }
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
@@ -128,18 +129,48 @@ pub fn poll_ipc_requests() {
 /// A visible evaluate injects code into the REPL (like user_input) and waits
 /// for the result. When R returns to the prompt, the evaluation is done and
 /// we can collect captured output and send the reply.
+/// Timeout for visible evaluate: if R hasn't returned to the prompt within this
+/// duration, we assume something went wrong and send an error response.
+/// Matches the client-side timeout.
+const VISIBLE_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 fn check_visible_eval_completion() {
     // Only complete when R is back at the prompt
-    if !r_is_at_prompt().load(Ordering::Relaxed) {
-        return;
-    }
+    let at_prompt = r_is_at_prompt().load(Ordering::Acquire);
 
     let mut guard = match pending_visible_eval().try_lock() {
         Ok(g) => g,
         Err(_) => return,
     };
 
+    // Check for staleness/timeout regardless of prompt state
+    if let Some(pending) = guard.as_ref()
+        && pending.started_at.elapsed() > VISIBLE_EVAL_TIMEOUT
+    {
+        let pending = guard.take().unwrap();
+        // Clean up capture state
+        let (stdout, stderr) = arf_libr::finish_ipc_capture();
+        let _ = pending.reply.send(IpcResponse::Error {
+            code: R_BUSY,
+            message: format!(
+                "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
+                VISIBLE_EVAL_TIMEOUT.as_secs(),
+                stdout.len(),
+                stderr.len(),
+            ),
+        });
+        r_is_at_prompt().store(true, Ordering::Release);
+        return;
+    }
+
+    if !at_prompt {
+        return;
+    }
+
     if let Some(pending) = guard.take() {
+        // Prevent new requests from starting during capture finalization
+        r_is_at_prompt().store(false, Ordering::Release);
+
         // Finish WriteConsoleEx capture and collect output
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
 
@@ -154,6 +185,9 @@ fn check_visible_eval_completion() {
         };
 
         let _ = pending.reply.send(IpcResponse::Evaluate(result));
+
+        // Restore prompt state now that finalization is complete
+        r_is_at_prompt().store(true, Ordering::Release);
     }
 }
 
@@ -261,13 +295,18 @@ fn handle_visible_evaluate(code: String, reply: tokio::sync::oneshot::Sender<Ipc
     }
 
     // Mark R as busy to reject concurrent requests
-    r_is_at_prompt().store(false, Ordering::Relaxed);
+    r_is_at_prompt().store(false, Ordering::Release);
 
     // Start WriteConsoleEx capture (visible=true → also print to terminal)
     arf_libr::start_ipc_capture(true);
 
     // Store reply channel — will be consumed by check_visible_eval_completion
-    *pending_visible_eval().lock().unwrap() = Some(PendingVisibleEval { reply });
+    *pending_visible_eval()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(PendingVisibleEval {
+        reply,
+        started_at: std::time::Instant::now(),
+    });
 
     // Inject code into REPL
     *input_guard = Some(code);
@@ -292,5 +331,5 @@ pub fn take_ipc_pending_input() -> Option<String> {
 
 /// Mark that R is now at the command prompt (idle, ready for input).
 pub fn set_r_at_prompt(at_prompt: bool) {
-    r_is_at_prompt().store(at_prompt, Ordering::Relaxed);
+    r_is_at_prompt().store(at_prompt, Ordering::Release);
 }

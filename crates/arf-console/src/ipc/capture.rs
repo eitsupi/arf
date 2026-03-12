@@ -247,6 +247,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_capture_file_with_special_chars() {
+        let tmpdir = std::env::temp_dir();
+        let path = tmpdir.join(".arf_test_capture_special.dat");
+
+        // Value containing quotes, newlines, backslashes, and control chars
+        let value = b"[1] \"hello\\nworld\"\n\ttab\there\r\n\\backslash\\\x1b[31mred\x1b[0m";
+        let header = format!("{} -1\n", value.len());
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(header.as_bytes()).unwrap();
+        file.write_all(value).unwrap();
+        drop(file);
+
+        let result = parse_capture_file(&path);
+        let _ = std::fs::remove_file(&path);
+
+        let val = result.value.as_ref().expect("value should be present");
+        assert!(result.error.is_none());
+
+        // Verify value is preserved exactly
+        assert_eq!(val.as_bytes(), value);
+
+        // Verify JSON serialization works (special chars must be escaped properly)
+        let json = serde_json::to_string(&result).unwrap();
+        // Round-trip: deserialize back and check
+        let deserialized: EvaluateResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.value.as_deref(), result.value.as_deref());
+    }
+
+    #[test]
     fn test_unique_tmp_path() {
         let p1 = unique_tmp_path();
         let p2 = unique_tmp_path();

@@ -289,8 +289,20 @@ mod ipc_tests {
             "response should contain stdout even in silent mode: {result:?}"
         );
 
-        // Wait a bit and verify the output did NOT appear in the terminal
-        std::thread::sleep(Duration::from_millis(500));
+        // Send a visible command as a sentinel to prove the terminal is caught up
+        send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "cat('sentinel_after_silent')" }),
+        )
+        .expect("sentinel user_input should succeed");
+
+        // Wait for the sentinel to appear in terminal output
+        terminal
+            .expect("sentinel_after_silent")
+            .expect("sentinel should appear in terminal");
+
+        // Now check that the silent_marker never appeared in the terminal
         let output = terminal.get_output().expect("get output");
         assert!(
             !output.contains("silent_marker"),

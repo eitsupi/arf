@@ -1110,19 +1110,25 @@ pub fn clear_write_console_callback() {
 /// Buffers output into `IPC_CAPTURE`. If `visible` is set, also writes to
 /// the terminal (default stdout/stderr behavior).
 fn ipc_capture_callback(s: &str, is_error: bool) {
-    let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
-    if is_error {
-        state.stderr.push_str(s);
-    } else {
-        state.stdout.push_str(s);
-    }
+    let visible = {
+        let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
+        if is_error {
+            state.stderr.push_str(s);
+        } else {
+            state.stdout.push_str(s);
+        }
+        state.visible
+    };
+    // Lock is dropped before any I/O to avoid holding it during blocking writes
 
-    if state.visible {
+    if visible {
         // Also output to terminal
         if is_error {
-            #[cfg(windows)]
-            let s = strip_cr(s);
+            // On Windows, strip_cr returns Cow<str>; on Unix s is already &str
+            #[cfg(not(windows))]
             eprint!("{}", format_error_output(s));
+            #[cfg(windows)]
+            eprint!("{}", format_error_output(&strip_cr(s)));
         } else {
             print!("{}", s);
             let _ = std::io::Write::flush(&mut std::io::stdout());
