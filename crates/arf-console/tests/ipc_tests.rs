@@ -7,6 +7,9 @@
 //! - No terminal output assertions (no vt100 screen parsing)
 //! - Platform-aware transport (Unix sockets / Windows named pipes)
 //! - Only JSON-RPC responses are verified
+//!
+//! Each test spawns a fresh arf process. Run with `--test-threads=1` to avoid
+//! resource contention from multiple R processes starting simultaneously.
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -189,6 +192,10 @@ impl IpcTestProcess {
 
 impl Drop for IpcTestProcess {
     fn drop(&mut self) {
+        // Signal the reader thread to stop first, so it can exit during the
+        // grace period rather than remaining blocked on pty_reader.read().
+        self.shutdown.store(true, Ordering::Relaxed);
+
         // Send q() to trigger clean shutdown (session file cleanup, etc.)
         if let Ok(mut writer) = self._pty_writer.lock() {
             let _ = writer.write_all(b"q()\n");
@@ -196,8 +203,13 @@ impl Drop for IpcTestProcess {
         }
         // Give it a moment to shut down cleanly
         thread::sleep(Duration::from_millis(500));
-        self.shutdown.store(true, Ordering::Relaxed);
         let _ = self.child.kill();
+
+        // Best-effort join — the reader thread may still be blocked on read()
+        // after child kill on some platforms. Thread leak is acceptable for tests.
+        if let Some(handle) = self._reader_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -207,6 +219,10 @@ impl Drop for IpcTestProcess {
 
 /// Find the IPC socket path by scanning session files.
 /// Retries until a connectable session appears or timeout is reached.
+///
+/// When `pid` is `None` (e.g., platform can't retrieve child PID), this
+/// connects to any available session. In parallel test runs this could cause
+/// cross-talk; use `--test-threads=1` to avoid this.
 fn find_socket_path(pid: Option<u32>, timeout: Duration) -> Option<String> {
     let sessions_dir = dirs::cache_dir()?.join("arf").join("sessions");
     let start = Instant::now();
@@ -284,6 +300,11 @@ fn send_ipc_request(
     }
 }
 
+/// Send via Unix socket with HTTP wrapping.
+///
+/// The response parser is intentionally simplistic: it reads everything after
+/// `\r\n\r\n` as JSON. This works because we send `Connection: close` and the
+/// server closes the connection after responding.
 #[cfg(unix)]
 fn send_ipc_request_unix(
     socket_path: &str,
