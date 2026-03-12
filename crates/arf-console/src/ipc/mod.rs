@@ -135,7 +135,7 @@ pub fn poll_ipc_requests() {
 const VISIBLE_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 fn check_visible_eval_completion() {
-    // Only complete when R is back at the prompt
+    // Check prompt state for normal completion, and elapsed time for timeout cleanup.
     let at_prompt = r_is_at_prompt().load(Ordering::Acquire);
 
     let mut guard = match pending_visible_eval().try_lock() {
@@ -143,12 +143,16 @@ fn check_visible_eval_completion() {
         Err(_) => return,
     };
 
-    // Check for staleness/timeout regardless of prompt state
+    // Check for staleness/timeout regardless of prompt state.
+    // NOTE: In the timeout path, R may still be actively evaluating the injected code.
+    // Calling finish_ipc_capture() here races with R's WriteConsoleEx calls — some output
+    // may be lost or partial. This is a best-effort cleanup to avoid indefinite hangs;
+    // subsequent R output from the timed-out evaluation will go to the default handler.
     if let Some(pending) = guard.as_ref()
         && pending.started_at.elapsed() > VISIBLE_EVAL_TIMEOUT
     {
         let pending = guard.take().unwrap();
-        // Clean up capture state
+        // Best-effort capture cleanup (may race with active R evaluation)
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
         let _ = pending.reply.send(IpcResponse::Error {
             code: R_BUSY,
@@ -198,7 +202,7 @@ fn handle_request(request: IpcRequest) {
     match method {
         IpcMethod::Evaluate { code, visible } => {
             // Check if R is at the prompt (idle)
-            if !r_is_at_prompt().load(Ordering::Relaxed) {
+            if !r_is_at_prompt().load(Ordering::Acquire) {
                 let _ = reply.send(IpcResponse::Error {
                     code: R_BUSY,
                     message: "R is busy".to_string(),
@@ -213,17 +217,17 @@ fn handle_request(request: IpcRequest) {
                 handle_visible_evaluate(code, reply);
             } else {
                 // Silent evaluate: run in idle callback with full capture
-                r_is_at_prompt().store(false, Ordering::Relaxed);
+                r_is_at_prompt().store(false, Ordering::Release);
 
                 let result = capture::evaluate_with_capture(&code);
 
-                r_is_at_prompt().store(true, Ordering::Relaxed);
+                r_is_at_prompt().store(true, Ordering::Release);
                 let _ = reply.send(IpcResponse::Evaluate(result));
             }
         }
         IpcMethod::UserInput { code } => {
             // Check if R is at the prompt
-            if !r_is_at_prompt().load(Ordering::Relaxed) {
+            if !r_is_at_prompt().load(Ordering::Acquire) {
                 let _ = reply.send(IpcResponse::Error {
                     code: R_NOT_AT_PROMPT,
                     message: "R is not at the command prompt".to_string(),
