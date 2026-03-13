@@ -45,8 +45,22 @@ fn pending_ipc_operation() -> &'static Mutex<Option<PendingIpcOperation>> {
 /// Whether R is currently busy evaluating (not waiting for input).
 static R_IS_AT_PROMPT: OnceLock<AtomicBool> = OnceLock::new();
 
+/// Whether the REPL is in an alternate mode (shell mode, history browser, help browser)
+/// where the idle callback is not running and IPC requests would hang.
+static IN_ALTERNATE_MODE: AtomicBool = AtomicBool::new(false);
+
 fn r_is_at_prompt() -> &'static AtomicBool {
     R_IS_AT_PROMPT.get_or_init(|| AtomicBool::new(false))
+}
+
+/// Set whether the REPL is in an alternate mode (shell, history browser, etc.).
+pub fn set_in_alternate_mode(active: bool) {
+    IN_ALTERNATE_MODE.store(active, Ordering::Release);
+}
+
+/// Check if the REPL is in an alternate mode.
+pub fn is_in_alternate_mode() -> bool {
+    IN_ALTERNATE_MODE.load(Ordering::Acquire)
 }
 
 /// Break signal shared with reedline to interrupt `read_line()`.
@@ -244,6 +258,17 @@ fn check_visible_eval_completion() {
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
+    // Reject if in alternate mode (shell, history browser, help browser).
+    // Normally dispatch_request() catches this first, but this covers the
+    // race where a request was queued just before alternate mode was entered.
+    if is_in_alternate_mode() {
+        let _ = reply.send(IpcResponse::Error {
+            code: R_NOT_AT_PROMPT,
+            message: "R is not at the command prompt".to_string(),
+        });
+        return;
+    }
+
     // Reject if there's already a pending operation waiting for ExternalBreak.
     // Uses INPUT_ALREADY_PENDING (not R_BUSY) so clients can distinguish
     // "R is evaluating" from "another IPC request is queued."
@@ -382,4 +407,76 @@ pub fn accept_user_input(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 /// Mark that R is now at the command prompt (idle, ready for input).
 pub fn set_r_at_prompt(at_prompt: bool) {
     r_is_at_prompt().store(at_prompt, Ordering::Release);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_alternate_mode_flag_default() {
+        // Default should be false
+        assert!(!is_in_alternate_mode());
+    }
+
+    #[test]
+    fn test_alternate_mode_flag_toggle() {
+        set_in_alternate_mode(true);
+        assert!(is_in_alternate_mode());
+        set_in_alternate_mode(false);
+        assert!(!is_in_alternate_mode());
+    }
+
+    #[test]
+    fn test_handle_request_rejects_in_alternate_mode() {
+        // Set alternate mode
+        set_in_alternate_mode(true);
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let request = IpcRequest {
+            method: IpcMethod::UserInput {
+                code: "1+1".to_string(),
+            },
+            reply: reply_tx,
+        };
+
+        handle_request(request);
+
+        let response = reply_rx.blocking_recv().unwrap();
+        match response {
+            IpcResponse::Error { code, .. } => {
+                assert_eq!(code, R_NOT_AT_PROMPT);
+            }
+            _ => panic!("Expected error response"),
+        }
+
+        // Cleanup
+        set_in_alternate_mode(false);
+    }
+
+    #[test]
+    fn test_handle_request_rejects_evaluate_in_alternate_mode() {
+        set_in_alternate_mode(true);
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let request = IpcRequest {
+            method: IpcMethod::Evaluate {
+                code: "1+1".to_string(),
+                visible: false,
+            },
+            reply: reply_tx,
+        };
+
+        handle_request(request);
+
+        let response = reply_rx.blocking_recv().unwrap();
+        match response {
+            IpcResponse::Error { code, .. } => {
+                assert_eq!(code, R_NOT_AT_PROMPT);
+            }
+            _ => panic!("Expected error response"),
+        }
+
+        set_in_alternate_mode(false);
+    }
 }

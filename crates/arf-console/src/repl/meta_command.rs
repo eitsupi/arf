@@ -207,7 +207,10 @@ pub fn process_meta_command(
             // Fuzzy help search for R documentation
             // Inspired by the felp package: https://github.com/atusy/felp
             let query = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-            if let Err(e) = run_help_browser(&query) {
+            crate::ipc::set_in_alternate_mode(true);
+            let help_result = run_help_browser(&query);
+            crate::ipc::set_in_alternate_mode(false);
+            if let Err(e) = help_result {
                 arf_println!("Error in help browser: {}", e);
             }
             Some(MetaCommandResult::Handled)
@@ -346,7 +349,11 @@ fn process_history_browse(
         return Some(MetaCommandResult::Handled);
     };
 
-    match run_history_browser(db_path, mode) {
+    crate::ipc::set_in_alternate_mode(true);
+    let browser_result = run_history_browser(db_path, mode);
+    crate::ipc::set_in_alternate_mode(false);
+
+    match browser_result {
         Ok(HistoryBrowserResult::Copied(cmd)) => {
             // Truncate long commands for display (display-width aware)
             let display = text_utils::truncate_to_width(&cmd, 60);

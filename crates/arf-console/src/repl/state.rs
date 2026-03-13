@@ -392,6 +392,7 @@ impl PromptRuntimeConfig {
 
     pub fn set_shell(&mut self, enabled: bool) {
         self.shell_enabled = enabled;
+        crate::ipc::set_in_alternate_mode(enabled);
     }
 
     pub fn is_reprex_enabled(&self) -> bool {

@@ -335,6 +335,17 @@ async fn dispatch_request(
 ) -> JsonRpcResponse {
     let id = request.id.clone();
 
+    // Reject immediately if in alternate mode (shell, history/help browser).
+    // These modes block the main thread, so requests would hang in the mpsc
+    // queue until the 300s timeout.
+    if super::is_in_alternate_mode() {
+        return JsonRpcResponse::error(
+            id,
+            super::protocol::R_NOT_AT_PROMPT,
+            "R is not at the command prompt".to_string(),
+        );
+    }
+
     let method = match request.method.as_str() {
         "evaluate" => {
             let params: EvaluateParams = match serde_json::from_value(request.params) {
@@ -429,5 +440,49 @@ mod tests {
     fn test_extract_body_raw_json() {
         let raw = b"{\"jsonrpc\":\"2.0\"}";
         assert_eq!(extract_body(raw), b"{\"jsonrpc\":\"2.0\"}");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_rejects_in_alternate_mode() {
+        use super::super::protocol::R_NOT_AT_PROMPT;
+
+        // Set alternate mode
+        super::super::set_in_alternate_mode(true);
+
+        let (tx, _rx) = mpsc::channel();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "evaluate".to_string(),
+            params: serde_json::json!({"code": "1+1"}),
+            id: Some(serde_json::json!(1)),
+        };
+
+        let response = dispatch_request(request, &tx).await;
+
+        // Should get R_NOT_AT_PROMPT error without sending to mpsc
+        assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
+
+        // Cleanup
+        super::super::set_in_alternate_mode(false);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_rejects_user_input_in_alternate_mode() {
+        use super::super::protocol::R_NOT_AT_PROMPT;
+
+        super::super::set_in_alternate_mode(true);
+
+        let (tx, _rx) = mpsc::channel();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "user_input".to_string(),
+            params: serde_json::json!({"code": "print('hello')"}),
+            id: Some(serde_json::json!(2)),
+        };
+
+        let response = dispatch_request(request, &tx).await;
+        assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
+
+        super::super::set_in_alternate_mode(false);
     }
 }
