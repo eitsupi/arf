@@ -468,6 +468,11 @@ impl Terminal {
         }
     }
 
+    /// Get the process ID of the child process, if available.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+
     /// Get current cursor position as (row, col), both 0-indexed.
     pub fn cursor_position(&self) -> Result<(u16, u16), String> {
         let state = self.state.lock().map_err(|e| e.to_string())?;

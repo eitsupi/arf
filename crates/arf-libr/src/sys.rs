@@ -212,6 +212,21 @@ use std::sync::RwLock;
 /// Console write callback function pointer storage.
 static mut WRITE_CONSOLE_CALLBACK: Option<fn(&str, bool)> = None;
 
+/// IPC capture state for buffering stdout/stderr during evaluate requests.
+struct IpcCaptureState {
+    enabled: bool,
+    visible: bool,
+    stdout: String,
+    stderr: String,
+}
+
+static IPC_CAPTURE: RwLock<IpcCaptureState> = RwLock::new(IpcCaptureState {
+    enabled: false,
+    visible: false,
+    stdout: String::new(),
+    stderr: String::new(),
+});
+
 /// Reprex mode settings.
 struct ReprexSettings {
     enabled: bool,
@@ -1081,6 +1096,74 @@ pub fn set_write_console_callback(callback: fn(&str, bool)) {
     unsafe {
         WRITE_CONSOLE_CALLBACK = Some(callback);
     }
+}
+
+/// Clear the console write callback.
+pub fn clear_write_console_callback() {
+    unsafe {
+        WRITE_CONSOLE_CALLBACK = None;
+    }
+}
+
+/// WriteConsoleEx callback for IPC capture.
+///
+/// Buffers output into `IPC_CAPTURE`. If `visible` is set, also writes to
+/// the terminal (default stdout/stderr behavior).
+fn ipc_capture_callback(s: &str, is_error: bool) {
+    let visible = {
+        let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
+        if is_error {
+            state.stderr.push_str(s);
+        } else {
+            state.stdout.push_str(s);
+        }
+        state.visible
+    };
+    // Lock is dropped before any I/O to avoid holding it during blocking writes
+
+    if visible {
+        // Also output to terminal
+        if is_error {
+            // On Windows, strip_cr returns Cow<str>; on Unix s is already &str
+            #[cfg(not(windows))]
+            eprint!("{}", format_error_output(s));
+            #[cfg(windows)]
+            eprint!("{}", format_error_output(&strip_cr(s)));
+        } else {
+            print!("{}", s);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+}
+
+/// Start IPC output capture.
+///
+/// Installs `ipc_capture_callback` as the WriteConsoleEx callback to buffer
+/// all R console output. If `visible` is true, output is also written to the
+/// terminal in real time.
+///
+/// Any previous capture state is reset (guards against leaked state from panics).
+pub fn start_ipc_capture(visible: bool) {
+    {
+        let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
+        state.enabled = true;
+        state.visible = visible;
+        state.stdout.clear();
+        state.stderr.clear();
+    }
+    set_write_console_callback(ipc_capture_callback);
+}
+
+/// Finish IPC output capture and return captured (stdout, stderr).
+///
+/// Clears the callback and returns ANSI-stripped output.
+pub fn finish_ipc_capture() -> (String, String) {
+    clear_write_console_callback();
+    let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
+    state.enabled = false;
+    let stdout = strip_ansi_escapes(&std::mem::take(&mut state.stdout));
+    let stderr = strip_ansi_escapes(&std::mem::take(&mut state.stderr));
+    (stdout, stderr)
 }
 
 /// ReadConsole callback storage.

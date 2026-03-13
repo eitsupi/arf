@@ -31,7 +31,7 @@ use reedline::{
     default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
-use std::io;
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::editor::keybindings::{
@@ -365,12 +365,14 @@ impl Repl {
         // supports this, and radian uses the same approach (setoption() in its inputhook).
         let auto_width = self.config.r.auto_width;
         line_editor = line_editor
+            .with_break_signal(crate::ipc::break_signal())
             .with_poll_interval(std::time::Duration::from_millis(33))
             .with_idle_callback(Box::new(move || {
                 arf_libr::process_r_events();
                 if auto_width {
                     sync_r_width();
                 }
+                crate::ipc::poll_ipc_requests();
             }));
 
         // Create shell line editor with separate history
@@ -660,6 +662,10 @@ impl Repl {
                     println!("\nGoodbye!");
                     break;
                 }
+                Ok(_) => {
+                    // ExternalBreak or future variants: ignore in standalone mode
+                    continue;
+                }
                 Err(err) => {
                     eprintln!("Error: {}", err);
                     break;
@@ -803,6 +809,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
         // This is called when R has finished evaluating and wants new input.
         // Continuation prompts (starting with '+') mean we're still in the same expression.
         // Non-command prompts (menus, etc.) should also not trigger exit status updates.
+        // Track prompt state for IPC: R is now idle and waiting for input
+        if is_r_command_prompt(r_prompt) {
+            crate::ipc::set_r_at_prompt(true);
+        }
+
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
             let had_error = if state.line_editor.has_last_command_context() {
                 let had_error = arf_libr::command_had_error();
@@ -849,6 +860,49 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 
             // Reset error state for the next command
             arf_libr::reset_command_error_state();
+        }
+
+        // Check for pending IPC operations before entering the reedline input loop.
+        // At this point reedline hasn't started, so there's no editor buffer to
+        // conflict with — we can always accept.
+        if is_r_command_prompt(r_prompt)
+            && !state.prompt_config.is_shell_enabled()
+            && let Some(op) = crate::ipc::take_pending_ipc_operation()
+        {
+            use crate::ipc::{
+                PendingIpcKind, accept_user_input, run_silent_eval, setup_visible_eval,
+            };
+            match op.kind {
+                PendingIpcKind::SilentEvaluate { reply } => {
+                    // Run silent evaluate directly — no buffer conflict possible.
+                    // Unlike visible eval / user_input, silent eval does not return
+                    // code to R. It runs synchronously here and then falls through
+                    // to the reedline loop below to wait for user input.
+                    run_silent_eval(&op.code, reply);
+                }
+                PendingIpcKind::VisibleEvaluate { reply } => {
+                    setup_visible_eval(reply);
+                    let prompt_str = "agent> ";
+                    println!("{}{}", prompt_str.dark_cyan(), op.code);
+                    if !op.code.is_empty() {
+                        state.prompt_config.set_command_start();
+                        state.prompt_config.start_spinner();
+                    }
+                    crate::ipc::set_r_at_prompt(false);
+                    return Some(op.code);
+                }
+                PendingIpcKind::UserInput { reply } => {
+                    accept_user_input(reply);
+                    let prompt_str = "agent> ";
+                    println!("{}{}", prompt_str.dark_cyan(), op.code);
+                    if !op.code.is_empty() {
+                        state.prompt_config.set_command_start();
+                        state.prompt_config.start_spinner();
+                    }
+                    crate::ipc::set_r_at_prompt(false);
+                    return Some(op.code);
+                }
+            }
         }
 
         loop {
@@ -992,6 +1046,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     #[cfg(windows)]
                     let code = arf_libr::strip_cr(&code).into_owned();
 
+                    // Mark R as busy (no longer at prompt) for IPC
+                    crate::ipc::set_r_at_prompt(false);
+
                     // Return the (possibly formatted) code to R
                     return Some(code);
                 }
@@ -1019,6 +1076,89 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     state.should_exit = true;
                     return None;
                 }
+                Ok(Signal::ExternalBreak(buffer)) => {
+                    // IPC operation triggered a break signal.
+                    // Check the editor buffer for mutual exclusion with console input.
+                    if let Some(op) = crate::ipc::take_pending_ipc_operation() {
+                        use crate::ipc::{
+                            PendingIpcKind, accept_user_input, reject_operation_user_typing,
+                            run_silent_eval, setup_visible_eval,
+                        };
+
+                        // If the user has typed something, reject the IPC operation.
+                        // We use trim() because reedline may include trailing whitespace
+                        // in the buffer; whitespace-only input is treated as empty.
+                        if !buffer.trim().is_empty() {
+                            reject_operation_user_typing(op);
+                            continue;
+                        }
+
+                        // Helper: clear the current prompt line and show agent prefix
+                        let clear_and_show_agent_prompt = |code: &str| {
+                            let mut out = io::stdout();
+                            let _ = out.execute(crossterm::cursor::MoveToColumn(0));
+                            let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
+                            println!("{}{}", "agent> ".dark_cyan(), code);
+                        };
+
+                        // Silent evaluate: run in-place and return to reedline
+                        if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
+                            // Show visual indicator, run eval, then return to reedline
+                            {
+                                let mut out = io::stdout();
+                                let _ = out.execute(crossterm::cursor::MoveToColumn(0));
+                                let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
+                                print!("{}", "[evaluating...]".dark_cyan());
+                                let _ = out.flush();
+                            }
+
+                            run_silent_eval(&op.code, reply);
+
+                            // Clear the indicator — reedline will repaint the prompt
+                            {
+                                let mut out = io::stdout();
+                                let _ = out.execute(crossterm::cursor::MoveToColumn(0));
+                                let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
+                            }
+
+                            continue;
+                        }
+
+                        // Visible evaluate / user input: accept, inject code into REPL
+                        match op.kind {
+                            PendingIpcKind::VisibleEvaluate { reply } => {
+                                setup_visible_eval(reply);
+                            }
+                            PendingIpcKind::UserInput { reply } => {
+                                accept_user_input(reply);
+                            }
+                            PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
+                        }
+
+                        clear_and_show_agent_prompt(&op.code);
+
+                        if !op.code.is_empty() {
+                            let entry = reedline::HistoryItem::from_command_line(&op.code);
+                            let _ = editor.history_mut().save(entry);
+                        }
+
+                        if !op.code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+
+                        #[cfg(windows)]
+                        let code = arf_libr::strip_cr(&op.code).into_owned();
+                        #[cfg(not(windows))]
+                        let code = op.code;
+
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(code);
+                    }
+                    // No pending operation (spurious signal), continue waiting
+                    continue;
+                }
+                Ok(_) => continue,
                 Err(err) => {
                     eprintln!("Error: {}", err);
                     state.should_exit = true;

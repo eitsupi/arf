@@ -207,7 +207,13 @@ pub fn process_meta_command(
             // Fuzzy help search for R documentation
             // Inspired by the felp package: https://github.com/atusy/felp
             let query = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-            if let Err(e) = run_help_browser(&query) {
+            // Mark alternate mode so IPC requests are rejected immediately
+            // instead of hanging. Not using a RAII guard because panics in
+            // the browser would crash the process anyway (no catch_unwind).
+            crate::ipc::set_in_alternate_mode(true);
+            let help_result = run_help_browser(&query);
+            crate::ipc::set_in_alternate_mode(false);
+            if let Err(e) = help_result {
                 arf_println!("Error in help browser: {}", e);
             }
             Some(MetaCommandResult::Handled)
@@ -250,6 +256,37 @@ pub fn process_meta_command(
             }
             Some(MetaCommandResult::Handled)
         }
+        "ipc" => {
+            let subcmd = parts.get(1).copied().unwrap_or("status");
+            match subcmd {
+                "start" => match crate::ipc::start_server() {
+                    Ok(path) => arf_println!("IPC server started: {}", path),
+                    Err(e) => arf_println!("Failed to start IPC server: {}", e),
+                },
+                "stop" => {
+                    crate::ipc::stop_server();
+                    arf_println!("IPC server stopped.");
+                }
+                "status" => {
+                    let sessions = crate::ipc::session::list_sessions();
+                    let my_pid = std::process::id();
+                    let my_session = sessions.iter().find(|s| s.pid == my_pid);
+                    if let Some(session) = my_session {
+                        arf_println!("IPC server is running.");
+                        println!("#   Socket: {}", session.socket_path);
+                        println!("#   PID:    {}", session.pid);
+                    } else {
+                        arf_println!(
+                            "IPC server is not running. Use :ipc start or --with-ipc flag."
+                        );
+                    }
+                }
+                _ => {
+                    arf_println!("Unknown :ipc subcommand. Available: start, stop, status");
+                }
+            }
+            Some(MetaCommandResult::Handled)
+        }
         "commands" | "cmds" => {
             arf_println!("Available commands:");
             println!("#   :help          - Search R help");
@@ -269,6 +306,7 @@ pub fn process_meta_command(
             println!("#   :restart!      - Restart without confirmation");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
             println!("#   :switch! <ver> - Switch without confirmation");
+            println!("#   :ipc           - IPC server management (start, stop, status)");
             println!("#   :changelog     - Show arf changelog");
             println!("#   :commands      - Show this list");
             println!("#   :quit          - Exit arf");
@@ -314,7 +352,14 @@ fn process_history_browse(
         return Some(MetaCommandResult::Handled);
     };
 
-    match run_history_browser(db_path, mode) {
+    // Mark alternate mode so IPC requests are rejected immediately
+    // instead of hanging. Not using a RAII guard because panics in
+    // the browser would crash the process anyway (no catch_unwind).
+    crate::ipc::set_in_alternate_mode(true);
+    let browser_result = run_history_browser(db_path, mode);
+    crate::ipc::set_in_alternate_mode(false);
+
+    match browser_result {
         Ok(HistoryBrowserResult::Copied(cmd)) => {
             // Truncate long commands for display (display-width aware)
             let display = text_utils::truncate_to_width(&cmd, 60);

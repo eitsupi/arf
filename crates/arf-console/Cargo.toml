@@ -41,6 +41,8 @@ tree-sitter-r.workspace = true
 libc.workspace = true
 pulldown-cmark.workspace = true
 unicode-width.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true

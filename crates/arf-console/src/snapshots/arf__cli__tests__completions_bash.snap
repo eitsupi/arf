@@ -32,6 +32,9 @@ _arf() {
             arf,history)
                 cmd="arf__history"
                 ;;
+            arf,ipc)
+                cmd="arf__ipc"
+                ;;
             arf__config,check)
                 cmd="arf__config__check"
                 ;;
@@ -62,6 +65,9 @@ _arf() {
             arf__help,history)
                 cmd="arf__help__history"
                 ;;
+            arf__help,ipc)
+                cmd="arf__help__ipc"
+                ;;
             arf__help__config,check)
                 cmd="arf__help__config__check"
                 ;;
@@ -76,6 +82,18 @@ _arf() {
                 ;;
             arf__help__history,schema)
                 cmd="arf__help__history__schema"
+                ;;
+            arf__help__ipc,eval)
+                cmd="arf__help__ipc__eval"
+                ;;
+            arf__help__ipc,list)
+                cmd="arf__help__ipc__list"
+                ;;
+            arf__help__ipc,send)
+                cmd="arf__help__ipc__send"
+                ;;
+            arf__help__ipc,status)
+                cmd="arf__help__ipc__status"
                 ;;
             arf__history,export)
                 cmd="arf__history__export"
@@ -101,6 +119,36 @@ _arf() {
             arf__history__help,schema)
                 cmd="arf__history__help__schema"
                 ;;
+            arf__ipc,eval)
+                cmd="arf__ipc__eval"
+                ;;
+            arf__ipc,help)
+                cmd="arf__ipc__help"
+                ;;
+            arf__ipc,list)
+                cmd="arf__ipc__list"
+                ;;
+            arf__ipc,send)
+                cmd="arf__ipc__send"
+                ;;
+            arf__ipc,status)
+                cmd="arf__ipc__status"
+                ;;
+            arf__ipc__help,eval)
+                cmd="arf__ipc__help__eval"
+                ;;
+            arf__ipc__help,help)
+                cmd="arf__ipc__help__help"
+                ;;
+            arf__ipc__help,list)
+                cmd="arf__ipc__help__list"
+                ;;
+            arf__ipc__help,send)
+                cmd="arf__ipc__help__send"
+                ;;
+            arf__ipc__help,status)
+                cmd="arf__ipc__help__status"
+                ;;
             *)
                 ;;
         esac
@@ -108,7 +156,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history ipc help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -394,7 +442,7 @@ _arf() {
             return 0
             ;;
         arf__help)
-            opts="completions config history help"
+            opts="completions config history ipc help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -520,6 +568,76 @@ _arf() {
             return 0
             ;;
         arf__help__history__schema)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc)
+            opts="list eval send status"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc__eval)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc__send)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc__status)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -706,6 +824,172 @@ _arf() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc)
+            opts="-h --help list eval send status help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__eval)
+            opts="-h --pid --visible --help <CODE>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help)
+            opts="list eval send status help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__eval)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__send)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__list)
+            opts="-h --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__send)
+            opts="-h --pid --help <CODE>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__status)
+            opts="-h --pid --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
