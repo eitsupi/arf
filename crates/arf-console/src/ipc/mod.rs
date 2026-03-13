@@ -413,70 +413,56 @@ pub fn set_r_at_prompt(at_prompt: bool) {
 mod tests {
     use super::*;
 
+    /// Tests for the IN_ALTERNATE_MODE flag and handle_request rejection.
+    ///
+    /// Combined into a single test to avoid flakiness from parallel test
+    /// execution, since all tests share the global `IN_ALTERNATE_MODE` atomic.
     #[test]
-    fn test_alternate_mode_flag_default() {
+    fn test_alternate_mode_flag_and_request_rejection() {
         // Default should be false
         assert!(!is_in_alternate_mode());
-    }
 
-    #[test]
-    fn test_alternate_mode_flag_toggle() {
+        // Toggle on/off
         set_in_alternate_mode(true);
         assert!(is_in_alternate_mode());
         set_in_alternate_mode(false);
         assert!(!is_in_alternate_mode());
-    }
 
-    #[test]
-    fn test_handle_request_rejects_in_alternate_mode() {
-        // Set alternate mode
+        // handle_request rejects user_input in alternate mode
         set_in_alternate_mode(true);
-
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let request = IpcRequest {
-            method: IpcMethod::UserInput {
-                code: "1+1".to_string(),
-            },
-            reply: reply_tx,
-        };
-
-        handle_request(request);
-
-        let response = reply_rx.blocking_recv().unwrap();
-        match response {
-            IpcResponse::Error { code, .. } => {
-                assert_eq!(code, R_NOT_AT_PROMPT);
+        {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let request = IpcRequest {
+                method: IpcMethod::UserInput {
+                    code: "1+1".to_string(),
+                },
+                reply: reply_tx,
+            };
+            handle_request(request);
+            match reply_rx.blocking_recv().unwrap() {
+                IpcResponse::Error { code, .. } => assert_eq!(code, R_NOT_AT_PROMPT),
+                _ => panic!("Expected R_NOT_AT_PROMPT error for user_input"),
             }
-            _ => panic!("Expected error response"),
+        }
+
+        // handle_request rejects evaluate in alternate mode
+        {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let request = IpcRequest {
+                method: IpcMethod::Evaluate {
+                    code: "1+1".to_string(),
+                    visible: false,
+                },
+                reply: reply_tx,
+            };
+            handle_request(request);
+            match reply_rx.blocking_recv().unwrap() {
+                IpcResponse::Error { code, .. } => assert_eq!(code, R_NOT_AT_PROMPT),
+                _ => panic!("Expected R_NOT_AT_PROMPT error for evaluate"),
+            }
         }
 
         // Cleanup
-        set_in_alternate_mode(false);
-    }
-
-    #[test]
-    fn test_handle_request_rejects_evaluate_in_alternate_mode() {
-        set_in_alternate_mode(true);
-
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        let request = IpcRequest {
-            method: IpcMethod::Evaluate {
-                code: "1+1".to_string(),
-                visible: false,
-            },
-            reply: reply_tx,
-        };
-
-        handle_request(request);
-
-        let response = reply_rx.blocking_recv().unwrap();
-        match response {
-            IpcResponse::Error { code, .. } => {
-                assert_eq!(code, R_NOT_AT_PROMPT);
-            }
-            _ => panic!("Expected error response"),
-        }
-
         set_in_alternate_mode(false);
     }
 }

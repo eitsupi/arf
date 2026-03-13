@@ -207,6 +207,9 @@ pub fn process_meta_command(
             // Fuzzy help search for R documentation
             // Inspired by the felp package: https://github.com/atusy/felp
             let query = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+            // Mark alternate mode so IPC requests are rejected immediately
+            // instead of hanging. Not using a RAII guard because panics in
+            // the browser would crash the process anyway (no catch_unwind).
             crate::ipc::set_in_alternate_mode(true);
             let help_result = run_help_browser(&query);
             crate::ipc::set_in_alternate_mode(false);
@@ -349,6 +352,9 @@ fn process_history_browse(
         return Some(MetaCommandResult::Handled);
     };
 
+    // Mark alternate mode so IPC requests are rejected immediately
+    // instead of hanging. Not using a RAII guard because panics in
+    // the browser would crash the process anyway (no catch_unwind).
     crate::ipc::set_in_alternate_mode(true);
     let browser_result = run_history_browser(db_path, mode);
     crate::ipc::set_in_alternate_mode(false);

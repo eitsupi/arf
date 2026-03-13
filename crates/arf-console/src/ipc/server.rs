@@ -442,13 +442,18 @@ mod tests {
         assert_eq!(extract_body(raw), b"{\"jsonrpc\":\"2.0\"}");
     }
 
+    /// Tests that dispatch_request rejects both evaluate and user_input
+    /// in alternate mode.
+    ///
+    /// Combined into a single test to avoid flakiness from parallel test
+    /// execution, since all tests share the global `IN_ALTERNATE_MODE` atomic.
     #[tokio::test]
     async fn test_dispatch_rejects_in_alternate_mode() {
         use super::super::protocol::R_NOT_AT_PROMPT;
 
-        // Set alternate mode
         super::super::set_in_alternate_mode(true);
 
+        // evaluate should be rejected
         let (tx, _rx) = mpsc::channel();
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -456,33 +461,20 @@ mod tests {
             params: serde_json::json!({"code": "1+1"}),
             id: Some(serde_json::json!(1)),
         };
-
         let response = dispatch_request(request, &tx).await;
-
-        // Should get R_NOT_AT_PROMPT error without sending to mpsc
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
-        // Cleanup
-        super::super::set_in_alternate_mode(false);
-    }
-
-    #[tokio::test]
-    async fn test_dispatch_rejects_user_input_in_alternate_mode() {
-        use super::super::protocol::R_NOT_AT_PROMPT;
-
-        super::super::set_in_alternate_mode(true);
-
-        let (tx, _rx) = mpsc::channel();
+        // user_input should also be rejected
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "user_input".to_string(),
             params: serde_json::json!({"code": "print('hello')"}),
             id: Some(serde_json::json!(2)),
         };
-
         let response = dispatch_request(request, &tx).await;
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
+        // Cleanup
         super::super::set_in_alternate_mode(false);
     }
 }
