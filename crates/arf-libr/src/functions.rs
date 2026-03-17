@@ -475,29 +475,36 @@ impl RLibrary {
                 .map(|s| s.into_raw().into_raw() as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
 
+            // On Windows, library.get::<T>() requires size_of::<T>() == size_of::<FARPROC>()
+            // (pointer-sized). Using c_int (4 bytes) fails the size check on 64-bit Windows.
+            // We use try_as_raw_ptr() to get the symbol address as a raw pointer instead.
             #[cfg(windows)]
             let r_interactive: *mut c_int = library
-                .get::<c_int>(b"R_Interactive\0")
+                .get::<usize>(b"R_Interactive\0")
                 .ok()
-                .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
+                .and_then(|s| unsafe { s.try_as_raw_ptr() })
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(windows)]
             let r_signalhandlers: *mut c_int = library
-                .get::<c_int>(b"R_SignalHandlers\0")
+                .get::<usize>(b"R_SignalHandlers\0")
                 .ok()
-                .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
+                .and_then(|s| unsafe { s.try_as_raw_ptr() })
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(windows)]
             let r_running_as_main_program: *mut c_int = library
-                .get::<c_int>(b"R_running_as_main_program\0")
+                .get::<usize>(b"R_running_as_main_program\0")
                 .ok()
-                .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
+                .and_then(|s| unsafe { s.try_as_raw_ptr() })
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(windows)]
             let character_mode: *mut c_int = library
-                .get::<c_int>(b"CharacterMode\0")
+                .get::<usize>(b"CharacterMode\0")
                 .ok()
-                .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
+                .and_then(|s| unsafe { s.try_as_raw_ptr() })
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
 
             // Load event processing function (cross-platform)
