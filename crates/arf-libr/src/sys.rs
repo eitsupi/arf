@@ -984,7 +984,9 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
             *lib.character_mode = UImode::LinkDLL as c_int;
             log::info!("[WINDOWS] CharacterMode switched from RGui to LinkDLL");
         } else {
-            log::warn!("[WINDOWS] Could not load CharacterMode symbol from R.dll");
+            log::error!(
+                "[WINDOWS] Could not load CharacterMode symbol from R.dll; system() may hang"
+            );
         }
 
         // Step 8: Setup R main loop (but don't run it yet)
