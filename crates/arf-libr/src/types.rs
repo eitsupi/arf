@@ -90,6 +90,14 @@ pub enum UImode {
     LinkDLL = 2,
 }
 
+// R defines CharacterMode as a C enum (int-sized). Ensure our repr(u32)
+// matches c_int so the pointer cast in sys.rs is safe.
+#[cfg(windows)]
+const _: () = assert!(
+    std::mem::size_of::<UImode>() == std::mem::size_of::<std::ffi::c_int>(),
+    "UImode size must match c_int (R's CharacterMode type)"
+);
+
 /// Windows startup action type.
 #[cfg(windows)]
 #[repr(u32)]
