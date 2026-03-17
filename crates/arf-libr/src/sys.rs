@@ -914,9 +914,14 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
             args.len()
         );
 
-        // Step 4: Configure the params (ark pattern)
+        // Step 4: Configure the params
         (*params_ptr).r_interactive = 1;
-        // ark uses RGui mode (not RTerm or LinkDLL)
+        // Use RGui mode during initialization so that R_SetParams correctly
+        // sets up console callbacks (ReadConsole, WriteConsoleEx, etc.).
+        // After setup_Rmainloop(), we switch to LinkDLL mode to prevent
+        // R's do_system() from invalidating standard handles, which causes
+        // system()/system2() to hang. This follows the sircon pattern.
+        // See: https://github.com/eitsupi/arf/issues/116
         (*params_ptr).character_mode = UImode::RGui;
 
         // Disable R's built-in profile loading during initialization.
@@ -964,7 +969,25 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         (lib.readconsolecfg)();
         log::info!("[WINDOWS] readconsolecfg called");
 
-        // Step 7: Setup R main loop (but don't run it yet)
+        // Step 7: Switch CharacterMode from RGui to LinkDLL.
+        //
+        // R's do_system() checks CharacterMode and, when it is RGui, calls
+        // SetStdHandle(STD_INPUT_HANDLE, INVALID_HANDLE_VALUE) (and similarly
+        // for stdout/stderr) before spawning child processes. This invalidates
+        // the standard handles and causes system()/system2() to hang.
+        //
+        // By switching to LinkDLL before setup_Rmainloop(), we keep the
+        // callback setup from RGui mode (applied by R_SetParams) while
+        // avoiding the handle invalidation in do_system(). This is the same
+        // approach used by sircon.
+        if !lib.character_mode.is_null() {
+            *lib.character_mode = UImode::LinkDLL as c_int;
+            log::info!("[WINDOWS] CharacterMode switched from RGui to LinkDLL");
+        } else {
+            log::warn!("[WINDOWS] Could not load CharacterMode symbol from R.dll");
+        }
+
+        // Step 8: Setup R main loop (but don't run it yet)
         log::info!("[WINDOWS] Calling setup_Rmainloop...");
         (lib.setup_rmainloop)();
         log::info!("[WINDOWS] setup_Rmainloop completed");

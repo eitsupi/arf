@@ -135,6 +135,10 @@ pub struct RLibrary {
     pub r_signalhandlers: *mut c_int,
     pub r_running_as_main_program: *mut c_int,
 
+    // Windows CharacterMode global (used to switch from RGui to LinkDLL after init)
+    #[cfg(windows)]
+    pub character_mode: *mut c_int,
+
     // Event processing functions
     pub r_processevents: unsafe extern "C" fn(),
 
@@ -489,6 +493,12 @@ impl RLibrary {
                 .ok()
                 .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
                 .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
+            let character_mode: *mut c_int = library
+                .get::<c_int>(b"CharacterMode\0")
+                .ok()
+                .and_then(|s| s.into_raw().into_raw().map(|f| f as usize as *mut c_int))
+                .unwrap_or(std::ptr::null_mut());
 
             // Load event processing function (cross-platform)
             load_symbol!(r_processevents, b"R_ProcessEvents\0");
@@ -577,6 +587,8 @@ impl RLibrary {
                 r_interactive,
                 r_signalhandlers,
                 r_running_as_main_program,
+                #[cfg(windows)]
+                character_mode,
                 r_processevents,
                 #[cfg(windows)]
                 ga_peekevent,
