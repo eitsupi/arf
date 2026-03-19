@@ -31,17 +31,19 @@ pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
     let dir = sessions_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "cache directory not found")
     })?;
-    std::fs::create_dir_all(&dir)?;
-
-    // Restrict directory permissions on Unix.
-    // NOTE: There is a brief TOCTOU window between create_dir_all (which uses
-    // the process umask) and set_permissions. Rust's std does not expose
-    // mkdir-with-mode, so this is a known limitation. The session file itself
-    // is created atomically with 0600 via OpenOptions below.
+    // Create directory with mode 0700 atomically on Unix to avoid TOCTOU
+    // race between create_dir_all and set_permissions.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&dir)?;
     }
 
     let path = dir.join(format!("{}.json", info.pid));

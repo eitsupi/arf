@@ -25,11 +25,21 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
         .replace('\n', "\\n")
         .replace('\r', "\\r");
 
-    let tmpfile = tempfile::Builder::new()
+    let tmpfile = match tempfile::Builder::new()
         .prefix(".arf_ipc_")
         .suffix(".dat")
         .tempfile()
-        .expect("Failed to create temp file for IPC capture");
+    {
+        Ok(f) => f,
+        Err(e) => {
+            return EvaluateResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                value: None,
+                error: Some(format!("Failed to create temp file for IPC capture: {e}")),
+            };
+        }
+    };
     let tmppath = tmpfile.path().display().to_string().replace('\\', "/");
 
     // R code: tryCatch + withVisible for value/error, stdout/stderr via callback.
