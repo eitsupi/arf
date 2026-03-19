@@ -365,4 +365,105 @@ mod ipc_tests {
 
         terminal.quit().expect("Should quit cleanly");
     }
+
+    /// Test that rejecting IPC user_input does not advance the prompt line.
+    ///
+    /// When the user has typed something in the buffer, IPC user_input should
+    /// be rejected with USER_IS_TYPING. After rejection, the prompt must stay
+    /// on the same row — no extra blank line should appear.
+    #[test]
+    fn test_ipc_user_input_reject_no_extra_line() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        // Record the prompt row before sending any input
+        let prompt_row_before = terminal
+            .cursor_position()
+            .expect("should get cursor position")
+            .0;
+
+        // Type something into the buffer (without pressing Enter)
+        terminal.send("hello").expect("send text");
+
+        // Give reedline time to process the keystrokes
+        std::thread::sleep(Duration::from_millis(500));
+
+        // Send IPC user_input — should be rejected because buffer is non-empty
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "1 + 1" }),
+        )
+        .expect("IPC request should succeed");
+
+        // Verify rejection
+        let error = response.get("error").expect("should have error");
+        assert_eq!(
+            error.get("code").and_then(|c| c.as_i64()),
+            Some(-32003),
+            "should be USER_IS_TYPING error, got: {response:?}"
+        );
+
+        // Give the terminal time to process the ExternalBreak → continue cycle
+        std::thread::sleep(Duration::from_millis(500));
+
+        // The prompt row should NOT have advanced
+        let prompt_row_after = terminal
+            .cursor_position()
+            .expect("should get cursor position")
+            .0;
+        assert_eq!(
+            prompt_row_before, prompt_row_after,
+            "prompt row should not advance after rejected IPC (before={}, after={})",
+            prompt_row_before, prompt_row_after
+        );
+
+        // Verify the user's typed text is still visible on the current line
+        terminal
+            .current_line()
+            .assert_contains("hello")
+            .expect("user's typed text should still be visible");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that IPC user_input does not create an extra blank prompt line.
+    ///
+    /// After accepting and executing an IPC user_input, the next prompt should
+    /// appear immediately after the R output — no extra blank line in between.
+    #[test]
+    fn test_ipc_user_input_no_extra_blank_line() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        // Send IPC user_input with a command that produces known output
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "cat('marker_output\\n')" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert!(
+            response
+                .get("result")
+                .and_then(|r| r.get("accepted"))
+                .and_then(|a| a.as_bool())
+                == Some(true),
+            "user_input should be accepted, got: {response:?}"
+        );
+
+        // Wait for output and next prompt
+        terminal
+            .expect("marker_output")
+            .expect("should see R output");
+        terminal.wait_for_prompt().expect("should return to prompt");
+
+        // The line immediately above the prompt should be the R output,
+        // not a blank line.
+        terminal
+            .previous_line(1)
+            .assert_contains("marker_output")
+            .expect("line above prompt should be R output, not a blank line");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
 }

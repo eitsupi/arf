@@ -23,7 +23,7 @@ crossterm = "0.29"
 crokey = "1.4"
 nu-ansi-term = { version = "0.50", features = ["derive_serde_style"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
-reedline = { git = "https://github.com/nushell/reedline.git", rev = "5145350c4a5d4ae59934be129431dcad3edbf084", features = ["sqlite", "idle_callback"] }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "beb43685030b8feab8afb3bda47d901451bc4698", features = ["sqlite", "idle_callback"] }
 
 # Configuration
 dirs = "6.0"
