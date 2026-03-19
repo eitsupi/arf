@@ -208,11 +208,13 @@ pub fn process_meta_command(
             // Inspired by the felp package: https://github.com/atusy/felp
             let query = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
             // Mark alternate mode so IPC requests are rejected immediately
-            // instead of hanging. Not using a RAII guard because panics in
-            // the browser would crash the process anyway (no catch_unwind).
+            // instead of hanging. Save and restore the previous state so that
+            // nested alternate modes (e.g., help inside shell mode) are not
+            // clobbered.
+            let was_alternate = crate::ipc::is_in_alternate_mode();
             crate::ipc::set_in_alternate_mode(true);
             let help_result = run_help_browser(&query);
-            crate::ipc::set_in_alternate_mode(false);
+            crate::ipc::set_in_alternate_mode(was_alternate);
             if let Err(e) = help_result {
                 arf_println!("Error in help browser: {}", e);
             }
@@ -353,11 +355,13 @@ fn process_history_browse(
     };
 
     // Mark alternate mode so IPC requests are rejected immediately
-    // instead of hanging. Not using a RAII guard because panics in
-    // the browser would crash the process anyway (no catch_unwind).
+    // instead of hanging. Save and restore the previous state so that
+    // nested alternate modes (e.g., history inside shell mode) are not
+    // clobbered.
+    let was_alternate = crate::ipc::is_in_alternate_mode();
     crate::ipc::set_in_alternate_mode(true);
     let browser_result = run_history_browser(db_path, mode);
-    crate::ipc::set_in_alternate_mode(false);
+    crate::ipc::set_in_alternate_mode(was_alternate);
 
     match browser_result {
         Ok(HistoryBrowserResult::Copied(cmd)) => {

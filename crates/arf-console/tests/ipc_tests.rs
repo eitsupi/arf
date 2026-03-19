@@ -203,11 +203,11 @@ impl Drop for IpcTestProcess {
         thread::sleep(Duration::from_millis(500));
         let _ = self.child.kill();
 
-        // Best-effort join — the reader thread may still be blocked on read()
-        // after child kill on some platforms. Thread leak is acceptable for tests.
-        if let Some(handle) = self._reader_handle.take() {
-            let _ = handle.join();
-        }
+        // Intentionally do NOT join the reader thread — it may be permanently
+        // blocked on pty_reader.read() after child kill, which would hang Drop
+        // (and thus the entire test run). Leaking the thread is acceptable for
+        // tests; the OS reclaims it on process exit.
+        let _ = self._reader_handle.take();
     }
 }
 

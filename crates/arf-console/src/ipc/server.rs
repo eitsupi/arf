@@ -55,6 +55,10 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
 
+    // Channel for the server thread to confirm successful bind before we
+    // write the session file.
+    let (bind_tx, bind_rx) = std::sync::mpsc::sync_channel::<Result<(), std::io::Error>>(1);
+
     let join_handle = std::thread::Builder::new()
         .name("arf-ipc-server".into())
         .spawn(move || {
@@ -64,11 +68,26 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
-                if let Err(e) = run_server(&path, tx, token_clone).await {
+                if let Err(e) = run_server(&path, tx, token_clone, bind_tx).await {
                     log::error!("IPC server error: {}", e);
                 }
             });
         })?;
+
+    // Wait for the server thread to confirm that bind succeeded.
+    match bind_rx.recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            let _ = join_handle.join();
+            return Err(e);
+        }
+        Err(_) => {
+            let _ = join_handle.join();
+            return Err(std::io::Error::other(
+                "IPC server thread failed to start",
+            ));
+        }
+    }
 
     // Store handle for later shutdown (lock is still held — no TOCTOU)
     *guard = Some(ServerState {
@@ -76,9 +95,6 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
         join_handle,
         socket_path: socket_path.clone(),
     });
-
-    // TODO: The server thread may fail to bind after this point. Consider using
-    // a oneshot channel to confirm successful bind before writing the session file.
 
     // Write session metadata
     let cwd = std::env::current_dir()
@@ -186,8 +202,18 @@ async fn run_server(
     socket_path: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
+    bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
 ) -> std::io::Result<()> {
-    let listener = tokio::net::UnixListener::bind(socket_path)?;
+    let listener = match tokio::net::UnixListener::bind(socket_path) {
+        Ok(l) => {
+            let _ = bind_tx.send(Ok(()));
+            l
+        }
+        Err(e) => {
+            let _ = bind_tx.send(Err(std::io::Error::new(e.kind(), e.to_string())));
+            return Err(e);
+        }
+    };
     log::info!("IPC server listening on {}", socket_path);
 
     loop {
@@ -224,15 +250,25 @@ async fn run_server(
     socket_path: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
+    bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
 ) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
-    log::info!("IPC server listening on {}", socket_path);
-
     // Create the first pipe instance
-    let mut server = ServerOptions::new()
+    let mut server = match ServerOptions::new()
         .first_pipe_instance(true)
-        .create(socket_path)?;
+        .create(socket_path)
+    {
+        Ok(s) => {
+            let _ = bind_tx.send(Ok(()));
+            s
+        }
+        Err(e) => {
+            let _ = bind_tx.send(Err(std::io::Error::new(e.kind(), e.to_string())));
+            return Err(e);
+        }
+    };
+    log::info!("IPC server listening on {}", socket_path);
 
     loop {
         tokio::select! {
@@ -381,6 +417,13 @@ where
             json
         );
         stream.write_all(http_response.as_bytes()).await?;
+        return Ok(());
+    }
+
+    // JSON-RPC 2.0 notifications (id is null or absent) must not yield a
+    // response. We don't support any notification methods, so just close the
+    // connection silently.
+    if matches!(&request.id, None | Some(serde_json::Value::Null)) {
         return Ok(());
     }
 
