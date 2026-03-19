@@ -120,6 +120,14 @@ pub fn break_signal() -> Arc<AtomicBool> {
 pub fn start_server() -> std::io::Result<String> {
     let (tx, rx) = std::sync::mpsc::channel();
 
+    // Initialize pending operation storage
+    let _ = pending_ipc_operation();
+
+    // Start the server thread first; only update the receiver after
+    // confirming that the server bound successfully, so a failed start
+    // doesn't break an already-running server's channel.
+    let path = server::start_server(tx)?;
+
     // Store receiver for polling from idle callback.
     // If OnceLock is already set (from a previous stop/start), replace the inner value.
     match IPC_RECEIVER.get() {
@@ -133,10 +141,7 @@ pub fn start_server() -> std::io::Result<String> {
         }
     }
 
-    // Initialize pending operation storage
-    let _ = pending_ipc_operation();
-
-    server::start_server(tx)
+    Ok(path)
 }
 
 /// Stop the IPC server (cleanup on exit).

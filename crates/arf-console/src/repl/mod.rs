@@ -809,10 +809,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
         // This is called when R has finished evaluating and wants new input.
         // Continuation prompts (starting with '+') mean we're still in the same expression.
         // Non-command prompts (menus, etc.) should also not trigger exit status updates.
-        // Track prompt state for IPC: R is now idle and waiting for input
-        if is_r_command_prompt(r_prompt) {
-            crate::ipc::set_r_at_prompt(true);
-        }
+        // Track prompt state for IPC: true when R is idle at the command
+        // prompt, false for continuation/menu/selection prompts so IPC
+        // requests are correctly rejected during non-command prompts.
+        crate::ipc::set_r_at_prompt(is_r_command_prompt(r_prompt));
 
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
             let had_error = if state.line_editor.has_last_command_context() {
