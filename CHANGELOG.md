@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** JSON-RPC IPC server for external tool integration (`--with-ipc`). Supports `evaluate` (silent/visible), `user_input`, and `send` methods over Unix domain sockets (Linux/macOS) or named pipes (Windows). Includes mutual exclusion with console input, alternate mode rejection, and session file discovery.
+- **Experimental:** `:ipc` meta command to start/stop/check IPC server status at runtime
+
 ## [0.2.4] - 2026-03-03
 
 ### Added
