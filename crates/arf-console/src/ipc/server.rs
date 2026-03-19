@@ -155,6 +155,12 @@ fn get_socket_path(pid: u32) -> String {
         use crate::ipc::session::sessions_dir;
         if let Some(dir) = sessions_dir() {
             let _ = std::fs::create_dir_all(&dir);
+            // Restrict directory permissions before binding the socket so
+            // other users cannot connect during the window before write_session.
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            }
             dir.join(format!("{pid}.sock")).display().to_string()
         } else {
             // Fallback to temp dir

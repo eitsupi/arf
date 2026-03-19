@@ -214,14 +214,12 @@ static mut WRITE_CONSOLE_CALLBACK: Option<fn(&str, bool)> = None;
 
 /// IPC capture state for buffering stdout/stderr during evaluate requests.
 struct IpcCaptureState {
-    enabled: bool,
     visible: bool,
     stdout: String,
     stderr: String,
 }
 
 static IPC_CAPTURE: RwLock<IpcCaptureState> = RwLock::new(IpcCaptureState {
-    enabled: false,
     visible: false,
     stdout: String::new(),
     stderr: String::new(),
@@ -1171,7 +1169,6 @@ fn ipc_capture_callback(s: &str, is_error: bool) {
 pub fn start_ipc_capture(visible: bool) {
     {
         let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
-        state.enabled = true;
         state.visible = visible;
         state.stdout.clear();
         state.stderr.clear();
@@ -1185,7 +1182,6 @@ pub fn start_ipc_capture(visible: bool) {
 pub fn finish_ipc_capture() -> (String, String) {
     clear_write_console_callback();
     let mut state = IPC_CAPTURE.write().unwrap_or_else(|e| e.into_inner());
-    state.enabled = false;
     let stdout = strip_ansi_escapes(&std::mem::take(&mut state.stdout));
     let stderr = strip_ansi_escapes(&std::mem::take(&mut state.stderr));
     (stdout, stderr)

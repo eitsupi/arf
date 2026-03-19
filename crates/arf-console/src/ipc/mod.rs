@@ -140,11 +140,44 @@ pub fn start_server() -> std::io::Result<String> {
 }
 
 /// Stop the IPC server (cleanup on exit).
+///
+/// Clears any in-flight IPC state (pending operations, active capture)
+/// so the REPL doesn't get stuck in a pending/capturing state.
 pub fn stop_server() {
     // Drop the receiver so the server thread's mpsc::send fails
     if let Some(receiver) = IPC_RECEIVER.get() {
         *receiver.lock().unwrap() = None;
     }
+
+    // Reply to any pending operation with a cancellation error
+    if let Some(pending) = take_pending_ipc_operation() {
+        match pending.kind {
+            PendingIpcKind::SilentEvaluate { reply }
+            | PendingIpcKind::VisibleEvaluate { reply }
+            | PendingIpcKind::UserInput { reply } => {
+                let _ = reply.send(IpcResponse::Error {
+                    code: R_NOT_AT_PROMPT,
+                    message: "IPC server is shutting down".to_string(),
+                });
+            }
+        }
+    }
+
+    // Finalize any active visible eval capture
+    if let Ok(mut guard) = pending_visible_eval().try_lock()
+        && let Some(pending) = guard.take()
+    {
+        let (stdout, stderr) = arf_libr::finish_ipc_capture();
+        let _ = pending.reply.send(IpcResponse::Error {
+            code: R_NOT_AT_PROMPT,
+            message: format!(
+                "IPC server shut down during visible evaluate (stdout: {} bytes, stderr: {} bytes)",
+                stdout.len(),
+                stderr.len(),
+            ),
+        });
+    }
+
     server::stop_server();
 }
 
@@ -430,7 +463,9 @@ mod tests {
         set_in_alternate_mode(false);
         assert!(!is_in_alternate_mode());
 
-        // handle_request rejects user_input in alternate mode
+        // Set R at prompt so we test alternate mode rejection specifically
+        // (not the R_BUSY / R_NOT_AT_PROMPT check that comes after)
+        set_r_at_prompt(true);
         set_in_alternate_mode(true);
         {
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -466,5 +501,6 @@ mod tests {
 
         // Cleanup
         set_in_alternate_mode(false);
+        set_r_at_prompt(false);
     }
 }
