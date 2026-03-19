@@ -428,6 +428,11 @@ pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 /// Called from the REPL after the buffer check passes. Runs R code with
 /// full output capture (stdout/stderr via WriteConsoleEx, value/error via
 /// temp file). The response is sent synchronously before returning.
+///
+/// **Note:** `evaluate_with_capture` does not support interactive R functions
+/// (e.g., `readline()`, `browser()`, `menu()`). If the evaluated code triggers
+/// a nested `ReadConsole` callback, R will block waiting for input that never
+/// arrives, eventually requiring user intervention from the console.
 pub fn run_silent_eval(code: &str, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
     r_is_at_prompt().store(false, Ordering::Release);
 

@@ -210,6 +210,14 @@ fn parse_var_from_wrapper_script(script_content: &str, var_name: &str) -> Option
 use std::sync::RwLock;
 
 /// Console write callback function pointer storage.
+///
+/// # Safety
+///
+/// This static is only accessed from R's main thread: R is single-threaded,
+/// and both the `r_write_console_ex` callback and the `set_`/`clear_`
+/// functions are called exclusively from that thread. No synchronization
+/// primitive is needed as long as this invariant holds. If multi-threaded
+/// access ever becomes possible, replace with `AtomicPtr` or similar.
 static mut WRITE_CONSOLE_CALLBACK: Option<fn(&str, bool)> = None;
 
 /// IPC capture state for buffering stdout/stderr during evaluate requests.
