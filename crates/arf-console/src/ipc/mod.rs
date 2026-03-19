@@ -218,7 +218,9 @@ fn check_visible_eval_completion() {
                 stderr.len(),
             ),
         });
-        r_is_at_prompt().store(true, Ordering::Release);
+        // Do NOT set r_is_at_prompt(true) here — R may still be evaluating.
+        // The flag will be set when R actually returns to the prompt via
+        // set_r_at_prompt(true) in the normal REPL flow.
         return;
     }
 

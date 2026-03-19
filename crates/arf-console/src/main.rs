@@ -190,12 +190,13 @@ fn run() -> Result<()> {
 
     // Create and run the REPL
     let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
-    repl.run()?;
+    let repl_result = repl.run();
 
-    // Cleanup IPC server on exit (idempotent — also covers :ipc start)
+    // Cleanup IPC server on exit (idempotent — also covers :ipc start).
+    // Called before propagating repl errors to ensure socket/session cleanup.
     ipc::stop_server();
 
-    Ok(())
+    repl_result
 }
 
 /// Load configuration with fallback to defaults on error.

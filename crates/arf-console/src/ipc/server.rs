@@ -424,7 +424,7 @@ async fn dispatch_request(
                 visible: params.visible,
             }
         }
-        "user_input" => {
+        "user_input" | "send" => {
             let params: UserInputParams = match serde_json::from_value(request.params) {
                 Ok(p) => p,
                 Err(e) => {
