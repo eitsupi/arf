@@ -192,10 +192,8 @@ fn run() -> Result<()> {
     let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
     repl.run()?;
 
-    // Cleanup IPC server on exit
-    if cli.with_ipc {
-        ipc::stop_server();
-    }
+    // Cleanup IPC server on exit (idempotent — also covers :ipc start)
+    ipc::stop_server();
 
     Ok(())
 }

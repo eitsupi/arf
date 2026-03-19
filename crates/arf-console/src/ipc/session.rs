@@ -23,14 +23,34 @@ pub fn sessions_dir() -> Option<PathBuf> {
 }
 
 /// Write session metadata to disk.
+///
+/// On Unix, the sessions directory is created with mode 0700 and the session
+/// file with mode 0600 so that other users cannot discover or connect to the
+/// IPC socket.
 pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
     let dir = sessions_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "cache directory not found")
     })?;
     std::fs::create_dir_all(&dir)?;
+
+    // Restrict directory permissions on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+
     let path = dir.join(format!("{}.json", info.pid));
     let json = serde_json::to_string_pretty(info).map_err(std::io::Error::other)?;
-    std::fs::write(&path, json)?;
+    std::fs::write(&path, &json)?;
+
+    // Restrict file permissions on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
     log::info!("Session file written: {}", path.display());
     Ok(())
 }
@@ -94,18 +114,30 @@ pub fn find_session(pid: Option<u32>) -> Option<SessionInfo> {
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        // On Unix, sending signal 0 checks process existence without actually signaling
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+        // On Unix, sending signal 0 checks process existence without actually signaling.
+        // Returns 0 on success, -1 on error. EPERM means the process exists but we
+        // lack permission to signal it — still alive.
+        let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if ret == 0 {
+            return true;
+        }
+        // EPERM: process exists but not owned by us
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
     #[cfg(windows)]
     {
         use std::process::Command;
         Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .output()
             .is_ok_and(|o| {
                 let out = String::from_utf8_lossy(&o.stdout);
-                out.contains(&pid.to_string())
+                // CSV format: "name","pid",...  — match exact PID field
+                out.lines().any(|line| {
+                    line.split(',')
+                        .nth(1)
+                        .is_some_and(|f| f.trim_matches('"') == pid.to_string())
+                })
             })
     }
 }

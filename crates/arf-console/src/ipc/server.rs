@@ -29,7 +29,18 @@ struct ServerState {
 /// Start the IPC server in a background thread.
 ///
 /// Returns the socket path on success.
+/// Returns an error if the server is already running.
 pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
+    // Reject if already running
+    if let Some(handle_store) = SERVER_HANDLE.get()
+        && handle_store.lock().unwrap().is_some()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "IPC server is already running",
+        ));
+    }
+
     let pid = std::process::id();
     let socket_path = get_socket_path(pid);
 
@@ -66,6 +77,9 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     };
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     *handle_store.lock().unwrap() = Some(state);
+
+    // TODO: The server thread may fail to bind after this point. Consider using
+    // a oneshot channel to confirm successful bind before writing the session file.
 
     // Write session metadata
     let cwd = std::env::current_dir()
@@ -250,20 +264,37 @@ async fn handle_connection<S>(mut stream: S, tx: mpsc::Sender<IpcRequest>) -> st
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
-    // Read the full request (up to 1MB)
+    // Read the full request (up to 1MB).
+    //
+    // Two strategies:
+    // 1. HTTP request with Content-Length: read headers, then read exactly body_len bytes.
+    // 2. Raw JSON: read until the buffer parses as valid JSON, or EOF.
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
 
-    // Read until we get a complete JSON object or connection closes.
-    // For simplicity, we read until the connection's read side is done
-    // or we have enough data. Clients should send the full request
-    // and then we respond.
     loop {
         match stream.read(&mut tmp).await? {
             0 => break, // EOF
             n => {
                 buf.extend_from_slice(&tmp[..n]);
-                // Try to parse as JSON to see if we have a complete request
+
+                // Check if we have complete HTTP headers
+                if let Some(header_end) = find_http_header_end(&buf) {
+                    let content_length = parse_content_length(&buf[..header_end]);
+                    if let Some(body_len) = content_length {
+                        let total_needed = header_end + 4 + body_len; // +4 for \r\n\r\n
+                        // Read remaining body bytes if needed
+                        while buf.len() < total_needed {
+                            match stream.read(&mut tmp).await? {
+                                0 => break,
+                                n => buf.extend_from_slice(&tmp[..n]),
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                // Fallback: try to parse as raw JSON
                 if serde_json::from_slice::<serde_json::Value>(&buf).is_ok() {
                     break;
                 }
@@ -425,6 +456,30 @@ async fn dispatch_request(
         }
         Err(_) => JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string()),
     }
+}
+
+/// Find the position of the end of HTTP headers (`\r\n\r\n`).
+/// Returns the byte offset of the first `\r` in the blank line, or None.
+fn find_http_header_end(data: &[u8]) -> Option<usize> {
+    if data.starts_with(b"POST ") || data.starts_with(b"GET ") || data.starts_with(b"PUT ") {
+        data.windows(4).position(|w| w == b"\r\n\r\n")
+    } else {
+        None
+    }
+}
+
+/// Parse the Content-Length header value from HTTP headers.
+fn parse_content_length(headers: &[u8]) -> Option<usize> {
+    let header_str = std::str::from_utf8(headers).ok()?;
+    for line in header_str.split("\r\n") {
+        if let Some(value) = line
+            .strip_prefix("Content-Length:")
+            .or_else(|| line.strip_prefix("content-length:"))
+        {
+            return value.trim().parse().ok();
+        }
+    }
+    None
 }
 
 /// Extract the body from an HTTP request (skip headers).
