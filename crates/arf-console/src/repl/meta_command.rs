@@ -210,7 +210,7 @@ pub fn process_meta_command(
             // Mark alternate mode so IPC requests are rejected immediately
             // instead of hanging. Save and restore the previous state so that
             // nested alternate modes (e.g., help inside shell mode) are not
-            // clobbered.
+            // clobbered. No RAII guard: a panic here aborts the process.
             let was_alternate = crate::ipc::is_in_alternate_mode();
             crate::ipc::set_in_alternate_mode(true);
             let help_result = run_help_browser(&query);
@@ -357,7 +357,7 @@ fn process_history_browse(
     // Mark alternate mode so IPC requests are rejected immediately
     // instead of hanging. Save and restore the previous state so that
     // nested alternate modes (e.g., history inside shell mode) are not
-    // clobbered.
+    // clobbered. No RAII guard: a panic here aborts the process.
     let was_alternate = crate::ipc::is_in_alternate_mode();
     crate::ipc::set_in_alternate_mode(true);
     let browser_result = run_history_browser(db_path, mode);

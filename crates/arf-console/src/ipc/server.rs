@@ -83,9 +83,7 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
         }
         Err(_) => {
             let _ = join_handle.join();
-            return Err(std::io::Error::other(
-                "IPC server thread failed to start",
-            ));
+            return Err(std::io::Error::other("IPC server thread failed to start"));
         }
     }
 
@@ -420,9 +418,10 @@ where
         return Ok(());
     }
 
-    // JSON-RPC 2.0 notifications (id is null or absent) must not yield a
-    // response. We don't support any notification methods, so just close the
-    // connection silently.
+    // JSON-RPC 2.0 notifications (absent id) must not yield a response.
+    // We also treat `"id": null` as a notification — strictly speaking null
+    // is a valid id per the spec, but many clients use it interchangeably
+    // with an absent id, and responding to a null-id request is unhelpful.
     if matches!(&request.id, None | Some(serde_json::Value::Null)) {
         return Ok(());
     }
