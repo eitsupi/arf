@@ -163,9 +163,12 @@ pub fn stop_server() {
         }
     }
 
-    // Finalize any active visible eval capture
-    if let Ok(mut guard) = pending_visible_eval().try_lock()
-        && let Some(pending) = guard.take()
+    // Finalize any active visible eval capture.
+    // Use blocking lock — stop_server is a final cleanup and can afford to wait.
+    if let Some(pending) = pending_visible_eval()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
     {
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
         let _ = pending.reply.send(IpcResponse::Error {

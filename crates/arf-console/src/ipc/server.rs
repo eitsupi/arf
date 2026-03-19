@@ -159,7 +159,11 @@ fn get_socket_path(pid: u32) -> String {
             // other users cannot connect during the window before write_session.
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+                if let Err(e) =
+                    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                {
+                    log::warn!("Failed to set sessions directory permissions to 0700: {e}");
+                }
             }
             dir.join(format!("{pid}.sock")).display().to_string()
         } else {
