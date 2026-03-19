@@ -42,13 +42,23 @@ pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
 
     let path = dir.join(format!("{}.json", info.pid));
     let json = serde_json::to_string_pretty(info).map_err(std::io::Error::other)?;
-    std::fs::write(&path, &json)?;
 
-    // Restrict file permissions on Unix
+    // On Unix, create the file with restricted permissions atomically
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        file.write_all(json.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, &json)?;
     }
 
     log::info!("Session file written: {}", path.display());

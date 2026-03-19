@@ -31,10 +31,11 @@ struct ServerState {
 /// Returns the socket path on success.
 /// Returns an error if the server is already running.
 pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
-    // Reject if already running
-    if let Some(handle_store) = SERVER_HANDLE.get()
-        && handle_store.lock().unwrap().is_some()
-    {
+    // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
+    let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
+    let mut guard = handle_store.lock().unwrap();
+
+    if guard.is_some() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             "IPC server is already running",
@@ -69,14 +70,12 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
             });
         })?;
 
-    // Store handle for later shutdown
-    let state = ServerState {
+    // Store handle for later shutdown (lock is still held — no TOCTOU)
+    *guard = Some(ServerState {
         cancel_token,
         join_handle,
         socket_path: socket_path.clone(),
-    };
-    let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
-    *handle_store.lock().unwrap() = Some(state);
+    });
 
     // TODO: The server thread may fail to bind after this point. Consider using
     // a oneshot channel to confirm successful bind before writing the session file.
@@ -283,6 +282,21 @@ where
                     let content_length = parse_content_length(&buf[..header_end]);
                     if let Some(body_len) = content_length {
                         let total_needed = header_end + 4 + body_len; // +4 for \r\n\r\n
+                        if total_needed > 1_048_576 {
+                            let response = JsonRpcResponse::error(
+                                None,
+                                INVALID_REQUEST,
+                                "Request too large".to_string(),
+                            );
+                            let json = serde_json::to_string(&response).unwrap_or_default();
+                            let http_response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                json.len(),
+                                json
+                            );
+                            stream.write_all(http_response.as_bytes()).await?;
+                            return Ok(());
+                        }
                         // Read remaining body bytes if needed
                         while buf.len() < total_needed {
                             match stream.read(&mut tmp).await? {
@@ -468,15 +482,13 @@ fn find_http_header_end(data: &[u8]) -> Option<usize> {
     }
 }
 
-/// Parse the Content-Length header value from HTTP headers.
+/// Parse the Content-Length header value from HTTP headers (case-insensitive).
 fn parse_content_length(headers: &[u8]) -> Option<usize> {
     let header_str = std::str::from_utf8(headers).ok()?;
+    let prefix = "content-length:";
     for line in header_str.split("\r\n") {
-        if let Some(value) = line
-            .strip_prefix("Content-Length:")
-            .or_else(|| line.strip_prefix("content-length:"))
-        {
-            return value.trim().parse().ok();
+        if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            return line[prefix.len()..].trim().parse().ok();
         }
     }
     None
