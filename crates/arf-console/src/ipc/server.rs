@@ -167,28 +167,26 @@ fn get_socket_path(pid: u32) -> String {
     #[cfg(unix)]
     {
         use crate::ipc::session::sessions_dir;
-        if let Some(dir) = sessions_dir() {
-            let _ = std::fs::create_dir_all(&dir);
-            // Restrict directory permissions before binding the socket so
-            // other users cannot connect during the window before write_session.
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Err(e) =
-                    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
-                {
-                    log::warn!("Failed to set sessions directory permissions to 0700: {e}");
-                }
+        use std::os::unix::fs::DirBuilderExt;
+
+        // Helper: create directory with mode 0700 atomically to avoid
+        // TOCTOU race between create_dir_all and set_permissions.
+        let create_dir_0700 = |dir: &std::path::Path| {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            if let Err(e) = builder.create(dir) {
+                log::warn!("Failed to create directory {}: {e}", dir.display());
             }
+        };
+
+        if let Some(dir) = sessions_dir() {
+            create_dir_0700(&dir);
             dir.join(format!("{pid}.sock")).display().to_string()
         } else {
             // Fallback: create a per-process directory under temp dir with
             // mode 0700 so the socket is not accessible to other users.
-            use std::os::unix::fs::PermissionsExt;
             let dir = std::env::temp_dir().join(format!("arf-{pid}"));
-            let _ = std::fs::create_dir_all(&dir);
-            if let Err(e) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)) {
-                log::warn!("Failed to set fallback socket directory permissions to 0700: {e}");
-            }
+            create_dir_0700(&dir);
             dir.join("ipc.sock").display().to_string()
         }
     }
