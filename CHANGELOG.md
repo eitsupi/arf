@@ -2,10 +2,17 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-03-19
+
 ### Added
 
-- **Experimental:** JSON-RPC IPC server for external tool integration (`--with-ipc`). Supports `evaluate` (silent/visible), `user_input`, and `send` methods over Unix domain sockets (Linux/macOS) or named pipes (Windows). Includes mutual exclusion with console input, alternate mode rejection, and session file discovery.
-- **Experimental:** `:ipc` meta command to start/stop/check IPC server status at runtime
+- **Experimental:** JSON-RPC IPC server for external tool integration (`--with-ipc`). Supports `evaluate` (silent/visible), `user_input`, and `send` methods over Unix domain sockets (Linux/macOS) or named pipes (Windows). Includes mutual exclusion with console input, alternate mode rejection, and session file discovery. (#113)
+- **Experimental:** `:ipc` meta command to start/stop/check IPC server status at runtime (#113)
+- Accept all R-compatible CLI flags (`--slave`, `--no-echo`, `--no-save`, `--no-restore`, etc.) so arf can be used as a drop-in `R` replacement in scripts (#109, #111)
+
+### Fixed
+
+- **Windows:** Switch `CharacterMode` from `RGui` to `LinkDLL` to prevent `system()` calls from hanging (#117)
 
 ## [0.2.4] - 2026-03-03
 
