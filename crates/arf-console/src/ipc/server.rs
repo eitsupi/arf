@@ -181,11 +181,15 @@ fn get_socket_path(pid: u32) -> String {
             }
             dir.join(format!("{pid}.sock")).display().to_string()
         } else {
-            // Fallback to temp dir
-            std::env::temp_dir()
-                .join(format!("arf-{pid}.sock"))
-                .display()
-                .to_string()
+            // Fallback: create a per-process directory under temp dir with
+            // mode 0700 so the socket is not accessible to other users.
+            use std::os::unix::fs::PermissionsExt;
+            let dir = std::env::temp_dir().join(format!("arf-{pid}"));
+            let _ = std::fs::create_dir_all(&dir);
+            if let Err(e) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)) {
+                log::warn!("Failed to set fallback socket directory permissions to 0700: {e}");
+            }
+            dir.join("ipc.sock").display().to_string()
         }
     }
     #[cfg(windows)]
@@ -351,6 +355,9 @@ where
                                 n => buf.extend_from_slice(&tmp[..n]),
                             }
                         }
+                        // Truncate to exactly total_needed so any overshoot
+                        // bytes from the final read() don't corrupt parsing.
+                        buf.truncate(total_needed);
                         break;
                     }
                 }

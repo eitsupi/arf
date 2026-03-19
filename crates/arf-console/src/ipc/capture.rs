@@ -137,7 +137,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
         }
         let len = len as usize;
         if *offset + len > body.len() {
-            return Some(String::new()); // Truncated, return empty
+            return None; // Truncated — treat as absent rather than empty
         }
         let s = String::from_utf8_lossy(&body[*offset..*offset + len]).into_owned();
         *offset += len;
@@ -145,13 +145,26 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
     };
 
     let value = read_field(&mut offset, lengths[0]);
-    let error = read_field(&mut offset, lengths[1]);
+    let error_field = read_field(&mut offset, lengths[1]);
+
+    // If the capture file was truncated, report it as an error so clients
+    // don't silently receive empty results.
+    let truncated =
+        (lengths[0] >= 0 && value.is_none()) || (lengths[1] >= 0 && error_field.is_none());
+    if truncated {
+        return EvaluateResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            value: None,
+            error: Some("Malformed capture file: truncated".to_string()),
+        };
+    }
 
     EvaluateResult {
         stdout: String::new(),
         stderr: String::new(),
         value,
-        error,
+        error: error_field,
     }
 }
 
@@ -271,5 +284,27 @@ mod tests {
         // Round-trip: deserialize back and check
         let deserialized: EvaluateResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.value.as_deref(), result.value.as_deref());
+    }
+
+    #[test]
+    fn test_parse_capture_file_truncated() {
+        let tmpdir = std::env::temp_dir();
+        let path = tmpdir.join(".arf_test_capture_truncated.dat");
+
+        // Header claims value is 100 bytes, but body is only 5 bytes
+        let header = "100 -1\n";
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(header.as_bytes()).unwrap();
+        file.write_all(b"short").unwrap();
+        drop(file);
+
+        let result = parse_capture_file(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(result.value.is_none());
+        assert_eq!(
+            result.error.as_deref(),
+            Some("Malformed capture file: truncated")
+        );
     }
 }
