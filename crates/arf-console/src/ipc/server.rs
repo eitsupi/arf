@@ -5,8 +5,8 @@
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
 use crate::ipc::protocol::{
-    EvaluateParams, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse,
-    JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, UserInputParams,
+    EvaluateParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest,
+    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, UserInputParams,
 };
 use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
@@ -73,15 +73,23 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
         .unwrap_or_default();
 
     let r_version = {
-        let pid = std::process::id();
-        let tmpfile = std::env::temp_dir().join(format!(".arf_ipc_rver_{pid}.txt"));
-        let tmppath = tmpfile.display().to_string().replace('\\', "/");
-        let code =
-            format!(r#"writeLines(paste0(R.version$major, ".", R.version$minor), "{tmppath}")"#);
-        let _ = arf_harp::eval_string(&code);
-        let ver = std::fs::read_to_string(&tmpfile).ok();
-        let _ = std::fs::remove_file(&tmpfile);
-        ver.map(|s| s.trim().to_string())
+        let tmpfile = tempfile::Builder::new()
+            .prefix(".arf_ipc_rver_")
+            .suffix(".txt")
+            .tempfile()
+            .ok();
+        if let Some(ref tmpfile) = tmpfile {
+            let tmppath = tmpfile.path().display().to_string().replace('\\', "/");
+            let code = format!(
+                r#"writeLines(paste0(R.version$major, ".", R.version$minor), "{tmppath}")"#
+            );
+            let _ = arf_harp::eval_string(&code);
+            std::fs::read_to_string(tmpfile.path())
+                .ok()
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        }
     };
 
     let session = SessionInfo {
@@ -266,7 +274,12 @@ where
                         "Request too large".to_string(),
                     );
                     let json = serde_json::to_string(&response).unwrap_or_default();
-                    stream.write_all(json.as_bytes()).await?;
+                    let http_response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        json.len(),
+                        json
+                    );
+                    stream.write_all(http_response.as_bytes()).await?;
                     return Ok(());
                 }
             }
@@ -393,7 +406,7 @@ async fn dispatch_request(
     };
 
     if tx.send(ipc_request).is_err() {
-        return JsonRpcResponse::error(id, -32003, "Main thread unavailable".to_string());
+        return JsonRpcResponse::error(id, INTERNAL_ERROR, "Main thread unavailable".to_string());
     }
 
     // Wait for response from main thread (with timeout)
@@ -407,8 +420,10 @@ async fn dispatch_request(
             }
             IpcResponse::Error { code, message } => JsonRpcResponse::error(id, code, message),
         },
-        Ok(Err(_)) => JsonRpcResponse::error(id, -32003, "Request handler dropped".to_string()),
-        Err(_) => JsonRpcResponse::error(id, -32003, "Request timed out".to_string()),
+        Ok(Err(_)) => {
+            JsonRpcResponse::error(id, INTERNAL_ERROR, "Request handler dropped".to_string())
+        }
+        Err(_) => JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string()),
     }
 }
 

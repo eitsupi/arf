@@ -43,6 +43,7 @@ pulldown-cmark.workspace = true
 unicode-width.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true

@@ -6,17 +6,6 @@
 //! Rust reads it back and constructs the JSON response.
 
 use crate::ipc::protocol::EvaluateResult;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Monotonic counter for unique temp file names.
-static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Generate a unique temp file path for this request.
-fn unique_tmp_path() -> std::path::PathBuf {
-    let pid = std::process::id();
-    let seq = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(".arf_ipc_{pid}_{seq}.dat"))
-}
 
 /// Evaluate R code with output capture, returning stdout, stderr, value, and error.
 ///
@@ -30,10 +19,18 @@ fn unique_tmp_path() -> std::path::PathBuf {
 /// Header format: `value_len error_len`
 /// A length of -1 means the field is NULL/absent.
 pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
-    let escaped = code.replace('\\', "\\\\").replace('\'', "\\'");
+    let escaped = code
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
 
-    let tmpfile = unique_tmp_path();
-    let tmppath = tmpfile.display().to_string().replace('\\', "/");
+    let tmpfile = tempfile::Builder::new()
+        .prefix(".arf_ipc_")
+        .suffix(".dat")
+        .tempfile()
+        .expect("Failed to create temp file for IPC capture");
+    let tmppath = tmpfile.path().display().to_string().replace('\\', "/");
 
     // R code: tryCatch + withVisible for value/error, stdout/stderr via callback.
     let capture_code = format!(
@@ -70,14 +67,15 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
 
     match eval_result {
         Ok(_) => {
-            let mut result = parse_capture_file(&tmpfile);
-            let _ = std::fs::remove_file(&tmpfile);
+            let mut result = parse_capture_file(tmpfile.path());
+            // tmpfile is dropped automatically (and deleted) at scope end
+            drop(tmpfile);
             result.stdout = stdout;
             result.stderr = stderr;
             result
         }
         Err(e) => {
-            let _ = std::fs::remove_file(&tmpfile);
+            drop(tmpfile);
             EvaluateResult {
                 stdout,
                 stderr,
@@ -273,12 +271,5 @@ mod tests {
         // Round-trip: deserialize back and check
         let deserialized: EvaluateResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.value.as_deref(), result.value.as_deref());
-    }
-
-    #[test]
-    fn test_unique_tmp_path() {
-        let p1 = unique_tmp_path();
-        let p2 = unique_tmp_path();
-        assert_ne!(p1, p2);
     }
 }

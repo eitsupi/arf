@@ -1,6 +1,6 @@
 //! IPC server for external tool access to the arf R session.
 //!
-//! Provides a JSON-RPC 2.0 interface over Unix sockets (or TCP on Windows)
+//! Provides a JSON-RPC 2.0 interface over Unix sockets (or named pipes on Windows)
 //! for AI agents, vscode-R, and other tools to interact with R.
 //!
 //! ## Mutual exclusion between console and IPC input
