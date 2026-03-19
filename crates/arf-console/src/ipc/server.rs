@@ -419,10 +419,7 @@ where
     }
 
     // JSON-RPC 2.0 notifications (absent id) must not yield a response.
-    // We also treat `"id": null` as a notification — strictly speaking null
-    // is a valid id per the spec, but many clients use it interchangeably
-    // with an absent id, and responding to a null-id request is unhelpful.
-    if matches!(&request.id, None | Some(serde_json::Value::Null)) {
+    if request.id.is_none() {
         return Ok(());
     }
 
