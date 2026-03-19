@@ -33,7 +33,11 @@ pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
     })?;
     std::fs::create_dir_all(&dir)?;
 
-    // Restrict directory permissions on Unix
+    // Restrict directory permissions on Unix.
+    // NOTE: There is a brief TOCTOU window between create_dir_all (which uses
+    // the process umask) and set_permissions. Rust's std does not expose
+    // mkdir-with-mode, so this is a known limitation. The session file itself
+    // is created atomically with 0600 via OpenOptions below.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

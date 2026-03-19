@@ -281,8 +281,9 @@ where
                 if let Some(header_end) = find_http_header_end(&buf) {
                     let content_length = parse_content_length(&buf[..header_end]);
                     if let Some(body_len) = content_length {
-                        let total_needed = header_end + 4 + body_len; // +4 for \r\n\r\n
-                        if total_needed > 1_048_576 {
+                        // Use checked_add to prevent overflow bypassing the size limit
+                        let total_needed = (header_end + 4).checked_add(body_len);
+                        if total_needed.is_none_or(|n| n > 1_048_576) {
                             let response = JsonRpcResponse::error(
                                 None,
                                 INVALID_REQUEST,
@@ -298,6 +299,8 @@ where
                             return Ok(());
                         }
                         // Read remaining body bytes if needed
+                        // unwrap is safe: we verified total_needed is Some above
+                        let total_needed = total_needed.unwrap();
                         while buf.len() < total_needed {
                             match stream.read(&mut tmp).await? {
                                 0 => break,
