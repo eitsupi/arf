@@ -156,10 +156,21 @@ pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
         std::process::exit(1);
     }
 
-    if let Some(result) = response.result
-        && result.get("accepted").and_then(|v| v.as_bool()) == Some(true)
-    {
-        println!("Shutdown request accepted.");
+    match response.result {
+        Some(result) => {
+            if result.get("accepted").and_then(|v| v.as_bool()) == Some(true) {
+                println!("Shutdown request accepted.");
+            } else {
+                eprintln!("Shutdown request was not accepted by the server.");
+                std::process::exit(1);
+            }
+        }
+        None => {
+            eprintln!(
+                "Server response did not contain a result; shutdown may not have been processed."
+            );
+            std::process::exit(1);
+        }
     }
 
     Ok(())

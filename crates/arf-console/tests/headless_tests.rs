@@ -4,9 +4,9 @@
 //! requiring a terminal (PTY/ConPTY). This makes them runnable on
 //! Windows CI where ConPTY cursor::position() is problematic.
 //!
-//! Each test spawns `arf headless`, waits for IPC readiness via session
-//! file discovery, then uses `arf ipc eval` / `arf ipc send` CLI commands
-//! to interact with R.
+//! Each test spawns `arf headless`, waits for IPC readiness by monitoring
+//! stderr for the "IPC server listening on:" message, then uses
+//! `arf ipc eval` / `arf ipc send` CLI commands to interact with R.
 
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};

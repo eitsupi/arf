@@ -547,6 +547,26 @@ fn test_ipc_user_input() {
     );
 }
 
+/// Test that `shutdown` is rejected in REPL mode (only available in headless).
+#[test]
+#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
+fn test_ipc_shutdown_rejected_in_repl() {
+    let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
+
+    let response = process
+        .request("shutdown", serde_json::json!({}))
+        .expect("shutdown request should get a response");
+
+    let error = response
+        .get("error")
+        .expect("should have error for shutdown in REPL mode");
+    assert_eq!(
+        error.get("code").and_then(|v| v.as_i64()),
+        Some(-32601), // METHOD_NOT_FOUND
+        "should return METHOD_NOT_FOUND: {error:?}"
+    );
+}
+
 /// Test that sequential evaluations work correctly (no stale state).
 #[test]
 #[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
