@@ -69,9 +69,15 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
                                 format!("IPC socket already in use at path: {}", socket_path),
                             ));
                         }
-                        Err(_) => {
-                            // Connection failed; treat as stale and remove
+                        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                            // No listener; treat as stale and remove
                             let _ = std::fs::remove_file(&socket_path);
+                        }
+                        Err(e) => {
+                            return Err(std::io::Error::new(
+                                e.kind(),
+                                format!("Cannot probe socket at {}: {}", socket_path, e),
+                            ));
                         }
                     }
                 } else {
@@ -92,7 +98,8 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
                 // Default path (PID-based) — safe to remove
                 let _ = std::fs::remove_file(&socket_path);
             }
-            Err(_) => {} // Does not exist — nothing to remove
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // Does not exist
+            Err(e) => return Err(e), // Propagate unexpected errors (e.g. EACCES)
         }
     }
 
