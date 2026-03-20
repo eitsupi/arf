@@ -776,18 +776,23 @@ fn test_headless_pid_file() {
     let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
         .expect("Failed to spawn headless with --pid-file");
 
-    // PID file is written right after the IPC server starts. Poll briefly
-    // to avoid a race between the stderr readiness signal and file creation.
+    // PID file is written right after the IPC server starts. Poll until the
+    // file exists AND has non-empty content to avoid reading between create
+    // and write.
     let start = std::time::Instant::now();
-    while !pid_path.exists() {
+    let pid_content = loop {
         assert!(
             start.elapsed() < Duration::from_secs(5),
-            "PID file should appear at: {}",
+            "PID file should appear with content at: {}",
             pid_str
         );
+        if let Ok(content) = std::fs::read_to_string(&pid_path)
+            && !content.is_empty()
+        {
+            break content;
+        }
         std::thread::sleep(Duration::from_millis(50));
-    }
-    let pid_content = std::fs::read_to_string(&pid_path).expect("read PID file");
+    };
     let expected_pid = process.pid.to_string();
     assert_eq!(
         pid_content.trim(),

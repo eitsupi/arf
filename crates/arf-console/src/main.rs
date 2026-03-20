@@ -58,6 +58,18 @@ fn init_logger(log_file: Option<&std::path::Path>) {
         }
         match opts.open(path) {
             Ok(file) => {
+                // Ensure restricted permissions even if the file already existed
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(0o600);
+                    if let Err(e) = std::fs::set_permissions(path, perms) {
+                        eprintln!(
+                            "Warning: could not set permissions on log file {}: {e}",
+                            path.display()
+                        );
+                    }
+                }
                 builder.target(env_logger::Target::Pipe(Box::new(file)));
             }
             Err(e) => {
@@ -108,10 +120,6 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    // Install signal handlers for fatal signals (SIGSEGV, SIGILL, SIGBUS).
-    // This prevents the process from hanging when R encounters a segmentation fault.
-    traps::register_trap_handlers();
-
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
     // detection that could miss global options before the subcommand.
@@ -124,6 +132,11 @@ fn run() -> Result<()> {
         _ => None,
     };
     init_logger(log_file);
+
+    // Install signal handlers for fatal signals (SIGSEGV, SIGILL, SIGBUS).
+    // This prevents the process from hanging when R encounters a segmentation fault.
+    // Must be called after init_logger so trap handlers can log.
+    traps::register_trap_handlers();
 
     // Handle subcommands first
     match &cli.command {
