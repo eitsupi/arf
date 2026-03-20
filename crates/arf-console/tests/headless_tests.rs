@@ -895,21 +895,23 @@ fn test_headless_sigterm_shutdown() {
     let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
         .expect("Failed to spawn headless with --pid-file");
 
-    // Wait for PID file to be written
+    // Wait for "Headless mode ready" on stderr, which is printed after the
+    // ctrlc/SIGTERM handler has been installed. This avoids a race where
+    // SIGTERM arrives before the handler is set up.
     let start = std::time::Instant::now();
     loop {
         assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "PID file should appear at: {}",
-            pid_str
+            start.elapsed() < Duration::from_secs(10),
+            "Headless mode should become ready"
         );
-        if let Ok(content) = std::fs::read_to_string(&pid_path)
-            && !content.is_empty()
-        {
+        if process.stderr_output().contains("Headless mode ready") {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+
+    // PID file should also exist by now (written before the handler)
+    assert!(pid_path.exists(), "PID file should exist at: {}", pid_str);
 
     // Send SIGTERM
     signal::kill(Pid::from_raw(process.pid as i32), Signal::SIGTERM)
