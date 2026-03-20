@@ -55,6 +55,9 @@ fn init_logger(log_file: Option<&std::path::Path>) {
         {
             use std::os::unix::fs::OpenOptionsExt;
             opts.mode(0o600);
+            // Prevent following symlinks when opening the log file to avoid
+            // appending logs to an unintended target via a symlink.
+            opts.custom_flags(libc::O_NOFOLLOW);
         }
         match opts.open(path) {
             Ok(file) => {
