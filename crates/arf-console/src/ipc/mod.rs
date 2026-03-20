@@ -445,7 +445,9 @@ pub fn setup_visible_eval(
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(PendingVisibleEval {
         reply,
-        deadline: std::time::Instant::now() + timeout,
+        deadline: std::time::Instant::now()
+            .checked_add(timeout)
+            .unwrap_or_else(|| std::time::Instant::now() + DEFAULT_EVAL_TIMEOUT),
         timeout,
     });
 }

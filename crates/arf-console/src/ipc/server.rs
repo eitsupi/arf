@@ -518,11 +518,23 @@ async fn dispatch_request(
         }
     };
 
-    // Extract timeout from method (evaluate supports custom timeout)
+    // Extract timeout from method (evaluate supports custom timeout).
+    // Clamp to a reasonable maximum to avoid overflowing Tokio's internal
+    // deadline computations or tying up the server task indefinitely.
+    const MAX_TIMEOUT_MS: u64 = 86_400_000; // 24 hours
+
     let timeout = match &method {
-        IpcMethod::Evaluate { timeout_ms, .. } => timeout_ms
-            .map(std::time::Duration::from_millis)
-            .unwrap_or(super::DEFAULT_EVAL_TIMEOUT),
+        IpcMethod::Evaluate { timeout_ms, .. } => match timeout_ms {
+            Some(ms) if *ms > MAX_TIMEOUT_MS => {
+                return JsonRpcResponse::error(
+                    id,
+                    INVALID_PARAMS,
+                    format!("timeout_ms too large (max {MAX_TIMEOUT_MS} ms, got {ms})"),
+                );
+            }
+            Some(ms) => std::time::Duration::from_millis(*ms),
+            None => super::DEFAULT_EVAL_TIMEOUT,
+        },
         _ => super::DEFAULT_EVAL_TIMEOUT,
     };
 
