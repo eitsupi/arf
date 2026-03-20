@@ -520,10 +520,10 @@ async fn dispatch_request(
 
     // Extract timeout from method (evaluate supports custom timeout)
     let timeout = match &method {
-        IpcMethod::Evaluate { timeout_ms, .. } => {
-            std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000))
-        }
-        _ => std::time::Duration::from_secs(300),
+        IpcMethod::Evaluate { timeout_ms, .. } => timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or(super::DEFAULT_EVAL_TIMEOUT),
+        _ => super::DEFAULT_EVAL_TIMEOUT,
     };
 
     // Send to main thread and await response

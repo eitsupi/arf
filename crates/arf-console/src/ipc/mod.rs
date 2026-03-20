@@ -232,7 +232,8 @@ pub fn poll_ipc_requests() {
 /// for the result. When R returns to the prompt, the evaluation is done and
 /// we can collect captured output and send the reply.
 /// Default timeout for visible evaluate (5 minutes).
-const DEFAULT_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+pub(in crate::ipc) const DEFAULT_EVAL_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(300);
 
 fn check_visible_eval_completion() {
     // Check prompt state for normal completion, and elapsed time for timeout cleanup.
@@ -539,6 +540,11 @@ fn headless_handle_request(request: IpcRequest) {
 
     match method {
         IpcMethod::Evaluate { code, visible, .. } => {
+            // Note: timeout_ms is intentionally ignored here. In headless mode,
+            // evaluate_with_capture() runs synchronously on the main thread, so
+            // R evaluation cannot be interrupted. The server-side oneshot timeout
+            // (in dispatch_request) still applies as a backstop.
+            //
             // When visible=true, captured output is also written to the
             // headless process's stdout/stderr for logging/monitoring.
             r_is_at_prompt().store(false, Ordering::Release);
