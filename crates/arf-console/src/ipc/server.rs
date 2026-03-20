@@ -477,6 +477,7 @@ async fn dispatch_request(
             IpcMethod::Evaluate {
                 code: params.code,
                 visible: params.visible,
+                timeout_ms: params.timeout_ms,
             }
         }
         "shutdown" => {
@@ -517,6 +518,14 @@ async fn dispatch_request(
         }
     };
 
+    // Extract timeout from method (evaluate supports custom timeout)
+    let timeout = match &method {
+        IpcMethod::Evaluate { timeout_ms, .. } => {
+            std::time::Duration::from_millis(timeout_ms.unwrap_or(300_000))
+        }
+        _ => std::time::Duration::from_secs(300),
+    };
+
     // Send to main thread and await response
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     let ipc_request = IpcRequest {
@@ -529,7 +538,7 @@ async fn dispatch_request(
     }
 
     // Wait for response from main thread (with timeout)
-    match tokio::time::timeout(std::time::Duration::from_secs(300), reply_rx).await {
+    match tokio::time::timeout(timeout, reply_rx).await {
         Ok(Ok(response)) => match response {
             IpcResponse::Evaluate(result) => {
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())

@@ -78,6 +78,11 @@ pub struct EvaluateParams {
     pub code: String,
     #[serde(default)]
     pub visible: bool,
+    /// Timeout in milliseconds. If the evaluation does not complete within
+    /// this duration, the server returns a timeout error. `None` means use
+    /// the default (300 seconds).
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 /// Result of the `evaluate` method.
@@ -117,8 +122,14 @@ pub struct IpcRequest {
 
 /// IPC method variants for internal dispatch.
 pub enum IpcMethod {
-    Evaluate { code: String, visible: bool },
-    UserInput { code: String },
+    Evaluate {
+        code: String,
+        visible: bool,
+        timeout_ms: Option<u64>,
+    },
+    UserInput {
+        code: String,
+    },
 }
 
 /// Internal response type sent from main thread back to IPC server thread.

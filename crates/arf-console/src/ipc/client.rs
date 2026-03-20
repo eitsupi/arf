@@ -50,14 +50,24 @@ fn resolve_session(pid: Option<u32>) -> Result<crate::ipc::session::SessionInfo>
 }
 
 /// Evaluate R code in a running arf session.
-pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool) -> Result<()> {
+pub fn cmd_eval(
+    code: &str,
+    pid: Option<u32>,
+    visible: bool,
+    timeout_ms: Option<u64>,
+) -> Result<()> {
     let session = resolve_session(pid)?;
+
+    let mut params = serde_json::json!({ "code": code, "visible": visible });
+    if let Some(ms) = timeout_ms {
+        params["timeout_ms"] = serde_json::json!(ms);
+    }
 
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "evaluate",
-        "params": { "code": code, "visible": visible }
+        "params": params
     });
 
     let response = send_request(&session.socket_path, &request)?;

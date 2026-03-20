@@ -78,6 +78,7 @@ static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceL
 struct PendingVisibleEval {
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
     started_at: std::time::Instant,
+    timeout: std::time::Duration,
 }
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
@@ -101,6 +102,7 @@ pub enum PendingIpcKind {
     /// Reply is deferred until R returns to the prompt.
     VisibleEvaluate {
         reply: tokio::sync::oneshot::Sender<IpcResponse>,
+        timeout: std::time::Duration,
     },
     /// User input: inject code into REPL as if the user typed it.
     /// Reply is sent when the operation is accepted or rejected.
@@ -162,7 +164,7 @@ pub fn stop_server() {
     if let Some(pending) = take_pending_ipc_operation() {
         match pending.kind {
             PendingIpcKind::SilentEvaluate { reply }
-            | PendingIpcKind::VisibleEvaluate { reply }
+            | PendingIpcKind::VisibleEvaluate { reply, .. }
             | PendingIpcKind::UserInput { reply } => {
                 let _ = reply.send(IpcResponse::Error {
                     code: R_NOT_AT_PROMPT,
@@ -229,10 +231,8 @@ pub fn poll_ipc_requests() {
 /// A visible evaluate injects code into the REPL (like user_input) and waits
 /// for the result. When R returns to the prompt, the evaluation is done and
 /// we can collect captured output and send the reply.
-/// Timeout for visible evaluate: if R hasn't returned to the prompt within this
-/// duration, we assume something went wrong and send an error response.
-/// Matches the client-side timeout.
-const VISIBLE_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+/// Default timeout for visible evaluate (5 minutes).
+const DEFAULT_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 fn check_visible_eval_completion() {
     // Check prompt state for normal completion, and elapsed time for timeout cleanup.
@@ -249,8 +249,9 @@ fn check_visible_eval_completion() {
     // may be lost or partial. This is a best-effort cleanup to avoid indefinite hangs;
     // subsequent R output from the timed-out evaluation will go to the default handler.
     if let Some(pending) = guard.as_ref()
-        && pending.started_at.elapsed() > VISIBLE_EVAL_TIMEOUT
+        && pending.started_at.elapsed() > pending.timeout
     {
+        let timeout = pending.timeout;
         let pending = guard.take().unwrap();
         // Best-effort capture cleanup (may race with active R evaluation)
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
@@ -258,7 +259,7 @@ fn check_visible_eval_completion() {
             code: R_BUSY,
             message: format!(
                 "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
-                VISIBLE_EVAL_TIMEOUT.as_secs(),
+                timeout.as_secs(),
                 stdout.len(),
                 stderr.len(),
             ),
@@ -332,7 +333,11 @@ fn handle_request(request: IpcRequest) {
     }
 
     match method {
-        IpcMethod::Evaluate { code, visible } => {
+        IpcMethod::Evaluate {
+            code,
+            visible,
+            timeout_ms,
+        } => {
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(Ordering::Acquire) {
                 let _ = reply.send(IpcResponse::Error {
@@ -342,8 +347,12 @@ fn handle_request(request: IpcRequest) {
                 return;
             }
 
+            let timeout = timeout_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(DEFAULT_EVAL_TIMEOUT);
+
             let kind = if visible {
-                PendingIpcKind::VisibleEvaluate { reply }
+                PendingIpcKind::VisibleEvaluate { reply, timeout }
             } else {
                 PendingIpcKind::SilentEvaluate { reply }
             };
@@ -403,7 +412,7 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation) {
     let message = "User is typing in the console".to_string();
     match op.kind {
         PendingIpcKind::SilentEvaluate { reply }
-        | PendingIpcKind::VisibleEvaluate { reply }
+        | PendingIpcKind::VisibleEvaluate { reply, .. }
         | PendingIpcKind::UserInput { reply } => {
             let _ = reply.send(IpcResponse::Error {
                 code: USER_IS_TYPING,
@@ -417,7 +426,10 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation) {
 ///
 /// Called from the REPL after the buffer check passes. The reply will be
 /// sent later by `check_visible_eval_completion` when R returns to the prompt.
-pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
+pub fn setup_visible_eval(
+    reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    timeout: std::time::Duration,
+) {
     r_is_at_prompt().store(false, Ordering::Release);
 
     // Start WriteConsoleEx capture (visible=true → also print to terminal)
@@ -429,6 +441,7 @@ pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
         .unwrap_or_else(|e| e.into_inner()) = Some(PendingVisibleEval {
         reply,
         started_at: std::time::Instant::now(),
+        timeout,
     });
 }
 
@@ -525,7 +538,7 @@ fn headless_handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
     match method {
-        IpcMethod::Evaluate { code, visible } => {
+        IpcMethod::Evaluate { code, visible, .. } => {
             // When visible=true, captured output is also written to the
             // headless process's stdout/stderr for logging/monitoring.
             r_is_at_prompt().store(false, Ordering::Release);
@@ -613,6 +626,7 @@ mod tests {
                 method: IpcMethod::Evaluate {
                     code: "1+1".to_string(),
                     visible: false,
+                    timeout_ms: None,
                 },
                 reply: reply_tx,
             };

@@ -880,8 +880,8 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // to the reedline loop below to wait for user input.
                     run_silent_eval(&op.code, reply);
                 }
-                PendingIpcKind::VisibleEvaluate { reply } => {
-                    setup_visible_eval(reply);
+                PendingIpcKind::VisibleEvaluate { reply, timeout } => {
+                    setup_visible_eval(reply, timeout);
                     let prompt_str = "agent> ";
                     println!("{}{}", prompt_str.dark_cyan(), op.code);
                     if !op.code.is_empty() {
@@ -1126,8 +1126,8 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 
                         // Visible evaluate / user input: accept, inject code into REPL
                         match op.kind {
-                            PendingIpcKind::VisibleEvaluate { reply } => {
-                                setup_visible_eval(reply);
+                            PendingIpcKind::VisibleEvaluate { reply, timeout } => {
+                                setup_visible_eval(reply, timeout);
                             }
                             PendingIpcKind::UserInput { reply } => {
                                 accept_user_input(reply);

@@ -300,6 +300,9 @@ pub enum IpcAction {
         /// Also show output in the REPL terminal
         #[arg(long)]
         visible: bool,
+        /// Timeout in milliseconds (default: 300000 = 5 minutes)
+        #[arg(long)]
+        timeout: Option<u64>,
     },
     /// Send code as user input to a running session (shown in REPL)
     Send {

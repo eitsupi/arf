@@ -960,13 +960,17 @@ _arf() {
             return 0
             ;;
         arf__ipc__eval)
-            opts="-h --pid --visible --help <CODE>"
+            opts="-h --pid --visible --timeout --help <CODE>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
                 --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --timeout)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
