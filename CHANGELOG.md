@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Headless:** Configure custom pager, browser, and graphics device options on startup to prevent `?topic` from spawning an interactive pager (`less`), `browseURL()` from opening a browser, and `plot()` from attempting to open X11/quartz in display-less environments
+
 ## [0.2.5] - 2026-03-19
 
 ### Added

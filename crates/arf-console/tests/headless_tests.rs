@@ -613,3 +613,45 @@ fn test_headless_shutdown_via_ipc() {
         .wait_for_exit(Duration::from_secs(10))
         .expect("headless process should exit after shutdown");
 }
+
+/// Test that help pages are captured via the custom pager instead of
+/// spawning an interactive pager like `less`.
+#[test]
+fn test_headless_help_does_not_hang() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // ?mean triggers R's help system which would normally open a pager.
+    // With our custom pager, the help text should be captured in stdout.
+    let result = process
+        .ipc_eval_with_timeout("?mean", 15000)
+        .expect("help eval should run");
+    assert!(
+        result.success,
+        "help should succeed without hanging. stderr: {}",
+        result.stderr
+    );
+    // The help text for `mean` should contain the word "mean" somewhere
+    assert!(
+        result.stdout.to_lowercase().contains("mean"),
+        "help output should contain 'mean': {}",
+        result.stdout
+    );
+}
+
+/// Test that plot() does not hang or error in headless mode.
+/// The graphics device should default to a file-based device (png/pdf).
+#[test]
+fn test_headless_plot_does_not_hang() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // plot() would normally try to open X11/quartz. In headless mode,
+    // our custom device function should create a file-based device instead.
+    let result = process
+        .ipc_eval_with_timeout("plot(1:10); dev.off()", 15000)
+        .expect("plot eval should run");
+    assert!(
+        result.success,
+        "plot should succeed without hanging. stderr: {}",
+        result.stderr
+    );
+}

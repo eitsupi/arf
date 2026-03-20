@@ -345,6 +345,13 @@ fn run_headless(
     #[cfg(windows)]
     source_r_profiles(&r_args);
 
+    // Configure R options for headless operation:
+    // - Redirect pager output (help, file.show) to stdout so it gets captured
+    //   by evaluate_with_capture instead of spawning an interactive pager (less)
+    // - Set default graphics device to file-based (png/pdf) instead of X11
+    //   to avoid DISPLAY-related errors or hangs in headless environments
+    configure_headless_r_options();
+
     // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
@@ -386,6 +393,83 @@ fn run_headless(
     ipc::stop_server();
 
     Ok(())
+}
+
+/// Configure R options for headless mode.
+///
+/// Sets up pager redirection and graphics device defaults so that commands
+/// like `?mean` or `plot(1:10)` don't spawn interactive programs (less, X11)
+/// that would block or corrupt the headless server.
+fn configure_headless_r_options() {
+    let code = r#"
+local({
+    # Force text-based help output (no HTML browser)
+    options(help_type = "text")
+
+    # Custom pager: dump file contents to stdout instead of spawning less/more.
+    # Output goes through WriteConsoleEx callback, so evaluate_with_capture
+    # picks it up automatically.
+    .arf_headless_pager <- function(files, header = NULL, title = NULL,
+                                    delete.file = FALSE, ...) {
+        files <- as.character(files)
+        if (length(files) == 0L) return(invisible(NULL))
+
+        if (!is.null(title) && length(title) >= 1L && nzchar(title[[1L]])) {
+            cat(title[[1L]], "\n", sep = "")
+        }
+
+        for (i in seq_along(files)) {
+            path <- files[[i]]
+            if (!nzchar(path) || !file.exists(path)) next
+
+            if (!is.null(header) && length(header) >= i && nzchar(header[[i]])) {
+                cat(header[[i]], "\n", sep = "")
+            }
+
+            tryCatch(
+                cat(readLines(path, warn = FALSE), sep = "\n"),
+                error = function(e) NULL
+            )
+
+            if (isTRUE(delete.file)) unlink(path, force = TRUE)
+        }
+        invisible(NULL)
+    }
+
+    options(pager = .arf_headless_pager)
+    options(help.pager = .arf_headless_pager)
+
+    # Suppress browseURL() — just print the URL
+    options(browser = function(url, ...) { cat(url, "\n"); invisible(0L) })
+
+    # Default graphics device: png with pdf fallback.
+    # Prevents X11/quartz from being opened in headless environments.
+    .arf_headless_device <- function(...) {
+        path <- tempfile("arf-headless-plot-", fileext = ".png")
+        ok <- FALSE
+        tryCatch({
+            grDevices::png(filename = path, ...)
+            ok <- TRUE
+        }, error = function(e) NULL)
+
+        if (!ok) {
+            path <- tempfile("arf-headless-plot-", fileext = ".pdf")
+            grDevices::pdf(file = path, ...)
+        }
+
+        # Enable display list recording for potential future plot retrieval
+        try(grDevices::dev.control(displaylist = "enable"), silent = TRUE)
+        invisible(NULL)
+    }
+
+    options(device = .arf_headless_device)
+})
+"#;
+
+    match arf_harp::eval_string(code) {
+        Ok(_) => log::info!("Headless R options configured (pager, graphics device)"),
+        Err(e) => log::warn!("Failed to configure headless R options: {:?}", e),
+    }
 }
 
 /// Handle config subcommands.
