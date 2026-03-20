@@ -79,7 +79,7 @@ tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros", "
 tokio-util = "0.7"
 
 # Signal handling
-ctrlc = "3.4"
+ctrlc = { version = "3.4", features = ["termination"] }
 
 # Testing
 insta = "1.46"
