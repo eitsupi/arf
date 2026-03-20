@@ -274,7 +274,7 @@ fn send_request(
             let mut response_buf = Vec::new();
             match tokio::time::timeout(timeout, pipe.read_to_end(&mut response_buf)).await {
                 Ok(result) => result?,
-                Err(_) => anyhow::bail!("Request timed out after {}ms", timeout.as_millis()),
+                Err(_) => anyhow::bail!("Request timed out after {}s", timeout.as_secs()),
             };
 
             parse_http_response(&response_buf)
