@@ -657,11 +657,12 @@ fn test_headless_plot_does_not_hang() {
         "plot should succeed without hanging. stderr: {}",
         result.stderr
     );
-    // Verify the device was file-based (png or pdf), not X11/quartz
+    // Verify the device is non-interactive: png/pdf from our custom device,
+    // or quartz_off_screen on macOS (quartz works headlessly unlike X11)
     let stdout = &result.stdout;
     assert!(
-        stdout.contains("png") || stdout.contains("pdf"),
-        "graphics device should be file-based (png or pdf), got: {}",
+        stdout.contains("png") || stdout.contains("pdf") || stdout.contains("quartz_off_screen"),
+        "graphics device should be non-interactive, got: {}",
         stdout
     );
 }
