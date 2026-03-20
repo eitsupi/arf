@@ -43,6 +43,7 @@ impl HeadlessProcess {
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
+        let quiet = extra_args.contains(&"--quiet");
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
@@ -68,7 +69,7 @@ impl HeadlessProcess {
         let shutdown_clone = Arc::clone(&shutdown);
         let shutdown_clone2 = Arc::clone(&shutdown);
 
-        // Channel to signal IPC readiness
+        // Channel to signal IPC readiness (used in non-quiet mode)
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
         let mut ready_tx = Some(ready_tx);
 
@@ -118,15 +119,44 @@ impl HeadlessProcess {
         });
 
         // Wait for IPC readiness
-        match ready_rx.recv_timeout(STARTUP_TIMEOUT) {
-            Ok(()) => {}
-            Err(_) => {
-                // Kill the process and report what we got
-                let _ = child.kill();
-                let output = stderr_output.lock().map(|s| s.clone()).unwrap_or_default();
-                return Err(format!(
-                    "Timeout waiting for headless IPC server to start. Stderr:\n{output}"
-                ));
+        if quiet {
+            // In quiet mode, stderr messages are suppressed. Poll the session
+            // file to detect readiness instead.
+            let start = std::time::Instant::now();
+            loop {
+                if start.elapsed() > STARTUP_TIMEOUT {
+                    let _ = child.kill();
+                    return Err("Timeout waiting for session file in quiet mode".to_string());
+                }
+                // Check if the process has exited early (e.g. error)
+                if let Ok(Some(status)) = child.try_wait() {
+                    let output = stderr_output.lock().map(|s| s.clone()).unwrap_or_default();
+                    return Err(format!(
+                        "Headless process exited early with {status}. Stderr:\n{output}"
+                    ));
+                }
+                // Try to connect via ipc status to confirm readiness
+                let probe = Command::new(bin_path)
+                    .args(["ipc", "status", "--pid", &pid.to_string()])
+                    .output();
+                if let Ok(output) = probe
+                    && output.status.success()
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        } else {
+            match ready_rx.recv_timeout(STARTUP_TIMEOUT) {
+                Ok(()) => {}
+                Err(_) => {
+                    // Kill the process and report what we got
+                    let _ = child.kill();
+                    let output = stderr_output.lock().map(|s| s.clone()).unwrap_or_default();
+                    return Err(format!(
+                        "Timeout waiting for headless IPC server to start. Stderr:\n{output}"
+                    ));
+                }
             }
         }
 
@@ -684,5 +714,114 @@ fn test_headless_browse_url_does_not_hang() {
         result.stdout.contains("https://example.com"),
         "URL should be captured in stdout: {}",
         result.stdout
+    );
+}
+
+/// Test that --bind allows specifying a custom socket path.
+#[cfg(unix)]
+#[test]
+fn test_headless_bind_custom_socket() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let sock_path = tmp.path().join("custom.sock");
+    let sock_str = sock_path.display().to_string();
+
+    let process = HeadlessProcess::spawn_with_args(&["--bind", &sock_str])
+        .expect("Failed to spawn headless with --bind");
+
+    // The custom socket file should exist
+    assert!(
+        sock_path.exists(),
+        "custom socket file should exist at: {}",
+        sock_str
+    );
+
+    // IPC should work via the session discovery (which picks up the custom path)
+    let result = process.ipc_eval("1 + 1").expect("eval should work");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    assert!(
+        result.stdout.contains("[1] 2"),
+        "should return result: {}",
+        result.stdout
+    );
+
+    // stderr should mention the custom path
+    let stderr = process.stderr_output();
+    assert!(
+        stderr.contains(&sock_str),
+        "stderr should mention custom socket path: {}",
+        stderr
+    );
+}
+
+/// Test that --pid-file writes the PID and is cleaned up on shutdown.
+#[test]
+fn test_headless_pid_file() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_path = tmp.path().join("arf.pid");
+    let pid_str = pid_path.display().to_string();
+
+    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
+        .expect("Failed to spawn headless with --pid-file");
+
+    // PID file is written right after the IPC server starts. Poll briefly
+    // to avoid a race between the stderr readiness signal and file creation.
+    let start = std::time::Instant::now();
+    while !pid_path.exists() {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "PID file should appear at: {}",
+            pid_str
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let pid_content = std::fs::read_to_string(&pid_path).expect("read PID file");
+    let expected_pid = process.pid.to_string();
+    assert_eq!(
+        pid_content.trim(),
+        expected_pid,
+        "PID file should contain process PID"
+    );
+
+    // Shutdown via IPC and verify PID file is cleaned up
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(result.success, "shutdown should succeed");
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
+
+    // PID file should be removed on clean shutdown
+    assert!(
+        !pid_path.exists(),
+        "PID file should be removed after shutdown"
+    );
+}
+
+/// Test that --quiet suppresses status messages on stderr.
+#[test]
+fn test_headless_quiet_mode() {
+    let process = HeadlessProcess::spawn_with_args(&["--quiet"])
+        .expect("Failed to spawn headless with --quiet");
+
+    // IPC should still work
+    let result = process.ipc_eval("1 + 1").expect("eval should work");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    assert!(
+        result.stdout.contains("[1] 2"),
+        "should return result: {}",
+        result.stdout
+    );
+
+    // stderr should NOT contain the usual status messages
+    let stderr = process.stderr_output();
+    assert!(
+        !stderr.contains("IPC server listening on:"),
+        "quiet mode should suppress IPC listening message, got: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("Headless mode ready"),
+        "quiet mode should suppress ready message, got: {}",
+        stderr
     );
 }

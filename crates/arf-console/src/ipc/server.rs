@@ -31,7 +31,7 @@ struct ServerState {
 ///
 /// Returns the socket path on success.
 /// Returns an error if the server is already running.
-pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
+pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io::Result<String> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -44,7 +44,10 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     }
 
     let pid = std::process::id();
-    let socket_path = get_socket_path(pid);
+    let socket_path = match bind {
+        Some(path) => path.to_string(),
+        None => get_socket_path(pid),
+    };
 
     // Remove stale socket file if it exists
     #[cfg(unix)]

@@ -261,7 +261,7 @@ pub fn process_meta_command(
         "ipc" => {
             let subcmd = parts.get(1).copied().unwrap_or("status");
             match subcmd {
-                "start" => match crate::ipc::start_server() {
+                "start" => match crate::ipc::start_server(None) {
                     Ok(path) => arf_println!("IPC server started: {}", path),
                     Err(e) => arf_println!("Failed to start IPC server: {}", e),
                 },

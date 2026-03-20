@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Headless:** `--bind <path>` option to specify a custom IPC socket path (Unix) or named pipe path (Windows) instead of the default PID-based path
+- **Headless:** `--pid-file <path>` option to write the server PID to a file for process management scripts. The file is removed on clean shutdown
+- **Headless:** `--quiet` flag to suppress status messages on stderr (IPC path, ready, shutdown)
+- **Headless:** `--log-file <path>` option to redirect log output to a file instead of stderr
+
 ### Fixed
 
 - **Headless:** Configure custom pager, browser, and graphics device options on startup to prevent `?topic` from spawning an interactive pager (`less`), `browseURL()` from opening a browser, and `plot()` from attempting to open X11/quartz in display-less environments
