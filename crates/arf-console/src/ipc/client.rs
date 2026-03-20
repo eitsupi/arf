@@ -75,9 +75,10 @@ pub fn cmd_eval(
 
     // Client transport timeout: match the server-side timeout with a small buffer
     // so the server can respond with a proper timeout error before the client gives up.
-    let transport_timeout = timeout_ms
-        .map(|ms| std::time::Duration::from_millis(ms.saturating_add(5000)))
-        .unwrap_or(DEFAULT_TRANSPORT_TIMEOUT);
+    let transport_timeout = match timeout_ms {
+        Some(ms) => std::time::Duration::from_millis(ms.saturating_add(5000)),
+        None => DEFAULT_TRANSPORT_TIMEOUT + std::time::Duration::from_secs(5),
+    };
 
     let response = send_request(&session.socket_path, &request, transport_timeout)?;
 
