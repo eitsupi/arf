@@ -126,6 +126,29 @@ impl HeadlessProcess {
         })
     }
 
+    /// Run `arf ipc eval <code> --pid <pid> --visible` and return output.
+    fn ipc_eval_visible(&self, code: &str) -> Result<IpcOutput, String> {
+        let bin_path = env!("CARGO_BIN_EXE_arf");
+
+        let output = Command::new(bin_path)
+            .args([
+                "ipc",
+                "eval",
+                code,
+                "--pid",
+                &self.pid.to_string(),
+                "--visible",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to run arf ipc eval --visible: {e}"))?;
+
+        Ok(IpcOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        })
+    }
+
     /// Run `arf ipc send <code> --pid <pid>` and return output.
     fn ipc_send(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -338,6 +361,35 @@ fn test_headless_eval_multiline() {
     assert!(
         result.stdout.contains("[1] 11"),
         "should evaluate multiline code: {}",
+        result.stdout
+    );
+}
+
+/// Test that `arf ipc eval --visible` works in headless mode.
+///
+/// In headless mode there is no terminal, so visible vs silent is handled
+/// identically (both use capture). This test verifies the `--visible` flag
+/// is accepted and the output is still returned correctly.
+#[test]
+fn test_headless_eval_visible() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval_visible("cat('vis_test\\n'); 99")
+        .expect("visible eval should run");
+    assert!(
+        result.success,
+        "visible eval should succeed. stderr: {}",
+        result.stderr
+    );
+    assert!(
+        result.stdout.contains("vis_test"),
+        "should capture stdout: {}",
+        result.stdout
+    );
+    assert!(
+        result.stdout.contains("[1] 99"),
+        "should capture value: {}",
         result.stdout
     );
 }
