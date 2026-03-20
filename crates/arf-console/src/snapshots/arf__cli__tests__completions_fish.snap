@@ -140,10 +140,14 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_using_subcommand headless" -l bind -d 'Bind IPC socket to a specific path instead of the default' -r -F
+complete -c arf -n "__fish_arf_using_subcommand headless" -l pid-file -d 'Write server PID to a file (removed on shutdown)' -r -F
+complete -c arf -n "__fish_arf_using_subcommand headless" -l log-file -d 'Redirect log output to a file instead of stderr' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-connections -d '[R] Set max number of connections to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l quiet -d 'Suppress status messages on stderr (IPC path, ready, shutdown)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-environ -d '[R] Don\'t read the site and user environment files'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'
