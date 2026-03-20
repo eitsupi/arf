@@ -267,6 +267,11 @@ async fn run_server(
             // The default PID-based path lives under a 0700 sessions dir,
             // but custom --bind paths inherit the parent dir's umask.
             // Use fd-based fchmod to avoid TOCTOU symlink race.
+            //
+            // NOTE: There is a brief race window between bind() and fchmod()
+            // where the socket exists with umask-inherited permissions. For
+            // custom --bind paths in shared directories, operators should
+            // ensure the parent directory is restricted (e.g. 0700).
             {
                 use std::os::unix::io::AsRawFd;
                 let ret = unsafe { libc::fchmod(l.as_raw_fd(), 0o600) };
