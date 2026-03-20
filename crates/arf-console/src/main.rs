@@ -101,7 +101,7 @@ fn run() -> Result<()> {
     // must NOT call env_logger::init() again for that path (it panics on
     // double-init). We defer logger initialization for headless and do it
     // early for everything else.
-    let is_headless = std::env::args().any(|a| a == "headless");
+    let is_headless = std::env::args().nth(1).is_some_and(|a| a == "headless");
     if !is_headless {
         env_logger::init();
     }

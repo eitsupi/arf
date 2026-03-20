@@ -825,3 +825,32 @@ fn test_headless_quiet_mode() {
         stderr
     );
 }
+
+/// Test that --log-file redirects log output to a file.
+#[test]
+fn test_headless_log_file() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let log_path = tmp.path().join("arf.log");
+    let log_str = log_path.display().to_string();
+
+    let process = HeadlessProcess::spawn_with_args(&["--log-file", &log_str])
+        .expect("Failed to spawn headless with --log-file");
+
+    // Run a simple eval to ensure the server is working
+    let result = process.ipc_eval("1 + 1").expect("eval should work");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+
+    // The log file should exist (env_logger writes to it)
+    assert!(log_path.exists(), "log file should exist at: {}", log_str);
+
+    // With RUST_LOG not set, the default level may not produce output.
+    // But the file should at least have been created by the append-open.
+    // If there IS content, it should look like log output (not status messages).
+    let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
+    // Status messages (eprintln) should still go to stderr, not the log file
+    assert!(
+        !log_content.contains("Headless mode ready"),
+        "log file should not contain status messages: {}",
+        log_content
+    );
+}
