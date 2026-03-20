@@ -304,11 +304,12 @@ impl HeadlessProcess {
     }
 
     /// Wait for the headless process to exit, with a timeout.
-    fn wait_for_exit(&mut self, timeout: Duration) -> Result<(), String> {
+    /// Returns the `ExitStatus` on success.
+    fn wait_for_exit(&mut self, timeout: Duration) -> Result<std::process::ExitStatus, String> {
         let start = std::time::Instant::now();
         loop {
             match self.child.try_wait() {
-                Ok(Some(_)) => return Ok(()),
+                Ok(Some(status)) => return Ok(status),
                 Ok(None) => {
                     if start.elapsed() > timeout {
                         return Err("Process did not exit within timeout".to_string());
@@ -881,11 +882,10 @@ fn test_headless_log_file() {
     );
 }
 
-/// Test that SIGTERM triggers graceful shutdown with PID file cleanup.
+/// Helper: test that a Unix signal triggers graceful shutdown with PID file cleanup.
 #[cfg(unix)]
-#[test]
-fn test_headless_sigterm_shutdown() {
-    use nix::sys::signal::{self, Signal};
+fn assert_signal_graceful_shutdown(signal: nix::sys::signal::Signal) {
+    use nix::sys::signal;
     use nix::unistd::Pid;
 
     let tmp = tempfile::TempDir::new().expect("create temp dir");
@@ -896,14 +896,23 @@ fn test_headless_sigterm_shutdown() {
         .expect("Failed to spawn headless with --pid-file");
 
     // Wait for "Headless mode ready" on stderr, which is printed after the
-    // ctrlc/SIGTERM handler has been installed. This avoids a race where
-    // SIGTERM arrives before the handler is set up.
+    // signal handler has been installed. This avoids a race where the signal
+    // arrives before the handler is set up.
     let start = std::time::Instant::now();
     loop {
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "Headless mode should become ready"
-        );
+        if start.elapsed() > Duration::from_secs(10) {
+            panic!(
+                "Headless mode should become ready.\nServer output:\n{}",
+                process.server_output()
+            );
+        }
+        // Fail fast if the process has already exited
+        if let Ok(Some(status)) = process.child.try_wait() {
+            panic!(
+                "Headless process exited early with {status}.\nServer output:\n{}",
+                process.server_output()
+            );
+        }
         if process.stderr_output().contains("Headless mode ready") {
             break;
         }
@@ -913,18 +922,36 @@ fn test_headless_sigterm_shutdown() {
     // PID file should also exist by now (written before the handler)
     assert!(pid_path.exists(), "PID file should exist at: {}", pid_str);
 
-    // Send SIGTERM
-    signal::kill(Pid::from_raw(process.pid as i32), Signal::SIGTERM)
-        .expect("failed to send SIGTERM");
+    // Send the signal
+    signal::kill(Pid::from_raw(process.pid as i32), signal)
+        .unwrap_or_else(|e| panic!("failed to send {signal}: {e}"));
 
     // Process should exit gracefully
-    process
+    let status = process
         .wait_for_exit(Duration::from_secs(10))
-        .expect("headless process should exit after SIGTERM");
+        .unwrap_or_else(|e| panic!("headless process should exit after {signal}: {e}"));
+    assert!(
+        status.success(),
+        "headless process should exit cleanly after {signal}, got: {status}"
+    );
 
     // PID file should be cleaned up
     assert!(
         !pid_path.exists(),
-        "PID file should be removed after SIGTERM shutdown"
+        "PID file should be removed after {signal} shutdown"
     );
+}
+
+/// Test that SIGTERM triggers graceful shutdown with PID file cleanup.
+#[cfg(unix)]
+#[test]
+fn test_headless_sigterm_shutdown() {
+    assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGTERM);
+}
+
+/// Test that SIGHUP triggers graceful shutdown with PID file cleanup.
+#[cfg(unix)]
+#[test]
+fn test_headless_sighup_shutdown() {
+    assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGHUP);
 }
