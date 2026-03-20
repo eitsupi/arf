@@ -95,23 +95,22 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    // Default logger for non-headless modes (headless has its own init_logger
-    // call that may redirect to a file).
-    // The Headless branch calls init_logger() before run_headless(), so we
-    // must NOT call env_logger::init() again for that path (it panics on
-    // double-init). We defer logger initialization for headless and do it
-    // early for everything else.
-    let is_headless = std::env::args().nth(1).is_some_and(|a| a == "headless");
-    if !is_headless {
-        env_logger::init();
-    }
-
     // Install signal handlers for fatal signals (SIGSEGV, SIGILL, SIGBUS).
     // This prevents the process from hanging when R encounters a segmentation fault.
     traps::register_trap_handlers();
 
-    // Parse command-line arguments
+    // Parse command-line arguments first, then initialize the logger exactly
+    // once based on the parsed command. This avoids the fragile pre-parse
+    // detection that could miss global options before the subcommand.
     let cli = Cli::parse();
+
+    // Extract log_file from headless command (if applicable) and initialize
+    // the logger once. Non-headless modes use the default stderr target.
+    let log_file = match &cli.command {
+        Some(Commands::Headless { log_file, .. }) => log_file.as_deref(),
+        _ => None,
+    };
+    init_logger(log_file);
 
     // Handle subcommands first
     match &cli.command {
@@ -135,7 +134,7 @@ fn run() -> Result<()> {
             bind,
             pid_file,
             quiet,
-            log_file,
+            log_file: _, // already used above for init_logger
             vanilla,
             no_environ,
             no_site_file,
@@ -145,10 +144,6 @@ fn run() -> Result<()> {
             min_nsize,
             min_vsize,
         }) => {
-            // Configure logging before anything else so all log output
-            // goes to the right destination.
-            init_logger(log_file.as_deref());
-
             let r_args_builder = RArgsBuilder {
                 vanilla: *vanilla,
                 no_environ: *no_environ,
