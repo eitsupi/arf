@@ -647,11 +647,21 @@ fn test_headless_plot_does_not_hang() {
     // plot() would normally try to open X11/quartz. In headless mode,
     // our custom device function should create a file-based device instead.
     let result = process
-        .ipc_eval_with_timeout("plot(1:10); dev.off()", 15000)
+        .ipc_eval_with_timeout(
+            "plot(1:10); dev_name <- names(dev.cur()); dev.off(); cat(dev_name)",
+            15000,
+        )
         .expect("plot eval should run");
     assert!(
         result.success,
         "plot should succeed without hanging. stderr: {}",
         result.stderr
+    );
+    // Verify the device was file-based (png or pdf), not X11/quartz
+    let stdout = &result.stdout;
+    assert!(
+        stdout.contains("png") || stdout.contains("pdf"),
+        "graphics device should be file-based (png or pdf), got: {}",
+        stdout
     );
 }

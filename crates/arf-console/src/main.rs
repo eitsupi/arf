@@ -453,8 +453,10 @@ local({
         }, error = function(e) NULL)
 
         if (!ok) {
+            # Don't forward ... to pdf() — png uses pixel dimensions while
+            # pdf uses inches, so forwarding would create absurdly large files.
             path <- tempfile("arf-headless-plot-", fileext = ".pdf")
-            grDevices::pdf(file = path, ...)
+            grDevices::pdf(file = path)
         }
 
         # Enable display list recording for potential future plot retrieval
