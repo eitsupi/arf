@@ -441,7 +441,7 @@ pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 pub fn run_silent_eval(code: &str, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
     r_is_at_prompt().store(false, Ordering::Release);
 
-    let result = capture::evaluate_with_capture(code);
+    let result = capture::evaluate_with_capture(code, false);
 
     r_is_at_prompt().store(true, Ordering::Release);
     let _ = reply.send(IpcResponse::Evaluate(result));
@@ -500,11 +500,11 @@ fn headless_handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
     match method {
-        IpcMethod::Evaluate { code, visible: _ } => {
-            // In headless mode, visible vs silent is irrelevant (no terminal).
-            // Always use capture mode for consistent output collection.
+        IpcMethod::Evaluate { code, visible } => {
+            // When visible=true, captured output is also written to the
+            // headless process's stdout/stderr for logging/monitoring.
             r_is_at_prompt().store(false, Ordering::Release);
-            let result = capture::evaluate_with_capture(&code);
+            let result = capture::evaluate_with_capture(&code, visible);
             r_is_at_prompt().store(true, Ordering::Release);
             let _ = reply.send(IpcResponse::Evaluate(result));
         }

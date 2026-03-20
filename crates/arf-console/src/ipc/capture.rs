@@ -12,13 +12,15 @@ use crate::ipc::protocol::EvaluateResult;
 /// Runs on the R main thread (called from idle callback).
 ///
 /// stdout/stderr are captured via the WriteConsoleEx callback.
+/// When `visible` is true, captured output is also written to the process's
+/// stdout/stderr (useful for headless mode logging or REPL display).
 /// value and error are written to a temp file by R code.
 ///
 /// Protocol: R writes a binary file with 2 length-prefixed fields:
 ///   `<header_line>\n<value><error>`
 /// Header format: `value_len error_len`
 /// A length of -1 means the field is NULL/absent.
-pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
+pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
     let escaped = code
         .replace('\\', "\\\\")
         .replace('\'', "\\'")
@@ -68,7 +70,7 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
     );
 
     // Start capturing via WriteConsoleEx callback
-    arf_libr::start_ipc_capture(false);
+    arf_libr::start_ipc_capture(visible);
 
     let eval_result = arf_harp::eval_string(&capture_code);
 

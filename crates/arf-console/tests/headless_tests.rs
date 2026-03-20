@@ -26,8 +26,12 @@ struct HeadlessProcess {
     child: Child,
     pid: u32,
     _stderr_thread: Option<thread::JoinHandle<()>>,
+    _stdout_thread: Option<thread::JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
+    /// Collected stderr from the headless process (status messages, visible eval errors).
     stderr_output: Arc<Mutex<String>>,
+    /// Collected stdout from the headless process (visible eval output).
+    stdout_output: Arc<Mutex<String>>,
 }
 
 impl HeadlessProcess {
@@ -55,10 +59,14 @@ impl HeadlessProcess {
         let pid = child.id();
 
         let stderr = child.stderr.take().expect("stderr should be piped");
+        let stdout = child.stdout.take().expect("stdout should be piped");
         let stderr_output = Arc::new(Mutex::new(String::new()));
+        let stdout_output = Arc::new(Mutex::new(String::new()));
         let stderr_clone = Arc::clone(&stderr_output);
+        let stdout_clone = Arc::clone(&stdout_output);
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
+        let shutdown_clone2 = Arc::clone(&shutdown);
 
         // Channel to signal IPC readiness
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
@@ -88,6 +96,27 @@ impl HeadlessProcess {
             }
         });
 
+        // Spawn a thread to read stdout (visible eval output goes here)
+        let stdout_thread = thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut buf = String::new();
+            loop {
+                if shutdown_clone2.load(Ordering::Relaxed) {
+                    break;
+                }
+                buf.clear();
+                match reader.read_line(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if let Ok(mut output) = stdout_clone.lock() {
+                            output.push_str(&buf);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         // Wait for IPC readiness
         match ready_rx.recv_timeout(STARTUP_TIMEOUT) {
             Ok(()) => {}
@@ -105,8 +134,10 @@ impl HeadlessProcess {
             child,
             pid,
             _stderr_thread: Some(stderr_thread),
+            _stdout_thread: Some(stdout_thread),
             shutdown,
             stderr_output,
+            stdout_output,
         })
     }
 
@@ -182,12 +213,24 @@ impl HeadlessProcess {
     }
 
     /// Get the headless process's stderr output collected so far.
-    #[allow(dead_code)]
     fn stderr_output(&self) -> String {
         self.stderr_output
             .lock()
             .map(|s| s.clone())
             .unwrap_or_default()
+    }
+
+    /// Get the headless process's stdout output collected so far.
+    fn stdout_output(&self) -> String {
+        self.stdout_output
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get all output (stdout + stderr) from the headless process.
+    fn server_output(&self) -> String {
+        format!("{}{}", self.stdout_output(), self.stderr_output())
     }
 }
 
@@ -365,17 +408,18 @@ fn test_headless_eval_multiline() {
     );
 }
 
-/// Test that `arf ipc eval --visible` works in headless mode.
+/// Test that `arf ipc eval --visible` outputs to the headless process's stderr.
 ///
-/// In headless mode there is no terminal, so visible vs silent is handled
-/// identically (both use capture). This test verifies the `--visible` flag
-/// is accepted and the output is still returned correctly.
+/// When `--visible` is used, the evaluated output should appear both in the
+/// JSON-RPC response AND on the headless process's stdout/stderr (via
+/// WriteConsoleEx passthrough). This is useful for monitoring/logging.
 #[test]
 fn test_headless_eval_visible() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
+    // Use a unique marker to avoid matching startup messages
     let result = process
-        .ipc_eval_visible("cat('vis_test\\n'); 99")
+        .ipc_eval_visible("cat('vis_marker_42\\n')")
         .expect("visible eval should run");
     assert!(
         result.success,
@@ -383,14 +427,48 @@ fn test_headless_eval_visible() {
         result.stderr
     );
     assert!(
-        result.stdout.contains("vis_test"),
-        "should capture stdout: {}",
+        result.stdout.contains("vis_marker_42"),
+        "JSON-RPC response should capture stdout: {}",
         result.stdout
     );
+
+    // Give the headless process a moment to flush output
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Verify the output also appeared on the headless process's stdout/stderr.
+    // R's cat() goes through WriteConsoleEx non-error channel → print! → stdout.
+    let server_output = process.server_output();
     assert!(
-        result.stdout.contains("[1] 99"),
-        "should capture value: {}",
+        server_output.contains("vis_marker_42"),
+        "visible eval output should appear on headless process output: {}",
+        server_output
+    );
+}
+
+/// Test that silent eval does NOT output to the headless process.
+#[test]
+fn test_headless_eval_silent_no_server_output() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval("cat('silent_marker_99\\n')")
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed");
+    assert!(
+        result.stdout.contains("silent_marker_99"),
+        "JSON-RPC response should capture stdout: {}",
         result.stdout
+    );
+
+    // Give a moment for any output to flush
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Silent eval should NOT appear on the headless process
+    let server_output = process.server_output();
+    assert!(
+        !server_output.contains("silent_marker_99"),
+        "silent eval output should NOT appear on headless process output: {}",
+        server_output
     );
 }
 
