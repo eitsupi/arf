@@ -6,6 +6,9 @@ use crate::ipc::protocol::JsonRpcResponse;
 use crate::ipc::session::{find_session, list_sessions};
 use anyhow::{Context, Result};
 
+/// Default transport timeout for client-side socket reads (5 minutes).
+const DEFAULT_TRANSPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// List all active arf sessions.
 pub fn cmd_list() -> Result<()> {
     let sessions = list_sessions();
@@ -70,7 +73,13 @@ pub fn cmd_eval(
         "params": params
     });
 
-    let response = send_request(&session.socket_path, &request)?;
+    // Client transport timeout: match the server-side timeout with a small buffer
+    // so the server can respond with a proper timeout error before the client gives up.
+    let transport_timeout = timeout_ms
+        .map(|ms| std::time::Duration::from_millis(ms.saturating_add(5000)))
+        .unwrap_or(DEFAULT_TRANSPORT_TIMEOUT);
+
+    let response = send_request(&session.socket_path, &request, transport_timeout)?;
 
     if let Some(error) = response.error {
         eprintln!("Error: {} (code {})", error.message, error.code);
@@ -132,7 +141,7 @@ pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
         "params": { "code": code }
     });
 
-    let response = send_request(&session.socket_path, &request)?;
+    let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT)?;
 
     if let Some(error) = response.error {
         eprintln!("Error: {} (code {})", error.message, error.code);
@@ -159,7 +168,7 @@ pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
         "params": {}
     });
 
-    let response = send_request(&session.socket_path, &request)?;
+    let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT)?;
 
     if let Some(error) = response.error {
         eprintln!("Error: {} (code {})", error.message, error.code);
@@ -205,7 +214,11 @@ pub fn cmd_status(pid: Option<u32>) -> Result<()> {
 }
 
 /// Send a JSON-RPC request to the socket and return the response.
-fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRpcResponse> {
+fn send_request(
+    socket_path: &str,
+    request: &serde_json::Value,
+    timeout: std::time::Duration,
+) -> Result<JsonRpcResponse> {
     let body = serde_json::to_string(request)?;
 
     #[cfg(unix)]
@@ -226,7 +239,7 @@ fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRp
 
         let mut stream = UnixStream::connect(socket_path)
             .with_context(|| format!("Failed to connect to {socket_path}"))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
+        stream.set_read_timeout(Some(timeout))?;
         stream.write_all(http_request.as_bytes())?;
         stream.shutdown(std::net::Shutdown::Write)?;
 
@@ -256,16 +269,11 @@ fn send_request(socket_path: &str, request: &serde_json::Value) -> Result<JsonRp
             pipe.write_all(body.as_bytes()).await?;
             pipe.flush().await?;
 
-            // Read response with timeout (300s, same as Unix)
+            // Read response with timeout
             let mut response_buf = Vec::new();
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(300),
-                pipe.read_to_end(&mut response_buf),
-            )
-            .await
-            {
+            match tokio::time::timeout(timeout, pipe.read_to_end(&mut response_buf)).await {
                 Ok(result) => result?,
-                Err(_) => anyhow::bail!("Request timed out after 300 seconds"),
+                Err(_) => anyhow::bail!("Request timed out after {}s", timeout.as_secs()),
             };
 
             parse_http_response(&response_buf)

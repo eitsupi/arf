@@ -77,8 +77,9 @@ static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceL
 
 struct PendingVisibleEval {
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
-    started_at: std::time::Instant,
-    timeout: std::time::Duration,
+    /// Absolute deadline — aligned with the server-side timeout so that the
+    /// REPL-side cleanup never outlives the server's oneshot wait.
+    deadline: std::time::Instant,
 }
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
@@ -250,17 +251,15 @@ fn check_visible_eval_completion() {
     // may be lost or partial. This is a best-effort cleanup to avoid indefinite hangs;
     // subsequent R output from the timed-out evaluation will go to the default handler.
     if let Some(pending) = guard.as_ref()
-        && pending.started_at.elapsed() > pending.timeout
+        && std::time::Instant::now() > pending.deadline
     {
-        let timeout = pending.timeout;
         let pending = guard.take().unwrap();
         // Best-effort capture cleanup (may race with active R evaluation)
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
         let _ = pending.reply.send(IpcResponse::Error {
             code: R_BUSY,
             message: format!(
-                "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
-                timeout.as_secs(),
+                "Visible evaluate timed out (stdout: {} bytes, stderr: {} bytes)",
                 stdout.len(),
                 stderr.len(),
             ),
@@ -436,13 +435,14 @@ pub fn setup_visible_eval(
     // Start WriteConsoleEx capture (visible=true → also print to terminal)
     arf_libr::start_ipc_capture(true);
 
-    // Store reply channel — will be consumed by check_visible_eval_completion
+    // Store reply channel — will be consumed by check_visible_eval_completion.
+    // The deadline is set from now + timeout, aligning with the server-side
+    // oneshot timeout that started slightly earlier in dispatch_request.
     *pending_visible_eval()
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(PendingVisibleEval {
         reply,
-        started_at: std::time::Instant::now(),
-        timeout,
+        deadline: std::time::Instant::now() + timeout,
     });
 }
 
