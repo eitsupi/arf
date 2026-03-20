@@ -450,16 +450,17 @@ local({
     # Default graphics device: png with pdf fallback.
     # Prevents X11/quartz from being opened in headless environments.
     .arf_headless_device <- function(...) {
+        # Ignore ... to avoid unit mismatch: dev.new() passes width/height
+        # in inches, but png() interprets them as pixels by default.
+        # Use sensible defaults; Stage 2 can add proper argument handling.
         path <- tempfile("arf-headless-plot-", fileext = ".png")
         ok <- FALSE
         tryCatch({
-            grDevices::png(filename = path, ...)
+            grDevices::png(filename = path)
             ok <- TRUE
         }, error = function(e) NULL)
 
         if (!ok) {
-            # Don't forward ... to pdf() — png uses pixel dimensions while
-            # pdf uses inches, so forwarding would create absurdly large files.
             path <- tempfile("arf-headless-plot-", fileext = ".pdf")
             grDevices::pdf(file = path)
         }
