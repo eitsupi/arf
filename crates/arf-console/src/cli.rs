@@ -256,6 +256,9 @@ pub enum Commands {
         ///
         /// Unix: filesystem path (e.g. /tmp/my-arf.sock)
         /// Windows: named pipe path (e.g. \\.\pipe\my-arf)
+        // NOTE: FilePath is not ideal on Windows (named pipes aren't filesystem
+        // paths), but using cfg_attr to vary the hint per platform would cause
+        // shell completion snapshots to differ across machines.
         #[arg(long, value_hint = ValueHint::FilePath)]
         bind: Option<String>,
 

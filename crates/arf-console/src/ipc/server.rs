@@ -261,12 +261,15 @@ async fn run_server(
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
 ) -> std::io::Result<()> {
+    // Temporarily tighten umask to 0o177 so the socket is created with 0o600
+    // permissions, closing the window between bind() and fchmod() where the
+    // socket could be accessible via the parent dir's default umask.
+    let old_umask = unsafe { libc::umask(0o177) };
     let listener = match tokio::net::UnixListener::bind(socket_path) {
         Ok(l) => {
-            // Restrict socket permissions so only the owner can connect.
-            // The default PID-based path lives under a 0700 sessions dir,
-            // but custom --bind paths inherit the parent dir's umask.
-            // Use fd-based fchmod to avoid TOCTOU symlink race.
+            unsafe { libc::umask(old_umask) };
+            // Belt-and-suspenders: also fchmod in case the platform ignores
+            // umask for Unix sockets (unlikely but defensive).
             {
                 use std::os::unix::io::AsRawFd;
                 let ret = unsafe { libc::fchmod(l.as_raw_fd(), 0o600) };
