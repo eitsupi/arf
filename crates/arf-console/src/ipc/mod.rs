@@ -562,7 +562,11 @@ mod tests {
     /// execution, since all tests share the global `IN_ALTERNATE_MODE` atomic.
     #[test]
     fn test_alternate_mode_flag_and_request_rejection() {
-        // Default should be false
+        // Reset global state first to avoid interference from parallel tests
+        set_in_alternate_mode(false);
+        set_r_at_prompt(false);
+
+        // Should be false after reset
         assert!(!is_in_alternate_mode());
 
         // Toggle on/off
