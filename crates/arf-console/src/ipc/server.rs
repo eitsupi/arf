@@ -453,7 +453,7 @@ async fn dispatch_request(
 
     // Reject immediately if in alternate mode (shell, history/help browser).
     // These modes block the main thread, so requests would hang in the mpsc
-    // queue until the 300s timeout.
+    // queue until the request timeout expires.
     if super::is_in_alternate_mode() {
         return JsonRpcResponse::error(
             id,

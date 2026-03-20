@@ -77,8 +77,8 @@ static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceL
 
 struct PendingVisibleEval {
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
-    /// Absolute deadline — aligned with the server-side timeout so that the
-    /// REPL-side cleanup never outlives the server's oneshot wait.
+    /// Absolute deadline — best-effort aligned with the server-side timeout so that
+    /// REPL-side cleanup should not outlive the server's oneshot wait under normal conditions.
     deadline: std::time::Instant,
     /// Original timeout duration, kept for diagnostic messages.
     timeout: std::time::Duration,
