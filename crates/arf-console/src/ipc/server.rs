@@ -285,6 +285,7 @@ async fn run_server(
             l
         }
         Err(e) => {
+            unsafe { libc::umask(old_umask) };
             let _ = bind_tx.send(Err(std::io::Error::new(e.kind(), e.to_string())));
             return Err(e);
         }
