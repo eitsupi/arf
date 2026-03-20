@@ -69,8 +69,13 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
                                 format!("IPC socket already in use at path: {}", socket_path),
                             ));
                         }
-                        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
-                            // No listener; treat as stale and remove
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::ConnectionRefused
+                                || e.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            // ConnectionRefused: no listener (stale socket).
+                            // NotFound: socket disappeared between metadata
+                            // check and connect (race); safe to proceed.
                             let _ = std::fs::remove_file(&socket_path);
                         }
                         Err(e) => {

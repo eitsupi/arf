@@ -146,7 +146,15 @@ impl HeadlessProcess {
                 }
                 // Try a real RPC to confirm R is ready
                 let probe = Command::new(bin_path)
-                    .args(["ipc", "eval", "1", "--pid", &pid.to_string()])
+                    .args([
+                        "ipc",
+                        "eval",
+                        "1",
+                        "--pid",
+                        &pid.to_string(),
+                        "--timeout",
+                        "500",
+                    ])
                     .output();
                 match probe {
                     Ok(output) if output.status.success() => break,
