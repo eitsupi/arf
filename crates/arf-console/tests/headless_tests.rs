@@ -126,10 +126,16 @@ impl HeadlessProcess {
             // has been called, unlike `ipc status` which only checks the
             // session file.
             let start = std::time::Instant::now();
+            let mut last_probe_err = String::new();
             loop {
                 if start.elapsed() > STARTUP_TIMEOUT {
                     let _ = child.kill();
-                    return Err("Timeout waiting for IPC eval to succeed in quiet mode".to_string());
+                    let server_stderr = stderr_output.lock().map(|s| s.clone()).unwrap_or_default();
+                    return Err(format!(
+                        "Timeout waiting for IPC eval to succeed in quiet mode.\n\
+                         Server stderr:\n{server_stderr}\n\
+                         Last probe error:\n{last_probe_err}"
+                    ));
                 }
                 // Check if the process has exited early (e.g. error)
                 if let Ok(Some(status)) = child.try_wait() {
@@ -142,10 +148,14 @@ impl HeadlessProcess {
                 let probe = Command::new(bin_path)
                     .args(["ipc", "eval", "1", "--pid", &pid.to_string()])
                     .output();
-                if let Ok(output) = probe
-                    && output.status.success()
-                {
-                    break;
+                match probe {
+                    Ok(output) if output.status.success() => break,
+                    Ok(output) => {
+                        last_probe_err = String::from_utf8_lossy(&output.stderr).into_owned();
+                    }
+                    Err(e) => {
+                        last_probe_err = e.to_string();
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }

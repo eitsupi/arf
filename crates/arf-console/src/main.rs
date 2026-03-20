@@ -455,16 +455,11 @@ fn run_headless(
     if let Some(pid_path) = pid_file
         && let Err(e) = write_pid_file(pid_path)
     {
-        // Best-effort cleanup of partially created PID file and IPC state
-        if let Err(clean_err) = std::fs::remove_file(pid_path) {
-            log::debug!(
-                "Failed to remove partially created PID file {:?}: {}",
-                pid_path,
-                clean_err
-            );
-        }
+        // Do not attempt to remove the PID file here: write_pid_file uses
+        // create_new and may have failed before creating it (e.g. AlreadyExists),
+        // so pid_path may refer to a pre-existing user-managed file.
 
-        // Stop IPC server to avoid leaving stale socket/session behind
+        // Stop IPC server to avoid leaving a stale socket/session behind.
         ipc::stop_server();
 
         return Err(e);
