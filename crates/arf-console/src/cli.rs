@@ -238,7 +238,7 @@ pub enum Commands {
     /// Starts R and an IPC server without the interactive console.
     /// Useful for AI agents that only need IPC access, or for
     /// CI environments where a terminal is not available.
-    /// Press Ctrl+C or send a shutdown request via IPC to exit.
+    /// Exit with Ctrl+C or `arf ipc shutdown`.
     Headless {
         /// Path to configuration file
         #[arg(short, long, value_hint = ValueHint::FilePath)]
@@ -311,6 +311,12 @@ pub enum IpcAction {
     },
     /// Show status of a running arf session
     Status {
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
+    /// Shut down a running arf headless session
+    Shutdown {
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,

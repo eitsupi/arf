@@ -138,6 +138,33 @@ pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
     Ok(())
 }
 
+/// Shut down a running arf headless session.
+pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
+    let session = resolve_session(pid)?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "shutdown",
+        "params": {}
+    });
+
+    let response = send_request(&session.socket_path, &request)?;
+
+    if let Some(error) = response.error {
+        eprintln!("Error: {} (code {})", error.message, error.code);
+        std::process::exit(1);
+    }
+
+    if let Some(result) = response.result
+        && result.get("accepted").and_then(|v| v.as_bool()) == Some(true)
+    {
+        println!("Shutdown request accepted.");
+    }
+
+    Ok(())
+}
+
 /// Show status of a specific session.
 pub fn cmd_status(pid: Option<u32>) -> Result<()> {
     let session = find_session(pid).ok_or_else(|| {

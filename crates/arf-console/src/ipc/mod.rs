@@ -29,6 +29,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+/// Shutdown flag for headless mode. When set, the headless event loop exits.
+/// Not set in REPL mode (shutdown is only available in headless mode).
+static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
 static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>>>> =
@@ -455,6 +459,27 @@ pub fn accept_user_input(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 /// Mark that R is now at the command prompt (idle, ready for input).
 pub fn set_r_at_prompt(at_prompt: bool) {
     r_is_at_prompt().store(at_prompt, Ordering::Release);
+}
+
+/// Register the headless shutdown flag so `shutdown` IPC method can trigger it.
+///
+/// Must be called before `start_server()` in headless mode. In REPL mode
+/// this is never called, so `shutdown` requests return METHOD_NOT_FOUND.
+pub fn set_headless_shutdown(flag: Arc<AtomicBool>) {
+    let _ = HEADLESS_SHUTDOWN.set(flag);
+}
+
+/// Try to trigger headless shutdown. Returns true if the flag was set.
+///
+/// Called from the server thread when a `shutdown` request arrives.
+/// Returns false if not in headless mode (flag not registered).
+pub fn trigger_headless_shutdown() -> bool {
+    if let Some(flag) = HEADLESS_SHUTDOWN.get() {
+        flag.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    }
 }
 
 // ── Headless mode API ────────────────────────────────────────────────────

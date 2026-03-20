@@ -212,6 +212,39 @@ impl HeadlessProcess {
         })
     }
 
+    /// Run `arf ipc shutdown --pid <pid>` and return output.
+    fn ipc_shutdown(&self) -> Result<IpcOutput, String> {
+        let bin_path = env!("CARGO_BIN_EXE_arf");
+
+        let output = Command::new(bin_path)
+            .args(["ipc", "shutdown", "--pid", &self.pid.to_string()])
+            .output()
+            .map_err(|e| format!("Failed to run arf ipc shutdown: {e}"))?;
+
+        Ok(IpcOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        })
+    }
+
+    /// Wait for the headless process to exit, with a timeout.
+    fn wait_for_exit(&mut self, timeout: Duration) -> Result<(), String> {
+        let start = std::time::Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) => {
+                    if start.elapsed() > timeout {
+                        return Err("Process did not exit within timeout".to_string());
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => return Err(format!("Error waiting for process: {e}")),
+            }
+        }
+    }
+
     /// Get the headless process's stderr output collected so far.
     fn stderr_output(&self) -> String {
         self.stderr_output
@@ -489,4 +522,32 @@ fn test_headless_vanilla_flag() {
         "should return result: {}",
         result.stdout
     );
+}
+
+/// Test that `arf ipc shutdown` gracefully stops a headless process.
+#[test]
+fn test_headless_shutdown_via_ipc() {
+    let mut process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // Verify it's running
+    let status = process.ipc_status().expect("status should work");
+    assert!(status.success, "should be running");
+
+    // Send shutdown
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(
+        result.success,
+        "shutdown should succeed. stderr: {}",
+        result.stderr
+    );
+    assert!(
+        result.stdout.contains("Shutdown request accepted"),
+        "should report acceptance: {}",
+        result.stdout
+    );
+
+    // Process should exit within a few seconds
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
 }

@@ -345,12 +345,15 @@ fn run_headless(
     #[cfg(windows)]
     source_r_profiles(&r_args);
 
+    // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
+    let shutdown = Arc::new(AtomicBool::new(false));
+    ipc::set_headless_shutdown(shutdown.clone());
+
     // Start IPC server
     let ipc_path = ipc::start_server().context("Failed to start IPC server")?;
     eprintln!("IPC server listening on: {}", ipc_path);
 
     // Set up Ctrl+C handler
-    let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_signal = shutdown.clone();
     if let Err(e) = ctrlc::set_handler(move || {
         shutdown_signal.store(true, Ordering::Release);
@@ -474,6 +477,7 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         IpcAction::Eval { code, pid, visible } => ipc::client::cmd_eval(code, *pid, *visible),
         IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
         IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
+        IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
     }
 }
 

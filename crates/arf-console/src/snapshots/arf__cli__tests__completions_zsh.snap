@@ -273,6 +273,13 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(shutdown)
+_arguments "${_arguments_options[@]}" : \
+'--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_arf__ipc__help_commands" \
@@ -298,6 +305,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(shutdown)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -424,6 +435,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(shutdown)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -589,6 +604,7 @@ _arf__help__ipc_commands() {
 'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
 'send:Send code as user input to a running session (shown in REPL)' \
 'status:Show status of a running arf session' \
+'shutdown:Shut down a running arf headless session' \
     )
     _describe -t commands 'arf help ipc commands' commands "$@"
 }
@@ -606,6 +622,11 @@ _arf__help__ipc__list_commands() {
 _arf__help__ipc__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc send commands' commands "$@"
+}
+(( $+functions[_arf__help__ipc__shutdown_commands] )) ||
+_arf__help__ipc__shutdown_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc shutdown commands' commands "$@"
 }
 (( $+functions[_arf__help__ipc__status_commands] )) ||
 _arf__help__ipc__status_commands() {
@@ -674,6 +695,7 @@ _arf__ipc_commands() {
 'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
 'send:Send code as user input to a running session (shown in REPL)' \
 'status:Show status of a running arf session' \
+'shutdown:Shut down a running arf headless session' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf ipc commands' commands "$@"
@@ -690,6 +712,7 @@ _arf__ipc__help_commands() {
 'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
 'send:Send code as user input to a running session (shown in REPL)' \
 'status:Show status of a running arf session' \
+'shutdown:Shut down a running arf headless session' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf ipc help commands' commands "$@"
@@ -714,6 +737,11 @@ _arf__ipc__help__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help send commands' commands "$@"
 }
+(( $+functions[_arf__ipc__help__shutdown_commands] )) ||
+_arf__ipc__help__shutdown_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help shutdown commands' commands "$@"
+}
 (( $+functions[_arf__ipc__help__status_commands] )) ||
 _arf__ipc__help__status_commands() {
     local commands; commands=()
@@ -728,6 +756,11 @@ _arf__ipc__list_commands() {
 _arf__ipc__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc send commands' commands "$@"
+}
+(( $+functions[_arf__ipc__shutdown_commands] )) ||
+_arf__ipc__shutdown_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc shutdown commands' commands "$@"
 }
 (( $+functions[_arf__ipc__status_commands] )) ||
 _arf__ipc__status_commands() {
