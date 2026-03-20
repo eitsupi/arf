@@ -81,10 +81,10 @@ impl HeadlessProcess {
                 }
                 match line {
                     Ok(line) => {
-                        if line.contains("IPC server listening on:") {
-                            if let Some(tx) = ready_tx.take() {
-                                let _ = tx.send(());
-                            }
+                        if line.contains("IPC server listening on:")
+                            && let Some(tx) = ready_tx.take()
+                        {
+                            let _ = tx.send(());
                         }
                         if let Ok(mut output) = stderr_clone.lock() {
                             output.push_str(&line);
