@@ -261,11 +261,16 @@ async fn run_server(
             // Restrict socket permissions so only the owner can connect.
             // The default PID-based path lives under a 0700 sessions dir,
             // but custom --bind paths inherit the parent dir's umask.
+            // Use fd-based fchmod to avoid TOCTOU symlink race.
             {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o600);
-                if let Err(e) = std::fs::set_permissions(socket_path, perms) {
-                    log::warn!("Could not set socket permissions on {}: {}", socket_path, e);
+                use std::os::unix::io::AsRawFd;
+                let ret = unsafe { libc::fchmod(l.as_raw_fd(), 0o600) };
+                if ret != 0 {
+                    log::warn!(
+                        "Could not set socket permissions on {}: {}",
+                        socket_path,
+                        std::io::Error::last_os_error()
+                    );
                 }
             }
             let _ = bind_tx.send(Ok(()));
