@@ -350,7 +350,7 @@ fn run_headless(
     //   by evaluate_with_capture instead of spawning an interactive pager (less)
     // - Set default graphics device to file-based (png/pdf) instead of X11
     //   to avoid DISPLAY-related errors or hangs in headless environments
-    configure_headless_r_options();
+    configure_headless_r_options()?;
 
     // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -400,7 +400,7 @@ fn run_headless(
 /// Sets up pager redirection and graphics device defaults so that commands
 /// like `?mean` or `plot(1:10)` don't spawn interactive programs (less, X11)
 /// that would block or corrupt the headless server.
-fn configure_headless_r_options() {
+fn configure_headless_r_options() -> Result<()> {
     let code = r#"
 local({
     # Force text-based help output (no HTML browser)
@@ -468,10 +468,10 @@ local({
 })
 "#;
 
-    match arf_harp::eval_string(code) {
-        Ok(_) => log::info!("Headless R options configured (pager, graphics device)"),
-        Err(e) => log::warn!("Failed to configure headless R options: {:?}", e),
-    }
+    arf_harp::eval_string(code)
+        .context("Failed to configure headless R options (pager, browser, graphics device)")?;
+    log::info!("Headless R options configured (pager, graphics device)");
+    Ok(())
 }
 
 /// Handle config subcommands.
