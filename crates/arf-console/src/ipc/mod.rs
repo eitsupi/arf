@@ -80,6 +80,8 @@ struct PendingVisibleEval {
     /// Absolute deadline — aligned with the server-side timeout so that the
     /// REPL-side cleanup never outlives the server's oneshot wait.
     deadline: std::time::Instant,
+    /// Original timeout duration, kept for diagnostic messages.
+    timeout: std::time::Duration,
 }
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
@@ -259,7 +261,8 @@ fn check_visible_eval_completion() {
         let _ = pending.reply.send(IpcResponse::Error {
             code: R_BUSY,
             message: format!(
-                "Visible evaluate timed out (stdout: {} bytes, stderr: {} bytes)",
+                "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
+                pending.timeout.as_secs(),
                 stdout.len(),
                 stderr.len(),
             ),
@@ -443,6 +446,7 @@ pub fn setup_visible_eval(
         .unwrap_or_else(|e| e.into_inner()) = Some(PendingVisibleEval {
         reply,
         deadline: std::time::Instant::now() + timeout,
+        timeout,
     });
 }
 
