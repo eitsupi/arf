@@ -557,16 +557,27 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// Drop guard that resets global IPC state on scope exit (including panics).
+    struct GlobalStateGuard;
+
+    impl Drop for GlobalStateGuard {
+        fn drop(&mut self) {
+            set_in_alternate_mode(false);
+            set_r_at_prompt(false);
+        }
+    }
+
     /// Tests for the IN_ALTERNATE_MODE flag and handle_request rejection.
     ///
     /// Serialized with `#[serial]` because all tests that touch the global
-    /// `IN_ALTERNATE_MODE` / `R_AT_PROMPT` atomics must not run concurrently.
+    /// `IN_ALTERNATE_MODE` / `R_IS_AT_PROMPT` atomics must not run concurrently.
     #[test]
     #[serial]
     fn test_alternate_mode_flag_and_request_rejection() {
-        // Reset global state
+        // Reset global state and ensure cleanup on panic via Drop guard
         set_in_alternate_mode(false);
         set_r_at_prompt(false);
+        let _guard = GlobalStateGuard;
 
         assert!(!is_in_alternate_mode());
 
@@ -612,8 +623,6 @@ mod tests {
             }
         }
 
-        // Cleanup
-        set_in_alternate_mode(false);
-        set_r_at_prompt(false);
+        // Cleanup handled by GlobalStateGuard drop
     }
 }
