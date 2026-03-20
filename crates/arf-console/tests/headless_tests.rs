@@ -120,13 +120,15 @@ impl HeadlessProcess {
 
         // Wait for IPC readiness
         if quiet {
-            // In quiet mode, stderr messages are suppressed. Poll the session
-            // file to detect readiness instead.
+            // In quiet mode, stderr messages are suppressed. Probe readiness by
+            // repeatedly running `arf ipc status --pid <pid>` until it succeeds.
             let start = std::time::Instant::now();
             loop {
                 if start.elapsed() > STARTUP_TIMEOUT {
                     let _ = child.kill();
-                    return Err("Timeout waiting for session file in quiet mode".to_string());
+                    return Err(
+                        "Timeout waiting for IPC status to succeed in quiet mode".to_string()
+                    );
                 }
                 // Check if the process has exited early (e.g. error)
                 if let Ok(Some(status)) = child.try_wait() {

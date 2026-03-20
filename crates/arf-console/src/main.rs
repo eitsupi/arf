@@ -439,8 +439,22 @@ fn run_headless(
     }
 
     // Write PID file if requested
-    if let Some(pid_path) = pid_file {
-        write_pid_file(pid_path)?;
+    if let Some(pid_path) = pid_file
+        && let Err(e) = write_pid_file(pid_path)
+    {
+        // Best-effort cleanup of partially created PID file and IPC state
+        if let Err(clean_err) = std::fs::remove_file(pid_path) {
+            log::debug!(
+                "Failed to remove partially created PID file {:?}: {}",
+                pid_path,
+                clean_err
+            );
+        }
+
+        // Stop IPC server to avoid leaving stale socket/session behind
+        ipc::stop_server();
+
+        return Err(e);
     }
 
     // Set up Ctrl+C handler
