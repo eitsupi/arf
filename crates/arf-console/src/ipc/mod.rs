@@ -457,6 +457,70 @@ pub fn set_r_at_prompt(at_prompt: bool) {
     r_is_at_prompt().store(at_prompt, Ordering::Release);
 }
 
+// ── Headless mode API ────────────────────────────────────────────────────
+
+/// Poll and directly process IPC requests in headless mode.
+///
+/// Unlike `poll_ipc_requests` (used by the REPL), this function processes
+/// requests immediately without the ExternalBreak/editor-buffer check,
+/// since there is no interactive editor in headless mode.
+///
+/// Returns `true` if at least one request was processed.
+pub fn headless_poll_and_process() -> bool {
+    let receiver = match IPC_RECEIVER.get() {
+        Some(r) => r,
+        None => return false,
+    };
+
+    let rx = match receiver.try_lock() {
+        Ok(rx) => rx,
+        Err(_) => return false,
+    };
+
+    let rx = match rx.as_ref() {
+        Some(rx) => rx,
+        None => return false,
+    };
+
+    let mut processed = false;
+
+    while let Ok(request) = rx.try_recv() {
+        processed = true;
+        headless_handle_request(request);
+    }
+
+    processed
+}
+
+/// Handle a single IPC request in headless mode.
+///
+/// Processes evaluate and user_input requests directly on the R thread.
+/// No editor buffer check is needed since there is no interactive console.
+fn headless_handle_request(request: IpcRequest) {
+    let IpcRequest { method, reply } = request;
+
+    match method {
+        IpcMethod::Evaluate { code, visible: _ } => {
+            // In headless mode, visible vs silent is irrelevant (no terminal).
+            // Always use capture mode for consistent output collection.
+            r_is_at_prompt().store(false, Ordering::Release);
+            let result = capture::evaluate_with_capture(&code);
+            r_is_at_prompt().store(true, Ordering::Release);
+            let _ = reply.send(IpcResponse::Evaluate(result));
+        }
+        IpcMethod::UserInput { code } => {
+            // In headless mode, user_input evaluates the code directly.
+            // Output goes to the default WriteConsoleEx handler (stdout/stderr).
+            r_is_at_prompt().store(false, Ordering::Release);
+            if let Err(e) = arf_harp::eval_string(&code) {
+                log::warn!("Headless user_input evaluation error: {}", e);
+            }
+            r_is_at_prompt().store(true, Ordering::Release);
+            let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -233,6 +233,57 @@ pub enum Commands {
         #[command(subcommand)]
         action: IpcAction,
     },
+    /// Run R with IPC server only (no interactive REPL)
+    ///
+    /// Starts R and an IPC server without the interactive console.
+    /// Useful for AI agents that only need IPC access, or for
+    /// CI environments where a terminal is not available.
+    /// Press Ctrl+C or send a shutdown request via IPC to exit.
+    Headless {
+        /// Path to configuration file
+        #[arg(short, long, value_hint = ValueHint::FilePath)]
+        config: Option<PathBuf>,
+
+        /// R version to use via rig (overrides r_source config)
+        #[arg(long = "with-r-version", conflicts_with = "r_home")]
+        r_version: Option<String>,
+
+        /// Explicit R_HOME path (overrides r_source config)
+        #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
+        r_home: Option<PathBuf>,
+
+        /// Start R in vanilla mode (no init files, no save/restore)
+        #[arg(long = "vanilla")]
+        vanilla: bool,
+
+        /// [R] Don't read the site and user environment files
+        #[arg(long = "no-environ", hide_short_help = true)]
+        no_environ: bool,
+
+        /// [R] Don't read the site-wide Rprofile
+        #[arg(long = "no-site-file", hide_short_help = true)]
+        no_site_file: bool,
+
+        /// [R] Don't read the user's .Rprofile
+        #[arg(long = "no-init-file", hide_short_help = true)]
+        no_init_file: bool,
+
+        /// [R] Set max number of connections to N
+        #[arg(long = "max-connections", hide = true)]
+        max_connections: Option<u32>,
+
+        /// [R] Set max size of protect stack to N
+        #[arg(long = "max-ppsize", hide = true)]
+        max_ppsize: Option<u32>,
+
+        /// [R] Set min number of fixed size obj's ("cons cells") to N
+        #[arg(long = "min-nsize", hide = true)]
+        min_nsize: Option<String>,
+
+        /// [R] Set vector heap minimum to N bytes; '4M' = 4 MegaB
+        #[arg(long = "min-vsize", hide = true)]
+        min_vsize: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -483,6 +534,59 @@ impl Cli {
         }
 
         // Always interactive (Unix only - Windows uses Rstart.r_interactive)
+        #[cfg(unix)]
+        args.push("--interactive".to_string());
+
+        args
+    }
+
+    /// Generate R initialization arguments for headless mode.
+    pub fn headless_r_args(
+        vanilla: bool,
+        no_environ: bool,
+        no_site_file: bool,
+        no_init_file: bool,
+        max_connections: Option<u32>,
+        max_ppsize: Option<u32>,
+        min_nsize: Option<&str>,
+        min_vsize: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = Vec::new();
+        args.push("--quiet".to_string());
+
+        if vanilla {
+            args.push("--no-environ".to_string());
+            args.push("--no-site-file".to_string());
+            args.push("--no-init-file".to_string());
+            args.push("--no-save".to_string());
+            args.push("--no-restore-data".to_string());
+        } else {
+            if no_environ {
+                args.push("--no-environ".to_string());
+            }
+            if no_site_file {
+                args.push("--no-site-file".to_string());
+            }
+            if no_init_file {
+                args.push("--no-init-file".to_string());
+            }
+            args.push("--no-save".to_string());
+            args.push("--no-restore-data".to_string());
+        }
+
+        if let Some(n) = max_connections {
+            args.push(format!("--max-connections={n}"));
+        }
+        if let Some(n) = max_ppsize {
+            args.push(format!("--max-ppsize={n}"));
+        }
+        if let Some(n) = min_nsize {
+            args.push(format!("--min-nsize={n}"));
+        }
+        if let Some(n) = min_vsize {
+            args.push(format!("--min-vsize={n}"));
+        }
+
         #[cfg(unix)]
         args.push("--interactive".to_string());
 

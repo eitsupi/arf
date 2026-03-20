@@ -65,6 +65,33 @@ fn run() -> Result<()> {
         Some(Commands::Ipc { action }) => {
             return handle_ipc_command(action);
         }
+        Some(Commands::Headless {
+            config,
+            r_version,
+            r_home,
+            vanilla,
+            no_environ,
+            no_site_file,
+            no_init_file,
+            max_connections,
+            max_ppsize,
+            min_nsize,
+            min_vsize,
+        }) => {
+            return run_headless(
+                config.as_ref(),
+                r_home.as_deref(),
+                r_version.as_deref(),
+                *vanilla,
+                *no_environ,
+                *no_site_file,
+                *no_init_file,
+                *max_connections,
+                *max_ppsize,
+                min_nsize.as_deref(),
+                min_vsize.as_deref(),
+            );
+        }
         None => {}
     }
 
@@ -271,6 +298,103 @@ fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
             Config::default()
         }
     }
+}
+
+/// Run in headless mode: R + IPC server, no interactive REPL.
+///
+/// Initializes R, starts the IPC server, and enters a polling loop.
+/// The loop processes IPC requests and R events until interrupted
+/// by Ctrl+C or a shutdown signal.
+#[allow(clippy::too_many_arguments)]
+fn run_headless(
+    config_path: Option<&std::path::PathBuf>,
+    r_home: Option<&std::path::Path>,
+    r_version: Option<&str>,
+    vanilla: bool,
+    no_environ: bool,
+    no_site_file: bool,
+    no_init_file: bool,
+    max_connections: Option<u32>,
+    max_ppsize: Option<u32>,
+    min_nsize: Option<&str>,
+    min_vsize: Option<&str>,
+) -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    log::info!("Starting arf in headless mode");
+
+    // Load config for r_source resolution
+    let config = load_config_or_warn(config_path);
+
+    // Set up R
+    setup_r(&config.startup.r_source, r_home, r_version)?;
+
+    // Ensure LD_LIBRARY_PATH includes R library directory
+    if let Err(e) = arf_libr::ensure_ld_library_path() {
+        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+    }
+
+    // Generate R initialization arguments
+    let r_args = Cli::headless_r_args(
+        vanilla,
+        no_environ,
+        no_site_file,
+        no_init_file,
+        max_connections,
+        max_ppsize,
+        min_nsize,
+        min_vsize,
+    );
+    let r_args_refs: Vec<&str> = r_args.iter().map(|s| s.as_str()).collect();
+
+    // Initialize R
+    unsafe {
+        arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
+    }
+
+    // Source R profile files (Windows only)
+    #[cfg(windows)]
+    source_r_profiles(&r_args);
+
+    // Start IPC server
+    let ipc_path = ipc::start_server().context("Failed to start IPC server")?;
+    eprintln!("IPC server listening on: {}", ipc_path);
+
+    // Set up Ctrl+C handler
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_signal = shutdown.clone();
+    if let Err(e) = ctrlc::set_handler(move || {
+        shutdown_signal.store(true, Ordering::Release);
+    }) {
+        log::warn!("Could not set Ctrl+C handler: {}", e);
+    }
+
+    // Mark R as ready for IPC requests
+    ipc::set_r_at_prompt(true);
+
+    eprintln!("Headless mode ready. Press Ctrl+C to exit.");
+
+    // Main event loop
+    while !shutdown.load(Ordering::Acquire) {
+        // Process IPC requests
+        let had_work = ipc::headless_poll_and_process();
+
+        // Process R events (timers, background tasks, etc.)
+        arf_libr::process_r_events();
+
+        // Sleep to avoid busy loop — shorter if we had work (more may be coming)
+        if had_work {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    eprintln!("\nShutting down...");
+    ipc::stop_server();
+
+    Ok(())
 }
 
 /// Handle config subcommands.

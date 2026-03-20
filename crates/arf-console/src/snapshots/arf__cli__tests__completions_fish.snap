@@ -74,6 +74,7 @@ complete -c arf -n "__fish_arf_needs_command" -a "completions" -d 'Generate shel
 complete -c arf -n "__fish_arf_needs_command" -a "config" -d 'Configuration management'
 complete -c arf -n "__fish_arf_needs_command" -a "history" -d 'History management'
 complete -c arf -n "__fish_arf_needs_command" -a "ipc" -d 'Interact with a running arf session via IPC'
+complete -c arf -n "__fish_arf_needs_command" -a "headless" -d 'Run R with IPC server only (no interactive REPL)'
 complete -c arf -n "__fish_arf_needs_command" -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand completions" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init check help" -s h -l help -d 'Print help'
@@ -131,11 +132,24 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "send" -d 'Send code as user input to a running session (shown in REPL)'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show status of a running arf session'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "completions" -d 'Generate shell completion scripts'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "config" -d 'Configuration management'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "history" -d 'History management'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "ipc" -d 'Interact with a running arf session via IPC'
-complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
+complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_using_subcommand headless" -l max-connections -d '[R] Set max number of connections to N' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l no-environ -d '[R] Don\'t read the site and user environment files'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l no-init-file -d '[R] Don\'t read the user\'s .Rprofile'
+complete -c arf -n "__fish_arf_using_subcommand headless" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "completions" -d 'Generate shell completion scripts'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "config" -d 'Configuration management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "ipc" -d 'Interact with a running arf session via IPC'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "headless" -d 'Run R with IPC server only (no interactive REPL)'
+complete -c arf -n "__fish_arf_using_subcommand help; and not __fish_seen_subcommand_from completions config history ipc headless help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "init" -d 'Generate a default configuration file'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "check" -d 'Validate the configuration file'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "schema" -d 'Display history database schema and example R code'

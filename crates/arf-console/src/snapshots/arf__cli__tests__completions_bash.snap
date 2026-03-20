@@ -26,6 +26,9 @@ _arf() {
             arf,config)
                 cmd="arf__config"
                 ;;
+            arf,headless)
+                cmd="arf__headless"
+                ;;
             arf,help)
                 cmd="arf__help"
                 ;;
@@ -58,6 +61,9 @@ _arf() {
                 ;;
             arf__help,config)
                 cmd="arf__help__config"
+                ;;
+            arf__help,headless)
+                cmd="arf__help__headless"
                 ;;
             arf__help,help)
                 cmd="arf__help__help"
@@ -156,7 +162,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history ipc help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --no-auto-match --no-completion --history-dir --no-history --help --version [SCRIPT] completions config history ipc headless help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -441,8 +447,79 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        arf__headless)
+            opts="-c -h --config --with-r-version --r-home --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                -c)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                --with-r-version)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --r-home)
+                    COMPREPLY=()
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o plusdirs
+                    fi
+                    return 0
+                    ;;
+                --max-connections)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-ppsize)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --min-nsize)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --min-vsize)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         arf__help)
-            opts="completions config history ipc help"
+            opts="completions config history ipc headless help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -500,6 +577,20 @@ _arf() {
         arf__help__config__init)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__headless)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
