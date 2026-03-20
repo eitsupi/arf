@@ -180,6 +180,30 @@ impl HeadlessProcess {
         })
     }
 
+    /// Run `arf ipc eval <code> --pid <pid> --timeout <ms>` and return output.
+    fn ipc_eval_with_timeout(&self, code: &str, timeout_ms: u64) -> Result<IpcOutput, String> {
+        let bin_path = env!("CARGO_BIN_EXE_arf");
+
+        let output = Command::new(bin_path)
+            .args([
+                "ipc",
+                "eval",
+                code,
+                "--pid",
+                &self.pid.to_string(),
+                "--timeout",
+                &timeout_ms.to_string(),
+            ])
+            .output()
+            .map_err(|e| format!("Failed to run arf ipc eval --timeout: {e}"))?;
+
+        Ok(IpcOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        })
+    }
+
     /// Run `arf ipc send <code> --pid <pid>` and return output.
     fn ipc_send(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -521,6 +545,44 @@ fn test_headless_vanilla_flag() {
         result.stdout.contains("[1] 2"),
         "should return result: {}",
         result.stdout
+    );
+}
+
+/// Test that --timeout option works: a fast eval completes within timeout.
+#[test]
+fn test_headless_eval_timeout_sufficient() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // Fast expression with generous timeout should succeed
+    let result = process
+        .ipc_eval_with_timeout("1 + 1", 30000)
+        .expect("eval with timeout should run");
+    assert!(result.success, "should succeed: {}", result.stderr);
+    assert!(
+        result.stdout.contains("[1] 2"),
+        "should return result: {}",
+        result.stdout
+    );
+}
+
+/// Test that --timeout option works: a slow eval times out.
+#[test]
+fn test_headless_eval_timeout_exceeded() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // Sys.sleep(10) with a 1-second timeout should fail
+    let result = process
+        .ipc_eval_with_timeout("Sys.sleep(10)", 1000)
+        .expect("eval with timeout should run");
+    assert!(
+        !result.success,
+        "should fail due to timeout. stdout: {}, stderr: {}",
+        result.stdout, result.stderr
+    );
+    assert!(
+        result.stderr.contains("timed out"),
+        "should mention timeout: {}",
+        result.stderr
     );
 }
 
