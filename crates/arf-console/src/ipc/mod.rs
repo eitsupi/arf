@@ -29,6 +29,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+/// Shutdown flag for headless mode. When set, the headless event loop exits.
+/// Not set in REPL mode (shutdown is only available in headless mode).
+static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
 static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>>>> =
@@ -441,7 +445,7 @@ pub fn setup_visible_eval(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 pub fn run_silent_eval(code: &str, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
     r_is_at_prompt().store(false, Ordering::Release);
 
-    let result = capture::evaluate_with_capture(code);
+    let result = capture::evaluate_with_capture(code, false);
 
     r_is_at_prompt().store(true, Ordering::Release);
     let _ = reply.send(IpcResponse::Evaluate(result));
@@ -455,6 +459,97 @@ pub fn accept_user_input(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 /// Mark that R is now at the command prompt (idle, ready for input).
 pub fn set_r_at_prompt(at_prompt: bool) {
     r_is_at_prompt().store(at_prompt, Ordering::Release);
+}
+
+/// Register the headless shutdown flag so `shutdown` IPC method can trigger it.
+///
+/// Must be called before `start_server()` in headless mode. In REPL mode
+/// this is never called, so `shutdown` requests return METHOD_NOT_FOUND.
+pub fn set_headless_shutdown(flag: Arc<AtomicBool>) {
+    let _ = HEADLESS_SHUTDOWN.set(flag);
+}
+
+/// Try to trigger headless shutdown. Returns true if the flag was set.
+///
+/// Called from the server thread when a `shutdown` request arrives.
+/// Returns false if not in headless mode (flag not registered).
+pub fn trigger_headless_shutdown() -> bool {
+    if let Some(flag) = HEADLESS_SHUTDOWN.get() {
+        flag.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    }
+}
+
+// ── Headless mode API ────────────────────────────────────────────────────
+
+/// Poll and directly process IPC requests in headless mode.
+///
+/// Unlike `poll_ipc_requests` (used by the REPL), this function processes
+/// requests immediately without the ExternalBreak/editor-buffer check,
+/// since there is no interactive editor in headless mode.
+///
+/// Returns `true` if at least one request was processed.
+pub fn headless_poll_and_process() -> bool {
+    let receiver = match IPC_RECEIVER.get() {
+        Some(r) => r,
+        None => return false,
+    };
+
+    let rx = match receiver.try_lock() {
+        Ok(rx) => rx,
+        Err(_) => return false,
+    };
+
+    let rx = match rx.as_ref() {
+        Some(rx) => rx,
+        None => return false,
+    };
+
+    let mut processed = false;
+
+    while let Ok(request) = rx.try_recv() {
+        processed = true;
+        headless_handle_request(request);
+    }
+
+    processed
+}
+
+/// Handle a single IPC request in headless mode.
+///
+/// Processes evaluate and user_input requests directly on the R thread.
+/// No editor buffer check is needed since there is no interactive console.
+fn headless_handle_request(request: IpcRequest) {
+    let IpcRequest { method, reply } = request;
+
+    match method {
+        IpcMethod::Evaluate { code, visible } => {
+            // When visible=true, captured output is also written to the
+            // headless process's stdout/stderr for logging/monitoring.
+            r_is_at_prompt().store(false, Ordering::Release);
+            let result = capture::evaluate_with_capture(&code, visible);
+            r_is_at_prompt().store(true, Ordering::Release);
+            let _ = reply.send(IpcResponse::Evaluate(result));
+        }
+        IpcMethod::UserInput { code } => {
+            // In headless mode, user_input evaluates the code directly.
+            // Output goes to the default WriteConsoleEx handler (stdout/stderr).
+            r_is_at_prompt().store(false, Ordering::Release);
+            let eval_result = arf_harp::eval_string(&code);
+            r_is_at_prompt().store(true, Ordering::Release);
+            match eval_result {
+                Ok(_) => {
+                    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
+                }
+                Err(e) => {
+                    log::warn!("Headless user_input evaluation error: {}", e);
+                    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: false }));
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

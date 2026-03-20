@@ -6,7 +6,8 @@
 
 use crate::ipc::protocol::{
     EvaluateParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest,
-    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, UserInputParams,
+    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, ShutdownResult,
+    UserInputParams,
 };
 use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
@@ -476,6 +477,22 @@ async fn dispatch_request(
             IpcMethod::Evaluate {
                 code: params.code,
                 visible: params.visible,
+            }
+        }
+        "shutdown" => {
+            // Shutdown is handled directly on the server thread — no need
+            // to send to the main thread. Only available in headless mode.
+            if super::trigger_headless_shutdown() {
+                return JsonRpcResponse::success(
+                    id,
+                    serde_json::to_value(ShutdownResult { accepted: true }).unwrap(),
+                );
+            } else {
+                return JsonRpcResponse::error(
+                    id,
+                    METHOD_NOT_FOUND,
+                    "shutdown is only available in headless mode".to_string(),
+                );
             }
         }
         "user_input" | "send" => {

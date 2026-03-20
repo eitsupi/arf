@@ -103,6 +103,12 @@ pub struct UserInputResult {
     pub accepted: bool,
 }
 
+/// Result of the `shutdown` method.
+#[derive(Debug, Serialize)]
+pub struct ShutdownResult {
+    pub accepted: bool,
+}
+
 /// Internal request type sent from IPC server thread to main thread.
 pub struct IpcRequest {
     pub method: IpcMethod,

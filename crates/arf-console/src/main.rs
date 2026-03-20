@@ -19,7 +19,7 @@ mod test_utils;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction};
+use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction, RArgsBuilder};
 use config::{
     Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
@@ -64,6 +64,38 @@ fn run() -> Result<()> {
         }
         Some(Commands::Ipc { action }) => {
             return handle_ipc_command(action);
+        }
+        Some(Commands::Headless {
+            config,
+            r_version,
+            r_home,
+            vanilla,
+            no_environ,
+            no_site_file,
+            no_init_file,
+            max_connections,
+            max_ppsize,
+            min_nsize,
+            min_vsize,
+        }) => {
+            let r_args_builder = RArgsBuilder {
+                vanilla: *vanilla,
+                no_environ: *no_environ,
+                no_site_file: *no_site_file,
+                no_init_file: *no_init_file,
+                save: false,
+                restore: false,
+                max_connections: *max_connections,
+                max_ppsize: *max_ppsize,
+                min_nsize: min_nsize.as_deref(),
+                min_vsize: min_vsize.as_deref(),
+            };
+            return run_headless(
+                config.as_ref(),
+                r_home.as_deref(),
+                r_version.as_deref(),
+                r_args_builder,
+            );
         }
         None => {}
     }
@@ -273,6 +305,89 @@ fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
     }
 }
 
+/// Run in headless mode: R + IPC server, no interactive REPL.
+///
+/// Initializes R, starts the IPC server, and enters a polling loop.
+/// The loop processes IPC requests and R events until interrupted
+/// by Ctrl+C or a shutdown signal.
+fn run_headless(
+    config_path: Option<&std::path::PathBuf>,
+    r_home: Option<&std::path::Path>,
+    r_version: Option<&str>,
+    r_args_builder: RArgsBuilder<'_>,
+) -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    log::info!("Starting arf in headless mode");
+
+    // Load config for r_source resolution
+    let config = load_config_or_warn(config_path);
+
+    // Set up R
+    setup_r(&config.startup.r_source, r_home, r_version)?;
+
+    // Ensure LD_LIBRARY_PATH includes R library directory
+    if let Err(e) = arf_libr::ensure_ld_library_path() {
+        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+    }
+
+    // Generate R initialization arguments
+    let r_args = r_args_builder.build();
+    let r_args_refs: Vec<&str> = r_args.iter().map(|s| s.as_str()).collect();
+
+    // Initialize R
+    unsafe {
+        arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
+    }
+
+    // Source R profile files (Windows only)
+    #[cfg(windows)]
+    source_r_profiles(&r_args);
+
+    // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
+    let shutdown = Arc::new(AtomicBool::new(false));
+    ipc::set_headless_shutdown(shutdown.clone());
+
+    // Start IPC server
+    let ipc_path = ipc::start_server().context("Failed to start IPC server")?;
+    eprintln!("IPC server listening on: {}", ipc_path);
+
+    // Set up Ctrl+C handler
+    let shutdown_signal = shutdown.clone();
+    if let Err(e) = ctrlc::set_handler(move || {
+        shutdown_signal.store(true, Ordering::Release);
+    }) {
+        log::warn!("Could not set Ctrl+C handler: {}", e);
+    }
+
+    // Mark R as ready for IPC requests
+    ipc::set_r_at_prompt(true);
+
+    eprintln!("Headless mode ready. Press Ctrl+C to exit.");
+
+    // Main event loop
+    while !shutdown.load(Ordering::Acquire) {
+        // Process IPC requests
+        let had_work = ipc::headless_poll_and_process();
+
+        // Process R events (timers, background tasks, etc.)
+        arf_libr::process_r_events();
+
+        // Sleep to avoid busy loop — shorter if we had work (more may be coming)
+        if had_work {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    eprintln!("\nShutting down...");
+    ipc::stop_server();
+
+    Ok(())
+}
+
 /// Handle config subcommands.
 fn handle_config_command(action: &ConfigAction) -> Result<()> {
     match action {
@@ -362,6 +477,7 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         IpcAction::Eval { code, pid, visible } => ipc::client::cmd_eval(code, *pid, *visible),
         IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
         IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
+        IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
     }
 }
 
