@@ -512,11 +512,17 @@ fn headless_handle_request(request: IpcRequest) {
             // In headless mode, user_input evaluates the code directly.
             // Output goes to the default WriteConsoleEx handler (stdout/stderr).
             r_is_at_prompt().store(false, Ordering::Release);
-            if let Err(e) = arf_harp::eval_string(&code) {
-                log::warn!("Headless user_input evaluation error: {}", e);
-            }
+            let eval_result = arf_harp::eval_string(&code);
             r_is_at_prompt().store(true, Ordering::Release);
-            let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
+            match eval_result {
+                Ok(_) => {
+                    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
+                }
+                Err(e) => {
+                    log::warn!("Headless user_input evaluation error: {}", e);
+                    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: false }));
+                }
+            }
         }
     }
 }

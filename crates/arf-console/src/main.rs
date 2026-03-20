@@ -19,7 +19,7 @@ mod test_utils;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction};
+use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction, RArgsBuilder};
 use config::{
     Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
@@ -78,18 +78,23 @@ fn run() -> Result<()> {
             min_nsize,
             min_vsize,
         }) => {
+            let r_args_builder = RArgsBuilder {
+                vanilla: *vanilla,
+                no_environ: *no_environ,
+                no_site_file: *no_site_file,
+                no_init_file: *no_init_file,
+                save: false,
+                restore: false,
+                max_connections: *max_connections,
+                max_ppsize: *max_ppsize,
+                min_nsize: min_nsize.as_deref(),
+                min_vsize: min_vsize.as_deref(),
+            };
             return run_headless(
                 config.as_ref(),
                 r_home.as_deref(),
                 r_version.as_deref(),
-                *vanilla,
-                *no_environ,
-                *no_site_file,
-                *no_init_file,
-                *max_connections,
-                *max_ppsize,
-                min_nsize.as_deref(),
-                min_vsize.as_deref(),
+                r_args_builder,
             );
         }
         None => {}
@@ -305,19 +310,11 @@ fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
 /// Initializes R, starts the IPC server, and enters a polling loop.
 /// The loop processes IPC requests and R events until interrupted
 /// by Ctrl+C or a shutdown signal.
-#[allow(clippy::too_many_arguments)]
 fn run_headless(
     config_path: Option<&std::path::PathBuf>,
     r_home: Option<&std::path::Path>,
     r_version: Option<&str>,
-    vanilla: bool,
-    no_environ: bool,
-    no_site_file: bool,
-    no_init_file: bool,
-    max_connections: Option<u32>,
-    max_ppsize: Option<u32>,
-    min_nsize: Option<&str>,
-    min_vsize: Option<&str>,
+    r_args_builder: RArgsBuilder<'_>,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -336,16 +333,7 @@ fn run_headless(
     }
 
     // Generate R initialization arguments
-    let r_args = Cli::headless_r_args(
-        vanilla,
-        no_environ,
-        no_site_file,
-        no_init_file,
-        max_connections,
-        max_ppsize,
-        min_nsize,
-        min_vsize,
-    );
+    let r_args = r_args_builder.build();
     let r_args_refs: Vec<&str> = r_args.iter().map(|s| s.as_str()).collect();
 
     // Initialize R
