@@ -120,15 +120,16 @@ impl HeadlessProcess {
 
         // Wait for IPC readiness
         if quiet {
-            // In quiet mode, stderr messages are suppressed. Probe readiness by
-            // repeatedly running `arf ipc status --pid <pid>` until it succeeds.
+            // In quiet mode, stderr messages are suppressed. Probe readiness
+            // by running an actual RPC (`arf ipc eval "1"`) until it succeeds.
+            // This ensures R is fully initialized and `set_r_at_prompt(true)`
+            // has been called, unlike `ipc status` which only checks the
+            // session file.
             let start = std::time::Instant::now();
             loop {
                 if start.elapsed() > STARTUP_TIMEOUT {
                     let _ = child.kill();
-                    return Err(
-                        "Timeout waiting for IPC status to succeed in quiet mode".to_string()
-                    );
+                    return Err("Timeout waiting for IPC eval to succeed in quiet mode".to_string());
                 }
                 // Check if the process has exited early (e.g. error)
                 if let Ok(Some(status)) = child.try_wait() {
@@ -137,9 +138,9 @@ impl HeadlessProcess {
                         "Headless process exited early with {status}. Stderr:\n{output}"
                     ));
                 }
-                // Try to connect via ipc status to confirm readiness
+                // Try a real RPC to confirm R is ready
                 let probe = Command::new(bin_path)
-                    .args(["ipc", "status", "--pid", &pid.to_string()])
+                    .args(["ipc", "eval", "1", "--pid", &pid.to_string()])
                     .output();
                 if let Ok(output) = probe
                     && output.status.success()

@@ -48,11 +48,15 @@ fn main() -> ExitCode {
 fn init_logger(log_file: Option<&std::path::Path>) {
     let mut builder = env_logger::Builder::from_default_env();
     if let Some(path) = log_file {
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).append(true);
+        // Restrict log file permissions on Unix (logs may contain sensitive data)
+        #[cfg(unix)]
         {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        match opts.open(path) {
             Ok(file) => {
                 builder.target(env_logger::Target::Pipe(Box::new(file)));
             }
@@ -71,14 +75,15 @@ fn init_logger(log_file: Option<&std::path::Path>) {
 /// intended to be removed on shutdown by the caller.
 fn write_pid_file(path: &std::path::Path) -> Result<()> {
     let pid = std::process::id().to_string();
+    // Use create_new to fail if the file already exists, avoiding overwrite
+    // of unrelated files or symlink-following attacks.
     #[cfg(unix)]
     {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(path)
             .with_context(|| format!("Failed to create PID file: {}", path.display()))?;
@@ -87,8 +92,16 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(path, &pid)
-            .with_context(|| format!("Failed to write PID file: {}", path.display()))?;
+        // create_new on Windows also fails if the file exists
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(pid.as_bytes())
+            })
+            .with_context(|| format!("Failed to create PID file: {}", path.display()))?;
     }
     log::info!("PID file written: {}", path.display());
     Ok(())

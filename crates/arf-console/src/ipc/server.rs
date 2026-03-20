@@ -49,10 +49,31 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
         None => get_socket_path(pid),
     };
 
-    // Remove stale socket file if it exists
+    // Remove stale socket file if it exists. When a custom --bind path is
+    // used, only remove the path if it is actually a Unix socket to avoid
+    // accidentally deleting unrelated files.
     #[cfg(unix)]
     {
-        let _ = std::fs::remove_file(&socket_path);
+        use std::os::unix::fs::FileTypeExt;
+        match std::fs::symlink_metadata(&socket_path) {
+            Ok(meta) if meta.file_type().is_socket() => {
+                let _ = std::fs::remove_file(&socket_path);
+            }
+            Ok(_) if bind.is_some() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "bind path already exists and is not a socket: {}",
+                        socket_path
+                    ),
+                ));
+            }
+            Ok(_) => {
+                // Default path (PID-based) — safe to remove
+                let _ = std::fs::remove_file(&socket_path);
+            }
+            Err(_) => {} // Does not exist — nothing to remove
+        }
     }
 
     let path = socket_path.clone();
