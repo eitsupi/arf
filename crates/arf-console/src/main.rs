@@ -483,7 +483,9 @@ fn run_headless(
         return Err(e);
     }
 
-    // Set up Ctrl+C handler
+    // Set up signal handler for graceful shutdown.
+    // With the "termination" feature, ctrlc also handles SIGTERM and SIGHUP,
+    // enabling clean shutdown from systemd stop, docker stop, nohup hangup, etc.
     let shutdown_signal = shutdown.clone();
     if let Err(e) = ctrlc::set_handler(move || {
         shutdown_signal.store(true, Ordering::Release);

@@ -880,3 +880,49 @@ fn test_headless_log_file() {
         log_content
     );
 }
+
+/// Test that SIGTERM triggers graceful shutdown with PID file cleanup.
+#[cfg(unix)]
+#[test]
+fn test_headless_sigterm_shutdown() {
+    use nix::sys::signal::{self, Signal};
+    use nix::unistd::Pid;
+
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_path = tmp.path().join("arf.pid");
+    let pid_str = pid_path.display().to_string();
+
+    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
+        .expect("Failed to spawn headless with --pid-file");
+
+    // Wait for PID file to be written
+    let start = std::time::Instant::now();
+    loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "PID file should appear at: {}",
+            pid_str
+        );
+        if let Ok(content) = std::fs::read_to_string(&pid_path)
+            && !content.is_empty()
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Send SIGTERM
+    signal::kill(Pid::from_raw(process.pid as i32), Signal::SIGTERM)
+        .expect("failed to send SIGTERM");
+
+    // Process should exit gracefully
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after SIGTERM");
+
+    // PID file should be cleaned up
+    assert!(
+        !pid_path.exists(),
+        "PID file should be removed after SIGTERM shutdown"
+    );
+}
