@@ -348,6 +348,10 @@ fn run_headless(
     // Configure R options for headless operation:
     // - Redirect pager output (help, file.show) to stdout so it gets captured
     //   by evaluate_with_capture instead of spawning an interactive pager (less)
+    // - Force plain-text help (`options(help_type = "text")`) so help output
+    //   is printable/capturable instead of opening HTML or other rich viewers
+    // - Disable interactive browsers (`options(browser = ...)`) so R does not
+    //   attempt to launch a GUI/web browser in headless environments
     // - Set default graphics device to file-based (png/pdf) instead of X11
     //   to avoid DISPLAY-related errors or hangs in headless environments
     configure_headless_r_options()?;
@@ -426,10 +430,11 @@ local({
                 cat(header[[i]], "\n", sep = "")
             }
 
-            tryCatch(
-                cat(readLines(path, warn = FALSE), sep = "\n"),
-                error = function(e) NULL
-            )
+            tryCatch({
+                lines <- readLines(path, warn = FALSE)
+                cat(lines, sep = "\n")
+                if (length(lines) > 0L) cat("\n")
+            }, error = function(e) NULL)
 
             if (isTRUE(delete.file)) unlink(path, force = TRUE)
         }
@@ -470,7 +475,7 @@ local({
 
     arf_harp::eval_string(code)
         .context("Failed to configure headless R options (pager, browser, graphics device)")?;
-    log::info!("Headless R options configured (pager, graphics device)");
+    log::info!("Headless R options configured (pager, browser, graphics device)");
     Ok(())
 }
 

@@ -666,3 +666,23 @@ fn test_headless_plot_does_not_hang() {
         stdout
     );
 }
+
+/// Test that browseURL() prints the URL to stdout instead of opening a browser.
+#[test]
+fn test_headless_browse_url_does_not_hang() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval_with_timeout("browseURL('https://example.com')", 15000)
+        .expect("browseURL eval should run");
+    assert!(
+        result.success,
+        "browseURL should succeed without hanging. stderr: {}",
+        result.stderr
+    );
+    assert!(
+        result.stdout.contains("https://example.com"),
+        "URL should be captured in stdout: {}",
+        result.stdout
+    );
+}
