@@ -404,6 +404,10 @@ fn run_headless(
 /// Sets up pager redirection and graphics device defaults so that commands
 /// like `?mean` or `plot(1:10)` don't spawn interactive programs (less, X11)
 /// that would block or corrupt the headless server.
+///
+/// The approach is based on [mcp-repl](https://github.com/t-kalinowski/mcp-repl)
+/// (Apache-2.0), which uses the same pattern of custom pager and device
+/// functions for non-interactive R sessions.
 fn configure_headless_r_options() -> Result<()> {
     let code = r#"
 local({
