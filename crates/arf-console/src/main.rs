@@ -63,7 +63,9 @@ fn init_logger(log_file: Option<&std::path::Path>) {
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let perms = std::fs::Permissions::from_mode(0o600);
-                    if let Err(e) = std::fs::set_permissions(path, perms) {
+                    // Use fd-based set_permissions (fchmod) to avoid TOCTOU
+                    // symlink race with path-based std::fs::set_permissions.
+                    if let Err(e) = file.set_permissions(perms) {
                         eprintln!(
                             "Warning: could not set permissions on log file {}: {e}",
                             path.display()
