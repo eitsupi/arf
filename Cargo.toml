@@ -83,6 +83,7 @@ ctrlc = "3.4"
 
 # Testing
 insta = "1.46"
+serial_test = "3"
 portable-pty = "0.9"
 regex = "1.11"
 tempfile = "3"

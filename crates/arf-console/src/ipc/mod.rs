@@ -555,18 +555,19 @@ fn headless_handle_request(request: IpcRequest) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Tests for the IN_ALTERNATE_MODE flag and handle_request rejection.
     ///
-    /// Combined into a single test to avoid flakiness from parallel test
-    /// execution, since all tests share the global `IN_ALTERNATE_MODE` atomic.
+    /// Serialized with `#[serial]` because all tests that touch the global
+    /// `IN_ALTERNATE_MODE` / `R_AT_PROMPT` atomics must not run concurrently.
     #[test]
+    #[serial]
     fn test_alternate_mode_flag_and_request_rejection() {
-        // Reset global state first to avoid interference from parallel tests
+        // Reset global state
         set_in_alternate_mode(false);
         set_r_at_prompt(false);
 
-        // Should be false after reset
         assert!(!is_in_alternate_mode());
 
         // Toggle on/off

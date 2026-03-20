@@ -601,9 +601,10 @@ mod tests {
     /// Tests that dispatch_request rejects both evaluate and user_input
     /// in alternate mode.
     ///
-    /// Combined into a single test to avoid flakiness from parallel test
-    /// execution, since all tests share the global `IN_ALTERNATE_MODE` atomic.
+    /// Serialized with `#[serial]` because all tests that touch the global
+    /// `IN_ALTERNATE_MODE` / `R_AT_PROMPT` atomics must not run concurrently.
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_dispatch_rejects_in_alternate_mode() {
         use super::super::protocol::R_NOT_AT_PROMPT;
 
