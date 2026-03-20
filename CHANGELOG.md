@@ -8,6 +8,7 @@
 - **Headless:** `--pid-file <path>` option to write the server PID to a file for process management scripts. The file is removed on clean shutdown
 - **Headless:** `--quiet` flag to suppress status messages on stderr (IPC path, ready, shutdown)
 - **Headless:** `--log-file <path>` option to redirect log output to a file instead of stderr
+- **Headless:** Graceful shutdown on SIGTERM and SIGHUP (in addition to SIGINT/Ctrl+C), enabling clean PID file removal and socket cleanup from `systemd stop`, `docker stop`, and nohup hangup
 
 ### Fixed
 
