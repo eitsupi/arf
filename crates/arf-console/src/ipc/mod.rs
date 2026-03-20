@@ -126,7 +126,10 @@ pub fn break_signal() -> Arc<AtomicBool> {
 ///
 /// Called from `main.rs` when `--with-ipc` is specified,
 /// or from `:ipc start` meta command.
-pub fn start_server() -> std::io::Result<String> {
+///
+/// If `bind` is `Some`, the server binds to the given path instead of the
+/// default PID-based path.
+pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Initialize pending operation storage
@@ -135,7 +138,7 @@ pub fn start_server() -> std::io::Result<String> {
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let path = server::start_server(tx)?;
+    let path = server::start_server(tx, bind)?;
 
     // Store receiver for polling from idle callback.
     // If OnceLock is already set (from a previous stop/start), replace the inner value.

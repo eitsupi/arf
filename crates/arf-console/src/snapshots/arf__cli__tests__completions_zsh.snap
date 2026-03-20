@@ -331,10 +331,14 @@ _arguments "${_arguments_options[@]}" : \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \
 '(--with-r-version)--r-home=[Explicit R_HOME path (overrides r_source config)]:R_HOME:_files -/' \
+'--bind=[Bind IPC socket to a specific path instead of the default]:BIND:_files' \
+'--pid-file=[Write server PID to a file (removed on shutdown)]:PID_FILE:_files' \
+'--log-file=[Redirect log output to a file instead of stderr]:LOG_FILE:_files' \
 '--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
 '--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
+'--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
 '--no-environ[\[R\] Don'\''t read the site and user environment files]' \
 '--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \

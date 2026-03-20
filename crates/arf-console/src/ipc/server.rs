@@ -31,7 +31,7 @@ struct ServerState {
 ///
 /// Returns the socket path on success.
 /// Returns an error if the server is already running.
-pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
+pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io::Result<String> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -44,12 +44,68 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>) -> std::io::Result<String> {
     }
 
     let pid = std::process::id();
-    let socket_path = get_socket_path(pid);
+    let socket_path = match bind {
+        Some(path) => path.to_string(),
+        None => get_socket_path(pid),
+    };
 
-    // Remove stale socket file if it exists
+    // Remove stale socket file if it exists. When a custom --bind path is
+    // used, only remove the path if it is actually a Unix socket to avoid
+    // accidentally deleting unrelated files. For sockets, attempt a connect
+    // to distinguish stale from active: if connect succeeds, another process
+    // is listening and we must not take over.
     #[cfg(unix)]
     {
-        let _ = std::fs::remove_file(&socket_path);
+        use std::os::unix::fs::FileTypeExt;
+        use std::os::unix::net::UnixStream;
+        match std::fs::symlink_metadata(&socket_path) {
+            Ok(meta) if meta.file_type().is_socket() => {
+                if bind.is_some() {
+                    // Custom bind path: verify the socket is stale before removing
+                    match UnixStream::connect(&socket_path) {
+                        Ok(_) => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::AlreadyExists,
+                                format!("IPC socket already in use at path: {}", socket_path),
+                            ));
+                        }
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::ConnectionRefused
+                                || e.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            // ConnectionRefused: no listener (stale socket).
+                            // NotFound: socket disappeared between metadata
+                            // check and connect (race); safe to proceed.
+                            let _ = std::fs::remove_file(&socket_path);
+                        }
+                        Err(e) => {
+                            return Err(std::io::Error::new(
+                                e.kind(),
+                                format!("Cannot probe socket at {}: {}", socket_path, e),
+                            ));
+                        }
+                    }
+                } else {
+                    // Default PID-based path — safe to remove (same PID reuse)
+                    let _ = std::fs::remove_file(&socket_path);
+                }
+            }
+            Ok(_) if bind.is_some() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "bind path already exists and is not a socket: {}",
+                        socket_path
+                    ),
+                ));
+            }
+            Ok(_) => {
+                // Default path (PID-based) — safe to remove
+                let _ = std::fs::remove_file(&socket_path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // Does not exist
+            Err(e) => return Err(e), // Propagate unexpected errors (e.g. EACCES)
+        }
     }
 
     let path = socket_path.clone();
@@ -207,6 +263,26 @@ async fn run_server(
 ) -> std::io::Result<()> {
     let listener = match tokio::net::UnixListener::bind(socket_path) {
         Ok(l) => {
+            // Restrict socket permissions so only the owner can connect.
+            // The default PID-based path lives under a 0700 sessions dir,
+            // but custom --bind paths inherit the parent dir's umask.
+            // Use fd-based fchmod to avoid TOCTOU symlink race.
+            //
+            // NOTE: There is a brief race window between bind() and fchmod()
+            // where the socket exists with umask-inherited permissions. For
+            // custom --bind paths in shared directories, operators should
+            // ensure the parent directory is restricted (e.g. 0700).
+            {
+                use std::os::unix::io::AsRawFd;
+                let ret = unsafe { libc::fchmod(l.as_raw_fd(), 0o600) };
+                if ret != 0 {
+                    log::warn!(
+                        "Could not set socket permissions on {}: {}",
+                        socket_path,
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
             let _ = bind_tx.send(Ok(()));
             l
         }

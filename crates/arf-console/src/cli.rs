@@ -252,6 +252,28 @@ pub enum Commands {
         #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
         r_home: Option<PathBuf>,
 
+        /// Bind IPC socket to a specific path instead of the default
+        ///
+        /// Unix: filesystem path (e.g. /tmp/my-arf.sock)
+        /// Windows: named pipe path (e.g. \\.\pipe\my-arf)
+        // NOTE: FilePath is not ideal on Windows (named pipes aren't filesystem
+        // paths), but using cfg_attr to vary the hint per platform would cause
+        // shell completion snapshots to differ across machines.
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        bind: Option<String>,
+
+        /// Write server PID to a file (removed on shutdown)
+        #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
+        pid_file: Option<PathBuf>,
+
+        /// Suppress status messages on stderr (IPC path, ready, shutdown)
+        #[arg(long)]
+        quiet: bool,
+
+        /// Redirect log output to a file instead of stderr
+        #[arg(long = "log-file", value_hint = ValueHint::FilePath)]
+        log_file: Option<PathBuf>,
+
         /// Start R in vanilla mode (no init files, no save/restore)
         #[arg(long = "vanilla")]
         vanilla: bool,

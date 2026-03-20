@@ -40,15 +40,108 @@ fn main() -> ExitCode {
     }
 }
 
+/// Initialize logging.
+///
+/// When `log_file` is `Some`, log output is written to the specified file
+/// instead of stderr. This is useful for daemon deployments where stderr
+/// may not be monitored.
+fn init_logger(log_file: Option<&std::path::Path>) {
+    let mut builder = env_logger::Builder::from_default_env();
+    if let Some(path) = log_file {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).append(true);
+        // Restrict log file permissions on Unix (logs may contain sensitive data)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+            // Prevent following symlinks when opening the log file to avoid
+            // appending logs to an unintended target via a symlink.
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        match opts.open(path) {
+            Ok(file) => {
+                // Ensure restricted permissions even if the file already existed
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(0o600);
+                    // Use fd-based set_permissions (fchmod) to avoid TOCTOU
+                    // symlink race with path-based std::fs::set_permissions.
+                    if let Err(e) = file.set_permissions(perms) {
+                        eprintln!(
+                            "Warning: could not set permissions on log file {}: {e}",
+                            path.display()
+                        );
+                    }
+                }
+                builder.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+            Err(e) => {
+                eprintln!("Warning: could not open log file {}: {e}", path.display());
+                eprintln!("         Falling back to stderr.");
+            }
+        }
+    }
+    builder.init();
+}
+
+/// Write the current process ID to a file.
+///
+/// The file is created with restricted permissions (0600 on Unix) and is
+/// intended to be removed on shutdown by the caller.
+fn write_pid_file(path: &std::path::Path) -> Result<()> {
+    let pid = std::process::id().to_string();
+    // Use create_new to fail if the file already exists, avoiding overwrite
+    // of unrelated files or symlink-following attacks.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("Failed to create PID file: {}", path.display()))?;
+        file.write_all(pid.as_bytes())
+            .with_context(|| format!("Failed to write PID file: {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        // create_new on Windows also fails if the file exists
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(pid.as_bytes())
+            })
+            .with_context(|| format!("Failed to create PID file: {}", path.display()))?;
+    }
+    log::info!("PID file written: {}", path.display());
+    Ok(())
+}
+
 fn run() -> Result<()> {
-    env_logger::init();
+    // Parse command-line arguments first, then initialize the logger exactly
+    // once based on the parsed command. This avoids the fragile pre-parse
+    // detection that could miss global options before the subcommand.
+    let cli = Cli::parse();
+
+    // Extract log_file from headless command (if applicable) and initialize
+    // the logger once. Non-headless modes use the default stderr target.
+    let log_file = match &cli.command {
+        Some(Commands::Headless { log_file, .. }) => log_file.as_deref(),
+        _ => None,
+    };
+    init_logger(log_file);
 
     // Install signal handlers for fatal signals (SIGSEGV, SIGILL, SIGBUS).
     // This prevents the process from hanging when R encounters a segmentation fault.
+    // Must be called after init_logger so trap handlers can log.
     traps::register_trap_handlers();
-
-    // Parse command-line arguments
-    let cli = Cli::parse();
 
     // Handle subcommands first
     match &cli.command {
@@ -69,6 +162,10 @@ fn run() -> Result<()> {
             config,
             r_version,
             r_home,
+            bind,
+            pid_file,
+            quiet,
+            log_file: _, // already used above for init_logger
             vanilla,
             no_environ,
             no_site_file,
@@ -95,6 +192,9 @@ fn run() -> Result<()> {
                 r_home.as_deref(),
                 r_version.as_deref(),
                 r_args_builder,
+                bind.as_deref(),
+                pid_file.as_deref(),
+                *quiet,
             );
         }
         None => {}
@@ -210,7 +310,7 @@ fn run() -> Result<()> {
 
     // Start IPC server if requested
     if cli.with_ipc {
-        match ipc::start_server() {
+        match ipc::start_server(None) {
             Ok(path) => {
                 log::info!("IPC server started on {}", path);
             }
@@ -315,6 +415,9 @@ fn run_headless(
     r_home: Option<&std::path::Path>,
     r_version: Option<&str>,
     r_args_builder: RArgsBuilder<'_>,
+    bind: Option<&str>,
+    pid_file: Option<&std::path::Path>,
+    quiet: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -360,9 +463,25 @@ fn run_headless(
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
 
-    // Start IPC server
-    let ipc_path = ipc::start_server().context("Failed to start IPC server")?;
-    eprintln!("IPC server listening on: {}", ipc_path);
+    // Start IPC server (with optional custom bind path)
+    let ipc_path = ipc::start_server(bind).context("Failed to start IPC server")?;
+    if !quiet {
+        eprintln!("IPC server listening on: {}", ipc_path);
+    }
+
+    // Write PID file if requested
+    if let Some(pid_path) = pid_file
+        && let Err(e) = write_pid_file(pid_path)
+    {
+        // Do not attempt to remove the PID file here: write_pid_file uses
+        // create_new and may have failed before creating it (e.g. AlreadyExists),
+        // so pid_path may refer to a pre-existing user-managed file.
+
+        // Stop IPC server to avoid leaving a stale socket/session behind.
+        ipc::stop_server();
+
+        return Err(e);
+    }
 
     // Set up Ctrl+C handler
     let shutdown_signal = shutdown.clone();
@@ -375,7 +494,9 @@ fn run_headless(
     // Mark R as ready for IPC requests
     ipc::set_r_at_prompt(true);
 
-    eprintln!("Headless mode ready. Press Ctrl+C to exit.");
+    if !quiet {
+        eprintln!("Headless mode ready. Press Ctrl+C to exit.");
+    }
 
     // Main event loop
     while !shutdown.load(Ordering::Acquire) {
@@ -393,8 +514,17 @@ fn run_headless(
         }
     }
 
-    eprintln!("\nShutting down...");
+    if !quiet {
+        eprintln!("\nShutting down...");
+    }
     ipc::stop_server();
+
+    // Clean up PID file
+    if let Some(pid_path) = pid_file
+        && let Err(e) = std::fs::remove_file(pid_path)
+    {
+        log::debug!("Could not remove PID file {}: {}", pid_path.display(), e);
+    }
 
     Ok(())
 }
