@@ -43,10 +43,12 @@ impl HeadlessProcess {
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
-        // When --quiet is used, status messages are suppressed.
+        // When --quiet is used, status messages are suppressed on stderr.
         // When --log-file is used, stderr is redirected to the file, so the
-        // pipe is disconnected. In both cases, fall back to polling for readiness.
-        let quiet = extra_args.contains(&"--quiet") || extra_args.contains(&"--log-file");
+        // pipe is disconnected. In both cases, fall back to polling for readiness
+        // instead of monitoring stderr for the "IPC server listening" message.
+        let poll_for_readiness =
+            extra_args.contains(&"--quiet") || extra_args.contains(&"--log-file");
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
@@ -72,7 +74,7 @@ impl HeadlessProcess {
         let shutdown_clone = Arc::clone(&shutdown);
         let shutdown_clone2 = Arc::clone(&shutdown);
 
-        // Channel to signal IPC readiness (used in non-quiet mode)
+        // Channel to signal IPC readiness (used when stderr is available)
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
         let mut ready_tx = Some(ready_tx);
 
@@ -122,8 +124,8 @@ impl HeadlessProcess {
         });
 
         // Wait for IPC readiness
-        if quiet {
-            // In quiet mode, stderr messages are suppressed. Probe readiness
+        if poll_for_readiness {
+            // Stderr is not available (suppressed or redirected). Probe readiness
             // by running an actual RPC (`arf ipc eval "1"`) until it succeeds.
             // This ensures R is fully initialized and `set_r_at_prompt(true)`
             // has been called, unlike `ipc status` which only checks the
@@ -135,7 +137,7 @@ impl HeadlessProcess {
                     let _ = child.kill();
                     let server_stderr = stderr_output.lock().map(|s| s.clone()).unwrap_or_default();
                     return Err(format!(
-                        "Timeout waiting for IPC eval to succeed in quiet mode.\n\
+                        "Timeout waiting for IPC eval to succeed (polling mode).\n\
                          Server stderr:\n{server_stderr}\n\
                          Last probe error:\n{last_probe_err}"
                     ));

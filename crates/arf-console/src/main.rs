@@ -160,9 +160,13 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
     }
 
     // Convert the duplicated OS handle to a C runtime fd.
-    // Use O_APPEND to match the append-mode log file; the default (0 = O_RDONLY)
-    // would make fd 2 read-only, causing CRT writes to stderr to fail.
-    let new_fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, libc::O_APPEND) };
+    // Use O_WRONLY | O_APPEND to match the append-mode log file; omitting an
+    // explicit access mode can leave fd 2 effectively read-only on some CRTs,
+    // causing CRT writes to stderr to fail.
+    // MSVC CRT: _O_WRONLY = 0x0001, _O_APPEND = 0x0008
+    const O_WRONLY: libc::c_int = 0x0001;
+    let new_fd =
+        unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, O_WRONLY | libc::O_APPEND) };
     if new_fd == -1 {
         eprintln!("Warning: failed to convert handle for stderr redirect");
         // Clean up the duplicated handle since open_osfhandle failed.
