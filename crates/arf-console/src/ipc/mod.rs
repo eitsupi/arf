@@ -314,8 +314,29 @@ fn handle_request(request: IpcRequest) {
 
     // Session requests are handled immediately without ExternalBreak,
     // since they are read-only and don't conflict with user input.
+    // However, we must not touch R (e.g. via arf_harp::eval_string) unless
+    // it is safe: R must be idle, not in alternate mode, and no other IPC
+    // operation pending that might race with us.
     if matches!(method, IpcMethod::Session) {
-        let result = collect_session_result(true);
+        let r_at_prompt = r_is_at_prompt().load(Ordering::Acquire);
+        let has_pending = pending_ipc_operation()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        let in_alt_mode = is_in_alternate_mode();
+
+        let try_r = r_at_prompt && !has_pending && !in_alt_mode;
+        let reason = if in_alt_mode {
+            "R is in alternate mode (shell, history browser, or help browser)"
+        } else if !r_at_prompt {
+            "R is busy evaluating another expression"
+        } else if has_pending {
+            "Another IPC operation is pending"
+        } else {
+            "" // R info will be collected
+        };
+
+        let result = collect_session_result(try_r, reason);
         let _ = reply.send(IpcResponse::Session(Box::new(result)));
         return;
     }
@@ -545,12 +566,20 @@ fn current_session_meta() -> (String, String) {
 ///
 /// Called from both REPL idle callback and headless mode handler.
 /// When R is busy or unavailable, returns arf-only info with an explanation.
-pub(in crate::ipc) fn collect_session_result(try_r: bool) -> SessionResult {
+///
+/// `reason` is used as the `r_unavailable_reason` when `try_r` is false.
+/// When `try_r` is true but R is not at the prompt, a default reason is used.
+pub(in crate::ipc) fn collect_session_result(try_r: bool, reason: &str) -> SessionResult {
     let (socket_path, started_at) = current_session_meta();
     let mut result = arf_session_base(&socket_path, &started_at);
 
     if !try_r || !r_is_at_prompt().load(Ordering::Acquire) {
-        result.r_unavailable_reason = Some("R is busy evaluating another expression".to_string());
+        let reason = if reason.is_empty() {
+            "R is busy evaluating another expression"
+        } else {
+            reason
+        };
+        result.r_unavailable_reason = Some(reason.to_string());
         result.hint = Some(
             "R session information will be available when R returns to the prompt. \
              Retry 'arf ipc session' later, or use 'arf ipc eval' with a timeout to wait."
@@ -747,7 +776,7 @@ fn headless_handle_request(request: IpcRequest) {
             }
         }
         IpcMethod::Session => {
-            let result = collect_session_result(true);
+            let result = collect_session_result(true, "");
             let _ = reply.send(IpcResponse::Session(Box::new(result)));
         }
     }

@@ -522,8 +522,8 @@ where
 
 /// Build an arf-only session response, falling back to INTERNAL_ERROR if
 /// serialization fails (should never happen, but avoids panics in recovery paths).
-fn session_fallback_response(id: Option<serde_json::Value>) -> JsonRpcResponse {
-    match serde_json::to_value(super::collect_session_result(false)) {
+fn session_fallback_response(id: Option<serde_json::Value>, reason: &str) -> JsonRpcResponse {
+    match serde_json::to_value(super::collect_session_result(false, reason)) {
         Ok(val) => JsonRpcResponse::success(id, val),
         Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, format!("Session info error: {e}")),
     }
@@ -546,7 +546,10 @@ async fn dispatch_request(
     // request would sit in the queue. Return arf-only info directly instead.
     if super::is_in_alternate_mode() {
         if is_session {
-            return session_fallback_response(id);
+            return session_fallback_response(
+                id,
+                "R is in alternate mode (shell, history browser, or help browser)",
+            );
         }
         return JsonRpcResponse::error(
             id,
@@ -645,7 +648,7 @@ async fn dispatch_request(
     if tx.send(ipc_request).is_err() {
         if is_session {
             // Return arf-only info if main thread is unavailable
-            return session_fallback_response(id);
+            return session_fallback_response(id, "Main thread is unavailable");
         }
         return JsonRpcResponse::error(id, INTERNAL_ERROR, "Main thread unavailable".to_string());
     }
@@ -666,13 +669,13 @@ async fn dispatch_request(
         },
         Ok(Err(_)) => {
             if is_session {
-                return session_fallback_response(id);
+                return session_fallback_response(id, "Request handler dropped");
             }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request handler dropped".to_string())
         }
         Err(_) => {
             if is_session {
-                return session_fallback_response(id);
+                return session_fallback_response(id, "Timed out collecting R session information");
             }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string())
         }
@@ -774,5 +777,106 @@ mod tests {
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
         // Cleanup handled by Guard drop
+    }
+
+    /// Tests that `session` returns arf-only success (not an error) in alternate mode,
+    /// with a context-appropriate `r_unavailable_reason`.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_session_returns_arf_only_in_alternate_mode() {
+        use super::super::protocol::SessionResult;
+
+        /// Drop guard that resets global IPC state on scope exit (including panics).
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                super::super::set_in_alternate_mode(false);
+            }
+        }
+
+        super::super::set_in_alternate_mode(true);
+        let _guard = Guard;
+
+        let (tx, _rx) = mpsc::channel();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "session".to_string(),
+            params: serde_json::json!({}),
+            id: Some(serde_json::json!(1)),
+        };
+        let response = dispatch_request(request, &tx).await;
+
+        // Should be a success, not an error
+        assert!(
+            response.error.is_none(),
+            "session should not return an error"
+        );
+        let result_value = response.result.expect("session should return a result");
+        let result: SessionResult =
+            serde_json::from_value(result_value).expect("should parse as SessionResult");
+
+        // Should have arf info
+        assert!(!result.arf_version.is_empty());
+        assert!(result.pid > 0);
+
+        // R info should be absent with an explanation
+        assert!(
+            result.r.is_none(),
+            "R info should be null in alternate mode"
+        );
+        let reason = result
+            .r_unavailable_reason
+            .expect("should have r_unavailable_reason");
+        assert!(
+            reason.contains("alternate mode"),
+            "reason should mention alternate mode, got: {reason}"
+        );
+        assert!(result.hint.is_some(), "should have a hint");
+    }
+
+    /// Tests that `session` returns arf-only info when the main thread channel
+    /// is broken (tx.send fails).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_session_fallback_on_channel_failure() {
+        use super::super::protocol::SessionResult;
+
+        /// Drop guard that resets global IPC state on scope exit (including panics).
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                super::super::set_in_alternate_mode(false);
+            }
+        }
+
+        super::super::set_in_alternate_mode(false);
+        let _guard = Guard;
+
+        // Create a channel and immediately drop the receiver so send() fails
+        let (tx, _rx) = mpsc::channel();
+        drop(_rx);
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "session".to_string(),
+            params: serde_json::json!({}),
+            id: Some(serde_json::json!(1)),
+        };
+        let response = dispatch_request(request, &tx).await;
+
+        // Should be a success with arf-only info
+        assert!(
+            response.error.is_none(),
+            "session should not return an error"
+        );
+        let result_value = response.result.expect("session should return a result");
+        let result: SessionResult =
+            serde_json::from_value(result_value).expect("should parse as SessionResult");
+
+        assert!(result.r.is_none(), "R info should be null");
+        assert!(
+            result.r_unavailable_reason.is_some(),
+            "should have r_unavailable_reason"
+        );
     }
 }

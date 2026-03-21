@@ -141,14 +141,11 @@ pub struct SessionResult {
     pub arch: String,
     pub socket_path: String,
     pub started_at: String,
-    /// R session information, or `null` if R is busy.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
     /// Reason why R information is unavailable, or `null` if available.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub r_unavailable_reason: Option<String>,
-    /// Hint for the caller on what to do next, or `null`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Hint for the caller on what to do next, or `null` if R info is available.
     pub hint: Option<String>,
 }
 
