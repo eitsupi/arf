@@ -135,10 +135,17 @@ pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     // Initialize pending operation storage
     let _ = pending_ipc_operation();
 
+    // Capture the start time before spawning so it is available even if
+    // the session file write fails later.
+    let started_at = chrono::Local::now().to_rfc3339();
+
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
     let path = server::start_server(tx, bind)?;
+
+    // Cache session metadata in memory for the `session` IPC method.
+    set_session_meta(path.clone(), started_at);
 
     // Store receiver for polling from idle callback.
     // If OnceLock is already set (from a previous stop/start), replace the inner value.
@@ -552,14 +559,27 @@ fn arf_session_base(socket_path: &str, started_at: &str) -> SessionResult {
     }
 }
 
-/// Look up socket_path and started_at from the session file.
-fn current_session_meta() -> (String, String) {
-    let pid = std::process::id();
-    if let Some(session) = session::find_session(Some(pid)) {
-        (session.socket_path, session.started_at)
-    } else {
-        (String::new(), String::new())
+/// In-memory session metadata, set once at IPC server startup.
+/// Avoids re-reading the session file on every `session` request.
+static SESSION_META: OnceLock<Mutex<(String, String)>> = OnceLock::new();
+
+/// Store session metadata in memory (called after server start).
+pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) {
+    match SESSION_META.get() {
+        Some(m) => *m.lock().unwrap() = (socket_path, started_at),
+        None => {
+            let _ = SESSION_META.set(Mutex::new((socket_path, started_at)));
+        }
     }
+}
+
+/// Get cached session metadata (socket_path, started_at).
+fn current_session_meta() -> (String, String) {
+    SESSION_META
+        .get()
+        .and_then(|m| m.try_lock().ok())
+        .map(|g| g.clone())
+        .unwrap_or_default()
 }
 
 /// Collect session information, including R info if `try_r` is true and R is idle.
@@ -580,11 +600,19 @@ pub(in crate::ipc) fn collect_session_result(try_r: bool, reason: &str) -> Sessi
             reason
         };
         result.r_unavailable_reason = Some(reason.to_string());
-        result.hint = Some(
+        result.hint = Some(if reason.contains("alternate mode") {
+            "Exit the current mode (shell, browser) to make R session info available.".to_string()
+        } else if reason.contains("pending") {
+            "Wait for the current IPC operation to complete, then retry.".to_string()
+        } else if reason.contains("Main thread") || reason.contains("handler dropped") {
+            "The arf process may be shutting down or unresponsive.".to_string()
+        } else if reason.contains("Timed out") {
+            "R may be busy with a long-running operation. Retry later.".to_string()
+        } else {
             "R session information will be available when R returns to the prompt. \
              Retry 'arf ipc session' later, or use 'arf ipc eval' with a timeout to wait."
-                .to_string(),
-        );
+                .to_string()
+        });
         return result;
     }
 
@@ -626,13 +654,19 @@ fn collect_r_session_info() -> Option<RSessionInfo> {
             lib_paths = .libPaths()
         )
         # Manual JSON construction to avoid dependency on jsonlite.
-        # Escape backslash, double-quote, and control characters for valid JSON.
+        # Escape backslash, double-quote, and all control characters
+        # (U+0000-U+001F) for valid JSON. Uses gsub (not byte-level) to
+        # preserve multibyte characters (e.g. CJK locales).
         esc <- function(x) {
             x <- gsub('\\\\', '\\\\\\\\', x, fixed = TRUE)
             x <- gsub('"', '\\\\"', x, fixed = TRUE)
+            x <- gsub('\b', '\\\\b', x, fixed = TRUE)
+            x <- gsub('\f', '\\\\f', x, fixed = TRUE)
             x <- gsub('\n', '\\\\n', x, fixed = TRUE)
             x <- gsub('\r', '\\\\r', x, fixed = TRUE)
             x <- gsub('\t', '\\\\t', x, fixed = TRUE)
+            # Remaining control characters (U+0000-U+001F) via regex
+            x <- gsub('[[:cntrl:]]', '', x)
             x
         }
         jarr <- function(xs) {
@@ -855,5 +889,75 @@ mod tests {
         }
 
         // Cleanup handled by GlobalStateGuard drop
+    }
+
+    /// Tests that `handle_request` returns arf-only session info (not an error)
+    /// in various states: alternate mode, R busy, pending operation.
+    #[test]
+    #[serial]
+    fn test_session_returns_arf_only_in_various_states() {
+        set_in_alternate_mode(false);
+        set_r_at_prompt(false);
+        let _guard = GlobalStateGuard;
+
+        // Helper: send a Session request and get the result
+        fn send_session() -> protocol::SessionResult {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let request = IpcRequest {
+                method: IpcMethod::Session,
+                reply: reply_tx,
+            };
+            handle_request(request);
+            match reply_rx.blocking_recv().unwrap() {
+                IpcResponse::Session(result) => *result,
+                _ => panic!("Expected Session response"),
+            }
+        }
+
+        // Case 1: alternate mode — should return arf-only with alternate mode reason
+        set_in_alternate_mode(true);
+        set_r_at_prompt(true);
+        {
+            let result = send_session();
+            assert!(result.r.is_none());
+            let reason = result.r_unavailable_reason.unwrap();
+            assert!(
+                reason.contains("alternate mode"),
+                "Expected alternate mode reason, got: {reason}"
+            );
+        }
+
+        // Case 2: R busy (not at prompt) — should return arf-only
+        set_in_alternate_mode(false);
+        set_r_at_prompt(false);
+        {
+            let result = send_session();
+            assert!(result.r.is_none());
+            assert!(result.r_unavailable_reason.is_some());
+        }
+
+        // Case 3: pending operation — should return arf-only
+        set_r_at_prompt(true);
+        {
+            // Insert a dummy pending operation
+            let (dummy_tx, _dummy_rx) = tokio::sync::oneshot::channel();
+            *pending_ipc_operation()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(PendingIpcOperation {
+                kind: PendingIpcKind::SilentEvaluate { reply: dummy_tx },
+                code: "dummy".to_string(),
+            });
+
+            let result = send_session();
+            assert!(result.r.is_none());
+            let reason = result.r_unavailable_reason.unwrap();
+            assert!(
+                reason.contains("pending"),
+                "Expected pending reason, got: {reason}"
+            );
+
+            // Clean up dummy pending operation
+            let _ = take_pending_ipc_operation();
+        }
     }
 }
