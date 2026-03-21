@@ -130,8 +130,7 @@ pub fn start_server(
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
-                if let Err(e) =
-                    run_server(&path, &started_at_owned, tx, token_clone, bind_tx).await
+                if let Err(e) = run_server(&path, &started_at_owned, tx, token_clone, bind_tx).await
                 {
                     log::error!("IPC server error: {}", e);
                 }
