@@ -115,15 +115,21 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
     // Safety: dup2 is safe with valid file descriptors.
     let ret = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
     if ret == -1 {
-        // Log the error — note this may still go to the original stderr
-        // if the redirect itself failed, which is the desired fallback.
-        log::warn!(
-            "Failed to redirect stderr to log file: {}",
+        // Use eprintln! because this runs before the logger is initialized
+        // (builder.init() hasn't been called yet). If dup2 failed, stderr
+        // is still connected to the original terminal, so eprintln! works.
+        eprintln!(
+            "Warning: failed to redirect stderr to log file: {}",
             std::io::Error::last_os_error()
         );
     }
 }
 
+/// Redirect the C runtime's stderr fd (fd 2) to the given file.
+///
+/// The Win32 `STD_ERROR_HANDLE` is left unchanged; only the CRT fd used by
+/// `eprintln!()` and similar Rust macros is redirected. Uses `DuplicateHandle`
+/// to create an independent OS handle before handing it to the CRT.
 #[cfg(windows)]
 fn redirect_stderr_to_file(file: &std::fs::File) {
     use std::os::windows::io::AsRawHandle;
@@ -146,8 +152,8 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
         )
     };
     if ok == 0 {
-        log::warn!(
-            "Failed to duplicate handle for stderr redirect: {}",
+        eprintln!(
+            "Warning: failed to duplicate handle for stderr redirect: {}",
             std::io::Error::last_os_error()
         );
         return;
@@ -156,7 +162,7 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
     // Convert the duplicated OS handle to a C runtime fd.
     let new_fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, 0) };
     if new_fd == -1 {
-        log::warn!("Failed to convert handle for stderr redirect");
+        eprintln!("Warning: failed to convert handle for stderr redirect");
         // Clean up the duplicated handle since open_osfhandle failed.
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(dup_handle);
@@ -166,8 +172,8 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
 
     // Redirect C runtime's fd 2 (stderr) to the new fd.
     if unsafe { libc::dup2(new_fd, 2) } == -1 {
-        log::warn!(
-            "Failed to redirect stderr to log file: {}",
+        eprintln!(
+            "Warning: failed to redirect stderr to log file: {}",
             std::io::Error::last_os_error()
         );
     }
