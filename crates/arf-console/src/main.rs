@@ -132,7 +132,7 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
     // independent handles. Without this, `_open_osfhandle` transfers ownership
     // to the C runtime while `File` retains the same value, causing a
     // double-close when both are dropped.
-    let mut dup_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+    let mut dup_handle: windows_sys::Win32::Foundation::HANDLE = std::ptr::null_mut();
     let cur_proc = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() };
     let ok = unsafe {
         windows_sys::Win32::Foundation::DuplicateHandle(
