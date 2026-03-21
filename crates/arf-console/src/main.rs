@@ -45,7 +45,14 @@ fn main() -> ExitCode {
 /// When `log_file` is `Some`, log output is written to the specified file
 /// instead of stderr. This is useful for daemon deployments where stderr
 /// may not be monitored.
-fn init_logger(log_file: Option<&std::path::Path>) {
+///
+/// When `redirect_stderr` is `true` and a log file is provided, the process's
+/// stderr file descriptor is also redirected to the log file via `dup2`. This
+/// ensures that *all* stderr output — including `eprintln!()` calls, R's
+/// `WriteConsoleEx` default output (e.g., from graphics device callbacks), and
+/// any other code writing directly to fd 2 — goes to the log file instead of
+/// the terminal.
+fn init_logger(log_file: Option<&std::path::Path>, redirect_stderr: bool) {
     let mut builder = env_logger::Builder::from_default_env();
     if let Some(path) = log_file {
         let mut opts = std::fs::OpenOptions::new();
@@ -75,6 +82,15 @@ fn init_logger(log_file: Option<&std::path::Path>) {
                         );
                     }
                 }
+
+                // Redirect process stderr to the log file so that all output
+                // (not just log::* macros) is captured. This must happen before
+                // env_logger takes ownership of the file handle, but the dup2'd
+                // fd is independent and survives the original fd being moved.
+                if redirect_stderr {
+                    redirect_stderr_to_file(&file);
+                }
+
                 builder.target(env_logger::Target::Pipe(Box::new(file)));
             }
             Err(e) => {
@@ -84,6 +100,46 @@ fn init_logger(log_file: Option<&std::path::Path>) {
         }
     }
     builder.init();
+}
+
+/// Redirect the process's stderr file descriptor to the given file.
+///
+/// Uses `dup2` to make fd 2 (stderr) point to the same file description as
+/// the provided file. After this call, `eprintln!()`, R's `WriteConsoleEx`
+/// default output path, and any other code writing to stderr will write to
+/// the file instead of the terminal.
+#[cfg(unix)]
+fn redirect_stderr_to_file(file: &std::fs::File) {
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    // Safety: dup2 is safe with valid file descriptors.
+    let ret = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+    if ret == -1 {
+        // Log the error — note this may still go to the original stderr
+        // if the redirect itself failed, which is the desired fallback.
+        log::warn!(
+            "Failed to redirect stderr to log file: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
+#[cfg(windows)]
+fn redirect_stderr_to_file(file: &std::fs::File) {
+    use std::os::windows::io::AsRawHandle;
+    // On Windows, redirect both the C runtime fd and the Win32 handle.
+    // _dup2 redirects the C runtime's fd 2 (used by eprintln!).
+    let new_fd = unsafe { libc::open_osfhandle(file.as_raw_handle() as libc::intptr_t, 0) };
+    if new_fd == -1 {
+        log::warn!("Failed to convert handle for stderr redirect");
+        return;
+    }
+    if unsafe { libc::dup2(new_fd, 2) } == -1 {
+        log::warn!(
+            "Failed to redirect stderr to log file: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 /// Write the current process ID to a file.
@@ -132,11 +188,13 @@ fn run() -> Result<()> {
 
     // Extract log_file from headless command (if applicable) and initialize
     // the logger once. Non-headless modes use the default stderr target.
-    let log_file = match &cli.command {
-        Some(Commands::Headless { log_file, .. }) => log_file.as_deref(),
-        _ => None,
+    // In headless mode, also redirect stderr to the log file so that all
+    // output (R device callbacks, eprintln!, etc.) is captured.
+    let (log_file, is_headless) = match &cli.command {
+        Some(Commands::Headless { log_file, .. }) => (log_file.as_deref(), true),
+        _ => (None, false),
     };
-    init_logger(log_file);
+    init_logger(log_file, is_headless);
 
     // Install signal handlers for fatal signals (SIGSEGV, SIGILL, SIGBUS).
     // This prevents the process from hanging when R encounters a segmentation fault.

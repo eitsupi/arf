@@ -43,7 +43,10 @@ impl HeadlessProcess {
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
-        let quiet = extra_args.contains(&"--quiet");
+        // When --quiet is used, status messages are suppressed.
+        // When --log-file is used, stderr is redirected to the file, so the
+        // pipe is disconnected. In both cases, fall back to polling for readiness.
+        let quiet = extra_args.contains(&"--quiet") || extra_args.contains(&"--log-file");
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
@@ -870,15 +873,22 @@ fn test_headless_log_file() {
     // The log file should exist (env_logger writes to it)
     assert!(log_path.exists(), "log file should exist at: {}", log_str);
 
-    // With RUST_LOG not set, the default level may not produce output.
-    // But the file should at least have been created by the append-open.
-    // If there IS content, it should look like log output (not status messages).
     let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
-    // Status messages (eprintln) should still go to stderr, not the log file
+
+    // In headless mode, stderr is redirected to the log file via dup2.
+    // Status messages (eprintln) should now appear in the log file.
     assert!(
-        !log_content.contains("Headless mode ready"),
-        "log file should not contain status messages: {}",
+        log_content.contains("Headless mode ready"),
+        "log file should contain status messages (stderr is redirected): {}",
         log_content
+    );
+
+    // stderr pipe should be empty (disconnected by dup2 redirect)
+    let stderr = process.stderr_output();
+    assert!(
+        !stderr.contains("Headless mode ready"),
+        "stderr pipe should be empty when --log-file redirects stderr: {}",
+        stderr
     );
 }
 
