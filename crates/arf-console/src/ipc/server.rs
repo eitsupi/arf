@@ -155,6 +155,11 @@ pub fn start_server(
         socket_path: socket_path.clone(),
     });
 
+    // Cache session metadata in memory BEFORE writing the session file.
+    // This must happen before any connection can be served, because the
+    // server thread is already accepting connections after bind success.
+    super::set_session_meta(socket_path.clone(), started_at.to_string());
+
     // Write session metadata
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())

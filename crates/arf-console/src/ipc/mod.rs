@@ -144,8 +144,8 @@ pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     // doesn't break an already-running server's channel.
     let path = server::start_server(tx, bind, &started_at)?;
 
-    // Cache session metadata in memory for the `session` IPC method.
-    set_session_meta(path.clone(), started_at);
+    // Note: session metadata is now cached inside server::start_server()
+    // right after bind confirmation, before the server can serve any request.
 
     // Store receiver for polling from idle callback.
     // If OnceLock is already set (from a previous stop/start), replace the inner value.
@@ -575,12 +575,16 @@ pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) 
 
 /// Get cached session metadata (socket_path, started_at).
 ///
-/// Uses a blocking lock with poison recovery. Returns empty strings only
-/// if `set_session_meta` was never called (should not happen in practice).
+/// Uses a blocking lock with poison recovery. If `set_session_meta` was never
+/// called (which should not happen in practice), returns explicit placeholder
+/// strings instead of empty values to avoid emitting ambiguous metadata.
 fn current_session_meta() -> (String, String) {
     match SESSION_META.get() {
         Some(m) => m.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-        None => Default::default(),
+        None => (
+            "<uninitialized_socket_path>".to_string(),
+            "<uninitialized_started_at>".to_string(),
+        ),
     }
 }
 
