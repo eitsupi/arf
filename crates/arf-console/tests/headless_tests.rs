@@ -125,7 +125,8 @@ impl HeadlessProcess {
 
         // Wait for IPC readiness
         if poll_for_readiness {
-            // Stderr is not available (suppressed or redirected). Probe readiness
+            // Stderr readiness message is not available (suppressed in --quiet
+            // mode, or pipe disconnected in --log-file mode). Probe readiness
             // by running an actual RPC (`arf ipc eval "1"`) until it succeeds.
             // This ensures R is fully initialized and `set_r_at_prompt(true)`
             // has been called, unlike `ipc status` which only checks the
@@ -888,8 +889,8 @@ fn test_headless_log_file() {
     // stderr pipe should be empty (disconnected by dup2 redirect)
     let stderr = process.stderr_output();
     assert!(
-        !stderr.contains("Headless mode ready"),
-        "stderr pipe should be empty when --log-file redirects stderr: {}",
+        stderr.trim().is_empty(),
+        "stderr pipe should be empty when --log-file redirects stderr, but got: {}",
         stderr
     );
 }
