@@ -521,6 +521,15 @@ where
 }
 
 /// Dispatch a JSON-RPC request to the main thread.
+/// Build an arf-only session response, falling back to INTERNAL_ERROR if
+/// serialization fails (should never happen, but avoids panics in recovery paths).
+fn session_fallback_response(id: Option<serde_json::Value>) -> JsonRpcResponse {
+    match serde_json::to_value(super::collect_session_result(false)) {
+        Ok(val) => JsonRpcResponse::success(id, val),
+        Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, format!("Session info error: {e}")),
+    }
+}
+
 async fn dispatch_request(
     request: JsonRpcRequest,
     tx: &mpsc::Sender<IpcRequest>,
@@ -538,10 +547,7 @@ async fn dispatch_request(
     // request would sit in the queue. Return arf-only info directly instead.
     if super::is_in_alternate_mode() {
         if is_session {
-            return JsonRpcResponse::success(
-                id,
-                serde_json::to_value(super::collect_session_result(false)).unwrap(),
-            );
+            return session_fallback_response(id);
         }
         return JsonRpcResponse::error(
             id,
@@ -640,10 +646,7 @@ async fn dispatch_request(
     if tx.send(ipc_request).is_err() {
         if is_session {
             // Return arf-only info if main thread is unavailable
-            return JsonRpcResponse::success(
-                id,
-                serde_json::to_value(super::collect_session_result(false)).unwrap(),
-            );
+            return session_fallback_response(id);
         }
         return JsonRpcResponse::error(id, INTERNAL_ERROR, "Main thread unavailable".to_string());
     }
@@ -664,19 +667,13 @@ async fn dispatch_request(
         },
         Ok(Err(_)) => {
             if is_session {
-                return JsonRpcResponse::success(
-                    id,
-                    serde_json::to_value(super::collect_session_result(false)).unwrap(),
-                );
+                return session_fallback_response(id);
             }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request handler dropped".to_string())
         }
         Err(_) => {
             if is_session {
-                return JsonRpcResponse::success(
-                    id,
-                    serde_json::to_value(super::collect_session_result(false)).unwrap(),
-                );
+                return session_fallback_response(id);
             }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string())
         }

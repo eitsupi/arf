@@ -597,9 +597,19 @@ fn collect_r_session_info() -> Option<RSessionInfo> {
             lib_paths = .libPaths()
         )
         # Manual JSON construction to avoid dependency on jsonlite.
-        # Strings are escaped minimally (backslash and double-quote).
-        esc <- function(x) gsub('"', '\\"', gsub('\\\\', '\\\\\\\\', x), fixed = FALSE)
-        jarr <- function(xs) paste0('["', paste(vapply(xs, esc, ""), collapse = '","'), '"]')
+        # Escape backslash, double-quote, and control characters for valid JSON.
+        esc <- function(x) {
+            x <- gsub('\\\\', '\\\\\\\\', x)
+            x <- gsub('"', '\\\\"', x)
+            x <- gsub('\n', '\\\\n', x)
+            x <- gsub('\r', '\\\\r', x)
+            x <- gsub('\t', '\\\\t', x)
+            x
+        }
+        jarr <- function(xs) {
+            if (length(xs) == 0L) return("[]")
+            paste0('["', paste(vapply(xs, esc, ""), collapse = '","'), '"]')
+        }
         paste0('{',
             '"version":"', esc(info$version), '",',
             '"platform":"', esc(info$platform), '",',

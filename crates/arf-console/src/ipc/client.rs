@@ -237,17 +237,19 @@ pub fn cmd_session(pid: Option<u32>) -> Result<()> {
         std::process::exit(1);
     }
 
-    if let Some(result) = response.result {
-        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-        let output = if is_tty {
-            serde_json::to_string_pretty(&result)?
-        } else {
-            serde_json::to_string(&result)?
-        };
-        println!("{output}");
+    match response.result {
+        Some(result) => {
+            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let output = if is_tty {
+                serde_json::to_string_pretty(&result)?
+            } else {
+                serde_json::to_string(&result)?
+            };
+            println!("{output}");
+            Ok(())
+        }
+        None => anyhow::bail!("Server returned empty response"),
     }
-
-    Ok(())
 }
 
 /// Send a JSON-RPC request to the socket and return the response.
