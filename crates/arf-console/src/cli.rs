@@ -343,15 +343,16 @@ pub enum IpcAction {
     /// Get session information as JSON (arf + R environment)
     ///
     /// Returns structured session information including arf version, OS,
-    /// and R environment details (loaded namespaces, attached packages,
-    /// library paths, locale, working directory, etc.).
+    /// log file path (if any), and R environment details (loaded namespaces,
+    /// attached packages, library paths, locale, working directory, etc.).
     ///
     /// Unlike `eval "sessionInfo()"`, this returns machine-readable JSON
     /// that can be piped to jq or consumed by AI agents without parsing
     /// human-readable text output. When R is busy, arf-side information
     /// is still returned with `r` set to null and `r_unavailable_reason`
-    /// / `hint` fields explaining the situation. The JSON shape is always
-    /// consistent — check `r` for null to determine availability.
+    /// / `hint` fields explaining the situation. The `log_file` field is
+    /// null when logging to stderr (non-headless mode). The JSON shape is
+    /// always consistent — check `r` for null to determine availability.
     ///
     /// Output is pretty-printed when writing to a terminal, and compact
     /// JSON when piped to another program.

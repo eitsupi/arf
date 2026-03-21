@@ -28,6 +28,9 @@ pub fn cmd_list() -> Result<()> {
             session.r_version.as_deref().unwrap_or("?"),
             session.cwd
         );
+        if let Some(ref log_file) = session.log_file {
+            println!("         Log: {log_file}");
+        }
     }
 
     Ok(())
@@ -210,6 +213,9 @@ pub fn cmd_status(pid: Option<u32>) -> Result<()> {
     println!("Socket:     {}", session.socket_path);
     println!("CWD:        {}", session.cwd);
     println!("Started:    {}", session.started_at);
+    if let Some(ref log_file) = session.log_file {
+        println!("Log file:   {log_file}");
+    }
 
     Ok(())
 }

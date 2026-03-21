@@ -129,7 +129,7 @@ pub fn break_signal() -> Arc<AtomicBool> {
 ///
 /// If `bind` is `Some`, the server binds to the given path instead of the
 /// default PID-based path.
-pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
+pub fn start_server(bind: Option<&str>, log_file: Option<String>) -> std::io::Result<String> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Initialize pending operation storage
@@ -142,7 +142,7 @@ pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let path = server::start_server(tx, bind, &started_at)?;
+    let path = server::start_server(tx, bind, &started_at, log_file)?;
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.
@@ -545,14 +545,15 @@ pub fn trigger_headless_shutdown() -> bool {
 // ── Session info collection ───────────────────────────────────────────────
 
 /// Build arf-side info that is always available (no R needed).
-fn arf_session_base(socket_path: &str, started_at: &str) -> SessionResult {
+fn arf_session_base(meta: &SessionMeta) -> SessionResult {
     SessionResult {
         arf_version: env!("CARGO_PKG_VERSION").to_string(),
         pid: std::process::id(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        socket_path: socket_path.to_string(),
-        started_at: started_at.to_string(),
+        socket_path: meta.socket_path.clone(),
+        started_at: meta.started_at.clone(),
+        log_file: meta.log_file.clone(),
         r: None,
         r_unavailable_reason: None,
         hint: None,
@@ -561,30 +562,47 @@ fn arf_session_base(socket_path: &str, started_at: &str) -> SessionResult {
 
 /// In-memory session metadata, set once at IPC server startup.
 /// Avoids re-reading the session file on every `session` request.
-static SESSION_META: OnceLock<Mutex<(String, String)>> = OnceLock::new();
+#[derive(Clone)]
+struct SessionMeta {
+    socket_path: String,
+    started_at: String,
+    log_file: Option<String>,
+}
+
+static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
 
 /// Store session metadata in memory (called after server start).
-pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) {
+pub(in crate::ipc) fn set_session_meta(
+    socket_path: String,
+    started_at: String,
+    log_file: Option<String>,
+) {
+    let meta = SessionMeta {
+        socket_path,
+        started_at,
+        log_file,
+    };
     match SESSION_META.get() {
-        Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = (socket_path, started_at),
+        Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = meta,
         None => {
-            let _ = SESSION_META.set(Mutex::new((socket_path, started_at)));
+            let _ = SESSION_META.set(Mutex::new(meta));
         }
     }
 }
 
-/// Get cached session metadata (socket_path, started_at).
+/// Get cached session metadata.
 ///
 /// Uses a blocking lock with poison recovery. If `set_session_meta` was never
 /// called (which should not happen in practice), returns explicit placeholder
 /// strings instead of empty values to avoid emitting ambiguous metadata.
-fn current_session_meta() -> (String, String) {
+fn current_session_meta() -> SessionMeta {
     match SESSION_META.get() {
         Some(m) => m.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-        None => (
-            "<uninitialized_socket_path>".to_string(),
-            "<uninitialized_started_at>".to_string(),
-        ),
+        None => SessionMeta {
+            socket_path: "<uninitialized_socket_path>".to_string(),
+            started_at: "<uninitialized_started_at>".to_string(),
+            log_file: None,
+        },
     }
 }
 
@@ -596,8 +614,8 @@ fn current_session_meta() -> (String, String) {
 /// `reason` is used as the `r_unavailable_reason` when `try_r` is false.
 /// When `try_r` is true but R is not at the prompt, a default reason is used.
 pub(in crate::ipc) fn collect_session_result(try_r: bool, reason: &str) -> SessionResult {
-    let (socket_path, started_at) = current_session_meta();
-    let mut result = arf_session_base(&socket_path, &started_at);
+    let meta = current_session_meta();
+    let mut result = arf_session_base(&meta);
 
     if !try_r || !r_is_at_prompt().load(Ordering::Acquire) {
         let reason = if reason.is_empty() {

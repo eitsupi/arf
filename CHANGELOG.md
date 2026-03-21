@@ -7,6 +7,7 @@
 ### Added
 
 - **Experimental:** Headless mode (`arf headless`) for running R without the interactive REPL, controlled entirely via JSON-RPC IPC. Designed for AI agents and CI environments where a terminal is not available. Supports `--bind`, `--pid-file`, `--quiet`, `--log-file` options and graceful shutdown on SIGTERM/SIGHUP (#119, #122, #123, #124, #125, #126)
+- IPC session info (`arf ipc session`, `arf ipc status`, `arf ipc list`) and session file now include `log_file` field, exposing the headless mode log file path for debugging and monitoring
 
 ## [0.2.5] - 2026-03-19
 

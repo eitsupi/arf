@@ -272,7 +272,7 @@ fn run() -> Result<()> {
             bind,
             pid_file,
             quiet,
-            log_file: _, // already used above for init_logger
+            log_file,
             vanilla,
             no_environ,
             no_site_file,
@@ -302,6 +302,7 @@ fn run() -> Result<()> {
                 bind.as_deref(),
                 pid_file.as_deref(),
                 *quiet,
+                log_file.as_deref(),
             );
         }
         None => {}
@@ -417,7 +418,7 @@ fn run() -> Result<()> {
 
     // Start IPC server if requested
     if cli.with_ipc {
-        match ipc::start_server(None) {
+        match ipc::start_server(None, None) {
             Ok(path) => {
                 log::info!("IPC server started on {}", path);
             }
@@ -517,6 +518,7 @@ fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
 /// Initializes R, starts the IPC server, and enters a polling loop.
 /// The loop processes IPC requests and R events until interrupted
 /// by Ctrl+C or a shutdown signal.
+#[allow(clippy::too_many_arguments)]
 fn run_headless(
     config_path: Option<&std::path::PathBuf>,
     r_home: Option<&std::path::Path>,
@@ -525,6 +527,7 @@ fn run_headless(
     bind: Option<&str>,
     pid_file: Option<&std::path::Path>,
     quiet: bool,
+    log_file: Option<&std::path::Path>,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -571,7 +574,8 @@ fn run_headless(
     ipc::set_headless_shutdown(shutdown.clone());
 
     // Start IPC server (with optional custom bind path)
-    let ipc_path = ipc::start_server(bind).context("Failed to start IPC server")?;
+    let log_file_str = log_file.map(|p| p.display().to_string());
+    let ipc_path = ipc::start_server(bind, log_file_str).context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", ipc_path);
     }
