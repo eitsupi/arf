@@ -108,7 +108,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arf-console"
-version = "0.2.5"
+version = "0.2.6-alpha.1"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.2.5"
+version = "0.2.6-alpha.1"
 dependencies = [
  "arf-libr",
  "log",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.2.5"
+version = "0.2.6-alpha.1"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -987,9 +987,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
@@ -1457,9 +1457,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83c41efbf8f90ac44de7f3a868f0867851d261b56291732d0cbf7cceaaeb55a6"
+checksum = "14104c5a24d9bcf7eb2c24753e0f49fe14555d8bd565ea3d38e4b4303267259d"
 dependencies = [
  "bitflags 2.11.0",
  "getopts",

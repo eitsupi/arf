@@ -2,18 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.6-alpha.1] - 2026-03-21
+
 ### Added
 
-- **Headless:** `--bind <path>` option to specify a custom IPC socket path (Unix) or named pipe path (Windows) instead of the default PID-based path
-- **Headless:** `--pid-file <path>` option to write the server PID to a file for process management scripts. The file is removed on clean shutdown
-- **Headless:** `--quiet` flag to suppress status messages on stderr (IPC path, ready, shutdown)
-- **Headless:** `--log-file <path>` option to redirect log output to a file instead of stderr
-- **Headless:** Graceful shutdown on SIGTERM and SIGHUP (in addition to SIGINT/Ctrl+C), enabling clean PID file removal and socket cleanup from `systemd stop`, `docker stop`, and nohup hangup
-
-### Fixed
-
-- **Headless:** When `--log-file` is specified, redirect the process's stderr to the log file via `dup2`. This captures all stderr output — including R's WriteConsoleEx output from graphics device callbacks and other non-IPC-captured diagnostics — instead of leaking it to the terminal
-- **Headless:** Configure custom pager, browser, and graphics device options on startup to prevent `?topic` from spawning an interactive pager (`less`), `browseURL()` from opening a browser, and `plot()` from attempting to open X11/quartz in display-less environments
+- **Experimental:** Headless mode (`arf headless`) for running R without the interactive REPL, controlled entirely via JSON-RPC IPC. Designed for AI agents and CI environments where a terminal is not available. Supports `--bind`, `--pid-file`, `--quiet`, `--log-file` options and graceful shutdown on SIGTERM/SIGHUP (#119, #122, #123, #124, #125, #126)
 
 ## [0.2.5] - 2026-03-19
 
