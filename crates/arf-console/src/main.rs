@@ -575,9 +575,11 @@ fn run_headless(
 
     // Start IPC server (with optional custom bind path)
     let log_file_str = log_file.map(|p| {
-        // Canonicalize to absolute path so IPC clients can locate the file
-        // regardless of their own working directory.
-        std::fs::canonicalize(p)
+        // Convert to absolute path so IPC clients can locate the file
+        // regardless of their own working directory. Use std::path::absolute
+        // instead of canonicalize because the file may not exist yet at this
+        // point (the logger creates it).
+        std::path::absolute(p)
             .unwrap_or_else(|_| p.to_path_buf())
             .display()
             .to_string()
