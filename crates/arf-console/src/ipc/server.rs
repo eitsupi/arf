@@ -113,6 +113,7 @@ pub fn start_server(
     }
 
     let path = socket_path.clone();
+    let started_at_owned = started_at.to_string();
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
 
@@ -129,7 +130,9 @@ pub fn start_server(
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
-                if let Err(e) = run_server(&path, tx, token_clone, bind_tx).await {
+                if let Err(e) =
+                    run_server(&path, &started_at_owned, tx, token_clone, bind_tx).await
+                {
                     log::error!("IPC server error: {}", e);
                 }
             });
@@ -155,10 +158,8 @@ pub fn start_server(
         socket_path: socket_path.clone(),
     });
 
-    // Cache session metadata in memory BEFORE writing the session file.
-    // This must happen before any connection can be served, because the
-    // server thread is already accepting connections after bind success.
-    super::set_session_meta(socket_path.clone(), started_at.to_string());
+    // Note: session metadata is cached in the server thread right before
+    // bind confirmation, so it is available before any connection is served.
 
     // Write session metadata
     let cwd = std::env::current_dir()
@@ -266,6 +267,7 @@ fn get_socket_path(pid: u32) -> String {
 #[cfg(unix)]
 async fn run_server(
     socket_path: &str,
+    started_at: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -292,6 +294,9 @@ async fn run_server(
                     );
                 }
             }
+            // Cache session metadata BEFORE signalling bind success, so it
+            // is guaranteed to be available when the first request arrives.
+            super::set_session_meta(socket_path.to_string(), started_at.to_string());
             let _ = bind_tx.send(Ok(()));
             l
         }
@@ -334,6 +339,7 @@ async fn run_server(
 #[cfg(windows)]
 async fn run_server(
     socket_path: &str,
+    started_at: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -346,6 +352,9 @@ async fn run_server(
         .create(socket_path)
     {
         Ok(s) => {
+            // Cache session metadata BEFORE signalling bind success, so it
+            // is guaranteed to be available when the first request arrives.
+            super::set_session_meta(socket_path.to_string(), started_at.to_string());
             let _ = bind_tx.send(Ok(()));
             s
         }
