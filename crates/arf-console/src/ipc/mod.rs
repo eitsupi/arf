@@ -135,14 +135,14 @@ pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     // Initialize pending operation storage
     let _ = pending_ipc_operation();
 
-    // Capture the start time before spawning so it is available even if
-    // the session file write fails later.
+    // Capture the start time once so both the session file and in-memory
+    // cache use the same value.
     let started_at = chrono::Local::now().to_rfc3339();
 
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let path = server::start_server(tx, bind)?;
+    let path = server::start_server(tx, bind, &started_at)?;
 
     // Cache session metadata in memory for the `session` IPC method.
     set_session_meta(path.clone(), started_at);
@@ -574,12 +574,14 @@ pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) 
 }
 
 /// Get cached session metadata (socket_path, started_at).
+///
+/// Uses a blocking lock with poison recovery. Returns empty strings only
+/// if `set_session_meta` was never called (should not happen in practice).
 fn current_session_meta() -> (String, String) {
-    SESSION_META
-        .get()
-        .and_then(|m| m.try_lock().ok())
-        .map(|g| g.clone())
-        .unwrap_or_default()
+    match SESSION_META.get() {
+        Some(m) => m.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        None => Default::default(),
+    }
 }
 
 /// Collect session information, including R info if `try_r` is true and R is idle.

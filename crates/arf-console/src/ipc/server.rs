@@ -31,7 +31,11 @@ struct ServerState {
 ///
 /// Returns the socket path on success.
 /// Returns an error if the server is already running.
-pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io::Result<String> {
+pub fn start_server(
+    tx: mpsc::Sender<IpcRequest>,
+    bind: Option<&str>,
+    started_at: &str,
+) -> std::io::Result<String> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -181,7 +185,7 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
         socket_path: socket_path.clone(),
         r_version,
         cwd,
-        started_at: chrono::Local::now().to_rfc3339(),
+        started_at: started_at.to_string(),
     };
 
     if let Err(e) = write_session(&session) {
