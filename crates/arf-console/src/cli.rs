@@ -351,8 +351,9 @@ pub enum IpcAction {
     /// human-readable text output. When R is busy, arf-side information
     /// is still returned with `r` set to null and `r_unavailable_reason`
     /// / `hint` fields explaining the situation. The `log_file` field is
-    /// null when logging to stderr (non-headless mode). The JSON shape is
-    /// always consistent — check `r` for null to determine availability.
+    /// null when no dedicated log file is configured (logging to stderr
+    /// without redirection). The JSON shape is always consistent — check
+    /// `r` for null to determine availability.
     ///
     /// Output is pretty-printed when writing to a terminal, and compact
     /// JSON when piped to another program.

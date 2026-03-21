@@ -15,7 +15,7 @@ pub struct SessionInfo {
     pub r_version: Option<String>,
     pub cwd: String,
     pub started_at: String,
-    /// Log file path, or `None` if logging to stderr.
+    /// Log file path, or `None` if no log file is configured.
     #[serde(default)]
     pub log_file: Option<String>,
 }

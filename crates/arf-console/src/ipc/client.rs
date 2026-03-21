@@ -19,17 +19,29 @@ pub fn cmd_list() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<8} {:<12} CWD", "PID", "R VERSION");
-    println!("{}", "-".repeat(60));
+    let has_log = sessions.iter().any(|s| s.log_file.is_some());
+    if has_log {
+        println!("{:<8} {:<12} {:<30} CWD", "PID", "R VERSION", "LOG FILE");
+    } else {
+        println!("{:<8} {:<12} CWD", "PID", "R VERSION");
+    }
+    println!("{}", "-".repeat(if has_log { 90 } else { 60 }));
     for session in &sessions {
-        println!(
-            "{:<8} {:<12} {}",
-            session.pid,
-            session.r_version.as_deref().unwrap_or("?"),
-            session.cwd
-        );
-        if let Some(ref log_file) = session.log_file {
-            println!("         Log: {log_file}");
+        if has_log {
+            println!(
+                "{:<8} {:<12} {:<30} {}",
+                session.pid,
+                session.r_version.as_deref().unwrap_or("?"),
+                session.log_file.as_deref().unwrap_or("-"),
+                session.cwd
+            );
+        } else {
+            println!(
+                "{:<8} {:<12} {}",
+                session.pid,
+                session.r_version.as_deref().unwrap_or("?"),
+                session.cwd
+            );
         }
     }
 

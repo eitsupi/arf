@@ -574,7 +574,14 @@ fn run_headless(
     ipc::set_headless_shutdown(shutdown.clone());
 
     // Start IPC server (with optional custom bind path)
-    let log_file_str = log_file.map(|p| p.display().to_string());
+    let log_file_str = log_file.map(|p| {
+        // Canonicalize to absolute path so IPC clients can locate the file
+        // regardless of their own working directory.
+        std::fs::canonicalize(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .display()
+            .to_string()
+    });
     let ipc_path = ipc::start_server(bind, log_file_str).context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", ipc_path);

@@ -141,7 +141,7 @@ pub struct SessionResult {
     pub arch: String,
     pub socket_path: String,
     pub started_at: String,
-    /// Log file path, or `null` if logging to stderr (non-headless mode).
+    /// Log file path, or `null` if no log file is configured and output is sent to stderr.
     pub log_file: Option<String>,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,

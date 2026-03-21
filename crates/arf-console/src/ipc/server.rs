@@ -909,4 +909,38 @@ mod tests {
             "should have r_unavailable_reason"
         );
     }
+
+    /// Tests that `log_file` in `SessionResult` reflects what was passed to `set_session_meta`.
+    #[test]
+    #[serial_test::serial]
+    fn test_session_result_includes_log_file() {
+        // With log_file set
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            Some("/tmp/arf.log".to_string()),
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.log_file.as_deref(), Some("/tmp/arf.log"));
+
+        // Without log_file
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            None,
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.log_file, None);
+
+        // Verify JSON serialization always includes the field
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(
+            json.get("log_file").is_some(),
+            "log_file field should always be present in JSON"
+        );
+        assert!(
+            json["log_file"].is_null(),
+            "log_file should be null when not configured"
+        );
+    }
 }
