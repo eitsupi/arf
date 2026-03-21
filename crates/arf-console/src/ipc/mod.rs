@@ -638,87 +638,42 @@ pub(in crate::ipc) fn collect_session_result(try_r: bool, reason: &str) -> Sessi
 ///
 /// Must be called on the main R thread when R is at the prompt.
 /// Returns `None` if R is not available or evaluation fails.
+///
+/// Each piece of information is collected via a separate `eval_string` call
+/// and extracted as a raw Rust string/vector. JSON serialization is handled
+/// entirely by serde_json, so no manual escaping is needed on the R side.
 fn collect_r_session_info() -> Option<RSessionInfo> {
-    use crate::editor::prompt::get_r_version;
-
-    // Collect all info in a single R expression to minimize round-trips.
-    // Output is a JSON string that we parse on the Rust side.
-    let r_code = r#"invisible(local({
-        info <- list(
-            version = paste0(R.version$major, ".", R.version$minor),
-            platform = R.version$platform,
-            locale = Sys.getlocale(),
-            cwd = getwd(),
-            loaded_namespaces = loadedNamespaces(),
-            attached_packages = .packages(),
-            lib_paths = .libPaths()
-        )
-        # Manual JSON construction to avoid dependency on jsonlite.
-        # Escape backslash, double-quote, and all control characters
-        # (U+0000-U+001F) for valid JSON. Uses gsub (not byte-level) to
-        # preserve multibyte characters (e.g. CJK locales).
-        esc <- function(x) {
-            x <- gsub('\\\\', '\\\\\\\\', x, fixed = TRUE)
-            x <- gsub('"', '\\\\"', x, fixed = TRUE)
-            x <- gsub('\b', '\\\\b', x, fixed = TRUE)
-            x <- gsub('\f', '\\\\f', x, fixed = TRUE)
-            x <- gsub('\n', '\\\\n', x, fixed = TRUE)
-            x <- gsub('\r', '\\\\r', x, fixed = TRUE)
-            x <- gsub('\t', '\\\\t', x, fixed = TRUE)
-            # Remaining control characters (U+0000-U+001F) via regex
-            x <- gsub('[[:cntrl:]]', '', x)
-            x
-        }
-        jarr <- function(xs) {
-            if (length(xs) == 0L) return("[]")
-            paste0('["', paste(vapply(xs, esc, ""), collapse = '","'), '"]')
-        }
-        paste0('{',
-            '"version":"', esc(info$version), '",',
-            '"platform":"', esc(info$platform), '",',
-            '"locale":"', esc(info$locale), '",',
-            '"cwd":"', esc(info$cwd), '",',
-            '"loaded_namespaces":', jarr(info$loaded_namespaces), ',',
-            '"attached_packages":', jarr(info$attached_packages), ',',
-            '"lib_paths":', jarr(info$lib_paths),
-        '}')
-    }))"#;
-
-    match arf_harp::eval_string(r_code) {
-        Ok(robj) => {
-            // Extract the JSON string from the R result
-            let json_str = extract_r_string(robj.sexp())?;
-            match serde_json::from_str::<RSessionInfo>(&json_str) {
-                Ok(info) => Some(info),
-                Err(e) => {
-                    log::warn!("Failed to parse R session info JSON: {e}");
-                    log::debug!("R session info JSON: {json_str}");
-                    // Fallback: try to get at least the version
-                    let version = get_r_version();
-                    if version.is_empty() {
-                        None
-                    } else {
-                        Some(RSessionInfo {
-                            version,
-                            platform: String::new(),
-                            locale: String::new(),
-                            cwd: String::new(),
-                            loaded_namespaces: Vec::new(),
-                            attached_packages: Vec::new(),
-                            lib_paths: Vec::new(),
-                        })
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to evaluate R session info: {e}");
-            None
-        }
+    let version = eval_r_scalar(r#"invisible(paste0(R.version$major, ".", R.version$minor))"#)
+        .unwrap_or_default();
+    if version.is_empty() {
+        return None;
     }
+
+    Some(RSessionInfo {
+        version,
+        platform: eval_r_scalar("invisible(R.version$platform)").unwrap_or_default(),
+        locale: eval_r_scalar("invisible(Sys.getlocale())").unwrap_or_default(),
+        cwd: eval_r_scalar("invisible(getwd())").unwrap_or_default(),
+        loaded_namespaces: eval_r_character_vector("invisible(loadedNamespaces())")
+            .unwrap_or_default(),
+        attached_packages: eval_r_character_vector("invisible(.packages())").unwrap_or_default(),
+        lib_paths: eval_r_character_vector("invisible(.libPaths())").unwrap_or_default(),
+    })
 }
 
-/// Extract a string from an R SEXP (character vector of length 1).
+/// Evaluate an R expression and extract a single string result.
+fn eval_r_scalar(code: &str) -> Option<String> {
+    let robj = arf_harp::eval_string(code).ok()?;
+    extract_r_string(robj.sexp())
+}
+
+/// Evaluate an R expression and extract a character vector result.
+fn eval_r_character_vector(code: &str) -> Option<Vec<String>> {
+    let robj = arf_harp::eval_string(code).ok()?;
+    extract_r_strings(robj.sexp())
+}
+
+/// Extract a single string from an R SEXP (character vector of length >= 1).
 fn extract_r_string(sexp: arf_libr::SEXP) -> Option<String> {
     let lib = arf_libr::r_library().ok()?;
     unsafe {
@@ -734,6 +689,30 @@ fn extract_r_string(sexp: arf_libr::SEXP) -> Option<String> {
             .to_str()
             .ok()
             .map(|s| s.to_string())
+    }
+}
+
+/// Extract all strings from an R SEXP character vector.
+fn extract_r_strings(sexp: arf_libr::SEXP) -> Option<Vec<String>> {
+    let lib = arf_libr::r_library().ok()?;
+    unsafe {
+        if (lib.rf_isstring)(sexp) == 0 {
+            return None;
+        }
+        let len = (lib.rf_length)(sexp) as isize;
+        let mut result = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let elt = (lib.string_elt)(sexp, i);
+            let cstr = (lib.r_charsxp)(elt);
+            if cstr.is_null() {
+                result.push(String::new());
+            } else if let Ok(s) = std::ffi::CStr::from_ptr(cstr).to_str() {
+                result.push(s.to_string());
+            } else {
+                result.push(String::new());
+            }
+        }
+        Some(result)
     }
 }
 
