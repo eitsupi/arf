@@ -566,7 +566,7 @@ static SESSION_META: OnceLock<Mutex<(String, String)>> = OnceLock::new();
 /// Store session metadata in memory (called after server start).
 pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) {
     match SESSION_META.get() {
-        Some(m) => *m.lock().unwrap() = (socket_path, started_at),
+        Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = (socket_path, started_at),
         None => {
             let _ = SESSION_META.set(Mutex::new((socket_path, started_at)));
         }
@@ -665,14 +665,24 @@ fn collect_r_session_info() -> Option<RSessionInfo> {
 
 /// Evaluate an R expression and extract a single string result.
 fn eval_r_scalar(code: &str) -> Option<String> {
-    let robj = arf_harp::eval_string(code).ok()?;
-    extract_r_string(robj.sexp())
+    match arf_harp::eval_string(code) {
+        Ok(robj) => extract_r_string(robj.sexp()),
+        Err(e) => {
+            log::debug!("eval_r_scalar failed for `{code}`: {e}");
+            None
+        }
+    }
 }
 
 /// Evaluate an R expression and extract a character vector result.
 fn eval_r_character_vector(code: &str) -> Option<Vec<String>> {
-    let robj = arf_harp::eval_string(code).ok()?;
-    extract_r_strings(robj.sexp())
+    match arf_harp::eval_string(code) {
+        Ok(robj) => extract_r_strings(robj.sexp()),
+        Err(e) => {
+            log::debug!("eval_r_character_vector failed for `{code}`: {e}");
+            None
+        }
+    }
 }
 
 /// Extract a single string from an R SEXP (character vector of length >= 1).
