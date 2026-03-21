@@ -526,11 +526,23 @@ async fn dispatch_request(
     tx: &mpsc::Sender<IpcRequest>,
 ) -> JsonRpcResponse {
     let id = request.id.clone();
+    let is_session = request.method == "session";
 
     // Reject immediately if in alternate mode (shell, history/help browser).
     // These modes block the main thread, so requests would hang in the mpsc
     // queue until the request timeout expires.
+    //
+    // Exception: `session` returns arf-only info when R is unavailable,
+    // so it handles alternate mode gracefully via the main-thread handler.
+    // However, if the idle callback isn't running (alternate mode), the
+    // request would sit in the queue. Return arf-only info directly instead.
     if super::is_in_alternate_mode() {
+        if is_session {
+            return JsonRpcResponse::success(
+                id,
+                serde_json::to_value(super::collect_session_result(false)).unwrap(),
+            );
+        }
         return JsonRpcResponse::error(
             id,
             super::protocol::R_NOT_AT_PROMPT,
@@ -585,6 +597,7 @@ async fn dispatch_request(
             };
             IpcMethod::UserInput { code: params.code }
         }
+        "session" => IpcMethod::Session,
         _ => {
             return JsonRpcResponse::error(
                 id,
@@ -598,6 +611,8 @@ async fn dispatch_request(
     // Clamp to a reasonable maximum to avoid overflowing Tokio's internal
     // deadline computations or tying up the server task indefinitely.
     const MAX_TIMEOUT_MS: u64 = 86_400_000; // 24 hours
+    // Session info collection is lightweight; use a short timeout.
+    const SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
     let timeout = match &method {
         IpcMethod::Evaluate { timeout_ms, .. } => match timeout_ms {
@@ -611,6 +626,7 @@ async fn dispatch_request(
             Some(ms) => std::time::Duration::from_millis(*ms),
             None => super::DEFAULT_EVAL_TIMEOUT,
         },
+        IpcMethod::Session => SESSION_TIMEOUT,
         _ => super::DEFAULT_EVAL_TIMEOUT,
     };
 
@@ -622,6 +638,13 @@ async fn dispatch_request(
     };
 
     if tx.send(ipc_request).is_err() {
+        if is_session {
+            // Return arf-only info if main thread is unavailable
+            return JsonRpcResponse::success(
+                id,
+                serde_json::to_value(super::collect_session_result(false)).unwrap(),
+            );
+        }
         return JsonRpcResponse::error(id, INTERNAL_ERROR, "Main thread unavailable".to_string());
     }
 
@@ -634,12 +657,29 @@ async fn dispatch_request(
             IpcResponse::UserInput(result) => {
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
             }
+            IpcResponse::Session(result) => {
+                JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+            }
             IpcResponse::Error { code, message } => JsonRpcResponse::error(id, code, message),
         },
         Ok(Err(_)) => {
+            if is_session {
+                return JsonRpcResponse::success(
+                    id,
+                    serde_json::to_value(super::collect_session_result(false)).unwrap(),
+                );
+            }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request handler dropped".to_string())
         }
-        Err(_) => JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string()),
+        Err(_) => {
+            if is_session {
+                return JsonRpcResponse::success(
+                    id,
+                    serde_json::to_value(super::collect_session_result(false)).unwrap(),
+                );
+            }
+            JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string())
+        }
     }
 }
 

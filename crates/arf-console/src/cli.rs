@@ -340,6 +340,24 @@ pub enum IpcAction {
         #[arg(long)]
         pid: Option<u32>,
     },
+    /// Get session information as JSON (arf + R environment)
+    ///
+    /// Returns structured session information including arf version, OS,
+    /// and R environment details (loaded namespaces, attached packages,
+    /// library paths, locale, working directory, etc.).
+    ///
+    /// Unlike `eval "sessionInfo()"`, this returns machine-readable JSON
+    /// that can be piped to jq or consumed by AI agents without parsing
+    /// human-readable text output. When R is busy, arf-side information
+    /// is still returned (R fields will be null with an explanation).
+    ///
+    /// Output is pretty-printed when writing to a terminal, and compact
+    /// JSON when piped to another program.
+    Session {
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
     /// Shut down a running arf headless session
     Shutdown {
         /// PID of the target arf session (optional if only one session is running)

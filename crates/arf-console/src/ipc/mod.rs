@@ -22,7 +22,7 @@ pub mod session;
 
 use protocol::{
     EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, USER_IS_TYPING, UserInputResult,
+    R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING, UserInputResult,
 };
 use std::sync::{
     Arc, Mutex, OnceLock,
@@ -312,6 +312,14 @@ fn check_visible_eval_completion() {
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
+    // Session requests are handled immediately without ExternalBreak,
+    // since they are read-only and don't conflict with user input.
+    if matches!(method, IpcMethod::Session) {
+        let result = collect_session_result(true);
+        let _ = reply.send(IpcResponse::Session(Box::new(result)));
+        return;
+    }
+
     // Reject if in alternate mode (shell, history browser, help browser).
     // Normally dispatch_request() catches this first, but this covers the
     // race where a request was queued just before alternate mode was entered.
@@ -388,6 +396,7 @@ fn handle_request(request: IpcRequest) {
             });
             fire_break_signal();
         }
+        IpcMethod::Session => unreachable!("Session handled above"),
     }
 }
 
@@ -505,6 +514,156 @@ pub fn trigger_headless_shutdown() -> bool {
     }
 }
 
+// ── Session info collection ───────────────────────────────────────────────
+
+/// Build arf-side info that is always available (no R needed).
+fn arf_session_base(socket_path: &str, started_at: &str) -> SessionResult {
+    SessionResult {
+        arf_version: env!("CARGO_PKG_VERSION").to_string(),
+        pid: std::process::id(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        socket_path: socket_path.to_string(),
+        started_at: started_at.to_string(),
+        r: None,
+        r_unavailable_reason: None,
+        hint: None,
+    }
+}
+
+/// Look up socket_path and started_at from the session file.
+fn current_session_meta() -> (String, String) {
+    let pid = std::process::id();
+    if let Some(session) = session::find_session(Some(pid)) {
+        (session.socket_path, session.started_at)
+    } else {
+        (String::new(), String::new())
+    }
+}
+
+/// Collect session information, including R info if `try_r` is true and R is idle.
+///
+/// Called from both REPL idle callback and headless mode handler.
+/// When R is busy or unavailable, returns arf-only info with an explanation.
+pub(in crate::ipc) fn collect_session_result(try_r: bool) -> SessionResult {
+    let (socket_path, started_at) = current_session_meta();
+    let mut result = arf_session_base(&socket_path, &started_at);
+
+    if !try_r || !r_is_at_prompt().load(Ordering::Acquire) {
+        result.r_unavailable_reason = Some("R is busy evaluating another expression".to_string());
+        result.hint = Some(
+            "R session information will be available when R returns to the prompt. \
+             Retry 'arf ipc session' later, or use 'arf ipc eval' with a timeout to wait."
+                .to_string(),
+        );
+        return result;
+    }
+
+    match collect_r_session_info() {
+        Some(r_info) => {
+            result.r = Some(r_info);
+        }
+        None => {
+            result.r_unavailable_reason =
+                Some("Failed to collect R session information".to_string());
+            result.hint = Some(
+                "R may not be fully initialized. Try again later or use \
+                 'arf ipc eval \"sessionInfo()\"' for raw output."
+                    .to_string(),
+            );
+        }
+    }
+
+    result
+}
+
+/// Collect R session information using base R functions.
+///
+/// Must be called on the main R thread when R is at the prompt.
+/// Returns `None` if R is not available or evaluation fails.
+fn collect_r_session_info() -> Option<RSessionInfo> {
+    use crate::editor::prompt::get_r_version;
+
+    // Collect all info in a single R expression to minimize round-trips.
+    // Output is a JSON string that we parse on the Rust side.
+    let r_code = r#"invisible(local({
+        info <- list(
+            version = paste0(R.version$major, ".", R.version$minor),
+            platform = R.version$platform,
+            locale = Sys.getlocale(),
+            cwd = getwd(),
+            loaded_namespaces = loadedNamespaces(),
+            attached_packages = .packages(),
+            lib_paths = .libPaths()
+        )
+        # Manual JSON construction to avoid dependency on jsonlite.
+        # Strings are escaped minimally (backslash and double-quote).
+        esc <- function(x) gsub('"', '\\"', gsub('\\\\', '\\\\\\\\', x), fixed = FALSE)
+        jarr <- function(xs) paste0('["', paste(vapply(xs, esc, ""), collapse = '","'), '"]')
+        paste0('{',
+            '"version":"', esc(info$version), '",',
+            '"platform":"', esc(info$platform), '",',
+            '"locale":"', esc(info$locale), '",',
+            '"cwd":"', esc(info$cwd), '",',
+            '"loaded_namespaces":', jarr(info$loaded_namespaces), ',',
+            '"attached_packages":', jarr(info$attached_packages), ',',
+            '"lib_paths":', jarr(info$lib_paths),
+        '}')
+    }))"#;
+
+    match arf_harp::eval_string(r_code) {
+        Ok(robj) => {
+            // Extract the JSON string from the R result
+            let json_str = extract_r_string(robj.sexp())?;
+            match serde_json::from_str::<RSessionInfo>(&json_str) {
+                Ok(info) => Some(info),
+                Err(e) => {
+                    log::warn!("Failed to parse R session info JSON: {e}");
+                    log::debug!("R session info JSON: {json_str}");
+                    // Fallback: try to get at least the version
+                    let version = get_r_version();
+                    if version.is_empty() {
+                        None
+                    } else {
+                        Some(RSessionInfo {
+                            version,
+                            platform: String::new(),
+                            locale: String::new(),
+                            cwd: String::new(),
+                            loaded_namespaces: Vec::new(),
+                            attached_packages: Vec::new(),
+                            lib_paths: Vec::new(),
+                        })
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to evaluate R session info: {e}");
+            None
+        }
+    }
+}
+
+/// Extract a string from an R SEXP (character vector of length 1).
+fn extract_r_string(sexp: arf_libr::SEXP) -> Option<String> {
+    let lib = arf_libr::r_library().ok()?;
+    unsafe {
+        if (lib.rf_isstring)(sexp) == 0 || (lib.rf_length)(sexp) == 0 {
+            return None;
+        }
+        let elt = (lib.string_elt)(sexp, 0);
+        let cstr = (lib.r_charsxp)(elt);
+        if cstr.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(cstr)
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
+    }
+}
+
 // ── Headless mode API ────────────────────────────────────────────────────
 
 /// Poll and directly process IPC requests in headless mode.
@@ -576,6 +735,10 @@ fn headless_handle_request(request: IpcRequest) {
                     let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: false }));
                 }
             }
+        }
+        IpcMethod::Session => {
+            let result = collect_session_result(true);
+            let _ = reply.send(IpcResponse::Session(Box::new(result)));
         }
     }
 }

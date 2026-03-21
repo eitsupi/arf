@@ -114,6 +114,44 @@ pub struct ShutdownResult {
     pub accepted: bool,
 }
 
+/// R session information collected from base R functions.
+///
+/// Only available when R is idle (at the prompt). When R is busy,
+/// this is `None` in the parent `SessionResult`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RSessionInfo {
+    pub version: String,
+    pub platform: String,
+    pub locale: String,
+    pub cwd: String,
+    pub loaded_namespaces: Vec<String>,
+    pub attached_packages: Vec<String>,
+    pub lib_paths: Vec<String>,
+}
+
+/// Result of the `session` method.
+///
+/// Always contains arf-side information. R session information is included
+/// when R is idle, or `null` with an explanation when R is busy.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionResult {
+    pub arf_version: String,
+    pub pid: u32,
+    pub os: String,
+    pub arch: String,
+    pub socket_path: String,
+    pub started_at: String,
+    /// R session information, or `null` if R is busy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r: Option<RSessionInfo>,
+    /// Reason why R information is unavailable, or `null` if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r_unavailable_reason: Option<String>,
+    /// Hint for the caller on what to do next, or `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
 /// Internal request type sent from IPC server thread to main thread.
 pub struct IpcRequest {
     pub method: IpcMethod,
@@ -130,11 +168,14 @@ pub enum IpcMethod {
     UserInput {
         code: String,
     },
+    /// Collect session information (arf + R if available).
+    Session,
 }
 
 /// Internal response type sent from main thread back to IPC server thread.
 pub enum IpcResponse {
     Evaluate(EvaluateResult),
     UserInput(UserInputResult),
+    Session(Box<SessionResult>),
     Error { code: i32, message: String },
 }
