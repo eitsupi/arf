@@ -22,7 +22,7 @@ pub mod session;
 
 use protocol::{
     EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, USER_IS_TYPING, UserInputResult,
+    R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING, UserInputResult,
 };
 use std::sync::{
     Arc, Mutex, OnceLock,
@@ -135,10 +135,17 @@ pub fn start_server(bind: Option<&str>) -> std::io::Result<String> {
     // Initialize pending operation storage
     let _ = pending_ipc_operation();
 
+    // Capture the start time once so both the session file and in-memory
+    // cache use the same value.
+    let started_at = chrono::Local::now().to_rfc3339();
+
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let path = server::start_server(tx, bind)?;
+    let path = server::start_server(tx, bind, &started_at)?;
+
+    // Note: session metadata is now cached inside server::start_server()
+    // right after bind confirmation, before the server can serve any request.
 
     // Store receiver for polling from idle callback.
     // If OnceLock is already set (from a previous stop/start), replace the inner value.
@@ -312,6 +319,35 @@ fn check_visible_eval_completion() {
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
+    // Session requests are handled immediately without ExternalBreak,
+    // since they are read-only and don't conflict with user input.
+    // However, we must not touch R (e.g. via arf_harp::eval_string) unless
+    // it is safe: R must be idle, not in alternate mode, and no other IPC
+    // operation pending that might race with us.
+    if matches!(method, IpcMethod::Session) {
+        let r_at_prompt = r_is_at_prompt().load(Ordering::Acquire);
+        let has_pending = pending_ipc_operation()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        let in_alt_mode = is_in_alternate_mode();
+
+        let try_r = r_at_prompt && !has_pending && !in_alt_mode;
+        let reason = if in_alt_mode {
+            "R is in alternate mode (shell, history browser, or help browser)"
+        } else if !r_at_prompt {
+            "R is busy evaluating another expression"
+        } else if has_pending {
+            "Another IPC operation is pending"
+        } else {
+            "" // R info will be collected
+        };
+
+        let result = collect_session_result(try_r, reason);
+        let _ = reply.send(IpcResponse::Session(Box::new(result)));
+        return;
+    }
+
     // Reject if in alternate mode (shell, history browser, help browser).
     // Normally dispatch_request() catches this first, but this covers the
     // race where a request was queued just before alternate mode was entered.
@@ -388,6 +424,7 @@ fn handle_request(request: IpcRequest) {
             });
             fire_break_signal();
         }
+        IpcMethod::Session => unreachable!("Session handled above"),
     }
 }
 
@@ -505,6 +542,196 @@ pub fn trigger_headless_shutdown() -> bool {
     }
 }
 
+// ── Session info collection ───────────────────────────────────────────────
+
+/// Build arf-side info that is always available (no R needed).
+fn arf_session_base(socket_path: &str, started_at: &str) -> SessionResult {
+    SessionResult {
+        arf_version: env!("CARGO_PKG_VERSION").to_string(),
+        pid: std::process::id(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        socket_path: socket_path.to_string(),
+        started_at: started_at.to_string(),
+        r: None,
+        r_unavailable_reason: None,
+        hint: None,
+    }
+}
+
+/// In-memory session metadata, set once at IPC server startup.
+/// Avoids re-reading the session file on every `session` request.
+static SESSION_META: OnceLock<Mutex<(String, String)>> = OnceLock::new();
+
+/// Store session metadata in memory (called after server start).
+pub(in crate::ipc) fn set_session_meta(socket_path: String, started_at: String) {
+    match SESSION_META.get() {
+        Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = (socket_path, started_at),
+        None => {
+            let _ = SESSION_META.set(Mutex::new((socket_path, started_at)));
+        }
+    }
+}
+
+/// Get cached session metadata (socket_path, started_at).
+///
+/// Uses a blocking lock with poison recovery. If `set_session_meta` was never
+/// called (which should not happen in practice), returns explicit placeholder
+/// strings instead of empty values to avoid emitting ambiguous metadata.
+fn current_session_meta() -> (String, String) {
+    match SESSION_META.get() {
+        Some(m) => m.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        None => (
+            "<uninitialized_socket_path>".to_string(),
+            "<uninitialized_started_at>".to_string(),
+        ),
+    }
+}
+
+/// Collect session information, including R info if `try_r` is true and R is idle.
+///
+/// Called from both REPL idle callback and headless mode handler.
+/// When R is busy or unavailable, returns arf-only info with an explanation.
+///
+/// `reason` is used as the `r_unavailable_reason` when `try_r` is false.
+/// When `try_r` is true but R is not at the prompt, a default reason is used.
+pub(in crate::ipc) fn collect_session_result(try_r: bool, reason: &str) -> SessionResult {
+    let (socket_path, started_at) = current_session_meta();
+    let mut result = arf_session_base(&socket_path, &started_at);
+
+    if !try_r || !r_is_at_prompt().load(Ordering::Acquire) {
+        let reason = if reason.is_empty() {
+            "R is busy evaluating another expression"
+        } else {
+            reason
+        };
+        result.r_unavailable_reason = Some(reason.to_string());
+        result.hint = Some(if reason.contains("alternate mode") {
+            "Exit the current mode (shell, browser) to make R session info available.".to_string()
+        } else if reason.contains("pending") {
+            "Wait for the current IPC operation to complete, then retry.".to_string()
+        } else if reason.contains("Main thread") || reason.contains("handler dropped") {
+            "The arf process may be shutting down or unresponsive.".to_string()
+        } else if reason.contains("Timed out") {
+            "R may be busy with a long-running operation. Retry later.".to_string()
+        } else {
+            "R session information will be available when R returns to the prompt. \
+             Retry 'arf ipc session' later, or use 'arf ipc eval' with a timeout to wait."
+                .to_string()
+        });
+        return result;
+    }
+
+    match collect_r_session_info() {
+        Some(r_info) => {
+            result.r = Some(r_info);
+        }
+        None => {
+            result.r_unavailable_reason =
+                Some("Failed to collect R session information".to_string());
+            result.hint = Some(
+                "R may not be fully initialized. Try again later or use \
+                 'arf ipc eval \"sessionInfo()\"' for raw output."
+                    .to_string(),
+            );
+        }
+    }
+
+    result
+}
+
+/// Collect R session information using base R functions.
+///
+/// Must be called on the main R thread when R is at the prompt.
+/// Returns `None` if R is not available or evaluation fails.
+///
+/// Each piece of information is collected via a separate `eval_string` call
+/// and extracted as a raw Rust string/vector. JSON serialization is handled
+/// entirely by serde_json, so no manual escaping is needed on the R side.
+fn collect_r_session_info() -> Option<RSessionInfo> {
+    let version = eval_r_scalar(r#"invisible(paste0(R.version$major, ".", R.version$minor))"#)
+        .unwrap_or_default();
+    if version.is_empty() {
+        return None;
+    }
+
+    Some(RSessionInfo {
+        version,
+        platform: eval_r_scalar("invisible(R.version$platform)").unwrap_or_default(),
+        locale: eval_r_scalar("invisible(Sys.getlocale())").unwrap_or_default(),
+        cwd: eval_r_scalar("invisible(getwd())").unwrap_or_default(),
+        loaded_namespaces: eval_r_character_vector("invisible(loadedNamespaces())")
+            .unwrap_or_default(),
+        attached_packages: eval_r_character_vector("invisible(.packages())").unwrap_or_default(),
+        lib_paths: eval_r_character_vector("invisible(.libPaths())").unwrap_or_default(),
+    })
+}
+
+/// Evaluate an R expression and extract a single string result.
+fn eval_r_scalar(code: &str) -> Option<String> {
+    match arf_harp::eval_string(code) {
+        Ok(robj) => extract_r_string(robj.sexp()),
+        Err(e) => {
+            log::debug!("eval_r_scalar failed for `{code}`: {e}");
+            None
+        }
+    }
+}
+
+/// Evaluate an R expression and extract a character vector result.
+fn eval_r_character_vector(code: &str) -> Option<Vec<String>> {
+    match arf_harp::eval_string(code) {
+        Ok(robj) => extract_r_strings(robj.sexp()),
+        Err(e) => {
+            log::debug!("eval_r_character_vector failed for `{code}`: {e}");
+            None
+        }
+    }
+}
+
+/// Extract a single string from an R SEXP (character vector of length >= 1).
+fn extract_r_string(sexp: arf_libr::SEXP) -> Option<String> {
+    let lib = arf_libr::r_library().ok()?;
+    unsafe {
+        if (lib.rf_isstring)(sexp) == 0 || (lib.rf_length)(sexp) == 0 {
+            return None;
+        }
+        let elt = (lib.string_elt)(sexp, 0);
+        let cstr = (lib.r_charsxp)(elt);
+        if cstr.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(cstr)
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
+    }
+}
+
+/// Extract all strings from an R SEXP character vector.
+fn extract_r_strings(sexp: arf_libr::SEXP) -> Option<Vec<String>> {
+    let lib = arf_libr::r_library().ok()?;
+    unsafe {
+        if (lib.rf_isstring)(sexp) == 0 {
+            return None;
+        }
+        let len = (lib.rf_length)(sexp) as isize;
+        let mut result = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let elt = (lib.string_elt)(sexp, i);
+            let cstr = (lib.r_charsxp)(elt);
+            if cstr.is_null() {
+                result.push(String::new());
+            } else if let Ok(s) = std::ffi::CStr::from_ptr(cstr).to_str() {
+                result.push(s.to_string());
+            } else {
+                result.push(String::new());
+            }
+        }
+        Some(result)
+    }
+}
+
 // ── Headless mode API ────────────────────────────────────────────────────
 
 /// Poll and directly process IPC requests in headless mode.
@@ -576,6 +803,10 @@ fn headless_handle_request(request: IpcRequest) {
                     let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: false }));
                 }
             }
+        }
+        IpcMethod::Session => {
+            let result = collect_session_result(true, "");
+            let _ = reply.send(IpcResponse::Session(Box::new(result)));
         }
     }
 }
@@ -653,5 +884,75 @@ mod tests {
         }
 
         // Cleanup handled by GlobalStateGuard drop
+    }
+
+    /// Tests that `handle_request` returns arf-only session info (not an error)
+    /// in various states: alternate mode, R busy, pending operation.
+    #[test]
+    #[serial]
+    fn test_session_returns_arf_only_in_various_states() {
+        set_in_alternate_mode(false);
+        set_r_at_prompt(false);
+        let _guard = GlobalStateGuard;
+
+        // Helper: send a Session request and get the result
+        fn send_session() -> protocol::SessionResult {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let request = IpcRequest {
+                method: IpcMethod::Session,
+                reply: reply_tx,
+            };
+            handle_request(request);
+            match reply_rx.blocking_recv().unwrap() {
+                IpcResponse::Session(result) => *result,
+                _ => panic!("Expected Session response"),
+            }
+        }
+
+        // Case 1: alternate mode — should return arf-only with alternate mode reason
+        set_in_alternate_mode(true);
+        set_r_at_prompt(true);
+        {
+            let result = send_session();
+            assert!(result.r.is_none());
+            let reason = result.r_unavailable_reason.unwrap();
+            assert!(
+                reason.contains("alternate mode"),
+                "Expected alternate mode reason, got: {reason}"
+            );
+        }
+
+        // Case 2: R busy (not at prompt) — should return arf-only
+        set_in_alternate_mode(false);
+        set_r_at_prompt(false);
+        {
+            let result = send_session();
+            assert!(result.r.is_none());
+            assert!(result.r_unavailable_reason.is_some());
+        }
+
+        // Case 3: pending operation — should return arf-only
+        set_r_at_prompt(true);
+        {
+            // Insert a dummy pending operation
+            let (dummy_tx, _dummy_rx) = tokio::sync::oneshot::channel();
+            *pending_ipc_operation()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(PendingIpcOperation {
+                kind: PendingIpcKind::SilentEvaluate { reply: dummy_tx },
+                code: "dummy".to_string(),
+            });
+
+            let result = send_session();
+            assert!(result.r.is_none());
+            let reason = result.r_unavailable_reason.unwrap();
+            assert!(
+                reason.contains("pending"),
+                "Expected pending reason, got: {reason}"
+            );
+
+            // Clean up dummy pending operation
+            let _ = take_pending_ipc_operation();
+        }
     }
 }

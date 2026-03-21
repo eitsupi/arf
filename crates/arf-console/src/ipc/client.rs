@@ -214,6 +214,44 @@ pub fn cmd_status(pid: Option<u32>) -> Result<()> {
     Ok(())
 }
 
+/// Get session information as JSON via the `session` IPC method.
+///
+/// Output is pretty-printed when stdout is a terminal, compact when piped.
+pub fn cmd_session(pid: Option<u32>) -> Result<()> {
+    let session = resolve_session(pid)?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session",
+        "params": {}
+    });
+
+    // Session info collection is lightweight; use a short transport timeout.
+    let transport_timeout = std::time::Duration::from_secs(15);
+
+    let response = send_request(&session.socket_path, &request, transport_timeout)?;
+
+    if let Some(error) = response.error {
+        eprintln!("Error: {} (code {})", error.message, error.code);
+        std::process::exit(1);
+    }
+
+    match response.result {
+        Some(result) => {
+            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let output = if is_tty {
+                serde_json::to_string_pretty(&result)?
+            } else {
+                serde_json::to_string(&result)?
+            };
+            println!("{output}");
+            Ok(())
+        }
+        None => anyhow::bail!("Server returned empty response"),
+    }
+}
+
 /// Send a JSON-RPC request to the socket and return the response.
 fn send_request(
     socket_path: &str,

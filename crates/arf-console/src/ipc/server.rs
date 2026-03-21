@@ -31,7 +31,11 @@ struct ServerState {
 ///
 /// Returns the socket path on success.
 /// Returns an error if the server is already running.
-pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io::Result<String> {
+pub fn start_server(
+    tx: mpsc::Sender<IpcRequest>,
+    bind: Option<&str>,
+    started_at: &str,
+) -> std::io::Result<String> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -109,6 +113,7 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
     }
 
     let path = socket_path.clone();
+    let started_at_owned = started_at.to_string();
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
 
@@ -125,7 +130,8 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
-                if let Err(e) = run_server(&path, tx, token_clone, bind_tx).await {
+                if let Err(e) = run_server(&path, &started_at_owned, tx, token_clone, bind_tx).await
+                {
                     log::error!("IPC server error: {}", e);
                 }
             });
@@ -150,6 +156,9 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
         join_handle,
         socket_path: socket_path.clone(),
     });
+
+    // Note: session metadata is cached in the server thread right before
+    // bind confirmation, so it is available before any connection is served.
 
     // Write session metadata
     let cwd = std::env::current_dir()
@@ -181,7 +190,7 @@ pub fn start_server(tx: mpsc::Sender<IpcRequest>, bind: Option<&str>) -> std::io
         socket_path: socket_path.clone(),
         r_version,
         cwd,
-        started_at: chrono::Local::now().to_rfc3339(),
+        started_at: started_at.to_string(),
     };
 
     if let Err(e) = write_session(&session) {
@@ -257,6 +266,7 @@ fn get_socket_path(pid: u32) -> String {
 #[cfg(unix)]
 async fn run_server(
     socket_path: &str,
+    started_at: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -283,6 +293,9 @@ async fn run_server(
                     );
                 }
             }
+            // Cache session metadata BEFORE signalling bind success, so it
+            // is guaranteed to be available when the first request arrives.
+            super::set_session_meta(socket_path.to_string(), started_at.to_string());
             let _ = bind_tx.send(Ok(()));
             l
         }
@@ -325,6 +338,7 @@ async fn run_server(
 #[cfg(windows)]
 async fn run_server(
     socket_path: &str,
+    started_at: &str,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -337,6 +351,9 @@ async fn run_server(
         .create(socket_path)
     {
         Ok(s) => {
+            // Cache session metadata BEFORE signalling bind success, so it
+            // is guaranteed to be available when the first request arrives.
+            super::set_session_meta(socket_path.to_string(), started_at.to_string());
             let _ = bind_tx.send(Ok(()));
             s
         }
@@ -520,17 +537,37 @@ where
     Ok(())
 }
 
-/// Dispatch a JSON-RPC request to the main thread.
+/// Build an arf-only session response, falling back to INTERNAL_ERROR if
+/// serialization fails (should never happen, but avoids panics in recovery paths).
+fn session_fallback_response(id: Option<serde_json::Value>, reason: &str) -> JsonRpcResponse {
+    match serde_json::to_value(super::collect_session_result(false, reason)) {
+        Ok(val) => JsonRpcResponse::success(id, val),
+        Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, format!("Session info error: {e}")),
+    }
+}
+
 async fn dispatch_request(
     request: JsonRpcRequest,
     tx: &mpsc::Sender<IpcRequest>,
 ) -> JsonRpcResponse {
     let id = request.id.clone();
+    let is_session = request.method == "session";
 
     // Reject immediately if in alternate mode (shell, history/help browser).
     // These modes block the main thread, so requests would hang in the mpsc
     // queue until the request timeout expires.
+    //
+    // Exception: `session` returns arf-only info when R is unavailable,
+    // so it handles alternate mode gracefully via the main-thread handler.
+    // However, if the idle callback isn't running (alternate mode), the
+    // request would sit in the queue. Return arf-only info directly instead.
     if super::is_in_alternate_mode() {
+        if is_session {
+            return session_fallback_response(
+                id,
+                "R is in alternate mode (shell, history browser, or help browser)",
+            );
+        }
         return JsonRpcResponse::error(
             id,
             super::protocol::R_NOT_AT_PROMPT,
@@ -585,6 +622,7 @@ async fn dispatch_request(
             };
             IpcMethod::UserInput { code: params.code }
         }
+        "session" => IpcMethod::Session,
         _ => {
             return JsonRpcResponse::error(
                 id,
@@ -598,6 +636,8 @@ async fn dispatch_request(
     // Clamp to a reasonable maximum to avoid overflowing Tokio's internal
     // deadline computations or tying up the server task indefinitely.
     const MAX_TIMEOUT_MS: u64 = 86_400_000; // 24 hours
+    // Session info collection is lightweight; use a short timeout.
+    const SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
     let timeout = match &method {
         IpcMethod::Evaluate { timeout_ms, .. } => match timeout_ms {
@@ -611,6 +651,7 @@ async fn dispatch_request(
             Some(ms) => std::time::Duration::from_millis(*ms),
             None => super::DEFAULT_EVAL_TIMEOUT,
         },
+        IpcMethod::Session => SESSION_TIMEOUT,
         _ => super::DEFAULT_EVAL_TIMEOUT,
     };
 
@@ -622,6 +663,10 @@ async fn dispatch_request(
     };
 
     if tx.send(ipc_request).is_err() {
+        if is_session {
+            // Return arf-only info if main thread is unavailable
+            return session_fallback_response(id, "Main thread is unavailable");
+        }
         return JsonRpcResponse::error(id, INTERNAL_ERROR, "Main thread unavailable".to_string());
     }
 
@@ -634,12 +679,23 @@ async fn dispatch_request(
             IpcResponse::UserInput(result) => {
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
             }
+            IpcResponse::Session(result) => {
+                JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+            }
             IpcResponse::Error { code, message } => JsonRpcResponse::error(id, code, message),
         },
         Ok(Err(_)) => {
+            if is_session {
+                return session_fallback_response(id, "Request handler dropped");
+            }
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request handler dropped".to_string())
         }
-        Err(_) => JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string()),
+        Err(_) => {
+            if is_session {
+                return session_fallback_response(id, "Timed out collecting R session information");
+            }
+            JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string())
+        }
     }
 }
 
@@ -738,5 +794,106 @@ mod tests {
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
         // Cleanup handled by Guard drop
+    }
+
+    /// Tests that `session` returns arf-only success (not an error) in alternate mode,
+    /// with a context-appropriate `r_unavailable_reason`.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_session_returns_arf_only_in_alternate_mode() {
+        use super::super::protocol::SessionResult;
+
+        /// Drop guard that resets global IPC state on scope exit (including panics).
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                super::super::set_in_alternate_mode(false);
+            }
+        }
+
+        super::super::set_in_alternate_mode(true);
+        let _guard = Guard;
+
+        let (tx, _rx) = mpsc::channel();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "session".to_string(),
+            params: serde_json::json!({}),
+            id: Some(serde_json::json!(1)),
+        };
+        let response = dispatch_request(request, &tx).await;
+
+        // Should be a success, not an error
+        assert!(
+            response.error.is_none(),
+            "session should not return an error"
+        );
+        let result_value = response.result.expect("session should return a result");
+        let result: SessionResult =
+            serde_json::from_value(result_value).expect("should parse as SessionResult");
+
+        // Should have arf info
+        assert!(!result.arf_version.is_empty());
+        assert!(result.pid > 0);
+
+        // R info should be absent with an explanation
+        assert!(
+            result.r.is_none(),
+            "R info should be null in alternate mode"
+        );
+        let reason = result
+            .r_unavailable_reason
+            .expect("should have r_unavailable_reason");
+        assert!(
+            reason.contains("alternate mode"),
+            "reason should mention alternate mode, got: {reason}"
+        );
+        assert!(result.hint.is_some(), "should have a hint");
+    }
+
+    /// Tests that `session` returns arf-only info when the main thread channel
+    /// is broken (tx.send fails).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_session_fallback_on_channel_failure() {
+        use super::super::protocol::SessionResult;
+
+        /// Drop guard that resets global IPC state on scope exit (including panics).
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                super::super::set_in_alternate_mode(false);
+            }
+        }
+
+        super::super::set_in_alternate_mode(false);
+        let _guard = Guard;
+
+        // Create a channel and immediately drop the receiver so send() fails
+        let (tx, _rx) = mpsc::channel();
+        drop(_rx);
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "session".to_string(),
+            params: serde_json::json!({}),
+            id: Some(serde_json::json!(1)),
+        };
+        let response = dispatch_request(request, &tx).await;
+
+        // Should be a success with arf-only info
+        assert!(
+            response.error.is_none(),
+            "session should not return an error"
+        );
+        let result_value = response.result.expect("session should return a result");
+        let result: SessionResult =
+            serde_json::from_value(result_value).expect("should parse as SessionResult");
+
+        assert!(result.r.is_none(), "R info should be null");
+        assert!(
+            result.r_unavailable_reason.is_some(),
+            "should have r_unavailable_reason"
+        );
     }
 }

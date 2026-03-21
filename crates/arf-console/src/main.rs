@@ -711,6 +711,7 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
         IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
         IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
+        IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
     }
 }
 

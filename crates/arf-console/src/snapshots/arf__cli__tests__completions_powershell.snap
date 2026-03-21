@@ -186,6 +186,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, not shown in REPL)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session (shown in REPL)')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
+            [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
@@ -215,6 +216,12 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
             break
         }
+        'arf;ipc;session' {
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'arf;ipc;shutdown' {
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
@@ -226,6 +233,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, not shown in REPL)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session (shown in REPL)')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
+            [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
@@ -240,6 +248,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;status' {
+            break
+        }
+        'arf;ipc;help;session' {
             break
         }
         'arf;ipc;help;shutdown' {
@@ -312,6 +323,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, not shown in REPL)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session (shown in REPL)')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
+            [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
             break
         }
@@ -325,6 +337,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;status' {
+            break
+        }
+        'arf;help;ipc;session' {
             break
         }
         'arf;help;ipc;shutdown' {
