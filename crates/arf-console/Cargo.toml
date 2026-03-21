@@ -49,6 +49,9 @@ ctrlc.workspace = true
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3"
 

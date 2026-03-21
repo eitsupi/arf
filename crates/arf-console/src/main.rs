@@ -84,9 +84,9 @@ fn init_logger(log_file: Option<&std::path::Path>, redirect_stderr: bool) {
                 }
 
                 // Redirect process stderr to the log file so that all output
-                // (not just log::* macros) is captured. This must happen before
-                // env_logger takes ownership of the file handle, but the dup2'd
-                // fd is independent and survives the original fd being moved.
+                // (not just log::* macros) is captured. This borrows `file`
+                // before it is moved into env_logger, but the dup2'd fd is
+                // independent of the original.
                 if redirect_stderr {
                     redirect_stderr_to_file(&file);
                 }
@@ -127,18 +127,55 @@ fn redirect_stderr_to_file(file: &std::fs::File) {
 #[cfg(windows)]
 fn redirect_stderr_to_file(file: &std::fs::File) {
     use std::os::windows::io::AsRawHandle;
-    // On Windows, redirect both the C runtime fd and the Win32 handle.
-    // _dup2 redirects the C runtime's fd 2 (used by eprintln!).
-    let new_fd = unsafe { libc::open_osfhandle(file.as_raw_handle() as libc::intptr_t, 0) };
-    if new_fd == -1 {
-        log::warn!("Failed to convert handle for stderr redirect");
+
+    // Duplicate the OS handle so the C runtime and the `File` object own
+    // independent handles. Without this, `_open_osfhandle` transfers ownership
+    // to the C runtime while `File` retains the same value, causing a
+    // double-close when both are dropped.
+    let mut dup_handle: windows_sys::Win32::Foundation::HANDLE = 0;
+    let cur_proc = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() };
+    let ok = unsafe {
+        windows_sys::Win32::Foundation::DuplicateHandle(
+            cur_proc,
+            file.as_raw_handle() as _,
+            cur_proc,
+            &mut dup_handle,
+            0,
+            0, // not inheritable
+            windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS,
+        )
+    };
+    if ok == 0 {
+        log::warn!(
+            "Failed to duplicate handle for stderr redirect: {}",
+            std::io::Error::last_os_error()
+        );
         return;
     }
+
+    // Convert the duplicated OS handle to a C runtime fd.
+    let new_fd = unsafe { libc::open_osfhandle(dup_handle as libc::intptr_t, 0) };
+    if new_fd == -1 {
+        log::warn!("Failed to convert handle for stderr redirect");
+        // Clean up the duplicated handle since open_osfhandle failed.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(dup_handle);
+        }
+        return;
+    }
+
+    // Redirect C runtime's fd 2 (stderr) to the new fd.
     if unsafe { libc::dup2(new_fd, 2) } == -1 {
         log::warn!(
             "Failed to redirect stderr to log file: {}",
             std::io::Error::last_os_error()
         );
+    }
+
+    // Close new_fd — dup2 gave fd 2 its own reference to the underlying
+    // handle, so new_fd is no longer needed.
+    unsafe {
+        libc::close(new_fd);
     }
 }
 
