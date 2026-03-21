@@ -520,7 +520,6 @@ where
     Ok(())
 }
 
-/// Dispatch a JSON-RPC request to the main thread.
 /// Build an arf-only session response, falling back to INTERNAL_ERROR if
 /// serialization fails (should never happen, but avoids panics in recovery paths).
 fn session_fallback_response(id: Option<serde_json::Value>) -> JsonRpcResponse {

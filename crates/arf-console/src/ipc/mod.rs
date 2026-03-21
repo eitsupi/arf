@@ -599,11 +599,11 @@ fn collect_r_session_info() -> Option<RSessionInfo> {
         # Manual JSON construction to avoid dependency on jsonlite.
         # Escape backslash, double-quote, and control characters for valid JSON.
         esc <- function(x) {
-            x <- gsub('\\\\', '\\\\\\\\', x)
-            x <- gsub('"', '\\\\"', x)
-            x <- gsub('\n', '\\\\n', x)
-            x <- gsub('\r', '\\\\r', x)
-            x <- gsub('\t', '\\\\t', x)
+            x <- gsub('\\\\', '\\\\\\\\', x, fixed = TRUE)
+            x <- gsub('"', '\\\\"', x, fixed = TRUE)
+            x <- gsub('\n', '\\\\n', x, fixed = TRUE)
+            x <- gsub('\r', '\\\\r', x, fixed = TRUE)
+            x <- gsub('\t', '\\\\t', x, fixed = TRUE)
             x
         }
         jarr <- function(xs) {
