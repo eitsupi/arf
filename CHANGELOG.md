@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- **Headless:** When `--log-file` is specified, redirect the process's stderr to the log file via `dup2`. This captures all stderr output — including R's WriteConsoleEx output from graphics device callbacks and other non-IPC-captured diagnostics — instead of leaking it to the terminal
 - **Headless:** Configure custom pager, browser, and graphics device options on startup to prevent `?topic` from spawning an interactive pager (`less`), `browseURL()` from opening a browser, and `plot()` from attempting to open X11/quartz in display-less environments
 
 ## [0.2.5] - 2026-03-19
