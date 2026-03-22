@@ -260,7 +260,7 @@ Examples:
     $ arf headless --log-file arf.log --pid-file arf.pid
 
   Use a custom socket path:
-    $ arf headless --bind /tmp/my-arf.sock
+    $ arf headless --bind /tmp/my-arf.sock --pid-file arf.pid
     $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
 
   Shut down a headless session:
