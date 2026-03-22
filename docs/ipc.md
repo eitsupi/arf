@@ -263,6 +263,9 @@ The IPC server listens on a named pipe:
 \\.\pipe\arf-ipc-<PID>
 ```
 
+> [!NOTE]
+> Although Windows 10 1803+ supports AF_UNIX sockets, arf currently uses named pipes on Windows because the async runtime (tokio) does not yet support AF_UNIX on Windows. See [tokio#2201](https://github.com/tokio-rs/tokio/issues/2201) for upstream progress.
+
 ### Custom Bind Path
 
 Use `--bind` to specify a custom socket/pipe path:
