@@ -321,7 +321,7 @@ Connection: close
 | Method | Parameters | Description |
 |--------|-----------|-------------|
 | `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
-| `user_input` | `code` (string) | Send code as user input |
+| `user_input` / `send` | `code` (string) | Send code as user input |
 | `session` | *(none)* | Get session information |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
 
