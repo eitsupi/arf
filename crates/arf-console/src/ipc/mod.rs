@@ -129,7 +129,10 @@ pub fn break_signal() -> Arc<AtomicBool> {
 ///
 /// If `bind` is `Some`, the server binds to the given path instead of the
 /// default PID-based path.
-pub fn start_server(bind: Option<&str>, log_file: Option<String>) -> std::io::Result<String> {
+pub fn start_server(
+    bind: Option<&str>,
+    log_file: Option<String>,
+) -> std::io::Result<session::SessionInfo> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Initialize pending operation storage
@@ -142,7 +145,7 @@ pub fn start_server(bind: Option<&str>, log_file: Option<String>) -> std::io::Re
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let path = server::start_server(tx, bind, &started_at, log_file)?;
+    let session = server::start_server(tx, bind, &started_at, log_file)?;
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.
@@ -160,7 +163,7 @@ pub fn start_server(bind: Option<&str>, log_file: Option<String>) -> std::io::Re
         }
     }
 
-    Ok(path)
+    Ok(session)
 }
 
 /// Stop the IPC server (cleanup on exit).

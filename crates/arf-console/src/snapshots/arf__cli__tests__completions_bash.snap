@@ -466,7 +466,7 @@ _arf() {
             return 0
             ;;
         arf__headless)
-            opts="-c -h --config --with-r-version --r-home --bind --pid-file --quiet --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --help"
+            opts="-c -h --config --with-r-version --r-home --bind --pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

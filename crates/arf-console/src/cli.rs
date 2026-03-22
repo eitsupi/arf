@@ -270,6 +270,14 @@ pub enum Commands {
         #[arg(long)]
         quiet: bool,
 
+        /// Print session info as JSON to stdout when ready
+        ///
+        /// Outputs a JSON object with pid, socket_path, r_version, etc.
+        /// Implies --quiet (suppresses status messages on stderr).
+        /// Pretty-printed when stdout is a terminal, compact when piped.
+        #[arg(long)]
+        json: bool,
+
         /// Redirect log output to a file instead of stderr
         #[arg(long = "log-file", value_hint = ValueHint::FilePath)]
         log_file: Option<PathBuf>,

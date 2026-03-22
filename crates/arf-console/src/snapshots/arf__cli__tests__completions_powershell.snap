@@ -272,6 +272,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--min-nsize', '--min-nsize', [CompletionResultType]::ParameterName, '[R] Set min number of fixed size obj''s ("cons cells") to N')
             [CompletionResult]::new('--min-vsize', '--min-vsize', [CompletionResultType]::ParameterName, '[R] Set vector heap minimum to N bytes; ''4M'' = 4 MegaB')
             [CompletionResult]::new('--quiet', '--quiet', [CompletionResultType]::ParameterName, 'Suppress status messages on stderr (IPC path, ready, shutdown)')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print session info as JSON to stdout when ready')
             [CompletionResult]::new('--vanilla', '--vanilla', [CompletionResultType]::ParameterName, 'Start R in vanilla mode (no init files, no save/restore)')
             [CompletionResult]::new('--no-environ', '--no-environ', [CompletionResultType]::ParameterName, '[R] Don''t read the site and user environment files')
             [CompletionResult]::new('--no-site-file', '--no-site-file', [CompletionResultType]::ParameterName, '[R] Don''t read the site-wide Rprofile')

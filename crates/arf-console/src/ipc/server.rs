@@ -29,14 +29,14 @@ struct ServerState {
 
 /// Start the IPC server in a background thread.
 ///
-/// Returns the socket path on success.
+/// Returns the [`SessionInfo`] on success (includes the socket path).
 /// Returns an error if the server is already running.
 pub fn start_server(
     tx: mpsc::Sender<IpcRequest>,
     bind: Option<&str>,
     started_at: &str,
     log_file: Option<String>,
-) -> std::io::Result<String> {
+) -> std::io::Result<SessionInfo> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -208,7 +208,7 @@ pub fn start_server(
         log::warn!("Failed to write session file: {}", e);
     }
 
-    Ok(socket_path)
+    Ok(session)
 }
 
 /// Stop the IPC server gracefully.

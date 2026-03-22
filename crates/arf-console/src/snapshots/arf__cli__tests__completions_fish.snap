@@ -152,6 +152,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l max-ppsize -d '[R] 
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l quiet -d 'Suppress status messages on stderr (IPC path, ready, shutdown)'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l json -d 'Print session info as JSON to stdout when ready'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-environ -d '[R] Don\'t read the site and user environment files'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'

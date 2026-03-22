@@ -350,6 +350,7 @@ _arguments "${_arguments_options[@]}" : \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
 '--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
+'--json[Print session info as JSON to stdout when ready]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
 '--no-environ[\[R\] Don'\''t read the site and user environment files]' \
 '--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \
