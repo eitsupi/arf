@@ -254,8 +254,7 @@ Examples:
     $ arf ipc eval '1 + 1'
 
   CI usage with JSON output:
-    $ arf headless --json > session.json &
-    $ jq -r .socket_path session.json
+    $ arf headless --json | jq -r .socket_path
 
   Run with logging to a file:
     $ arf headless --log-file arf.log --pid-file arf.pid
