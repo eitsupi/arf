@@ -282,6 +282,16 @@ arf headless --bind \\.\pipe\my-arf
 
 Each arf session with IPC enabled writes a session file to the OS cache directory (e.g., `~/.cache/arf/sessions/<PID>.json` on Linux, `~/Library/Caches/arf/sessions/<PID>.json` on macOS). The `arf ipc` client commands use these files to discover running sessions. Stale session files (where the process is no longer running) are automatically cleaned up.
 
+### Remote Access (No Built-in TCP)
+
+arf intentionally does not listen on TCP. Supporting TCP would require building authentication and encryption into arf itself, which is better handled by dedicated tools. Instead, use an existing proxy or tunnel to expose the local socket remotely:
+
+- **SSH tunneling** (OpenSSH 6.7+ supports Unix socket forwarding) — recommended for most cases, as it provides encryption and authentication with no extra software
+- **socat** — lightweight bidirectional relay between Unix sockets and TCP, useful for quick bridging on trusted networks
+- **Reverse proxies** (Caddy, nginx) — suitable for persistent setups, especially when TLS is required
+
+On Windows, arf listens on a named pipe which these tools cannot target directly. In WSL environments, [npiperelay](https://github.com/albertony/npiperelay) can bridge a Windows named pipe to stdin/stdout, allowing it to be combined with socat or SSH.
+
 ## JSON-RPC Protocol
 
 For tool developers who want to communicate with arf directly (without the `arf ipc` CLI), the server speaks JSON-RPC 2.0 over HTTP on the Unix socket or named pipe.
