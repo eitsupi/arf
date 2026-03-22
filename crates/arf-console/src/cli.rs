@@ -235,8 +235,8 @@ pub enum Commands {
     /// Interact with a running arf session via IPC
     ///
     /// Evaluate R code, send user input, or query session info in a running
-    /// arf instance. The target session must have IPC enabled — either via
-    /// `arf headless` (headless mode) or `arf --with-ipc` (interactive REPL).
+    /// arf instance. The target session must have IPC enabled — via
+    /// `arf headless`, `arf --with-ipc`, or the `:ipc start` meta command.
     Ipc {
         #[command(subcommand)]
         action: IpcAction,
@@ -346,7 +346,7 @@ Examples:
 pub enum IpcAction {
     /// List active arf sessions
     List,
-    /// Evaluate R code in a running session (output captured, not shown in REPL)
+    /// Evaluate R code in a running session (output captured, use --visible to also show in REPL)
     #[command(after_long_help = "\
 Examples:
   Evaluate an expression and print the result:
@@ -373,14 +373,16 @@ Examples:
         #[arg(long)]
         timeout: Option<u64>,
     },
-    /// Send code as user input to a running session (shown in REPL)
+    /// Send code as user input to a running session
     ///
     /// Unlike `eval`, the code is executed as if the user typed it at the
-    /// prompt. Output appears in the REPL but is not captured in the
-    /// response. Use this when you want the human to see the interaction.
+    /// prompt. Output goes to the session's output streams (the REPL
+    /// terminal or headless stdout/log file) and is not captured in the
+    /// IPC response. Use this when you want the output to be visible in
+    /// the session rather than programmatically captured.
     #[command(after_long_help = "\
 Examples:
-  Send code that appears in the REPL:
+  Send code that appears in the session output:
     $ arf ipc send 'library(dplyr)'
 
   Target a specific session:
