@@ -47,10 +47,17 @@ struct HeadlessInfo {
 
 impl HeadlessInfo {
     fn from_session(session: &SessionInfo, warnings: Vec<String>) -> Self {
+        // Normalize empty/whitespace-only R version to None so JSON shows null
+        let r_version = session
+            .r_version
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
+
         Self {
             pid: session.pid,
             socket_path: session.socket_path.clone(),
-            r_version: session.r_version.clone(),
+            r_version,
             cwd: session.cwd.clone(),
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
@@ -334,7 +341,7 @@ fn run() -> Result<()> {
                 r_args_builder,
                 bind.as_deref(),
                 pid_file.as_deref(),
-                *quiet || *json,
+                *quiet,
                 *json,
                 log_file.as_deref(),
             );
@@ -703,7 +710,15 @@ fn run_headless(
             serde_json::to_string(&output)
         }
         .context("Failed to serialize session info")?;
-        println!("{json_str}");
+        // Use writeln + flush instead of println to ensure the JSON is
+        // delivered immediately when stdout is piped (non-TTY). This is the
+        // readiness signal for CI scripts waiting on the output.
+        use std::io::Write;
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{json_str}").context("Failed to write session info to stdout")?;
+        stdout
+            .flush()
+            .context("Failed to flush session info to stdout")?;
     } else if !quiet {
         eprintln!("Headless mode ready. Press Ctrl+C to exit.");
     }
