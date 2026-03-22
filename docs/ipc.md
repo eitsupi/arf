@@ -164,7 +164,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
 }
 ```
 
-When R is idle, the `r` field contains session details:
+When R is idle, the `r` field contains session details (other top-level fields omitted for brevity):
 
 ```json
 {
@@ -177,7 +177,8 @@ When R is idle, the `r` field contains session details:
     "attached_packages": ["base", "datasets"],
     "lib_paths": ["/usr/lib/R/library"]
   },
-  "r_unavailable_reason": null
+  "r_unavailable_reason": null,
+  "hint": null
 }
 ```
 
