@@ -225,22 +225,24 @@ Within a running session, you can start and stop the IPC server:
 When both a human and an external tool use the same session, arf prevents conflicts:
 
 - If you are typing when an IPC `eval` or `send` request arrives, the request is rejected with a `USER_IS_TYPING` error
-- IPC requests wait until R returns to the prompt (busy R rejects with `R_BUSY`)
-- The `session` method always succeeds — it returns arf-side info even when R is busy
+- If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
+- If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
+- Clients are expected to handle these errors by retrying later (for example, with backoff); the server does not queue multiple IPC requests beyond a single pending one
+- The `session` method always succeeds — it returns arf-side info even when R is busy or not at the prompt
 
 ## Transport & Security
 
 ### Unix (Linux/macOS)
 
-The IPC server listens on a Unix domain socket. The default path is:
+The IPC server listens on a Unix domain socket. The default path is inside the OS cache directory:
 
-```
-~/.cache/arf/sessions/<PID>.sock
-```
+- **Linux**: `~/.cache/arf/sessions/<PID>.sock`
+- **macOS**: `~/Library/Caches/arf/sessions/<PID>.sock`
 
-Both the sessions directory and socket file are created with restrictive permissions:
+The sessions directory, socket file, and session metadata file are all created with restrictive permissions:
 - Directory: mode `0700` (owner only)
-- Session file: mode `0600` (owner only)
+- Socket file (`<PID>.sock`): mode `0600` (owner only)
+- Session metadata JSON file (`<PID>.json`): mode `0600` (owner only)
 
 This prevents other users on the system from discovering or connecting to your session.
 
@@ -266,7 +268,7 @@ arf headless --bind \\.\pipe\my-arf
 
 ### Session Discovery
 
-Each arf session with IPC enabled writes a session file to `~/.cache/arf/sessions/<PID>.json`. The `arf ipc` client commands use these files to discover running sessions. Stale session files (where the process is no longer running) are automatically cleaned up.
+Each arf session with IPC enabled writes a session file to the OS cache directory (e.g., `~/.cache/arf/sessions/<PID>.json` on Linux, `~/Library/Caches/arf/sessions/<PID>.json` on macOS). The `arf ipc` client commands use these files to discover running sessions. Stale session files (where the process is no longer running) are automatically cleaned up.
 
 ## JSON-RPC Protocol
 
@@ -321,11 +323,13 @@ Connection: close
   "id": 1,
   "result": {
     "stdout": "",
-    "stderr": "Error in eval(expr, envir, enclos) : object 'x' not found\n",
-    "error": "Error in eval(expr, envir, enclos) : object 'x' not found\n"
+    "stderr": "",
+    "error": "object 'x' not found"
   }
 }
 ```
+
+Errors are caught by `tryCatch`, so the error message appears in the `error` field (via `conditionMessage()`). The `stderr` field is typically empty for caught errors.
 
 **R is busy:**
 
@@ -335,7 +339,7 @@ Connection: close
   "id": 1,
   "error": {
     "code": -32000,
-    "message": "R is currently busy. Try again later."
+    "message": "R is busy"
   }
 }
 ```
@@ -344,8 +348,8 @@ Connection: close
 
 The `evaluate` method captures R output through two separate channels:
 
-- **`stdout` / `stderr`**: Captured via R's `WriteConsoleEx` callback at the C level. This handles output from `cat()`, `message()`, `warning()`, and printed values.
-- **`value` / `error`**: Captured by writing raw bytes to a temp file using R's `charToRaw()` + `writeBin()`, then reading the file from Rust. This binary protocol avoids JSON escaping issues with special characters in R output.
+- **`stdout` / `stderr` (console output)**: Captured via R's `WriteConsoleEx` callback at the C level. This includes text produced by `cat()`, `message()`, `warning()`, and other writes to the R console.
+- **`value` / `error` (structured result)**: Captured separately as the evaluated result (or error) of the last expression, using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). In silent `evaluate` calls, printed values of expressions appear here rather than in `stdout`/`stderr`.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
 
@@ -367,19 +371,19 @@ The result fields in the JSON response are already properly escaped strings — 
 
 ### "No active arf sessions found"
 
-The `arf ipc` client could not find a session file in `~/.cache/arf/sessions/`. This means:
+The `arf ipc` client could not find a session file in the cache directory. This means:
 
 - No arf session has IPC enabled, or
-- The session started with a custom `--bind` path (use `--pid` to target it), or
+- The session file could not be created (for example, the cache directory is missing or not writable), or
 - The session file was cleaned up (the process exited)
 
 **Fix:** Start arf with `arf headless` or `arf --with-ipc`.
 
-### "R is currently busy"
+### "R is busy"
 
-The R interpreter is executing code and cannot accept new requests.
+The R interpreter is executing code and cannot accept new requests. The request is rejected immediately — it is not queued.
 
-**Fix:** Wait for the current operation to complete, or use `--timeout` with `arf ipc eval` to wait automatically.
+**Fix:** Wait for the current operation to complete. For programmatic use, handle `R_BUSY` responses by retrying the request with backoff. Note that `--timeout` only limits how long an evaluation may run — it does not wait for R to become idle.
 
 ### "User is typing" (interactive mode)
 
@@ -395,7 +399,7 @@ The socket exists but the server is not responding.
 - The arf process crashed but the socket file was not cleaned up
 - R is stuck in an infinite loop or blocking operation
 
-**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket file manually from `~/.cache/arf/sessions/`.
+**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket and session files manually from the cache directory (e.g., `~/.cache/arf/sessions/` on Linux).
 
 ### Permission denied on socket
 
