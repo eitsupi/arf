@@ -264,7 +264,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--config', '--config', [CompletionResultType]::ParameterName, 'Path to configuration file')
             [CompletionResult]::new('--with-r-version', '--with-r-version', [CompletionResultType]::ParameterName, 'R version to use via rig (overrides r_source config)')
             [CompletionResult]::new('--r-home', '--r-home', [CompletionResultType]::ParameterName, 'Explicit R_HOME path (overrides r_source config)')
-            [CompletionResult]::new('--bind', '--bind', [CompletionResultType]::ParameterName, 'Bind IPC socket to a specific path instead of the default')
+            [CompletionResult]::new('--bind', '--bind', [CompletionResultType]::ParameterName, 'Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted')
             [CompletionResult]::new('--pid-file', '--pid-file', [CompletionResultType]::ParameterName, 'Write server PID to a file (removed on shutdown)')
             [CompletionResult]::new('--log-file', '--log-file', [CompletionResultType]::ParameterName, 'Redirect log output to a file instead of stderr')
             [CompletionResult]::new('--max-connections', '--max-connections', [CompletionResultType]::ParameterName, '[R] Set max number of connections to N')

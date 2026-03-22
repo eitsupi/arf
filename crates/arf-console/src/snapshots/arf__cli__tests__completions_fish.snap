@@ -144,7 +144,7 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
-complete -c arf -n "__fish_arf_using_subcommand headless" -l bind -d 'Bind IPC socket to a specific path instead of the default' -r -F
+complete -c arf -n "__fish_arf_using_subcommand headless" -l bind -d 'Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l pid-file -d 'Write server PID to a file (removed on shutdown)' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l log-file -d 'Redirect log output to a file instead of stderr' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-connections -d '[R] Set max number of connections to N' -r

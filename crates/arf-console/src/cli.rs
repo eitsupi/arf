@@ -279,7 +279,9 @@ Examples:
         #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
         r_home: Option<PathBuf>,
 
-        /// Bind IPC socket to a specific path instead of the default
+        /// Bind IPC socket to a specific path instead of the default.
+        /// On Unix, ensure the parent directory is user-private (mode 0700)
+        /// to avoid a brief permission window before the socket is restricted.
         ///
         /// Unix: filesystem path (e.g. /tmp/my-arf.sock)
         /// Windows: named pipe path (e.g. \\.\pipe\my-arf)

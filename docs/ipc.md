@@ -266,6 +266,9 @@ arf headless --bind /tmp/my-arf.sock
 arf headless --bind \\.\pipe\my-arf
 ```
 
+> [!NOTE]
+> On Unix, the socket file is created with `bind()` and then restricted to `0600`. There is a brief window between these two calls where the default umask applies. If you use a custom path, ensure the parent directory is user-private (e.g., mode `0700`) to prevent other users from connecting during that window.
+
 ### Session Discovery
 
 Each arf session with IPC enabled writes a session file to the OS cache directory (e.g., `~/.cache/arf/sessions/<PID>.json` on Linux, `~/Library/Caches/arf/sessions/<PID>.json` on macOS). The `arf ipc` client commands use these files to discover running sessions. Stale session files (where the process is no longer running) are automatically cleaned up.
@@ -297,7 +300,7 @@ Connection: close
 | `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
 | `user_input` | `code` (string) | Send code as user input |
 | `session` | *(none)* | Get session information |
-| `shutdown` | *(none)* | Shut down headless session |
+| `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
 
 ### Response Examples
 

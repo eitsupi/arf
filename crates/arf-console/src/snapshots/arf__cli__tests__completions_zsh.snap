@@ -342,7 +342,7 @@ _arguments "${_arguments_options[@]}" : \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \
 '(--with-r-version)--r-home=[Explicit R_HOME path (overrides r_source config)]:R_HOME:_files -/' \
-'--bind=[Bind IPC socket to a specific path instead of the default]:BIND:_files' \
+'--bind=[Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted]:BIND:_files' \
 '--pid-file=[Write server PID to a file (removed on shutdown)]:PID_FILE:_files' \
 '--log-file=[Redirect log output to a file instead of stderr]:LOG_FILE:_files' \
 '--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
