@@ -360,8 +360,8 @@ Connection: close
 - name: Start arf headless
   run: |
     arf headless --json > session.json &
-    # Wait for readiness
-    while [ ! -s session.json ]; do sleep 0.1; done
+    # Wait for readiness (timeout after 30s)
+    timeout 30 sh -c 'while [ ! -s session.json ]; do sleep 0.1; done'
 
 - name: Run R code
   run: |
@@ -380,8 +380,8 @@ Connection: close
 - name: Start arf headless with logging
   run: |
     arf headless --log-file arf.log --pid-file arf.pid &
-    # Wait for PID file
-    while [ ! -s arf.pid ]; do sleep 0.1; done
+    # Wait for PID file (timeout after 30s)
+    timeout 30 sh -c 'while [ ! -s arf.pid ]; do sleep 0.1; done'
 
 - name: Run tests
   run: arf ipc eval 'testthat::test_dir("tests")'
