@@ -237,7 +237,7 @@ When both a human and an external tool use the same session, arf prevents confli
 - If you are typing when an IPC `eval` or `send` request arrives, the request is rejected with a `USER_IS_TYPING` error
 - If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
-- Clients are expected to handle these errors by retrying later (for example, with backoff); the server does not queue multiple IPC requests beyond a single pending one
+- Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially
 - The `session` method always succeeds — it returns arf-side info even when R is busy or not at the prompt
 
 ## Transport & Security
