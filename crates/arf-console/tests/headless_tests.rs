@@ -976,8 +976,17 @@ fn test_headless_json_output() {
     let process =
         HeadlessProcess::spawn_with_args(&["--json"]).expect("Failed to spawn with --json");
 
-    // Give the process a moment to flush JSON output
-    std::thread::sleep(Duration::from_millis(500));
+    // Wait for the stdout reader thread to capture the JSON output.
+    // spawn_with_args already confirmed IPC readiness, so the JSON has been
+    // written; we just need the reader thread to catch up.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while process.stdout_output().trim().is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Timed out waiting for JSON on stdout"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
     let stdout = process.stdout_output();
 
@@ -994,10 +1003,18 @@ fn test_headless_json_output() {
         json["socket_path"].is_string(),
         "JSON should have socket_path: {json}"
     );
+    assert!(
+        json["r_version"].is_string(),
+        "JSON should have r_version when R is running: {json}"
+    );
     assert!(json["cwd"].is_string(), "JSON should have cwd: {json}");
     assert!(
         json["started_at"].is_string(),
         "JSON should have started_at: {json}"
+    );
+    assert!(
+        json["log_file"].is_null(),
+        "JSON log_file should be null without --log-file: {json}"
     );
     assert!(
         json["warnings"].is_array(),
