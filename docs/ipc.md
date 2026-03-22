@@ -272,6 +272,8 @@ Each arf session with IPC enabled writes a session file to `~/.cache/arf/session
 
 For tool developers who want to communicate with arf directly (without the `arf ipc` CLI), the server speaks JSON-RPC 2.0 over HTTP on the Unix socket or named pipe.
 
+The server also accepts raw JSON bodies (without HTTP framing) for simpler clients.
+
 ### Request Format
 
 Send an HTTP POST request with a JSON-RPC body:
@@ -338,6 +340,15 @@ Connection: close
 }
 ```
 
+### Output Capture
+
+The `evaluate` method captures R output through two separate channels:
+
+- **`stdout` / `stderr`**: Captured via R's `WriteConsoleEx` callback at the C level. This handles output from `cat()`, `message()`, `warning()`, and printed values.
+- **`value` / `error`**: Captured by writing raw bytes to a temp file using R's `charToRaw()` + `writeBin()`, then reading the file from Rust. This binary protocol avoids JSON escaping issues with special characters in R output.
+
+The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
+
 ### Error Codes
 
 | Code | Name | Description |
@@ -351,52 +362,6 @@ Connection: close
 | -32001 | R Not At Prompt | R has not returned to the prompt |
 | -32002 | Input Already Pending | Another IPC request is already queued |
 | -32003 | User Is Typing | User is typing in the REPL (interactive mode only) |
-
-## CI / GitHub Actions Examples
-
-### Basic: Evaluate R Code in CI
-
-```yaml
-- name: Start arf headless
-  run: |
-    arf headless --json > session.json &
-    # Wait for readiness (timeout after 30s)
-    timeout 30 sh -c 'while [ ! -s session.json ]; do sleep 0.1; done'
-
-- name: Run R code
-  run: |
-    arf ipc eval 'sessionInfo()'
-    arf ipc eval 'install.packages("jsonlite", repos = "https://cloud.r-project.org")'
-    arf ipc eval 'jsonlite::toJSON(list(status = "ok"))'
-
-- name: Shut down
-  if: always()
-  run: arf ipc shutdown || true
-```
-
-### With Logging
-
-```yaml
-- name: Start arf headless with logging
-  run: |
-    arf headless --log-file arf.log --pid-file arf.pid &
-    # Wait for PID file (timeout after 30s)
-    timeout 30 sh -c 'while [ ! -s arf.pid ]; do sleep 0.1; done'
-
-- name: Run tests
-  run: arf ipc eval 'testthat::test_dir("tests")'
-
-- name: Upload logs on failure
-  if: failure()
-  uses: actions/upload-artifact@v4
-  with:
-    name: arf-logs
-    path: arf.log
-
-- name: Shut down
-  if: always()
-  run: arf ipc shutdown --pid $(cat arf.pid) || true
-```
 
 ## Troubleshooting
 
