@@ -174,6 +174,10 @@ pub struct Cli {
     pub no_restore_history: bool,
 
     /// Enable IPC server for external tool access (AI agents, vscode-R, etc.)
+    ///
+    /// Starts the IPC server alongside the interactive REPL, allowing
+    /// external tools to call `arf ipc eval`, `arf ipc send`, etc.
+    /// For headless (no REPL) usage, see `arf headless` instead.
     #[arg(long = "with-ipc")]
     pub with_ipc: bool,
 
@@ -229,6 +233,10 @@ pub enum Commands {
         action: HistoryAction,
     },
     /// Interact with a running arf session via IPC
+    ///
+    /// Evaluate R code, send user input, or query session info in a running
+    /// arf instance. The target session must have IPC enabled — via
+    /// `arf headless`, `arf --with-ipc`, or the `:ipc start` meta command.
     Ipc {
         #[command(subcommand)]
         action: IpcAction,
@@ -239,6 +247,24 @@ pub enum Commands {
     /// Useful for AI agents that only need IPC access, or for
     /// CI environments where a terminal is not available.
     /// Exit with Ctrl+C or `arf ipc shutdown`.
+    #[command(after_long_help = "\
+Examples:
+  Start headless and evaluate R code:
+    $ arf headless &
+    $ arf ipc eval '1 + 1'
+
+  CI usage with JSON output:
+    $ arf headless --json | jq -r .socket_path
+
+  Run with logging to a file:
+    $ arf headless --log-file arf.log --pid-file arf.pid
+
+  Use a custom socket path:
+    $ arf headless --bind /tmp/my-arf.sock --pid-file arf.pid
+    $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
+
+  Shut down a headless session:
+    $ arf ipc shutdown")]
     Headless {
         /// Path to configuration file
         #[arg(short, long, value_hint = ValueHint::FilePath)]
@@ -320,21 +346,47 @@ pub enum Commands {
 pub enum IpcAction {
     /// List active arf sessions
     List,
-    /// Evaluate R code in a running session (output captured, not shown in REPL)
+    /// Evaluate R code in a running session (output captured, use --visible to also show in session)
+    #[command(after_long_help = "\
+Examples:
+  Evaluate an expression and print the result:
+    $ arf ipc eval '1 + 1'
+
+  Run code with a 10-second timeout:
+    $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
+
+  Also show output in the session (REPL or headless stdout):
+    $ arf ipc eval --visible 'cat(\"hello\\n\")'
+
+  Target a specific session when multiple are running:
+    $ arf ipc eval --pid 12345 'getwd()'")]
     Eval {
         /// R code to evaluate
         code: String,
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
-        /// Also show output in the REPL terminal
+        /// Also show output in the session (REPL or headless stdout)
         #[arg(long)]
         visible: bool,
         /// Timeout in milliseconds (default: 300000 = 5 minutes)
         #[arg(long)]
         timeout: Option<u64>,
     },
-    /// Send code as user input to a running session (shown in REPL)
+    /// Send code as user input to a running session
+    ///
+    /// Unlike `eval`, the code is executed as if the user typed it at the
+    /// prompt. Output goes to the session's output streams (the REPL
+    /// terminal or headless stdout/log file) and is not captured in the
+    /// IPC response. Use this when you want the output to be visible in
+    /// the session rather than programmatically captured.
+    #[command(after_long_help = "\
+Examples:
+  Send code that appears in the session output:
+    $ arf ipc send 'library(dplyr)'
+
+  Target a specific session:
+    $ arf ipc send --pid 12345 'print(mtcars)'")]
     Send {
         /// R code to send
         code: String,
@@ -365,12 +417,29 @@ pub enum IpcAction {
     ///
     /// Output is pretty-printed when writing to a terminal, and compact
     /// JSON when piped to another program.
+    #[command(after_long_help = "\
+Examples:
+  Get session info (pretty-printed on terminal):
+    $ arf ipc session
+
+  Extract R version with jq:
+    $ arf ipc session | jq -r '.r.version'
+
+  Check loaded namespaces:
+    $ arf ipc session | jq '.r.loaded_namespaces'")]
     Session {
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
     },
     /// Shut down a running arf headless session
+    #[command(after_long_help = "\
+Examples:
+  Shut down the only running session:
+    $ arf ipc shutdown
+
+  Shut down a specific session:
+    $ arf ipc shutdown --pid 12345")]
     Shutdown {
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]

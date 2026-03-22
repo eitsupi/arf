@@ -231,8 +231,8 @@ esac
 ;;
 (ipc)
 _arguments "${_arguments_options[@]}" : \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_arf__ipc_commands" \
 "*::: :->ipc" \
 && ret=0
@@ -253,17 +253,17 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
 '--timeout=[Timeout in milliseconds (default\: 300000 = 5 minutes)]:TIMEOUT:_default' \
-'--visible[Also show output in the REPL terminal]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'--visible[Also show output in the session (REPL or headless stdout)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':code -- R code to evaluate:_default' \
 && ret=0
 ;;
 (send)
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':code -- R code to send:_default' \
 && ret=0
 ;;
@@ -284,8 +284,8 @@ _arguments "${_arguments_options[@]}" : \
 (shutdown)
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (help)
@@ -622,8 +622,8 @@ _arf__help__history__schema_commands() {
 _arf__help__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
-'send:Send code as user input to a running session (shown in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
+'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session' \
@@ -719,8 +719,8 @@ _arf__history__schema_commands() {
 _arf__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
-'send:Send code as user input to a running session (shown in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
+'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session' \
@@ -737,8 +737,8 @@ _arf__ipc__eval_commands() {
 _arf__ipc__help_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, not shown in REPL)' \
-'send:Send code as user input to a running session (shown in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
+'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session' \
