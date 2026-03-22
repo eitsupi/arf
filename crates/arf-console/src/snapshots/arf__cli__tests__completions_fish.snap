@@ -125,15 +125,15 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l timeout -d 'Timeout in milliseconds (default: 300000 = 5 minutes)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l visible -d 'Also show output in the REPL terminal'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from send" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
-complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from send" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from send" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from status" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from session" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from session" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from shutdown" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
-complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from shutdown" -s h -l help -d 'Print help'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from shutdown" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "list" -d 'List active arf sessions'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, not shown in REPL)'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "send" -d 'Send code as user input to a running session (shown in REPL)'
