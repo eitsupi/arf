@@ -159,7 +159,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
   "r": null,
-  "r_unavailable_reason": "R is busy",
+  "r_unavailable_reason": "R is busy evaluating another expression",
   "hint": null
 }
 ```
