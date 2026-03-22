@@ -622,7 +622,7 @@ _arf__help__history__schema_commands() {
 _arf__help__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, use --visible to also show in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
 'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \
@@ -719,7 +719,7 @@ _arf__history__schema_commands() {
 _arf__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, use --visible to also show in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
 'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \
@@ -737,7 +737,7 @@ _arf__ipc__eval_commands() {
 _arf__ipc__help_commands() {
     local commands; commands=(
 'list:List active arf sessions' \
-'eval:Evaluate R code in a running session (output captured, use --visible to also show in REPL)' \
+'eval:Evaluate R code in a running session (output captured, use --visible to also show in session)' \
 'send:Send code as user input to a running session' \
 'status:Show status of a running arf session' \
 'session:Get session information as JSON (arf + R environment)' \

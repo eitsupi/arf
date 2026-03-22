@@ -346,7 +346,7 @@ Examples:
 pub enum IpcAction {
     /// List active arf sessions
     List,
-    /// Evaluate R code in a running session (output captured, use --visible to also show in REPL)
+    /// Evaluate R code in a running session (output captured, use --visible to also show in session)
     #[command(after_long_help = "\
 Examples:
   Evaluate an expression and print the result:

@@ -183,7 +183,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in REPL)')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
@@ -230,7 +230,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         }
         'arf;ipc;help' {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in REPL)')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
@@ -321,7 +321,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         }
         'arf;help;ipc' {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in REPL)')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
