@@ -158,17 +158,26 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "socket_path": "/home/user/.cache/arf/sessions/12345.sock",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
+  "r": null,
+  "r_unavailable_reason": "R is busy",
+  "hint": null
+}
+```
+
+When R is idle, the `r` field contains session details:
+
+```json
+{
   "r": {
     "version": "4.4.1",
     "platform": "x86_64-pc-linux-gnu",
     "locale": "en_US.UTF-8",
     "cwd": "/workspace",
-    "loaded_namespaces": ["base", "stats", "utils", ...],
-    "attached_packages": ["base", "datasets", ...],
+    "loaded_namespaces": ["base", "stats", "utils"],
+    "attached_packages": ["base", "datasets"],
     "lib_paths": ["/usr/lib/R/library"]
   },
-  "r_unavailable_reason": null,
-  "hint": null
+  "r_unavailable_reason": null
 }
 ```
 
