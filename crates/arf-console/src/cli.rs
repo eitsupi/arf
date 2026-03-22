@@ -254,7 +254,8 @@ Examples:
     $ arf ipc eval '1 + 1'
 
   CI usage with JSON output:
-    $ arf headless --json | jq -r .socket_path
+    $ arf headless --json > session.json &
+    $ jq -r .socket_path session.json
 
   Run with logging to a file:
     $ arf headless --log-file arf.log --pid-file arf.pid
@@ -355,7 +356,7 @@ Examples:
   Run code with a 10-second timeout:
     $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
 
-  Also show output in the REPL terminal:
+  Also show output in the session (REPL or headless stdout):
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
   Target a specific session when multiple are running:
