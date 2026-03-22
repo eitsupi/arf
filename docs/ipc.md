@@ -28,7 +28,7 @@ Headless mode starts R with an IPC server but without the interactive REPL. This
 arf headless
 ```
 
-The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
+The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`. Immediately after startup there is a brief window where the IPC endpoint is listening but R is not yet ready, so early client requests may return `R_BUSY`. For scripted or automated use, prefer `arf headless --json` and treat the JSON emitted on stdout as the readiness signal, or retry the first `arf ipc` command with a small backoff until it succeeds.
 
 ### Options
 
@@ -274,7 +274,7 @@ Each arf session with IPC enabled writes a session file to the OS cache director
 
 For tool developers who want to communicate with arf directly (without the `arf ipc` CLI), the server speaks JSON-RPC 2.0 over HTTP on the Unix socket or named pipe.
 
-The server also accepts raw JSON bodies (without HTTP framing) for simpler clients.
+The server also accepts raw JSON request bodies (without HTTP request-line/headers) for simpler clients. Responses are still sent as standard `HTTP/1.1 200 OK` messages with headers followed by a JSON body, so raw-JSON clients need to strip the HTTP headers before parsing the response.
 
 ### Request Format
 
@@ -383,7 +383,7 @@ The `arf ipc` client could not find a session file in the cache directory. This 
 
 The R interpreter is executing code and cannot accept new requests. The request is rejected immediately — it is not queued.
 
-**Fix:** Wait for the current operation to complete. For programmatic use, handle `R_BUSY` responses by retrying the request with backoff. Note that `--timeout` only limits how long an evaluation may run — it does not wait for R to become idle.
+**Fix:** Wait for the current operation to complete. For programmatic use, handle `R_BUSY` responses by retrying the request with backoff. Note that `--timeout` only limits how long the IPC call waits for a reply — it does not cancel the underlying R evaluation, and long-running code may keep R busy even after the client times out.
 
 ### "User is typing" (interactive mode)
 
