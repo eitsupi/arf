@@ -253,7 +253,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
 '--timeout=[Timeout in milliseconds (default\: 300000 = 5 minutes)]:TIMEOUT:_default' \
-'--visible[Also show output in the REPL terminal]' \
+'--visible[Also show output in the session (REPL or headless stdout)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 ':code -- R code to evaluate:_default' \

@@ -366,7 +366,7 @@ Examples:
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
-        /// Also show output in the REPL terminal
+        /// Also show output in the session (REPL or headless stdout)
         #[arg(long)]
         visible: bool,
         /// Timeout in milliseconds (default: 300000 = 5 minutes)
