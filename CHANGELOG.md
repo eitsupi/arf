@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Remove `send` as a JSON-RPC method alias for `user_input`. The CLI subcommand `arf ipc send` is unchanged.
+
 ## [0.2.6-alpha.1] - 2026-03-21
 
 ### Added
