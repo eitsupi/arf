@@ -43,12 +43,13 @@ impl HeadlessProcess {
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
-        // When --quiet is used, status messages are suppressed on stderr.
+        // When --quiet/--json is used, status messages are suppressed on stderr.
         // When --log-file is used, stderr is redirected to the file, so the
-        // pipe is disconnected. In both cases, fall back to polling for readiness
+        // pipe is disconnected. In all cases, fall back to polling for readiness
         // instead of monitoring stderr for the "IPC server listening" message.
-        let poll_for_readiness =
-            extra_args.contains(&"--quiet") || extra_args.contains(&"--log-file");
+        let poll_for_readiness = extra_args.contains(&"--quiet")
+            || extra_args.contains(&"--json")
+            || extra_args.contains(&"--log-file");
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
@@ -967,4 +968,56 @@ fn test_headless_sigterm_shutdown() {
 #[test]
 fn test_headless_sighup_shutdown() {
     assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGHUP);
+}
+
+/// Test that `--json` outputs valid JSON with session info to stdout.
+#[test]
+fn test_headless_json_output() {
+    let process =
+        HeadlessProcess::spawn_with_args(&["--json"]).expect("Failed to spawn with --json");
+
+    // Give the process a moment to flush JSON output
+    std::thread::sleep(Duration::from_millis(500));
+
+    let stdout = process.stdout_output();
+
+    // stdout should contain valid JSON with expected fields
+    let json: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("Invalid JSON: {e}\nstdout: {stdout}"));
+
+    assert_eq!(
+        json["pid"].as_u64().unwrap() as u32,
+        process.pid,
+        "JSON pid should match process PID"
+    );
+    assert!(
+        json["socket_path"].is_string(),
+        "JSON should have socket_path: {json}"
+    );
+    assert!(json["cwd"].is_string(), "JSON should have cwd: {json}");
+    assert!(
+        json["started_at"].is_string(),
+        "JSON should have started_at: {json}"
+    );
+    assert!(
+        json["warnings"].is_array(),
+        "JSON should have warnings array: {json}"
+    );
+
+    // IPC should still work
+    let result = process.ipc_eval("1 + 1").expect("eval should work");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+
+    // stderr should NOT contain status messages (--json implies --quiet)
+    let stderr = process.stderr_output();
+    assert!(
+        !stderr.contains("IPC server listening on:"),
+        "json mode should suppress IPC listening message, got: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("Headless mode ready"),
+        "json mode should suppress ready message, got: {}",
+        stderr
+    );
 }
