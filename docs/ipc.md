@@ -109,7 +109,7 @@ arf ipc eval --pid 12345 'getwd()'
 | `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes) |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** stdout contains the captured R output (value + printed output). stderr contains error messages if the evaluation fails. Exit code is non-zero on R errors.
+**Output format:** stdout contains the captured stdout plus the printed value. stderr contains the captured stderr (warnings/messages) and errors, and is printed whenever non-empty. Exit code is non-zero on R errors.
 
 ### `arf ipc send` — Send User Input
 
@@ -407,9 +407,9 @@ The `arf ipc` client could not find a session file in the cache directory. This 
 
 ### "R is busy"
 
-The R interpreter is executing code and cannot accept new requests. The request is rejected immediately — it is not queued.
+In interactive/REPL mode, the request is rejected immediately with `R_BUSY` — it is not queued. In headless mode, requests are queued and processed sequentially; clients will typically block until the current operation finishes or their own timeout elapses.
 
-**Fix:** Wait for the current operation to complete. For programmatic use, handle `R_BUSY` responses by retrying the request with backoff. Note that `--timeout` only limits how long the IPC call waits for a reply — it does not cancel the underlying R evaluation, and long-running code may keep R busy even after the client times out.
+**Fix:** For interactive mode, handle `R_BUSY` responses by retrying the request with backoff. In headless mode, configure appropriate client-side timeouts. Note that `--timeout` only limits how long the IPC call waits for a reply — it does not cancel the underlying R evaluation, and long-running code may keep R busy even after the client times out.
 
 ### "User is typing" (interactive mode)
 
