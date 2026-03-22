@@ -231,8 +231,8 @@ esac
 ;;
 (ipc)
 _arguments "${_arguments_options[@]}" : \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_arf__ipc_commands" \
 "*::: :->ipc" \
 && ret=0

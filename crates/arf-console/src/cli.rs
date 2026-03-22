@@ -174,6 +174,10 @@ pub struct Cli {
     pub no_restore_history: bool,
 
     /// Enable IPC server for external tool access (AI agents, vscode-R, etc.)
+    ///
+    /// Starts the IPC server alongside the interactive REPL, allowing
+    /// external tools to call `arf ipc eval`, `arf ipc send`, etc.
+    /// For headless (no REPL) usage, see `arf headless` instead.
     #[arg(long = "with-ipc")]
     pub with_ipc: bool,
 
@@ -229,6 +233,10 @@ pub enum Commands {
         action: HistoryAction,
     },
     /// Interact with a running arf session via IPC
+    ///
+    /// Evaluate R code, send user input, or query session info in a running
+    /// arf instance. The target session must have IPC enabled — either via
+    /// `arf headless` (headless mode) or `arf --with-ipc` (interactive REPL).
     Ipc {
         #[command(subcommand)]
         action: IpcAction,

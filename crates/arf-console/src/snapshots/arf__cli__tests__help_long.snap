@@ -88,6 +88,8 @@ Options:
 
       --with-ipc
           Enable IPC server for external tool access (AI agents, vscode-R, etc.)
+          
+          Starts the IPC server alongside the interactive REPL, allowing external tools to call `arf ipc eval`, `arf ipc send`, etc. For headless (no REPL) usage, see `arf headless` instead.
 
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
