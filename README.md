@@ -47,6 +47,8 @@
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - Syntax highlighting with customizable colors
 - SQLite-backed persistent history with import/export support
+- IPC server for AI agent and CI integration ([guide](docs/ipc.md))
+- Headless mode for non-interactive environments (CI, background jobs)
 
 ## Installation
 
@@ -86,6 +88,26 @@ arf --with-r-version 4.4
 # Enable reprex mode for reproducible examples
 arf --reprex
 ```
+
+### Headless Mode & IPC
+
+Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions:
+
+```sh
+# Start headless R with IPC server
+arf headless &
+
+# Evaluate R code from another process
+arf ipc eval '1 + 1'
+
+# Get session info as JSON
+arf ipc session | jq '.r.version'
+
+# Shut down when done
+arf ipc shutdown
+```
+
+See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ### Interactive Help
 
