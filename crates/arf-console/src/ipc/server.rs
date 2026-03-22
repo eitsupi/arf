@@ -622,7 +622,7 @@ async fn dispatch_request(
                 );
             }
         }
-        "user_input" | "send" => {
+        "user_input" => {
             let params: UserInputParams = match serde_json::from_value(request.params) {
                 Ok(p) => p,
                 Err(e) => {
