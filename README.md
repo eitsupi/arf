@@ -47,7 +47,7 @@
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - Syntax highlighting with customizable colors
 - SQLite-backed persistent history with import/export support
-- IPC server for AI agent and CI integration ([guide](docs/ipc.md))
+- IPC server for AI agent and CI integration
 - Headless mode for non-interactive environments (CI, background jobs)
 
 ## Installation
@@ -88,26 +88,6 @@ arf --with-r-version 4.4
 # Enable reprex mode for reproducible examples
 arf --reprex
 ```
-
-### Headless Mode & IPC
-
-Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions. Unlike MCP-based solutions that require R package installation and an MCP client, arf provides a single binary with a simple CLI for programmatic R access:
-
-```sh
-# Start headless R with IPC server
-arf headless
-
-# From another terminal, evaluate R code
-arf ipc eval '1 + 1'
-
-# Get session info as JSON
-arf ipc session | jq '.r.version'
-
-# Shut down when done
-arf ipc shutdown
-```
-
-See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ### Interactive Help
 
@@ -215,6 +195,29 @@ main = "LightGreen"
 ```
 
 See the full [Configuration Guide](docs/configuration.md) for all options.
+
+## Headless Mode & IPC
+
+> [!NOTE]
+> This feature is experimental and may change in future versions.
+
+Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions. Unlike MCP-based solutions that require R package installation and an MCP client, arf provides a single binary with a simple CLI for programmatic R access:
+
+```sh
+# Start headless R with IPC server
+arf headless
+
+# From another terminal, evaluate R code
+arf ipc eval '1 + 1'
+
+# Get session info as JSON
+arf ipc session | jq '.r.version'
+
+# Shut down when done
+arf ipc shutdown
+```
+
+See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ## Experimental Features
 
