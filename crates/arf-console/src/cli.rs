@@ -251,6 +251,7 @@ pub enum Commands {
 Examples:
   Start headless and evaluate R code:
     $ arf headless &
+    $ # (wait for the server to be ready)
     $ arf ipc eval '1 + 1'
 
   CI usage with JSON output:

@@ -91,11 +91,12 @@ arf --reprex
 
 ### Headless Mode & IPC
 
-Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions:
+Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions. Unlike MCP-based solutions that require R package installation and an MCP client, arf provides a single binary with a simple CLI for programmatic R access:
 
 ```sh
 # Start headless R with IPC server
 arf headless &
+# (wait for the server to be ready before sending commands)
 
 # Evaluate R code from another process
 arf ipc eval '1 + 1'
