@@ -129,7 +129,7 @@ arf ipc send --pid 12345 'print(mtcars)'
 |---|---|---|
 | Output captured in response | Yes | No |
 | Shown in session | Only with `--visible` | Always |
-| Timeout support | Yes | No |
+| User-configurable timeout (`--timeout` / `timeout_ms`) | Yes | No |
 | Use case | Programmatic access | Human-visible interaction |
 
 ### `arf ipc session` — Get Session Info
