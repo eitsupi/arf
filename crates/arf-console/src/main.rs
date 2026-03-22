@@ -32,7 +32,8 @@ use std::fs;
 /// JSON output for `arf headless --json`.
 ///
 /// Contains session connection info and any warnings collected during startup.
-/// The schema is fixed: all fields are always present (warnings may be empty).
+/// All keys are always present in the JSON output; `r_version` and `log_file`
+/// may be `null`. `warnings` is an array that may be empty.
 #[derive(Debug, Serialize)]
 struct HeadlessInfo {
     pid: u32,
@@ -596,6 +597,10 @@ fn run_headless(
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    // --json implies --quiet: suppress status messages on stderr since
+    // all relevant info is in the JSON output on stdout.
+    let quiet = quiet || json;
 
     log::info!("Starting arf in headless mode");
 
