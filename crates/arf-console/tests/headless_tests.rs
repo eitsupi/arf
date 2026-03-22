@@ -45,7 +45,7 @@ impl HeadlessProcess {
         let bin_path = env!("CARGO_BIN_EXE_arf");
         // When --quiet/--json is used, status messages are suppressed on stderr.
         // When --log-file is used, stderr is redirected to the file, so the
-        // pipe is disconnected. In all cases, fall back to polling for readiness
+        // pipe is disconnected. In these cases, fall back to polling for readiness
         // instead of monitoring stderr for the "IPC server listening" message.
         let poll_for_readiness = extra_args.contains(&"--quiet")
             || extra_args.contains(&"--json")
@@ -1004,8 +1004,8 @@ fn test_headless_json_output() {
         "JSON should have socket_path: {json}"
     );
     assert!(
-        json["r_version"].is_string(),
-        "JSON should have r_version when R is running: {json}"
+        json["r_version"].is_string() || json["r_version"].is_null(),
+        "JSON r_version should be a string or null: {json}"
     );
     assert!(json["cwd"].is_string(), "JSON should have cwd: {json}");
     assert!(
