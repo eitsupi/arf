@@ -370,7 +370,8 @@ Examples:
         /// Also show output in the session (REPL or headless stdout)
         #[arg(long)]
         visible: bool,
-        /// Timeout in milliseconds (default: 300000 = 5 minutes)
+        /// Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes).
+        /// This does NOT cancel the R evaluation — long-running code keeps R busy after timeout.
         #[arg(long)]
         timeout: Option<u64>,
     },
