@@ -95,10 +95,9 @@ Run R without a terminal and interact via IPC — useful for AI agents, CI, and 
 
 ```sh
 # Start headless R with IPC server
-arf headless &
-# (wait for the server to be ready before sending commands)
+arf headless
 
-# Evaluate R code from another process
+# From another terminal, evaluate R code
 arf ipc eval '1 + 1'
 
 # Get session info as JSON
