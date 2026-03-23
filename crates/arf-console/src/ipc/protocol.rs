@@ -143,6 +143,8 @@ pub struct SessionResult {
     pub started_at: String,
     /// Log file path, or `null` if no log file is configured and output is sent to stderr.
     pub log_file: Option<String>,
+    /// History session ID (nanosecond timestamp), or `null` in headless mode.
+    pub history_session_id: Option<i64>,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
     /// Reason why R information is unavailable, or `null` if available.

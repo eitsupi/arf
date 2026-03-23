@@ -122,6 +122,8 @@ pub struct ReplState {
     pub sponge_queue: SpongeQueue,
     /// Directory stack for :pushd/:popd navigation.
     pub dir_stack: Vec<PathBuf>,
+    /// History session ID as raw i64 (for IPC).
+    pub history_session_id: Option<i64>,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

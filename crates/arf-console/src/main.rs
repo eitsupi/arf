@@ -25,6 +25,7 @@ use config::{
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
 };
 use ipc::session::SessionInfo;
+use reedline::Reedline;
 use repl::Repl;
 use serde::Serialize;
 use std::fs;
@@ -42,6 +43,7 @@ struct HeadlessInfo {
     cwd: String,
     started_at: String,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
     warnings: Vec<String>,
 }
 
@@ -61,6 +63,7 @@ impl HeadlessInfo {
             cwd: session.cwd.clone(),
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
+            history_session_id: session.history_session_id,
             warnings,
         }
     }
@@ -457,9 +460,13 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
+    // Generate a session ID for history isolation (shared across R and shell history).
+    let session_id = Reedline::create_history_session_id();
+    let session_id_raw = session_id.map(i64::from);
+
     // Start IPC server if requested
     if cli.with_ipc {
-        match ipc::start_server(None, None) {
+        match ipc::start_server(None, None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
             }
@@ -470,7 +477,13 @@ fn run() -> Result<()> {
     }
 
     // Create and run the REPL
-    let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
+    let mut repl = Repl::new(
+        config,
+        config_path,
+        config_status,
+        r_source_status,
+        session_id,
+    )?;
     let repl_result = repl.run();
 
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).
@@ -668,7 +681,8 @@ fn run_headless(
             .display()
             .to_string()
     });
-    let session = ipc::start_server(bind, log_file_str).context("Failed to start IPC server")?;
+    let session =
+        ipc::start_server(bind, log_file_str, None).context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
     }

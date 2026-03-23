@@ -151,6 +151,7 @@ impl Repl {
         config_path: Option<std::path::PathBuf>,
         config_status: ConfigStatus,
         r_source_status: RSourceStatus,
+        session_id: Option<HistorySessionId>,
     ) -> Result<Self> {
         // Check if R is initialized
         let r_initialized = arf_libr::r_library().is_ok();
@@ -170,8 +171,13 @@ impl Repl {
             r_source_status,
             r_initialized,
             prompt_formatter,
-            session_id: Reedline::create_history_session_id(),
+            session_id,
         })
+    }
+
+    /// Get the history session ID as an i64 (for IPC).
+    pub fn history_session_id_raw(&self) -> Option<i64> {
+        self.session_id.map(i64::from)
     }
 
     /// Get the R history database path based on configuration.
@@ -434,6 +440,7 @@ impl Repl {
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
+                history_session_id: self.history_session_id_raw(),
             });
         });
 
@@ -621,6 +628,7 @@ impl Repl {
                         &shell_history_path,
                         &self.r_source_status,
                         &mut dir_stack,
+                        self.history_session_id_raw(),
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
@@ -958,6 +966,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.shell_history_path,
                         &state.r_source_status,
                         &mut state.dir_stack,
+                        state.history_session_id,
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
