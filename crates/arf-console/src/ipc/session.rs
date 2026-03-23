@@ -97,6 +97,9 @@ pub fn clear_session_history_id(pid: u32) {
         }
     };
     info.history_session_id = None;
+    // Ensure we rewrite the same file even if the stored PID differs
+    // (e.g. due to file corruption or tampering).
+    info.pid = pid;
     if let Err(e) = write_session(&info) {
         log::debug!("Could not rewrite session file {}: {}", path.display(), e);
     }

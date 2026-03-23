@@ -464,7 +464,14 @@ fn run() -> Result<()> {
     let session_id = create_session_id(&config);
     let session_id_raw = session_id.map(i64::from);
 
-    // Start IPC server if requested
+    // Start IPC server if requested.
+    //
+    // NOTE: The IPC server is started before history databases are opened (which
+    // happens inside `Repl::run_*`).  This means there is a brief window where
+    // the on-disk session file advertises a non-null `history_session_id` even
+    // though history has not been confirmed yet.  If history initialization later
+    // fails, `clear_history_session_id()` is called to set it back to `null`.
+    // In practice the window is negligibly short (milliseconds).
     if cli.with_ipc {
         match ipc::start_server(None, None, session_id_raw) {
             Ok(session) => {
