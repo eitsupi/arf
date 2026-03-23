@@ -461,13 +461,7 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
-    // Only generate a session ID when history is enabled; otherwise use None so that
-    // IPC/session JSON does not misleadingly advertise history isolation.
-    let session_id = if config.history.disabled {
-        None
-    } else {
-        Reedline::create_history_session_id()
-    };
+    let session_id = create_session_id(&config);
     let session_id_raw = session_id.map(i64::from);
 
     // Start IPC server if requested
@@ -1496,5 +1490,41 @@ fn source_r_profiles(r_args: &[String]) {
         arf_harp::source_user_r_profile();
     } else {
         log::trace!("Skipping user R profile (--no-init-file or --vanilla)");
+    }
+}
+
+/// Generate a history session ID when history is enabled, or `None` when disabled.
+///
+/// This ensures IPC/session JSON does not misleadingly advertise history isolation
+/// when no history backend is configured.
+fn create_session_id(config: &Config) -> Option<reedline::HistorySessionId> {
+    if config.history.disabled {
+        None
+    } else {
+        Reedline::create_history_session_id()
+    }
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::*;
+
+    #[test]
+    fn test_create_session_id_when_history_enabled() {
+        let config = Config::default();
+        assert!(!config.history.disabled);
+        let id = create_session_id(&config);
+        assert!(
+            id.is_some(),
+            "should generate session ID when history is enabled"
+        );
+    }
+
+    #[test]
+    fn test_create_session_id_when_history_disabled() {
+        let mut config = Config::default();
+        config.history.disabled = true;
+        let id = create_session_id(&config);
+        assert!(id.is_none(), "should be None when history is disabled");
     }
 }
