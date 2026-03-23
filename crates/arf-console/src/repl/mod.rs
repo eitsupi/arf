@@ -176,7 +176,7 @@ impl Repl {
     }
 
     /// Get the history session ID as an i64 (for IPC).
-    pub fn history_session_id_raw(&self) -> Option<i64> {
+    fn history_session_id_raw(&self) -> Option<i64> {
         self.session_id.map(i64::from)
     }
 

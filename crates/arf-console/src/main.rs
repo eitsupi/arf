@@ -33,8 +33,9 @@ use std::fs;
 /// JSON output for `arf headless --json`.
 ///
 /// Contains session connection info and any warnings collected during startup.
-/// All keys are always present in the JSON output; `r_version` and `log_file`
-/// may be `null`. `warnings` is an array that may be empty.
+/// All keys are always present in the JSON output; `r_version`, `log_file`,
+/// and `history_session_id` may be `null`. `warnings` is an array that may be
+/// empty.
 #[derive(Debug, Serialize)]
 struct HeadlessInfo {
     pid: u32,

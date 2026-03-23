@@ -961,4 +961,42 @@ mod tests {
             "log_file should be null when not configured"
         );
     }
+
+    /// Tests that `history_session_id` in `SessionResult` reflects what was passed to
+    /// `set_session_meta`.
+    #[test]
+    #[serial_test::serial]
+    fn test_session_result_includes_history_session_id() {
+        // With history_session_id set
+        let session_id: i64 = 1_700_000_000_000_000_000;
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            None,
+            Some(session_id),
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.history_session_id, Some(session_id));
+
+        // Verify JSON serialization includes the value
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["history_session_id"], session_id);
+
+        // Without history_session_id (headless mode)
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            None,
+            None,
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.history_session_id, None);
+
+        // Verify JSON serialization shows null
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(
+            json["history_session_id"].is_null(),
+            "history_session_id should be null when not set"
+        );
+    }
 }
