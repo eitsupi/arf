@@ -256,7 +256,8 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let mut line_editor = setup_history(line_editor, self.r_history_path(), self.session_id);
+        let (mut line_editor, r_history_ok) =
+            setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -385,7 +386,13 @@ impl Repl {
             }));
 
         // Create shell line editor with separate history
-        let shell_line_editor = self.create_shell_line_editor();
+        let (shell_line_editor, shell_history_ok) = self.create_shell_line_editor();
+
+        // If neither history DB was opened, clear the session ID from IPC metadata
+        // so clients are not misled about history isolation being active.
+        if !r_history_ok && !shell_history_ok {
+            crate::ipc::clear_history_session_id();
+        }
 
         // Create prompt runtime config with unexpanded templates
         // Templates are expanded dynamically in build_main_prompt() to track cwd changes
@@ -440,7 +447,12 @@ impl Repl {
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
-                history_session_id: self.history_session_id_raw(),
+                // Only expose session ID if at least one history DB was opened
+                history_session_id: if r_history_ok || shell_history_ok {
+                    self.history_session_id_raw()
+                } else {
+                    None
+                },
             });
         });
 
@@ -516,7 +528,8 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let mut line_editor = setup_history(line_editor, self.r_history_path(), self.session_id);
+        let (mut line_editor, _history_ok) =
+            setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -690,12 +703,12 @@ impl Repl {
     /// Create a shell mode line editor with separate history.
     ///
     /// Shell mode uses a separate SQLite history database from R mode.
-    fn create_shell_line_editor(&self) -> Reedline {
+    fn create_shell_line_editor(&self) -> (Reedline, bool) {
         // Create shell editor with bracketed paste enabled
         let shell_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for Shell mode (separate from R)
-        let mut shell_editor =
+        let (mut shell_editor, history_ok) =
             setup_history(shell_editor, self.shell_history_path(), self.session_id);
 
         // Use same edit mode as R editor
@@ -784,7 +797,7 @@ impl Repl {
                 arf_libr::process_r_events();
             }));
 
-        shell_editor
+        (shell_editor, history_ok)
     }
 }
 
@@ -1219,26 +1232,30 @@ fn is_r_command_prompt(prompt: &str) -> bool {
 
 /// Set up history for a line editor with a specific database path.
 ///
-/// Returns the line editor with history configured (or unchanged if path is None).
+/// Returns `(editor, true)` if history was successfully configured, or
+/// `(editor, false)` if history path was `None` or the database failed to open.
 /// The history is wrapped with FuzzyHistory to provide fuzzy search capabilities.
 fn setup_history(
     line_editor: Reedline,
     history_path: Option<std::path::PathBuf>,
     session_id: Option<HistorySessionId>,
-) -> Reedline {
-    // Set up SQLite-backed history if we have a path
-    if let Some(path) = history_path
-        && let Ok(history) =
-            SqliteBackedHistory::with_file(path, session_id, Some(chrono::Utc::now()))
-    {
-        // Wrap with FuzzyHistory for fuzzy Ctrl+R search
-        let fuzzy_history = FuzzyHistory::new(history);
-        return line_editor
-            .with_history_session_id(session_id)
-            .with_history(Box::new(fuzzy_history));
+) -> (Reedline, bool) {
+    let Some(path) = history_path else {
+        return (line_editor, false);
+    };
+    match SqliteBackedHistory::with_file(path.clone(), session_id, Some(chrono::Utc::now())) {
+        Ok(history) => {
+            let fuzzy_history = FuzzyHistory::new(history);
+            let editor = line_editor
+                .with_history_session_id(session_id)
+                .with_history(Box::new(fuzzy_history));
+            (editor, true)
+        }
+        Err(e) => {
+            log::warn!("Failed to open history database {}: {}", path.display(), e);
+            (line_editor, false)
+        }
     }
-
-    line_editor
 }
 
 #[cfg(test)]

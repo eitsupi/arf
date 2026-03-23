@@ -577,6 +577,18 @@ struct SessionMeta {
 
 static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
 
+/// Clear the history session ID from cached session metadata.
+///
+/// Called when history initialization fails, so IPC does not advertise
+/// a session ID that has no corresponding history backend.
+pub fn clear_history_session_id() {
+    if let Some(m) = SESSION_META.get() {
+        m.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .history_session_id = None;
+    }
+}
+
 /// Store session metadata in memory (called after server start).
 pub(in crate::ipc) fn set_session_meta(
     socket_path: String,
