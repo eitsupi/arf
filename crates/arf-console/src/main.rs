@@ -25,6 +25,7 @@ use config::{
     ensure_directories, init_config, load_config, load_config_from_path, mask_home_path,
 };
 use ipc::session::SessionInfo;
+use reedline::Reedline;
 use repl::Repl;
 use serde::Serialize;
 use std::fs;
@@ -32,8 +33,9 @@ use std::fs;
 /// JSON output for `arf headless --json`.
 ///
 /// Contains session connection info and any warnings collected during startup.
-/// All keys are always present in the JSON output; `r_version` and `log_file`
-/// may be `null`. `warnings` is an array that may be empty.
+/// All keys are always present in the JSON output; `r_version`, `log_file`,
+/// and `history_session_id` may be `null`. `warnings` is an array that may be
+/// empty.
 #[derive(Debug, Serialize)]
 struct HeadlessInfo {
     pid: u32,
@@ -42,6 +44,7 @@ struct HeadlessInfo {
     cwd: String,
     started_at: String,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
     warnings: Vec<String>,
 }
 
@@ -61,6 +64,7 @@ impl HeadlessInfo {
             cwd: session.cwd.clone(),
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
+            history_session_id: session.history_session_id,
             warnings,
         }
     }
@@ -457,9 +461,19 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
-    // Start IPC server if requested
+    let session_id = create_session_id(&config);
+    let session_id_raw = session_id.map(i64::from);
+
+    // Start IPC server if requested.
+    //
+    // NOTE: The IPC server is started before history databases are opened (which
+    // happens inside `Repl::run_*`).  This means there is a brief window where
+    // the on-disk session file advertises a non-null `history_session_id` even
+    // though history has not been confirmed yet.  If history initialization later
+    // fails, `clear_history_session_id()` is called to set it back to `null`.
+    // In practice the window is negligibly short (milliseconds).
     if cli.with_ipc {
-        match ipc::start_server(None, None) {
+        match ipc::start_server(None, None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
             }
@@ -470,7 +484,13 @@ fn run() -> Result<()> {
     }
 
     // Create and run the REPL
-    let mut repl = Repl::new(config, config_path, config_status, r_source_status)?;
+    let mut repl = Repl::new(
+        config,
+        config_path,
+        config_status,
+        r_source_status,
+        session_id,
+    )?;
     let repl_result = repl.run();
 
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).
@@ -668,7 +688,8 @@ fn run_headless(
             .display()
             .to_string()
     });
-    let session = ipc::start_server(bind, log_file_str).context("Failed to start IPC server")?;
+    let session =
+        ipc::start_server(bind, log_file_str, None).context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
     }
@@ -1476,5 +1497,61 @@ fn source_r_profiles(r_args: &[String]) {
         arf_harp::source_user_r_profile();
     } else {
         log::trace!("Skipping user R profile (--no-init-file or --vanilla)");
+    }
+}
+
+/// Generate a history session ID when history is enabled and a history directory
+/// is available, or `None` otherwise.
+///
+/// This ensures IPC/session JSON does not misleadingly advertise history isolation
+/// when no history backend is configured.
+fn create_session_id(config: &Config) -> Option<reedline::HistorySessionId> {
+    if config.history.disabled {
+        return None;
+    }
+    // Check that a history directory is actually resolvable, matching the logic
+    // in Repl::r_history_path() / shell_history_path().
+    if config.history.dir.is_none() && config::history_dir().is_none() {
+        return None;
+    }
+    Reedline::create_history_session_id()
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::*;
+
+    #[test]
+    fn test_create_session_id_when_history_enabled() {
+        let mut config = Config::default();
+        // Ensure a history dir is available by setting it explicitly
+        config.history.dir = Some(std::env::temp_dir());
+        assert!(!config.history.disabled);
+        let id = create_session_id(&config);
+        assert!(
+            id.is_some(),
+            "should generate session ID when history is enabled"
+        );
+    }
+
+    #[test]
+    fn test_create_session_id_when_history_disabled() {
+        let mut config = Config::default();
+        config.history.disabled = true;
+        let id = create_session_id(&config);
+        assert!(id.is_none(), "should be None when history is disabled");
+    }
+
+    #[test]
+    fn test_create_session_id_respects_default_history_dir() {
+        // With default config (history.dir = None), session ID depends on
+        // whether the platform provides a data directory via history_dir().
+        let config = Config::default();
+        assert!(!config.history.disabled);
+        assert!(config.history.dir.is_none());
+        let id = create_session_id(&config);
+        // On most platforms history_dir() returns Some, so session ID is generated.
+        // On exotic platforms where it returns None, session ID should be None.
+        assert_eq!(id.is_some(), config::history_dir().is_some());
     }
 }

@@ -36,6 +36,7 @@ pub fn start_server(
     bind: Option<&str>,
     started_at: &str,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
 ) -> std::io::Result<SessionInfo> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
@@ -116,6 +117,7 @@ pub fn start_server(
     let path = socket_path.clone();
     let started_at_owned = started_at.to_string();
     let log_file_clone = log_file.clone();
+    let history_session_id_clone = history_session_id;
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
 
@@ -136,6 +138,7 @@ pub fn start_server(
                     &path,
                     &started_at_owned,
                     log_file_clone,
+                    history_session_id_clone,
                     tx,
                     token_clone,
                     bind_tx,
@@ -202,6 +205,7 @@ pub fn start_server(
         cwd,
         started_at: started_at.to_string(),
         log_file,
+        history_session_id,
     };
 
     if let Err(e) = write_session(&session) {
@@ -279,6 +283,7 @@ async fn run_server(
     socket_path: &str,
     started_at: &str,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -307,7 +312,12 @@ async fn run_server(
             }
             // Cache session metadata BEFORE signalling bind success, so it
             // is guaranteed to be available when the first request arrives.
-            super::set_session_meta(socket_path.to_string(), started_at.to_string(), log_file);
+            super::set_session_meta(
+                socket_path.to_string(),
+                started_at.to_string(),
+                log_file,
+                history_session_id,
+            );
             let _ = bind_tx.send(Ok(()));
             l
         }
@@ -352,6 +362,7 @@ async fn run_server(
     socket_path: &str,
     started_at: &str,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -366,7 +377,12 @@ async fn run_server(
         Ok(s) => {
             // Cache session metadata BEFORE signalling bind success, so it
             // is guaranteed to be available when the first request arrives.
-            super::set_session_meta(socket_path.to_string(), started_at.to_string(), log_file);
+            super::set_session_meta(
+                socket_path.to_string(),
+                started_at.to_string(),
+                log_file,
+                history_session_id,
+            );
             let _ = bind_tx.send(Ok(()));
             s
         }
@@ -919,6 +935,7 @@ mod tests {
             "/tmp/test.sock".to_string(),
             "2026-01-01T00:00:00+00:00".to_string(),
             Some("/tmp/arf.log".to_string()),
+            None,
         );
         let result = super::super::collect_session_result(false, "test");
         assert_eq!(result.log_file.as_deref(), Some("/tmp/arf.log"));
@@ -927,6 +944,7 @@ mod tests {
         super::super::set_session_meta(
             "/tmp/test.sock".to_string(),
             "2026-01-01T00:00:00+00:00".to_string(),
+            None,
             None,
         );
         let result = super::super::collect_session_result(false, "test");
@@ -941,6 +959,44 @@ mod tests {
         assert!(
             json["log_file"].is_null(),
             "log_file should be null when not configured"
+        );
+    }
+
+    /// Tests that `history_session_id` in `SessionResult` reflects what was passed to
+    /// `set_session_meta`.
+    #[test]
+    #[serial_test::serial]
+    fn test_session_result_includes_history_session_id() {
+        // With history_session_id set
+        let session_id: i64 = 1_700_000_000_000_000_000;
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            None,
+            Some(session_id),
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.history_session_id, Some(session_id));
+
+        // Verify JSON serialization includes the value
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["history_session_id"], session_id);
+
+        // Without history_session_id (headless mode)
+        super::super::set_session_meta(
+            "/tmp/test.sock".to_string(),
+            "2026-01-01T00:00:00+00:00".to_string(),
+            None,
+            None,
+        );
+        let result = super::super::collect_session_result(false, "test");
+        assert_eq!(result.history_session_id, None);
+
+        // Verify JSON serialization shows null
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(
+            json["history_session_id"].is_null(),
+            "history_session_id should be null when not set"
         );
     }
 }

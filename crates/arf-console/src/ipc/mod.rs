@@ -132,6 +132,7 @@ pub fn break_signal() -> Arc<AtomicBool> {
 pub fn start_server(
     bind: Option<&str>,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
 ) -> std::io::Result<session::SessionInfo> {
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -145,7 +146,7 @@ pub fn start_server(
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let session = server::start_server(tx, bind, &started_at, log_file)?;
+    let session = server::start_server(tx, bind, &started_at, log_file, history_session_id)?;
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.
@@ -557,6 +558,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
         socket_path: meta.socket_path.clone(),
         started_at: meta.started_at.clone(),
         log_file: meta.log_file.clone(),
+        history_session_id: meta.history_session_id,
         r: None,
         r_unavailable_reason: None,
         hint: None,
@@ -570,20 +572,39 @@ struct SessionMeta {
     socket_path: String,
     started_at: String,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
 }
 
 static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
+
+/// Clear the history session ID from both in-memory cache and on-disk session file.
+///
+/// Called when history initialization fails, so IPC does not advertise
+/// a session ID that has no corresponding history backend.
+pub fn clear_history_session_id() {
+    // Only rewrite the on-disk session file if we actually had a history session ID.
+    // This avoids extra file I/O and noisy logs when the value is already None
+    // or when IPC was never started (SESSION_META not initialized).
+    if let Some(m) = SESSION_META.get() {
+        let mut meta = m.lock().unwrap_or_else(|e| e.into_inner());
+        if meta.history_session_id.take().is_some() {
+            session::clear_session_history_id(std::process::id());
+        }
+    }
+}
 
 /// Store session metadata in memory (called after server start).
 pub(in crate::ipc) fn set_session_meta(
     socket_path: String,
     started_at: String,
     log_file: Option<String>,
+    history_session_id: Option<i64>,
 ) {
     let meta = SessionMeta {
         socket_path,
         started_at,
         log_file,
+        history_session_id,
     };
     match SESSION_META.get() {
         Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = meta,
@@ -605,6 +626,7 @@ fn current_session_meta() -> SessionMeta {
             socket_path: "<uninitialized_socket_path>".to_string(),
             started_at: "<uninitialized_started_at>".to_string(),
             log_file: None,
+            history_session_id: None,
         },
     }
 }

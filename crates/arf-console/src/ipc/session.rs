@@ -18,6 +18,10 @@ pub struct SessionInfo {
     /// Log file path, or `None` if no log file is configured.
     #[serde(default)]
     pub log_file: Option<String>,
+    /// History session ID (nanosecond timestamp), or `None` in headless mode,
+    /// when history is disabled, or when no history directory is available.
+    #[serde(default)]
+    pub history_session_id: Option<i64>,
 }
 
 /// Return the directory where session files are stored.
@@ -72,6 +76,37 @@ pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
 
     log::info!("Session file written: {}", path.display());
     Ok(())
+}
+
+/// Clear the `history_session_id` field in the on-disk session file for this process.
+///
+/// Reads the current session file, sets `history_session_id` to `null`, and rewrites it.
+/// Errors are logged but not propagated since this is a best-effort cleanup.
+pub fn clear_session_history_id(pid: u32) {
+    let Some(dir) = sessions_dir() else { return };
+    let path = dir.join(format!("{pid}.json"));
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            log::debug!("Could not read session file {}: {}", path.display(), e);
+            return;
+        }
+    };
+    let mut info: SessionInfo = match serde_json::from_str(&contents) {
+        Ok(i) => i,
+        Err(e) => {
+            log::debug!("Could not parse session file {}: {}", path.display(), e);
+            return;
+        }
+    };
+    info.history_session_id = None;
+    // Ensure we rewrite the same file even if the stored PID differs
+    // (e.g. due to file corruption or tampering).
+    info.pid = pid;
+    if let Err(e) = write_session(&info) {
+        log::debug!("Could not rewrite session file {}: {}", path.display(), e);
+    }
 }
 
 /// Remove session metadata on shutdown.

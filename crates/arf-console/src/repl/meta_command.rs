@@ -39,6 +39,7 @@ pub fn process_meta_command(
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
     dir_stack: &mut Vec<PathBuf>,
+    history_session_id: Option<i64>,
 ) -> Option<MetaCommandResult> {
     let trimmed = input.trim();
     if !trimmed.starts_with(':') {
@@ -261,7 +262,7 @@ pub fn process_meta_command(
         "ipc" => {
             let subcmd = parts.get(1).copied().unwrap_or("status");
             match subcmd {
-                "start" => match crate::ipc::start_server(None, None) {
+                "start" => match crate::ipc::start_server(None, None, history_session_id) {
                     Ok(session) => {
                         arf_println!("IPC server started: {}", session.socket_path)
                     }
@@ -580,6 +581,7 @@ mod tests {
             shell_history_path,
             status,
             &mut dir_stack,
+            None,
         )
     }
 
@@ -943,6 +945,7 @@ mod tests {
             &None,
             &status,
             &mut dir_stack,
+            None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
@@ -964,6 +967,7 @@ mod tests {
             &None,
             &status,
             &mut dir_stack,
+            None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert_eq!(dir_stack.len(), 1);
@@ -977,6 +981,7 @@ mod tests {
             &None,
             &status,
             &mut dir_stack,
+            None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(dir_stack.is_empty());
