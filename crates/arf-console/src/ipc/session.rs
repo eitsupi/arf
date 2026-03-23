@@ -87,7 +87,11 @@ pub fn clear_session_history_id(pid: u32) {
     let path = dir.join(format!("{pid}.json"));
     let contents = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return, // File may not exist (IPC not started)
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            log::debug!("Could not read session file {}: {}", path.display(), e);
+            return;
+        }
     };
     let mut info: SessionInfo = match serde_json::from_str(&contents) {
         Ok(i) => i,

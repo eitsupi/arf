@@ -582,12 +582,18 @@ static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
 /// Called when history initialization fails, so IPC does not advertise
 /// a session ID that has no corresponding history backend.
 pub fn clear_history_session_id() {
+    // Only rewrite the on-disk session file if we actually had a history session ID.
+    // This avoids extra file I/O and noisy logs when the value is already None.
+    let mut should_clear_on_disk = true;
+
     if let Some(m) = SESSION_META.get() {
-        m.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .history_session_id = None;
+        let mut meta = m.lock().unwrap_or_else(|e| e.into_inner());
+        should_clear_on_disk = meta.history_session_id.take().is_some();
     }
-    session::clear_session_history_id(std::process::id());
+
+    if should_clear_on_disk {
+        session::clear_session_history_id(std::process::id());
+    }
 }
 
 /// Store session metadata in memory (called after server start).
