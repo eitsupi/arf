@@ -528,8 +528,18 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let (mut line_editor, _history_ok) =
+        let (mut line_editor, history_ok) =
             setup_history(line_editor, self.r_history_path(), self.session_id);
+
+        // If history DB failed to open, clear the session ID from IPC metadata
+        if !history_ok {
+            crate::ipc::clear_history_session_id();
+        }
+        let history_session_id = if history_ok {
+            self.history_session_id_raw()
+        } else {
+            None
+        };
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -641,7 +651,7 @@ impl Repl {
                         &shell_history_path,
                         &self.r_source_status,
                         &mut dir_stack,
-                        self.history_session_id_raw(),
+                        history_session_id,
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
