@@ -26,8 +26,8 @@ use crossterm::{
 };
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    DefaultHinter, Emacs, IdeMenu, ListMenu, MenuBuilder, Reedline, ReedlineMenu, Signal,
-    SqliteBackedHistory, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
+    DefaultHinter, Emacs, HistorySessionId, IdeMenu, ListMenu, MenuBuilder, Reedline, ReedlineMenu,
+    Signal, SqliteBackedHistory, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
     default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
@@ -134,6 +134,8 @@ pub struct Repl {
     r_source_status: RSourceStatus,
     r_initialized: bool,
     prompt_formatter: PromptFormatter,
+    /// Session ID for history isolation (shared across R and shell history).
+    session_id: Option<HistorySessionId>,
 }
 
 impl Repl {
@@ -168,6 +170,7 @@ impl Repl {
             r_source_status,
             r_initialized,
             prompt_formatter,
+            session_id: Reedline::create_history_session_id(),
         })
     }
 
@@ -247,7 +250,7 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let mut line_editor = setup_history(line_editor, self.r_history_path());
+        let mut line_editor = setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -506,7 +509,7 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let mut line_editor = setup_history(line_editor, self.r_history_path());
+        let mut line_editor = setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -684,7 +687,8 @@ impl Repl {
         let shell_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for Shell mode (separate from R)
-        let mut shell_editor = setup_history(shell_editor, self.shell_history_path());
+        let mut shell_editor =
+            setup_history(shell_editor, self.shell_history_path(), self.session_id);
 
         // Use same edit mode as R editor
         shell_editor = match self.config.editor.mode {
@@ -1208,14 +1212,21 @@ fn is_r_command_prompt(prompt: &str) -> bool {
 ///
 /// Returns the line editor with history configured (or unchanged if path is None).
 /// The history is wrapped with FuzzyHistory to provide fuzzy search capabilities.
-fn setup_history(line_editor: Reedline, history_path: Option<std::path::PathBuf>) -> Reedline {
+fn setup_history(
+    line_editor: Reedline,
+    history_path: Option<std::path::PathBuf>,
+    session_id: Option<HistorySessionId>,
+) -> Reedline {
     // Set up SQLite-backed history if we have a path
     if let Some(path) = history_path
-        && let Ok(history) = SqliteBackedHistory::with_file(path, None, None)
+        && let Ok(history) =
+            SqliteBackedHistory::with_file(path, session_id, Some(chrono::Utc::now()))
     {
         // Wrap with FuzzyHistory for fuzzy Ctrl+R search
         let fuzzy_history = FuzzyHistory::new(history);
-        return line_editor.with_history(Box::new(fuzzy_history));
+        return line_editor
+            .with_history_session_id(session_id)
+            .with_history(Box::new(fuzzy_history));
     }
 
     line_editor
