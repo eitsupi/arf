@@ -577,7 +577,7 @@ struct SessionMeta {
 
 static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
 
-/// Clear the history session ID from cached session metadata.
+/// Clear the history session ID from both in-memory cache and on-disk session file.
 ///
 /// Called when history initialization fails, so IPC does not advertise
 /// a session ID that has no corresponding history backend.
@@ -587,6 +587,7 @@ pub fn clear_history_session_id() {
             .unwrap_or_else(|e| e.into_inner())
             .history_session_id = None;
     }
+    session::clear_session_history_id(std::process::id());
 }
 
 /// Store session metadata in memory (called after server start).

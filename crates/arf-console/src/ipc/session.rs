@@ -78,6 +78,30 @@ pub fn write_session(info: &SessionInfo) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Clear the `history_session_id` field in the on-disk session file for this process.
+///
+/// Reads the current session file, sets `history_session_id` to `null`, and rewrites it.
+/// Errors are logged but not propagated since this is a best-effort cleanup.
+pub fn clear_session_history_id(pid: u32) {
+    let Some(dir) = sessions_dir() else { return };
+    let path = dir.join(format!("{pid}.json"));
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return, // File may not exist (IPC not started)
+    };
+    let mut info: SessionInfo = match serde_json::from_str(&contents) {
+        Ok(i) => i,
+        Err(e) => {
+            log::debug!("Could not parse session file {}: {}", path.display(), e);
+            return;
+        }
+    };
+    info.history_session_id = None;
+    if let Err(e) = write_session(&info) {
+        log::debug!("Could not rewrite session file {}: {}", path.display(), e);
+    }
+}
+
 /// Remove session metadata on shutdown.
 pub fn remove_session(pid: u32) {
     if let Some(dir) = sessions_dir() {
