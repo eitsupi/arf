@@ -461,8 +461,13 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
-    // Generate a session ID for history isolation (shared across R and shell history).
-    let session_id = Reedline::create_history_session_id();
+    // Only generate a session ID when history is enabled; otherwise use None so that
+    // IPC/session JSON does not misleadingly advertise history isolation.
+    let session_id = if config.history.disabled {
+        None
+    } else {
+        Reedline::create_history_session_id()
+    };
     let session_id_raw = session_id.map(i64::from);
 
     // Start IPC server if requested
