@@ -234,7 +234,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
 
 ```json
 {
-  "arf_version": "0.2.6-alpha.1",
+  "arf_version": "0.2.6",
   "pid": 12345,
   "os": "linux",
   "arch": "x86_64",
