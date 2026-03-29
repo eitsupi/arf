@@ -153,14 +153,25 @@ arf ipc eval --pid 12345 'getwd()'
 | `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes) |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `stdout`, `stderr`, `value` (nullable), and `error` (nullable) fields. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure. Example:
+**Output format:** JSON object with `stdout` (string), `stderr` (string), and optional `value` / `error` fields (strings, omitted when not applicable). In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
+
+Example (silent eval, result captured in `value`):
 
 ```json
 {
-  "stdout": "[1] 2\n",
+  "stdout": "",
   "stderr": "",
-  "value": null,
-  "error": null
+  "value": "[1] 2"
+}
+```
+
+Example (R error):
+
+```json
+{
+  "stdout": "",
+  "stderr": "",
+  "error": "object 'x' not found"
 }
 ```
 

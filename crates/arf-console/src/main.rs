@@ -306,7 +306,8 @@ fn run() -> Result<()> {
             return handle_history_command(action, cli.config.as_ref(), cli.history_dir.as_ref());
         }
         Some(Commands::Ipc { action }) => {
-            return handle_ipc_command(action);
+            handle_ipc_command(action);
+            return Ok(());
         }
         Some(Commands::Headless {
             config,
@@ -995,7 +996,7 @@ fn handle_history_command(
     }
 }
 
-fn handle_ipc_command(action: &IpcAction) -> Result<()> {
+fn handle_ipc_command(action: &IpcAction) {
     match action {
         IpcAction::List => ipc::client::cmd_list(),
         IpcAction::Eval {

@@ -15,8 +15,7 @@ const DEFAULT_TRANSPORT_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 // ── Exit codes ───────────────────────────────────────────────────────
 //
-// 0 = success (implicit via Ok(()))
-// 1 = reserved for R evaluation errors (future use)
+// 0 = success
 // 2 = IPC transport error
 // 3 = session resolution error
 // 4 = JSON-RPC protocol error
@@ -30,16 +29,21 @@ const EXIT_PROTOCOL: i32 = 4;
 
 // ── Output helpers ───────────────────────────────────────────────────
 
+/// Serialize a JSON value to a string, using pretty-printing when the
+/// given stream is a terminal.
+fn format_json(value: &serde_json::Value, is_tty: bool) -> String {
+    if is_tty {
+        serde_json::to_string_pretty(value).expect("print_json: serialization failed")
+    } else {
+        serde_json::to_string(value).expect("print_json: serialization failed")
+    }
+}
+
 /// Print a JSON value to stdout. Pretty-prints when stdout is a
 /// terminal, compact when piped.
 fn print_json(value: &serde_json::Value) {
     let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    let output = if is_tty {
-        serde_json::to_string_pretty(value).expect("JSON serialization failed")
-    } else {
-        serde_json::to_string(value).expect("JSON serialization failed")
-    };
-    println!("{output}");
+    println!("{}", format_json(value, is_tty));
 }
 
 /// Print a structured error to stderr as JSON and exit with the given code.
@@ -52,6 +56,10 @@ fn print_json(value: &serde_json::Value) {
 ///   (e.g. `"R_BUSY"`, `"PARSE_ERROR"`)
 /// - Application codes use uppercase snake_case (e.g. `"TRANSPORT_ERROR"`,
 ///   `"SESSION_NOT_FOUND"`)
+///
+/// NOTE: This function calls `std::process::exit()`, so it cannot be
+/// tested in-process. Error paths are covered by integration tests in
+/// `headless_tests.rs` which run `arf ipc` as a subprocess.
 fn exit_error(exit_code: i32, code: &str, message: &str, hint: Option<&str>) -> ! {
     let mut error = serde_json::json!({
         "error": {
@@ -63,12 +71,7 @@ fn exit_error(exit_code: i32, code: &str, message: &str, hint: Option<&str>) -> 
         error["error"]["hint"] = serde_json::Value::String(hint.to_string());
     }
     let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
-    let output = if is_tty {
-        serde_json::to_string_pretty(&error).expect("JSON serialization failed")
-    } else {
-        serde_json::to_string(&error).expect("JSON serialization failed")
-    };
-    eprintln!("{output}");
+    eprintln!("{}", format_json(&error, is_tty));
     std::process::exit(exit_code);
 }
 
@@ -116,23 +119,23 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
 /// Handle a JSON-RPC response: print result or exit with structured error.
 ///
 /// This is the common response handler for all IPC commands that send a
-/// JSON-RPC request and print the result.
-fn handle_response(response: JsonRpcResponse) -> Result<()> {
+/// JSON-RPC request and print the result. On success, prints the result
+/// JSON to stdout. On error, prints a structured error to stderr and exits.
+fn handle_response(response: JsonRpcResponse) {
     if let Some(ref error) = response.error {
         let (code, hint) = rpc_error_info(error.code);
         exit_error(EXIT_PROTOCOL, code, &error.message, hint);
     }
 
     match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
+        Some(result) => print_json(&result),
         None => {
+            // JSON-RPC 2.0 requires exactly one of `result` or `error` to be
+            // present. Reaching here indicates a server-side bug.
             exit_error(
                 EXIT_PROTOCOL,
                 "EMPTY_RESPONSE",
-                "Server returned empty response",
+                "Server returned a response with neither result nor error (possible server bug)",
                 None,
             );
         }
@@ -140,25 +143,18 @@ fn handle_response(response: JsonRpcResponse) -> Result<()> {
 }
 
 /// List all active arf sessions as JSON.
-pub fn cmd_list() -> Result<()> {
+///
+/// Uses `serde_json::to_value` on `SessionInfo` (which derives Serialize)
+/// so that new fields are automatically included without manual sync.
+pub fn cmd_list() {
     let sessions = list_sessions();
 
     let sessions_json: Vec<serde_json::Value> = sessions
         .iter()
-        .map(|s| {
-            serde_json::json!({
-                "pid": s.pid,
-                "r_version": s.r_version,
-                "socket_path": s.socket_path,
-                "cwd": s.cwd,
-                "started_at": s.started_at,
-                "log_file": s.log_file,
-            })
-        })
+        .map(|s| serde_json::to_value(s).expect("cmd_list: SessionInfo serialization failed"))
         .collect();
 
     print_json(&serde_json::json!({ "sessions": sessions_json }));
-    Ok(())
 }
 
 /// Resolve a session or exit with a structured JSON error.
@@ -203,12 +199,7 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
 /// On success, prints the structured result as JSON to stdout.
 /// R evaluation errors are returned as part of the JSON result (exit 0)
 /// — they are a normal response, not an IPC failure.
-pub fn cmd_eval(
-    code: &str,
-    pid: Option<u32>,
-    visible: bool,
-    timeout_ms: Option<u64>,
-) -> Result<()> {
+pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
     let session = resolve_session(pid);
 
     let mut params = serde_json::json!({ "code": code, "visible": visible });
@@ -231,11 +222,11 @@ pub fn cmd_eval(
     };
 
     let response = send_request(&session.socket_path, &request, transport_timeout);
-    handle_response(response)
+    handle_response(response);
 }
 
 /// Send code as user input to a running arf session.
-pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
+pub fn cmd_send(code: &str, pid: Option<u32>) {
     let session = resolve_session(pid);
 
     let request = serde_json::json!({
@@ -246,11 +237,11 @@ pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
     });
 
     let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
-    handle_response(response)
+    handle_response(response);
 }
 
 /// Shut down a running arf headless session.
-pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
+pub fn cmd_shutdown(pid: Option<u32>) {
     let session = resolve_session(pid);
 
     let request = serde_json::json!({
@@ -261,13 +252,13 @@ pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
     });
 
     let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
-    handle_response(response)
+    handle_response(response);
 }
 
 /// Get session information as JSON via the `session` IPC method.
 ///
 /// Output is pretty-printed when stdout is a terminal, compact when piped.
-pub fn cmd_session(pid: Option<u32>) -> Result<()> {
+pub fn cmd_session(pid: Option<u32>) {
     let session = resolve_session(pid);
 
     let request = serde_json::json!({
@@ -281,7 +272,7 @@ pub fn cmd_session(pid: Option<u32>) -> Result<()> {
     let transport_timeout = std::time::Duration::from_secs(15);
 
     let response = send_request(&session.socket_path, &request, transport_timeout);
-    handle_response(response)
+    handle_response(response);
 }
 
 /// Query command history via the `history` IPC method.
@@ -294,7 +285,7 @@ pub fn cmd_history(
     cwd: Option<&str>,
     grep: Option<&str>,
     since: Option<&str>,
-) -> Result<()> {
+) {
     let session = resolve_session(pid);
 
     let mut params = serde_json::json!({
@@ -320,7 +311,7 @@ pub fn cmd_history(
 
     let transport_timeout = std::time::Duration::from_secs(15);
     let response = send_request(&session.socket_path, &request, transport_timeout);
-    handle_response(response)
+    handle_response(response);
 }
 
 /// Send a JSON-RPC request to the socket and return the response.
@@ -335,12 +326,26 @@ fn send_request(
     match send_request_inner(socket_path, request, timeout) {
         Ok(response) => response,
         Err(e) => {
-            exit_error(
-                EXIT_TRANSPORT,
-                "TRANSPORT_ERROR",
-                &format!("{e:#}"),
-                Some("Check that the arf session is running and IPC is enabled."),
-            );
+            // Distinguish protocol-level errors (malformed JSON-RPC responses)
+            // from transport-level errors (connection refused, timeout, etc.)
+            // so that exit codes match the documented categories.
+            let is_protocol = e.downcast_ref::<serde_json::Error>().is_some()
+                || format!("{e}").contains("Failed to parse JSON-RPC response");
+            if is_protocol {
+                exit_error(
+                    EXIT_PROTOCOL,
+                    "PROTOCOL_ERROR",
+                    &format!("{e:#}"),
+                    Some("Received an invalid or malformed response from the arf session."),
+                );
+            } else {
+                exit_error(
+                    EXIT_TRANSPORT,
+                    "TRANSPORT_ERROR",
+                    &format!("{e:#}"),
+                    Some("Check that the arf session is running and IPC is enabled."),
+                );
+            }
         }
     }
 }

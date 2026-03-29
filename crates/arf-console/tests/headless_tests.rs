@@ -18,6 +18,17 @@ use std::time::Duration;
 /// Timeout for waiting for IPC server to start.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Parse JSON from an IPC output, including stdout/stderr in the panic
+/// message on failure for easier debugging.
+fn parse_ipc_json(output: &IpcOutput) -> serde_json::Value {
+    serde_json::from_str(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "failed to parse JSON: {e}\nstdout: {}\nstderr: {}",
+            output.stdout, output.stderr
+        )
+    })
+}
+
 /// Wrapper around a headless arf process.
 ///
 /// Spawns `arf headless` and waits for IPC readiness by monitoring
@@ -401,7 +412,7 @@ fn test_headless_starts_and_ipc_ready() {
         "ipc session should succeed. stdout: {}, stderr: {}",
         result.stdout, result.stderr
     );
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("should parse JSON");
+    let json = parse_ipc_json(&result);
     assert_eq!(
         json["pid"].as_u64(),
         Some(process.pid as u64),
@@ -462,7 +473,7 @@ fn test_headless_eval_error() {
         "eval should succeed (R errors are in JSON, not exit code). stderr: {}",
         result.stderr
     );
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("should parse JSON");
+    let json = parse_ipc_json(&result);
     assert!(
         json["error"]
             .as_str()
@@ -525,7 +536,7 @@ fn test_headless_user_input() {
         "send should succeed. stderr: {}",
         result.stderr
     );
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("should parse JSON");
+    let json = parse_ipc_json(&result);
     assert_eq!(
         json["accepted"].as_bool(),
         Some(true),
@@ -686,7 +697,7 @@ fn test_headless_shutdown_via_ipc() {
         "shutdown should succeed. stderr: {}",
         result.stderr
     );
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("should parse JSON");
+    let json = parse_ipc_json(&result);
     assert_eq!(
         json["accepted"].as_bool(),
         Some(true),
@@ -1211,7 +1222,7 @@ fn test_ipc_history_basic() {
     let result = process.ipc_history(&[]).expect("history query");
     assert!(result.success, "history should succeed: {}", result.stderr);
 
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse history JSON");
+    let json = parse_ipc_json(&result);
     let entries = json["entries"].as_array().expect("entries should be array");
 
     // Should contain both commands (newest first)
@@ -1266,7 +1277,7 @@ fn test_ipc_history_limit() {
         .expect("history query");
     assert!(result.success);
 
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let json = parse_ipc_json(&result);
     let entries = json["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 2, "should return exactly 2 entries: {json}");
 }
@@ -1295,7 +1306,7 @@ fn test_ipc_history_grep() {
         .expect("history grep");
     assert!(result.success);
 
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let json = parse_ipc_json(&result);
     let entries = json["entries"].as_array().expect("entries array");
 
     let commands: Vec<&str> = entries
@@ -1333,7 +1344,7 @@ fn test_ipc_history_default_session_scoped() {
     let result = process.ipc_history(&[]).expect("history default");
     assert!(result.success);
 
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let json = parse_ipc_json(&result);
     let entries = json["entries"].as_array().expect("entries array");
     assert!(
         !entries.is_empty(),
@@ -1370,7 +1381,7 @@ fn test_ipc_history_metadata() {
     let result = process.ipc_history(&[]).expect("history query");
     assert!(result.success);
 
-    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let json = parse_ipc_json(&result);
     let entries = json["entries"].as_array().expect("entries array");
 
     let success_entry = entries
