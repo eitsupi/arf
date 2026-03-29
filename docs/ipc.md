@@ -38,6 +38,8 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--bind <PATH>` | Custom socket path (Unix) or named pipe path (Windows) |
 | `--pid-file <PATH>` | Write PID to file (removed on shutdown) |
 | `--log-file <PATH>` | Redirect log output to file instead of stderr |
+| `--history-dir <PATH>` | Override history database directory |
+| `--no-history` | Disable command history |
 | `--quiet` | Suppress status messages on stderr |
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
@@ -199,6 +201,49 @@ arf ipc status
 arf ipc status --pid 12345
 ```
 
+### `arf ipc history` — Query Command History
+
+Returns command history entries from the session's SQLite history database as JSON. This method is handled on the server thread and does not touch R, so it works even when R is busy.
+
+```sh
+# Show recent history (default 50 entries)
+arf ipc history
+
+# Show last 10 entries
+arf ipc history --limit 10
+
+# Filter by current session only
+arf ipc history --session-only
+
+# Search for commands containing 'dplyr'
+arf ipc history --grep dplyr
+
+# Filter by working directory
+arf ipc history --cwd /path/to/project
+
+# Show entries since a date
+arf ipc history --since 2026-03-29
+
+# Combine filters
+arf ipc history --session-only --grep 'library' --limit 20
+
+# Extract commands with jq
+arf ipc history | jq -r '.entries[].command'
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `--limit <N>` | Maximum number of entries to return (default: 50, must be positive) |
+| `--session-only` | Only return entries from the current session |
+| `--cwd <PATH>` | Filter entries by exact working directory |
+| `--grep <PATTERN>` | Filter entries whose command contains this substring |
+| `--since <DATE>` | Only return entries after this timestamp (RFC 3339 or `YYYY-MM-DD`) |
+| `--pid <PID>` | Target session PID |
+
+**Output format:** JSON object with `entries` array (newest first) and `session_id`. Each entry contains `command`, `timestamp`, `cwd`, `exit_status`, and `session_id` (optional fields are omitted when null). Output is pretty-printed when stdout is a terminal, compact when piped.
+
 ### `arf ipc shutdown` — Shut Down Headless Session
 
 Sends a graceful shutdown request to a headless session. The session cleans up (removes socket, PID file, session file) before exiting.
@@ -238,7 +283,7 @@ When both a human and an external tool use the same session, arf prevents confli
 - If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
 - Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially
-- The `session` method always succeeds — it returns arf-side info even when R is busy or not at the prompt
+- The `session` and `history` methods always succeed — they do not touch R and return data even when R is busy or not at the prompt
 
 ## Transport & Security
 
@@ -323,6 +368,7 @@ Connection: close
 | `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
 | `user_input` | `code` (string) | Send code as user input |
 | `session` | *(none)* | Get session information |
+| `history` | `limit` (int, default 50), `session_only` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
 
 ### Response Examples
