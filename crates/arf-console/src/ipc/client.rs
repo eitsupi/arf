@@ -33,9 +33,9 @@ const EXIT_PROTOCOL: i32 = 4;
 /// given stream is a terminal.
 fn format_json(value: &serde_json::Value, is_tty: bool) -> String {
     if is_tty {
-        serde_json::to_string_pretty(value).expect("print_json: serialization failed")
+        serde_json::to_string_pretty(value).expect("format_json: serialization failed")
     } else {
-        serde_json::to_string(value).expect("print_json: serialization failed")
+        serde_json::to_string(value).expect("format_json: serialization failed")
     }
 }
 
@@ -329,8 +329,11 @@ fn send_request(
             // Distinguish protocol-level errors (malformed JSON-RPC responses)
             // from transport-level errors (connection refused, timeout, etc.)
             // so that exit codes match the documented categories.
-            let is_protocol = e.downcast_ref::<serde_json::Error>().is_some()
-                || format!("{e}").contains("Failed to parse JSON-RPC response");
+            // Walk the full anyhow error chain to find serde_json::Error even
+            // when it's wrapped by context().
+            let is_protocol = e
+                .chain()
+                .any(|cause| cause.downcast_ref::<serde_json::Error>().is_some());
             if is_protocol {
                 exit_error(
                     EXIT_PROTOCOL,
