@@ -317,6 +317,8 @@ fn run() -> Result<()> {
             quiet,
             json,
             log_file,
+            history_dir,
+            no_history,
             vanilla,
             no_environ,
             no_site_file,
@@ -348,6 +350,8 @@ fn run() -> Result<()> {
                 *quiet,
                 *json,
                 log_file.as_deref(),
+                history_dir.as_ref(),
+                *no_history,
             );
         }
         None => {}
@@ -621,6 +625,8 @@ fn run_headless(
     quiet: bool,
     json: bool,
     log_file: Option<&std::path::Path>,
+    cli_history_dir: Option<&std::path::PathBuf>,
+    no_history: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -635,7 +641,7 @@ fn run_headless(
     let mut warnings: Vec<String> = Vec::new();
 
     // Load config for r_source resolution
-    let config = if json {
+    let mut config = if json {
         load_config_collecting_warnings(config_path, &mut warnings)
     } else {
         load_config_or_warn(config_path)
@@ -676,6 +682,13 @@ fn run_headless(
     // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
+
+    // Apply CLI history overrides (same logic as the REPL path in main())
+    if no_history {
+        config.history.disabled = true;
+    } else if let Some(history_dir) = cli_history_dir {
+        config.history.dir = Some(history_dir.clone());
+    }
 
     // Initialize history for headless mode (same SQLite database as the REPL).
     // Only advertise history_session_id to IPC if the backend was actually opened.

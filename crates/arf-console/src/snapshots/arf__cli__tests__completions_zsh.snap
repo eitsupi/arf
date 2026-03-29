@@ -347,6 +347,7 @@ _arguments "${_arguments_options[@]}" : \
 '--log-file=[Redirect log output to a file instead of stderr]:LOG_FILE:_files' \
 '--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
 '--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
+'--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
 '--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
@@ -355,6 +356,7 @@ _arguments "${_arguments_options[@]}" : \
 '--no-environ[\[R\] Don'\''t read the site and user environment files]' \
 '--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \
 '--no-init-file[\[R\] Don'\''t read the user'\''s .Rprofile]' \
+'--no-history[Disable history (no history saved)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
