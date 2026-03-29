@@ -534,7 +534,7 @@ fn strip_ansi_escapes(s: &str) -> String {
 ///
 /// Returns a `Cow<str>` to avoid allocation when no CR characters are present.
 #[cfg(any(windows, test))]
-pub fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
+fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
     if s.contains('\r') {
         std::borrow::Cow::Owned(s.replace('\r', ""))
     } else {
