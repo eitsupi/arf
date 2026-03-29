@@ -711,8 +711,10 @@ pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, His
         params_vec.push(Box::new(cwd.clone()));
     }
     if let Some(ref grep) = params.grep {
-        sql.push_str(" AND command_line LIKE ?");
-        params_vec.push(Box::new(format!("%{grep}%")));
+        // Use instr() instead of LIKE to avoid wildcard escaping issues
+        // (same approach as reedline's Substring search).
+        sql.push_str(" AND instr(command_line, ?) >= 1");
+        params_vec.push(Box::new(grep.clone()));
     }
     if let Some(ms) = since_ms {
         sql.push_str(" AND start_timestamp >= ?");
