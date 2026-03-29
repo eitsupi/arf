@@ -722,6 +722,7 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
     item.exit_status = exit_status;
+    item.session_id = HISTORY_DB_INFO.get().and_then(|(_, sid)| *sid);
     if let Err(e) = history.save(item) {
         log::warn!("Failed to save headless history: {}", e);
     }
