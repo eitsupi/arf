@@ -281,7 +281,8 @@ arf ipc list
 #       "socket_path": "/home/user/.cache/arf/sessions/12345.sock",
 #       "cwd": "/workspace",
 #       "started_at": "2026-03-22T10:00:00+09:00",
-#       "log_file": null
+#       "log_file": null,
+#       "history_session_id": 1742601600000000000
 #     }
 #   ]
 # }

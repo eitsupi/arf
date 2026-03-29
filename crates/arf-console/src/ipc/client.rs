@@ -4,7 +4,7 @@
 //!
 //! All commands output JSON to stdout (pretty-printed when stdout is a
 //! terminal, compact when piped). Errors are written to stderr as JSON
-//! with `{"error": {"code": "ERROR_CODE", "message": "...", "hint": "..."}}`.
+//! with `{"error": {"code": "ERROR_CODE", "message": "...", "hint": "...", "data": ...}}`.
 
 use crate::ipc::protocol::JsonRpcResponse;
 use crate::ipc::session::{find_session, list_sessions};

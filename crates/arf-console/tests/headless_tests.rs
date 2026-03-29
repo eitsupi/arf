@@ -1446,8 +1446,12 @@ fn test_ipc_history_disabled() {
 #[test]
 fn test_ipc_exit_code_session_not_found() {
     let bin_path = env!("CARGO_BIN_EXE_arf");
+
+    // Derive a PID unlikely to match any running arf session.
+    let fake_pid = std::process::id().saturating_add(900_000).to_string();
+
     let output = Command::new(bin_path)
-        .args(["ipc", "eval", "1", "--pid", "99999"])
+        .args(["ipc", "eval", "1", "--pid", &fake_pid])
         .output()
         .expect("should run");
 
