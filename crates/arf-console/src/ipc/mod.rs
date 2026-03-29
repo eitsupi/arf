@@ -33,6 +33,10 @@ use std::sync::{
 /// Not set in REPL mode (shutdown is only available in headless mode).
 static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
+/// History backend for headless mode. When set, evaluated commands are
+/// persisted to the same SQLite history database used by the REPL.
+static HEADLESS_HISTORY: OnceLock<Mutex<reedline::SqliteBackedHistory>> = OnceLock::new();
+
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
 static IPC_RECEIVER: OnceLock<Mutex<Option<std::sync::mpsc::Receiver<IpcRequest>>>> =
@@ -593,6 +597,34 @@ pub fn clear_history_session_id() {
     }
 }
 
+/// Set the history backend for headless mode.
+///
+/// Once set, `headless_handle_request` will persist evaluated commands
+/// (both `evaluate` and `user_input`) to the SQLite history database.
+pub fn set_headless_history(history: reedline::SqliteBackedHistory) {
+    let _ = HEADLESS_HISTORY.set(Mutex::new(history));
+}
+
+/// Save a command to the headless history database, if configured.
+///
+/// Errors are logged but never propagated — history saving must not
+/// interfere with IPC response delivery.
+fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
+    let Some(h) = HEADLESS_HISTORY.get() else {
+        return;
+    };
+    let Ok(mut history) = h.lock() else {
+        log::warn!("Headless history lock poisoned, skipping save");
+        return;
+    };
+    use reedline::History;
+    let mut item = reedline::HistoryItem::from_command_line(code);
+    item.exit_status = exit_status;
+    if let Err(e) = history.save(item) {
+        log::warn!("Failed to save headless history: {}", e);
+    }
+}
+
 /// Store session metadata in memory (called after server start).
 pub(in crate::ipc) fn set_session_meta(
     socket_path: String,
@@ -829,6 +861,12 @@ fn headless_handle_request(request: IpcRequest) {
             r_is_at_prompt().store(false, Ordering::Release);
             let result = capture::evaluate_with_capture(&code, visible);
             r_is_at_prompt().store(true, Ordering::Release);
+
+            if !code.is_empty() {
+                let exit_status = if result.error.is_some() { 1 } else { 0 };
+                save_to_headless_history(&code, Some(exit_status));
+            }
+
             let _ = reply.send(IpcResponse::Evaluate(result));
         }
         IpcMethod::UserInput { code } => {
@@ -837,14 +875,21 @@ fn headless_handle_request(request: IpcRequest) {
             r_is_at_prompt().store(false, Ordering::Release);
             let eval_result = arf_harp::eval_string(&code);
             r_is_at_prompt().store(true, Ordering::Release);
+            let exit_status;
             match eval_result {
                 Ok(_) => {
+                    exit_status = 0;
                     let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
                 }
                 Err(e) => {
+                    exit_status = 1;
                     log::warn!("Headless user_input evaluation error: {}", e);
                     let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: false }));
                 }
+            }
+
+            if !code.is_empty() {
+                save_to_headless_history(&code, Some(exit_status));
             }
         }
         IpcMethod::Session => {

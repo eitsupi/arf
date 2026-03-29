@@ -677,6 +677,31 @@ fn run_headless(
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
 
+    // Initialize history for headless mode (same SQLite database as the REPL)
+    let session_id = create_session_id(&config);
+    let session_id_raw = session_id.map(i64::from);
+    if let Some(sid) = session_id {
+        let history_path = {
+            let dir = config.history.dir.clone().or_else(config::history_dir);
+            dir.map(|d| d.join("r.db"))
+        };
+        if let Some(path) = history_path {
+            match reedline::SqliteBackedHistory::with_file(
+                path.clone(),
+                Some(sid),
+                Some(chrono::Utc::now()),
+            ) {
+                Ok(history) => {
+                    ipc::set_headless_history(history);
+                    log::info!("Headless history enabled: {}", path.display());
+                }
+                Err(e) => {
+                    log::warn!("Failed to open history database {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+
     // Start IPC server (with optional custom bind path)
     let log_file_str = log_file.map(|p| {
         // Convert to absolute path so IPC clients can locate the file
@@ -688,8 +713,8 @@ fn run_headless(
             .display()
             .to_string()
     });
-    let session =
-        ipc::start_server(bind, log_file_str, None).context("Failed to start IPC server")?;
+    let session = ipc::start_server(bind, log_file_str, session_id_raw)
+        .context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
     }
