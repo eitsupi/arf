@@ -677,9 +677,10 @@ fn run_headless(
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
 
-    // Initialize history for headless mode (same SQLite database as the REPL)
+    // Initialize history for headless mode (same SQLite database as the REPL).
+    // Only advertise history_session_id to IPC if the backend was actually opened.
     let session_id = create_session_id(&config);
-    let session_id_raw = session_id.map(i64::from);
+    let mut session_id_raw = None;
     if let Some(sid) = session_id {
         let history_path = {
             let dir = config.history.dir.clone().or_else(config::history_dir);
@@ -693,6 +694,7 @@ fn run_headless(
             ) {
                 Ok(history) => {
                     ipc::set_headless_history(history);
+                    session_id_raw = Some(i64::from(sid));
                     log::info!("Headless history enabled: {}", path.display());
                 }
                 Err(e) => {

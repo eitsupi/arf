@@ -867,12 +867,15 @@ fn headless_handle_request(request: IpcRequest) {
             let result = capture::evaluate_with_capture(&code, visible);
             r_is_at_prompt().store(true, Ordering::Release);
 
+            // Determine exit status before moving result into the reply.
+            let has_error = result.error.is_some();
+            let _ = reply.send(IpcResponse::Evaluate(result));
+
+            // Save after reply so SQLite I/O doesn't delay the IPC response.
             if !code.is_empty() {
-                let exit_status = if result.error.is_some() { 1 } else { 0 };
+                let exit_status = if has_error { 1 } else { 0 };
                 save_to_headless_history(&code, Some(exit_status));
             }
-
-            let _ = reply.send(IpcResponse::Evaluate(result));
         }
         IpcMethod::UserInput { code } => {
             // In headless mode, user_input evaluates the code directly.
