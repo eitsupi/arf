@@ -290,7 +290,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (history)
 _arguments "${_arguments_options[@]}" : \
-'--limit=[Maximum number of entries to return]:LIMIT:_default' \
+'--limit=[Maximum number of entries to return (must be positive)]:LIMIT:_default' \
 '--cwd=[Filter entries by exact working directory]:CWD:_default' \
 '--grep=[Filter entries whose command contains this substring]:GREP:_default' \
 '--since=[Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)]:SINCE:_default' \

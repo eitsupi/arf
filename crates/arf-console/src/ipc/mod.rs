@@ -626,6 +626,10 @@ pub fn set_history_db_info(path: PathBuf, session_id: Option<reedline::HistorySe
 /// and the main writer (reedline or headless handler) commits each save
 /// immediately.
 pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, String> {
+    if params.limit < 1 {
+        return Err(format!("limit must be positive, got {}", params.limit));
+    }
+
     let (db_path, session_id) = HISTORY_DB_INFO
         .get()
         .ok_or_else(|| "History is not available (no history database configured)".to_string())?;

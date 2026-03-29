@@ -666,9 +666,16 @@ async fn dispatch_request(
                 }
             };
             match super::query_history(&params) {
-                Ok(result) => {
-                    return JsonRpcResponse::success(id, serde_json::to_value(result).unwrap());
-                }
+                Ok(result) => match serde_json::to_value(result) {
+                    Ok(value) => return JsonRpcResponse::success(id, value),
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            id,
+                            INTERNAL_ERROR,
+                            format!("Failed to serialize history result: {e}"),
+                        );
+                    }
+                },
                 Err(message) => {
                     return JsonRpcResponse::error(id, INTERNAL_ERROR, message);
                 }

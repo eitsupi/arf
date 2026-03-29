@@ -230,7 +230,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;history' {
-            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of entries to return')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of entries to return (must be positive)')
             [CompletionResult]::new('--cwd', '--cwd', [CompletionResultType]::ParameterName, 'Filter entries by exact working directory')
             [CompletionResult]::new('--grep', '--grep', [CompletionResultType]::ParameterName, 'Filter entries whose command contains this substring')
             [CompletionResult]::new('--since', '--since', [CompletionResultType]::ParameterName, 'Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)')

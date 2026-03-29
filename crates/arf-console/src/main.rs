@@ -469,6 +469,9 @@ fn run() -> Result<()> {
     let session_id_raw = session_id.map(i64::from);
 
     // Register history DB path for IPC history queries.
+    // Note: the DB file may not exist yet at this point (first run); that's OK
+    // because SqliteBackedHistory::with_file creates it on open. In the REPL
+    // path, reedline opens the DB later in Repl::run_*, which also creates it.
     if !config.history.disabled {
         let history_dir = config.history.dir.clone().or_else(config::history_dir);
         if let Some(dir) = history_dir {

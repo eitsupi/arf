@@ -499,8 +499,8 @@ Examples:
   Extract commands with jq:
     $ arf ipc history | jq -r '.entries[].command'")]
     History {
-        /// Maximum number of entries to return
-        #[arg(long, default_value = "50")]
+        /// Maximum number of entries to return (must be positive)
+        #[arg(long, default_value = "50", value_parser = clap::value_parser!(i64).range(1..))]
         limit: i64,
         /// Only return entries from the current session
         #[arg(long)]
