@@ -350,7 +350,7 @@ fn run() -> Result<()> {
                 *quiet,
                 *json,
                 log_file.as_deref(),
-                history_dir.as_ref(),
+                history_dir.as_deref(),
                 *no_history,
             );
         }
@@ -625,7 +625,7 @@ fn run_headless(
     quiet: bool,
     json: bool,
     log_file: Option<&std::path::Path>,
-    cli_history_dir: Option<&std::path::PathBuf>,
+    cli_history_dir: Option<&std::path::Path>,
     no_history: bool,
 ) -> Result<()> {
     use std::sync::Arc;
@@ -687,7 +687,7 @@ fn run_headless(
     if no_history {
         config.history.disabled = true;
     } else if let Some(history_dir) = cli_history_dir {
-        config.history.dir = Some(history_dir.clone());
+        config.history.dir = Some(history_dir.to_path_buf());
     }
 
     // Initialize history for headless mode (same SQLite database as the REPL).
