@@ -92,6 +92,9 @@ _arf() {
             arf__help__ipc,eval)
                 cmd="arf__help__ipc__eval"
                 ;;
+            arf__help__ipc,history)
+                cmd="arf__help__ipc__history"
+                ;;
             arf__help__ipc,list)
                 cmd="arf__help__ipc__list"
                 ;;
@@ -137,6 +140,9 @@ _arf() {
             arf__ipc,help)
                 cmd="arf__ipc__help"
                 ;;
+            arf__ipc,history)
+                cmd="arf__ipc__history"
+                ;;
             arf__ipc,list)
                 cmd="arf__ipc__list"
                 ;;
@@ -157,6 +163,9 @@ _arf() {
                 ;;
             arf__ipc__help,help)
                 cmd="arf__ipc__help__help"
+                ;;
+            arf__ipc__help,history)
+                cmd="arf__ipc__help__history"
                 ;;
             arf__ipc__help,list)
                 cmd="arf__ipc__help__list"
@@ -743,7 +752,7 @@ _arf() {
             return 0
             ;;
         arf__help__ipc)
-            opts="list eval send status session shutdown"
+            opts="list eval send status session shutdown history"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -757,6 +766,20 @@ _arf() {
             return 0
             ;;
         arf__help__ipc__eval)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__help__ipc__history)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1021,7 +1044,7 @@ _arf() {
             return 0
             ;;
         arf__ipc)
-            opts="-h --help list eval send status session shutdown help"
+            opts="-h --help list eval send status session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1057,7 +1080,7 @@ _arf() {
             return 0
             ;;
         arf__ipc__help)
-            opts="list eval send status session shutdown help"
+            opts="list eval send status session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1085,6 +1108,20 @@ _arf() {
             return 0
             ;;
         arf__ipc__help__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__help__history)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1161,6 +1198,40 @@ _arf() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__ipc__history)
+            opts="-h --limit --all-sessions --cwd --grep --since --pid --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --cwd)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --grep)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --since)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;

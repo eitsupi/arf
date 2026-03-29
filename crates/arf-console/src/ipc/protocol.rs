@@ -154,6 +154,54 @@ pub struct SessionResult {
     pub hint: Option<String>,
 }
 
+/// Parameters for the `history` method.
+#[derive(Debug, Deserialize)]
+pub struct HistoryParams {
+    /// Maximum number of entries to return (default: 50).
+    #[serde(default = "default_history_limit")]
+    pub limit: i64,
+    /// Include entries from all sessions, not just the current one.
+    #[serde(default)]
+    pub all_sessions: bool,
+    /// Filter entries by exact working directory.
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// Filter entries whose command line contains this substring.
+    #[serde(default)]
+    pub grep: Option<String>,
+    /// Only return entries after this timestamp (ISO 8601 / RFC 3339 datetime
+    /// or date-only `YYYY-MM-DD`).
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+fn default_history_limit() -> i64 {
+    50
+}
+
+/// A single history entry returned by the `history` method.
+#[derive(Debug, Serialize)]
+pub struct HistoryEntry {
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_status: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<i64>,
+}
+
+/// Result of the `history` method.
+#[derive(Debug, Serialize)]
+pub struct HistoryResult {
+    pub entries: Vec<HistoryEntry>,
+    /// Current session ID, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<i64>,
+}
+
 /// Internal request type sent from IPC server thread to main thread.
 pub struct IpcRequest {
     pub method: IpcMethod,

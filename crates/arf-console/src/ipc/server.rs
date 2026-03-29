@@ -5,9 +5,9 @@
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
 use crate::ipc::protocol::{
-    EvaluateParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest,
-    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, ShutdownResult,
-    UserInputParams,
+    EvaluateParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod,
+    IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR,
+    ShutdownResult, UserInputParams,
 };
 use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
@@ -581,15 +581,14 @@ async fn dispatch_request(
 ) -> JsonRpcResponse {
     let id = request.id.clone();
     let is_session = request.method == "session";
+    let is_history = request.method == "history";
 
     // Reject immediately if in alternate mode (shell, history/help browser).
     // These modes block the main thread, so requests would hang in the mpsc
     // queue until the request timeout expires.
     //
-    // Exception: `session` returns arf-only info when R is unavailable,
-    // so it handles alternate mode gracefully via the main-thread handler.
-    // However, if the idle callback isn't running (alternate mode), the
-    // request would sit in the queue. Return arf-only info directly instead.
+    // Exceptions: `session` and `history` are handled entirely on the server
+    // thread (no main-thread dispatch needed), so they work in alternate mode.
     if super::is_in_alternate_mode() {
         if is_session {
             return session_fallback_response(
@@ -597,11 +596,13 @@ async fn dispatch_request(
                 "R is in alternate mode (shell, history browser, or help browser)",
             );
         }
-        return JsonRpcResponse::error(
-            id,
-            super::protocol::R_NOT_AT_PROMPT,
-            "R is not at the command prompt".to_string(),
-        );
+        if !is_history {
+            return JsonRpcResponse::error(
+                id,
+                super::protocol::R_NOT_AT_PROMPT,
+                "R is not at the command prompt".to_string(),
+            );
+        }
     }
 
     let method = match request.method.as_str() {
@@ -652,6 +653,45 @@ async fn dispatch_request(
             IpcMethod::UserInput { code: params.code }
         }
         "session" => IpcMethod::Session,
+        "history" => {
+            // History is handled directly on the server thread — it only
+            // reads the SQLite database and does not touch R state.
+            // Treat missing/null params as empty object so callers can
+            // rely on defaults (all fields have #[serde(default)]).
+            let raw_params = if request.params.is_null() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                request.params
+            };
+            let params: HistoryParams = match serde_json::from_value(raw_params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        id,
+                        INVALID_PARAMS,
+                        format!("Invalid params: {e}"),
+                    );
+                }
+            };
+            match super::query_history(&params) {
+                Ok(result) => match serde_json::to_value(result) {
+                    Ok(value) => return JsonRpcResponse::success(id, value),
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            id,
+                            INTERNAL_ERROR,
+                            format!("Failed to serialize history result: {e}"),
+                        );
+                    }
+                },
+                Err(super::HistoryQueryError::InvalidParams(message)) => {
+                    return JsonRpcResponse::error(id, INVALID_PARAMS, message);
+                }
+                Err(super::HistoryQueryError::Internal(message)) => {
+                    return JsonRpcResponse::error(id, INTERNAL_ERROR, message);
+                }
+            }
+        }
         _ => {
             return JsonRpcResponse::error(
                 id,

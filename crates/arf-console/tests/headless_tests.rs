@@ -294,6 +294,26 @@ impl HeadlessProcess {
         })
     }
 
+    /// Run `arf ipc history --pid <pid>` with optional extra args and return output.
+    fn ipc_history(&self, extra_args: &[&str]) -> Result<IpcOutput, String> {
+        let bin_path = env!("CARGO_BIN_EXE_arf");
+        let pid_str = self.pid.to_string();
+
+        let mut args = vec!["ipc", "history", "--pid", &pid_str];
+        args.extend_from_slice(extra_args);
+
+        let output = Command::new(bin_path)
+            .args(&args)
+            .output()
+            .map_err(|e| format!("Failed to run arf ipc history: {e}"))?;
+
+        Ok(IpcOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        })
+    }
+
     /// Run `arf ipc shutdown --pid <pid>` and return output.
     fn ipc_shutdown(&self) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -1157,5 +1177,238 @@ fn test_headless_json_output() {
         !stderr.contains("Headless mode ready"),
         "json mode should suppress ready message, got: {}",
         stderr
+    );
+}
+
+// ── IPC history query tests ─────────────────────────────────────────────
+
+/// Test basic `arf ipc history` query returns evaluated commands.
+#[test]
+fn test_ipc_history_basic() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    // Evaluate a few commands
+    let r1 = process.ipc_eval("1 + 1").expect("eval 1");
+    assert!(r1.success);
+    let r2 = process.ipc_eval("cat('hello')").expect("eval 2");
+    assert!(r2.success);
+
+    // Small delay for SQLite flush
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Query history
+    let result = process.ipc_history(&[]).expect("history query");
+    assert!(result.success, "history should succeed: {}", result.stderr);
+
+    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse history JSON");
+    let entries = json["entries"].as_array().expect("entries should be array");
+
+    // Should contain both commands (newest first)
+    assert!(
+        entries.len() >= 2,
+        "should have at least 2 entries, got {}: {json}",
+        entries.len()
+    );
+
+    let commands: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| e["command"].as_str())
+        .collect();
+    assert!(
+        commands.contains(&"1 + 1"),
+        "should contain '1 + 1': {commands:?}"
+    );
+    assert!(
+        commands.contains(&"cat('hello')"),
+        "should contain cat('hello'): {commands:?}"
+    );
+
+    // Should have a session_id
+    assert!(
+        json["session_id"].is_number(),
+        "should have session_id: {json}"
+    );
+}
+
+/// Test `--limit` flag restricts the number of returned entries.
+#[test]
+fn test_ipc_history_limit() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    // Evaluate 3 commands
+    for i in 1..=3 {
+        let r = process
+            .ipc_eval(&format!("{i} + {i}"))
+            .expect("eval should run");
+        assert!(r.success);
+    }
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Query with limit=2
+    let result = process
+        .ipc_history(&["--limit", "2"])
+        .expect("history query");
+    assert!(result.success);
+
+    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let entries = json["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2, "should return exactly 2 entries: {json}");
+}
+
+/// Test `--grep` flag filters by command substring.
+#[test]
+fn test_ipc_history_grep() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    let r1 = process.ipc_eval("print('apple')").expect("eval 1");
+    assert!(r1.success);
+    let r2 = process.ipc_eval("cat('banana')").expect("eval 2");
+    assert!(r2.success);
+    let r3 = process.ipc_eval("print('apricot')").expect("eval 3");
+    assert!(r3.success);
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Search for "apple"
+    let result = process
+        .ipc_history(&["--grep", "apple"])
+        .expect("history grep");
+    assert!(result.success);
+
+    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let entries = json["entries"].as_array().expect("entries array");
+
+    let commands: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| e["command"].as_str())
+        .collect();
+    assert!(
+        commands.iter().all(|c| c.contains("apple")),
+        "all results should contain 'apple': {commands:?}"
+    );
+    assert!(
+        !commands.iter().any(|c| c.contains("banana")),
+        "should not contain 'banana': {commands:?}"
+    );
+}
+
+/// Test that the default query returns only the current session's entries.
+///
+/// By default (without `--all-sessions`), history is scoped to the
+/// current session. All returned entries must share the session_id.
+#[test]
+fn test_ipc_history_default_session_scoped() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    let r1 = process.ipc_eval("42").expect("eval");
+    assert!(r1.success);
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Default query — should be scoped to the current session
+    let result = process.ipc_history(&[]).expect("history default");
+    assert!(result.success);
+
+    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let entries = json["entries"].as_array().expect("entries array");
+    assert!(
+        !entries.is_empty(),
+        "default query should find entries: {json}"
+    );
+
+    // All entries should have the same session_id as the response
+    let session_id = json["session_id"].as_i64().expect("session_id");
+    for entry in entries {
+        assert_eq!(
+            entry["session_id"].as_i64(),
+            Some(session_id),
+            "all entries should match session_id: {entry}"
+        );
+    }
+}
+
+/// Test that history entries include metadata (timestamp, cwd, exit_status).
+#[test]
+fn test_ipc_history_metadata() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    let r1 = process.ipc_eval("1 + 1").expect("eval success");
+    assert!(r1.success);
+    let r2 = process.ipc_eval("stop('oops')").expect("eval error");
+    assert!(!r2.success);
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    let result = process.ipc_history(&[]).expect("history query");
+    assert!(result.success);
+
+    let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
+    let entries = json["entries"].as_array().expect("entries array");
+
+    let success_entry = entries
+        .iter()
+        .find(|e| e["command"].as_str() == Some("1 + 1"))
+        .expect("should find success entry");
+    assert!(
+        success_entry["timestamp"].is_string(),
+        "should have timestamp: {success_entry}"
+    );
+    assert!(
+        success_entry["cwd"].is_string(),
+        "should have cwd: {success_entry}"
+    );
+    assert_eq!(
+        success_entry["exit_status"].as_i64(),
+        Some(0),
+        "success should have exit_status=0: {success_entry}"
+    );
+
+    let error_entry = entries
+        .iter()
+        .find(|e| e["command"].as_str() == Some("stop('oops')"))
+        .expect("should find error entry");
+    assert_eq!(
+        error_entry["exit_status"].as_i64(),
+        Some(1),
+        "error should have exit_status=1: {error_entry}"
+    );
+}
+
+/// Test that history returns an error when history is disabled.
+#[test]
+fn test_ipc_history_disabled() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir, "--no-history"])
+        .expect("spawn headless");
+
+    let result = process.ipc_history(&[]).expect("history query");
+    // Should fail because history is not configured
+    assert!(
+        !result.success,
+        "history should fail when disabled: stdout={}, stderr={}",
+        result.stdout, result.stderr
     );
 }

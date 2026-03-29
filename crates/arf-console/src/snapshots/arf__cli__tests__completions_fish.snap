@@ -113,14 +113,15 @@ complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcomm
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "import" -d 'Import history from another source (experimental)'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "export" -d 'Export history to a unified SQLite file (experimental)'
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "list" -d 'List active arf sessions'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, use --visible to also show in session)'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "send" -d 'Send code as user input to a running session'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "status" -d 'Show status of a running arf session'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "session" -d 'Get session information as JSON (arf + R environment)'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "shutdown" -d 'Shut down a running arf headless session'
-complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "list" -d 'List active arf sessions'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, use --visible to also show in session)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "send" -d 'Send code as user input to a running session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "status" -d 'Show status of a running arf session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "session" -d 'Get session information as JSON (arf + R environment)'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "shutdown" -d 'Shut down a running arf headless session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "history" -d 'Query command history from a running session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and not __fish_seen_subcommand_from list eval send status session shutdown history help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from list" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from eval" -l timeout -d 'Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout' -r
@@ -134,12 +135,20 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from session" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from shutdown" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from shutdown" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l limit -d 'Maximum number of entries to return (must be positive)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l cwd -d 'Filter entries by exact working directory' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l grep -d 'Filter entries whose command contains this substring' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l since -d 'Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l all-sessions -d 'Include entries from all sessions, not just the current one'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "list" -d 'List active arf sessions'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, use --visible to also show in session)'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "send" -d 'Send code as user input to a running session'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show status of a running arf session'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "session" -d 'Get session information as JSON (arf + R environment)'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "shutdown" -d 'Shut down a running arf headless session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "history" -d 'Query command history from a running session'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
@@ -177,3 +186,4 @@ complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "status" -d 'Show status of a running arf session'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "session" -d 'Get session information as JSON (arf + R environment)'
 complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "shutdown" -d 'Shut down a running arf headless session'
+complete -c arf -n "__fish_arf_using_subcommand help; and __fish_seen_subcommand_from ipc" -f -a "history" -d 'Query command history from a running session'
