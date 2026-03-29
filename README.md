@@ -66,6 +66,12 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/la
 winget install --id eitsupi.arf
 ```
 
+### cargo-binstall
+
+```sh
+cargo binstall --git https://github.com/eitsupi/arf arf-console
+```
+
 ### Manual Download
 
 Download the archive for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases) and extract the binary to a directory in your `PATH`.
