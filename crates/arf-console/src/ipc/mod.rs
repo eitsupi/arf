@@ -467,11 +467,24 @@ pub fn take_pending_ipc_operation() -> Option<PendingIpcOperation> {
 /// field so that callers (e.g. AI agents) can see what the user is
 /// typing and decide whether to retry or abort. The `message` field
 /// is kept stable for pattern matching.
+///
+/// The buffer is capped at 1024 characters to prevent excessively large
+/// payloads. When truncated, `buffer_truncated` is `true` and
+/// `buffer_original_length` contains the full character count.
 pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
+    const MAX_BUFFER_CHARS: usize = 1024;
+    let original_len = buffer.chars().count();
+    let truncated = original_len > MAX_BUFFER_CHARS;
+    let preview: String = buffer.chars().take(MAX_BUFFER_CHARS).collect();
+
     let response = IpcResponse::error_with_data(
         USER_IS_TYPING,
         "User is typing in the console".to_string(),
-        serde_json::json!({ "buffer": buffer }),
+        serde_json::json!({
+            "buffer": preview,
+            "buffer_truncated": truncated,
+            "buffer_original_length": original_len,
+        }),
     );
     match op.kind {
         PendingIpcKind::SilentEvaluate { reply }

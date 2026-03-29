@@ -106,21 +106,23 @@ The `code` field is a string identifier for stable matching. Process exit codes 
 | Exit code | Meaning |
 |-----------|---------|
 | 0 | Success |
-| 2 | IPC transport error (connection failed, timeout) |
+| 2 | IPC transport error (socket/pipe connection failed, connection-level read timeout) |
 | 3 | Session resolution error (no session found, ambiguous PID) |
-| 4 | JSON-RPC protocol error (R busy, user typing, etc.) |
+| 4 | JSON-RPC protocol error (R busy, user typing, server-side request timeout from `--timeout`, etc.) |
+
+> **Note:** Transport-level timeouts (failing to connect to the socket or low-level read/write timeouts) produce exit code **2** (`TRANSPORT_ERROR`). Server-side evaluation timeouts triggered by `arf ipc eval --timeout` result in a JSON-RPC error response from the server, which the client reports as exit code **4**.
 
 Error code strings:
 
 | Code | Exit | Description |
 |------|------|-------------|
-| `TRANSPORT_ERROR` | 2 | Socket connection failed, read timeout, etc. |
+| `TRANSPORT_ERROR` | 2 | Socket/pipe connection failed, connection-level read timeout, etc. |
 | `SESSION_NOT_FOUND` | 3 | No session with the specified PID, or no sessions at all |
 | `SESSION_AMBIGUOUS` | 3 | Multiple sessions running and `--pid` not specified |
 | `R_BUSY` | 4 | R is executing code |
 | `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
-| `USER_IS_TYPING` | 4 | User is typing in the REPL (`data.buffer` contains current input) |
+| `USER_IS_TYPING` | 4 | User is typing in the REPL (see `data` fields below) |
 | `EMPTY_RESPONSE` | 4 | Server returned no result |
 | `PARSE_ERROR` | 4 | Invalid JSON in request |
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
@@ -128,6 +130,16 @@ Error code strings:
 | `INVALID_PARAMS` | 4 | Invalid method parameters |
 | `INTERNAL_ERROR` | 4 | Server internal error |
 | `PROTOCOL_ERROR` | 4 | Other JSON-RPC error |
+
+#### `USER_IS_TYPING` error data
+
+When the user is typing in the REPL, the `data` field contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `buffer` | string | Current editor buffer content (capped at 1024 characters) |
+| `buffer_truncated` | boolean | `true` if the buffer was truncated |
+| `buffer_original_length` | integer | Full character count of the original buffer |
 
 ### `arf ipc eval` — Evaluate R Code
 
