@@ -1076,12 +1076,6 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         state.prompt_config.start_spinner();
                     }
 
-                    // On Windows, reedline inserts CRLF for newlines in multiline input.
-                    // R doesn't accept CR in code, so we need to strip it.
-                    // Use the shared strip_cr function from arf_libr.
-                    #[cfg(windows)]
-                    let code = arf_libr::strip_cr(&code).into_owned();
-
                     // Mark R as busy (no longer at prompt) for IPC
                     crate::ipc::set_r_at_prompt(false);
 
@@ -1183,13 +1177,8 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             state.prompt_config.start_spinner();
                         }
 
-                        #[cfg(windows)]
-                        let code = arf_libr::strip_cr(&op.code).into_owned();
-                        #[cfg(not(windows))]
-                        let code = op.code;
-
                         crate::ipc::set_r_at_prompt(false);
-                        return Some(code);
+                        return Some(op.code);
                     }
                     // No pending operation (spurious signal), continue waiting
                     continue;

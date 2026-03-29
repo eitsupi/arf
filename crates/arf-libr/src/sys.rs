@@ -526,13 +526,8 @@ fn strip_ansi_escapes(s: &str) -> String {
 
 /// Strip all carriage return characters from a string.
 ///
-/// On Windows, CR (`\r`) characters can cause issues in two contexts:
-///
-/// 1. **Output**: R may produce CR in error messages, causing the cursor to
-///    return to the start of the line and overwrite previous content.
-///
-/// 2. **Input**: reedline inserts CRLF for newlines in multiline input, but
-///    R treats CR as an invalid token.
+/// On Windows, R may produce CR (`\r`) in error messages, causing the cursor
+/// to return to the start of the line and overwrite previous content.
 ///
 /// This function removes all CR characters to prevent these issues.
 /// Both CRLF (`\r\n`) and standalone CR are handled.
