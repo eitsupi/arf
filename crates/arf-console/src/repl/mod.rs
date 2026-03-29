@@ -1125,7 +1125,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // We use trim() because reedline may include trailing whitespace
                         // in the buffer; whitespace-only input is treated as empty.
                         if !buffer.trim().is_empty() {
-                            reject_operation_user_typing(op);
+                            reject_operation_user_typing(op, &buffer);
                             continue;
                         }
 

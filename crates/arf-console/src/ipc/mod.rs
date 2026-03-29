@@ -466,8 +466,11 @@ pub fn take_pending_ipc_operation() -> Option<PendingIpcOperation> {
 /// Reject a pending IPC operation because the user is typing.
 ///
 /// Sends a `USER_IS_TYPING` error response to the IPC client.
-pub fn reject_operation_user_typing(op: PendingIpcOperation) {
-    let message = "User is typing in the console".to_string();
+/// The current editor buffer is included in the error message so that
+/// callers (e.g. AI agents) can see what the user is typing and decide
+/// whether to retry or abort.
+pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
+    let message = format!("User is typing in the console: {buffer}");
     match op.kind {
         PendingIpcKind::SilentEvaluate { reply }
         | PendingIpcKind::VisibleEvaluate { reply, .. }

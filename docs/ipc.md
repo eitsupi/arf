@@ -117,7 +117,7 @@ Error code strings:
 | `R_BUSY` | 4 | R is executing code |
 | `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
-| `USER_IS_TYPING` | 4 | User is typing in the REPL |
+| `USER_IS_TYPING` | 4 | User is typing in the REPL (message includes current buffer) |
 | `EMPTY_RESPONSE` | 4 | Server returned no result |
 | `PARSE_ERROR` | 4 | Invalid JSON in request |
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
