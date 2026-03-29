@@ -86,7 +86,7 @@ All `arf ipc` subcommands connect to a running arf session. If only one session 
 
 ### Output Format
 
-All subcommands output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
+All IPC action subcommands (`list`, `eval`, `send`, `session`, `shutdown`, `history`) output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
 
 ```json
 {
