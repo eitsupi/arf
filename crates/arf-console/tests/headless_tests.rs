@@ -1032,7 +1032,6 @@ fn test_headless_history_persistence() {
         .expect("collect rows")
     };
 
-    // The readiness probe ("1") + our 3 commands = at least 4 rows.
     // Filter to just our known commands for assertion stability.
     let success_row = rows.iter().find(|r| r.0 == "1 + 1");
     let error_row = rows.iter().find(|r| r.0 == "stop('test_error')");
