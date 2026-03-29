@@ -974,7 +974,7 @@ fn test_headless_sighup_shutdown() {
 ///
 /// Verifies that:
 /// - IPC evaluate commands are saved with correct command_line and exit_status
-/// - Metadata fields (hostname, cwd, start_timestamp) are populated
+/// - Metadata fields (hostname, cwd) are populated
 /// - Errors are recorded with exit_status=1
 /// - The --history-dir flag controls the database location
 #[test]
