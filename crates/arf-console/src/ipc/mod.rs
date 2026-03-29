@@ -619,6 +619,11 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
     };
     use reedline::History;
     let mut item = reedline::HistoryItem::from_command_line(code);
+    item.start_timestamp = Some(chrono::Utc::now());
+    item.hostname = gethostname::gethostname().into_string().ok();
+    item.cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
     item.exit_status = exit_status;
     if let Err(e) = history.save(item) {
         log::warn!("Failed to save headless history: {}", e);
