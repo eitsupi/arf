@@ -656,7 +656,14 @@ async fn dispatch_request(
         "history" => {
             // History is handled directly on the server thread — it only
             // reads the SQLite database and does not touch R state.
-            let params: HistoryParams = match serde_json::from_value(request.params) {
+            // Treat missing/null params as empty object so callers can
+            // rely on defaults (all fields have #[serde(default)]).
+            let raw_params = if request.params.is_null() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                request.params
+            };
+            let params: HistoryParams = match serde_json::from_value(raw_params) {
                 Ok(p) => p,
                 Err(e) => {
                     return JsonRpcResponse::error(

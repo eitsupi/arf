@@ -244,6 +244,9 @@ arf ipc history | jq -r '.entries[].command'
 
 **Output format:** JSON object with `entries` array (newest first) and `session_id`. Each entry contains `command`, `timestamp`, `cwd`, `exit_status`, and `session_id` (optional fields are omitted when null). Output is pretty-printed when stdout is a terminal, compact when piped.
 
+> [!NOTE]
+> Only completed commands are recorded in the history database. A command that is currently executing will not appear in the results until it finishes.
+
 ### `arf ipc shutdown` — Shut Down Headless Session
 
 Sends a graceful shutdown request to a headless session. The session cleans up (removes socket, PID file, session file) before exiting.
@@ -283,7 +286,7 @@ When both a human and an external tool use the same session, arf prevents confli
 - If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
 - Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially
-- The `session` and `history` methods always succeed — they do not touch R and return data even when R is busy or not at the prompt
+- The `session` and `history` methods do not touch R and can be called even when R is busy or not at the prompt. `session` always succeeds; `history` may fail if history is disabled or the history database cannot be accessed
 
 ## Transport & Security
 

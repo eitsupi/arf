@@ -473,6 +473,8 @@ Examples:
     ///
     /// Returns history entries as JSON, newest first. Output is
     /// pretty-printed when writing to a terminal and compact when piped.
+    /// Only completed commands are recorded; a currently executing
+    /// command will not appear until it finishes.
     #[command(after_long_help = "\
 Examples:
   Show recent history (default 50 entries):
