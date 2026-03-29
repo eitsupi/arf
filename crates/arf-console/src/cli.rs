@@ -237,6 +237,26 @@ pub enum Commands {
     /// Evaluate R code, send user input, or query session info in a running
     /// arf instance. The target session must have IPC enabled — via
     /// `arf headless`, `arf --with-ipc`, or the `:ipc start` meta command.
+    #[command(after_long_help = "\
+Quick start:
+  # 1. Start a headless session (or use --with-ipc with the REPL)
+  $ arf headless &
+
+  # 2. Check the session is running
+  $ arf ipc list
+
+  # 3. Evaluate R code and get structured JSON output
+  $ arf ipc eval '1 + 1'
+
+  # 4. Check session status (R version, loaded packages, etc.)
+  $ arf ipc session
+
+  # 5. Shut down when done
+  $ arf ipc shutdown
+
+All commands output JSON to stdout (pretty-printed on terminal, compact \
+when piped). Errors are written to stderr as JSON. Exit codes: \
+0 = success, 2 = transport error, 3 = session error, 4 = protocol error.")]
     Ipc {
         #[command(subcommand)]
         action: IpcAction,
@@ -382,11 +402,11 @@ Examples:
     List,
     /// Evaluate R code and return captured output as JSON
     ///
-    /// Returns a JSON object with stdout, stderr, and optional value /
-    /// error fields (omitted when not applicable). In silent mode (the
-    /// default), the printed result appears in value rather than stdout.
-    /// R evaluation errors are included in the error field with exit
-    /// code 0 — they are a normal response, not an IPC failure.
+    /// Returns a JSON object with stdout, stderr, value, and error fields.
+    /// All fields are always present (null when not applicable). In silent
+    /// mode (the default), the printed result appears in value rather than
+    /// stdout. R evaluation errors are included in the error field with
+    /// exit code 0 — they are a normal response, not an IPC failure.
     #[command(after_long_help = "\
 Examples:
   Evaluate an expression:

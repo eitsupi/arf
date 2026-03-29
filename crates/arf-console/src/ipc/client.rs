@@ -48,8 +48,8 @@ fn print_json(value: &serde_json::Value) {
 
 /// Print a structured error to stderr as JSON and exit with the given code.
 ///
-/// The error format is:
-/// `{"error": {"code": "ERROR_CODE", "message": "...", "hint": "..."}}`
+/// The error format is (all fields are always present):
+/// `{"error": {"code": "ERROR_CODE", "message": "...", "hint": ..., "data": ...}}`
 ///
 /// Error codes are strings for stable matching by consumers:
 /// - JSON-RPC codes (negative integers) are mapped to descriptive names
@@ -60,16 +60,21 @@ fn print_json(value: &serde_json::Value) {
 /// NOTE: This function calls `std::process::exit()`, so it cannot be
 /// tested in-process. Error paths are covered by integration tests in
 /// `headless_tests.rs` which run `arf ipc` as a subprocess.
-fn exit_error(exit_code: i32, code: &str, message: &str, hint: Option<&str>) -> ! {
-    let mut error = serde_json::json!({
+fn exit_error(
+    exit_code: i32,
+    code: &str,
+    message: &str,
+    hint: Option<&str>,
+    data: Option<&serde_json::Value>,
+) -> ! {
+    let error = serde_json::json!({
         "error": {
             "code": code,
             "message": message,
+            "hint": hint,
+            "data": data,
         }
     });
-    if let Some(hint) = hint {
-        error["error"]["hint"] = serde_json::Value::String(hint.to_string());
-    }
     let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
     eprintln!("{}", format_json(&error, is_tty));
     std::process::exit(exit_code);
@@ -89,8 +94,8 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
         R_NOT_AT_PROMPT => (
             "R_NOT_AT_PROMPT",
             Some(
-                "R is not at the prompt (e.g. in browser/menu mode). \
-                 Complete the current interaction first.",
+                "R is in browser/debug mode or a menu. If triggered by \
+                 browser(), use 'arf ipc send \"Q\"' to exit the debugger.",
             ),
         ),
         INPUT_ALREADY_PENDING => (
@@ -125,7 +130,13 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
 fn handle_response(response: JsonRpcResponse) {
     if let Some(ref error) = response.error {
         let (code, hint) = rpc_error_info(error.code);
-        exit_error(EXIT_PROTOCOL, code, &error.message, hint);
+        exit_error(
+            EXIT_PROTOCOL,
+            code,
+            &error.message,
+            hint,
+            error.data.as_ref(),
+        );
     }
 
     match response.result {
@@ -137,6 +148,7 @@ fn handle_response(response: JsonRpcResponse) {
                 EXIT_PROTOCOL,
                 "EMPTY_RESPONSE",
                 "Server returned a response with neither result nor error (possible server bug)",
+                None,
                 None,
             );
         }
@@ -159,6 +171,7 @@ pub fn cmd_list() {
                     "SERIALIZATION_ERROR",
                     &format!("Failed to serialize session info: {e}"),
                     Some("This is likely a bug in arf."),
+                    None,
                 );
             })
         })
@@ -178,6 +191,7 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
                     "SESSION_NOT_FOUND",
                     &format!("No active arf session with PID {p}"),
                     Some("Use 'arf ipc list' to see active sessions."),
+                    None,
                 );
             } else {
                 let sessions = list_sessions();
@@ -187,6 +201,7 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
                         "SESSION_NOT_FOUND",
                         "No active arf sessions found",
                         Some("Start arf with --with-ipc to enable IPC."),
+                        None,
                     );
                 } else {
                     exit_error(
@@ -197,6 +212,7 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
                             "Specify --pid to select one. Use 'arf ipc list' \
                              to see active sessions.",
                         ),
+                        None,
                     );
                 }
             }
@@ -350,6 +366,7 @@ fn send_request(
                     "PROTOCOL_ERROR",
                     &format!("{e:#}"),
                     Some("Received an invalid or malformed response from the arf session."),
+                    None,
                 );
             } else {
                 exit_error(
@@ -357,6 +374,7 @@ fn send_request(
                     "TRANSPORT_ERROR",
                     &format!("{e:#}"),
                     Some("Check that the arf session is running and IPC is enabled."),
+                    None,
                 );
             }
         }

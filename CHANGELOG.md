@@ -4,8 +4,8 @@
 
 ### Changed
 
-- **Breaking:** All `arf ipc` subcommands now output JSON to stdout (pretty-printed on terminal, compact when piped). Commands that previously used plain text (`list`, `eval`, `send`, `shutdown`) now return structured JSON. Errors are written to stderr as JSON objects of the form `{"error": {"code": "...", "message": "...", "hint": "..."}}`. Exit codes now indicate error category: 2 (transport), 3 (session), 4 (protocol).
-- **Breaking:** `arf ipc eval` no longer exits with code 1 for R evaluation errors. R errors are returned as part of the JSON response (exit 0) to distinguish from IPC failures.
+- **Breaking:** All `arf ipc` subcommands now output JSON to stdout (pretty-printed on terminal, compact when piped). Commands that previously used plain text (`list`, `eval`, `send`, `shutdown`) now return structured JSON. Errors are written to stderr as JSON objects of the form `{"error": {"code": "...", "message": "...", "hint": ..., "data": ...}}`. All fields are always present (null when not applicable) for a fixed JSON schema. Exit codes now indicate error category: 2 (transport), 3 (session), 4 (protocol).
+- **Breaking:** `arf ipc eval` no longer exits with code 1 for R evaluation errors. R errors are returned as part of the JSON response (exit 0) to distinguish from IPC failures. The `value` and `error` fields are always present (null when not applicable).
 
 ### Removed
 

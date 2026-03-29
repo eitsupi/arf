@@ -93,10 +93,13 @@ All subcommands output JSON to stdout. Output is pretty-printed when stdout is a
   "error": {
     "code": "R_BUSY",
     "message": "R is busy",
-    "hint": "R is executing code. Wait for it to finish, or use 'arf ipc session' to check status."
+    "hint": "R is executing code. Wait for it to finish, or use 'arf ipc session' to check status.",
+    "data": null
   }
 }
 ```
+
+All four fields (`code`, `message`, `hint`, `data`) are always present. `hint` is `null` when no hint is available. `data` contains additional structured information (e.g. `{"buffer": "..."}` for `USER_IS_TYPING`) or `null`.
 
 The `code` field is a string identifier for stable matching. Process exit codes indicate the error category:
 
@@ -117,7 +120,7 @@ Error code strings:
 | `R_BUSY` | 4 | R is executing code |
 | `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
-| `USER_IS_TYPING` | 4 | User is typing in the REPL (message includes current buffer) |
+| `USER_IS_TYPING` | 4 | User is typing in the REPL (`data.buffer` contains current input) |
 | `EMPTY_RESPONSE` | 4 | Server returned no result |
 | `PARSE_ERROR` | 4 | Invalid JSON in request |
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
@@ -153,7 +156,7 @@ arf ipc eval --pid 12345 'getwd()'
 | `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes) |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `stdout` (string), `stderr` (string), and optional `value` / `error` fields (strings, omitted when not applicable). In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
+**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
 
 Example (silent eval, result captured in `value`):
 
@@ -161,7 +164,8 @@ Example (silent eval, result captured in `value`):
 {
   "stdout": "",
   "stderr": "",
-  "value": "[1] 2"
+  "value": "[1] 2",
+  "error": null
 }
 ```
 
@@ -171,6 +175,7 @@ Example (R error):
 {
   "stdout": "",
   "stderr": "",
+  "value": null,
   "error": "object 'x' not found"
 }
 ```
@@ -313,7 +318,7 @@ arf ipc history | jq -r '.entries[].command'
 | `--since <DATE>` | Only return entries after this timestamp (RFC 3339 or `YYYY-MM-DD`) |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `entries` array (newest first) and `session_id`. Each entry contains `command`, `timestamp`, `cwd`, `exit_status`, and `session_id` (optional fields are omitted when null). Output is pretty-printed when stdout is a terminal, compact when piped.
+**Output format:** JSON object with `entries` array (newest first) and `session_id`. Each entry contains `command`, `timestamp`, `cwd`, `exit_status`, and `session_id` (all fields are always present; null when not available). Output is pretty-printed when stdout is a terminal, compact when piped.
 
 > [!NOTE]
 > Only completed commands are recorded in the history database. A command that is currently executing will not appear in the results until it finishes.
