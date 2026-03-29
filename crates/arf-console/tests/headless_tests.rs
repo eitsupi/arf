@@ -1012,14 +1012,14 @@ fn test_headless_history_persistence() {
         rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .expect("open history db");
 
-    let rows: Vec<(String, Option<i64>, Option<String>, Option<String>)> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT command_line, exit_status, hostname, cwd \
-                 FROM history ORDER BY id",
-            )
-            .expect("prepare query");
-        stmt.query_map([], |row| {
+    let mut stmt = conn
+        .prepare(
+            "SELECT command_line, exit_status, hostname, cwd \
+             FROM history ORDER BY id",
+        )
+        .expect("prepare query");
+    let rows: Vec<_> = stmt
+        .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<i64>>(1)?,
@@ -1029,8 +1029,7 @@ fn test_headless_history_persistence() {
         })
         .expect("query")
         .collect::<Result<Vec<_>, _>>()
-        .expect("collect rows")
-    };
+        .expect("collect rows");
 
     // Filter to just our known commands for assertion stability.
     let success_row = rows.iter().find(|r| r.0 == "1 + 1");
