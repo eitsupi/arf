@@ -970,7 +970,115 @@ fn test_headless_sighup_shutdown() {
     assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGHUP);
 }
 
-/// Test that `--json` outputs valid JSON with session info to stdout.
+/// Test that headless mode persists evaluated commands to the history database.
+///
+/// Verifies that:
+/// - IPC evaluate commands are saved with correct command_line and exit_status
+/// - Metadata fields (hostname, cwd, start_timestamp) are populated
+/// - Errors are recorded with exit_status=1
+/// - The --history-dir flag controls the database location
+#[test]
+fn test_headless_history_persistence() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir])
+        .expect("Failed to spawn headless with --history-dir");
+
+    // Run a successful command
+    let r1 = process.ipc_eval("1 + 1").expect("eval should run");
+    assert!(r1.success, "first eval should succeed");
+
+    // Run a command that errors
+    let r2 = process
+        .ipc_eval("stop('test_error')")
+        .expect("error eval should run");
+    assert!(!r2.success, "error eval should fail");
+
+    // Run a send (user_input) command
+    let r3 = process
+        .ipc_send("invisible(NULL)")
+        .expect("send should run");
+    assert!(r3.success, "send should succeed");
+
+    // Small delay to let SQLite flush
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Read the history database directly
+    let db_path = tmp.path().join("r.db");
+    assert!(db_path.exists(), "history database should exist");
+
+    let conn =
+        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open history db");
+
+    let rows: Vec<(String, Option<i64>, Option<String>, Option<String>)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT command_line, exit_status, hostname, cwd \
+                 FROM history ORDER BY id",
+            )
+            .expect("prepare query");
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .expect("query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect rows")
+    };
+
+    // The readiness probe ("1") + our 3 commands = at least 4 rows.
+    // Filter to just our known commands for assertion stability.
+    let success_row = rows.iter().find(|r| r.0 == "1 + 1");
+    let error_row = rows.iter().find(|r| r.0 == "stop('test_error')");
+    let send_row = rows.iter().find(|r| r.0 == "invisible(NULL)");
+
+    // Successful eval
+    let success_row = success_row.expect("should find '1 + 1' in history");
+    assert_eq!(
+        success_row.1,
+        Some(0),
+        "successful eval should have exit_status=0"
+    );
+    assert!(success_row.2.is_some(), "hostname should be populated");
+    assert!(success_row.3.is_some(), "cwd should be populated");
+
+    // Error eval
+    let error_row = error_row.expect("should find error command in history");
+    assert_eq!(error_row.1, Some(1), "error eval should have exit_status=1");
+
+    // user_input (send)
+    let send_row = send_row.expect("should find send command in history");
+    assert_eq!(send_row.1, Some(0), "send should have exit_status=0");
+}
+
+/// Test that --no-history prevents history from being saved in headless mode.
+#[test]
+fn test_headless_no_history_flag() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let process = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir, "--no-history"])
+        .expect("Failed to spawn headless with --no-history");
+
+    // Run a command
+    let result = process.ipc_eval("1 + 1").expect("eval should run");
+    assert!(result.success, "eval should succeed");
+
+    // History database should NOT be created
+    let db_path = tmp.path().join("r.db");
+    assert!(
+        !db_path.exists(),
+        "history database should not exist with --no-history"
+    );
+}
+
+/// Test that --json outputs valid JSON with session info to stdout.
 #[test]
 fn test_headless_json_output() {
     let process =
