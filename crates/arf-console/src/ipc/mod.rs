@@ -194,10 +194,10 @@ pub fn stop_server() {
             PendingIpcKind::SilentEvaluate { reply }
             | PendingIpcKind::VisibleEvaluate { reply, .. }
             | PendingIpcKind::UserInput { reply } => {
-                let _ = reply.send(IpcResponse::Error {
-                    code: R_NOT_AT_PROMPT,
-                    message: "IPC server is shutting down".to_string(),
-                });
+                let _ = reply.send(IpcResponse::error(
+                    R_NOT_AT_PROMPT,
+                    "IPC server is shutting down".to_string(),
+                ));
             }
         }
     }
@@ -210,14 +210,14 @@ pub fn stop_server() {
         .take()
     {
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
-        let _ = pending.reply.send(IpcResponse::Error {
-            code: R_NOT_AT_PROMPT,
-            message: format!(
+        let _ = pending.reply.send(IpcResponse::error(
+            R_NOT_AT_PROMPT,
+            format!(
                 "IPC server shut down during visible evaluate (stdout: {} bytes, stderr: {} bytes)",
                 stdout.len(),
                 stderr.len(),
             ),
-        });
+        ));
     }
 
     server::stop_server();
@@ -283,15 +283,15 @@ fn check_visible_eval_completion() {
         let pending = guard.take().unwrap();
         // Best-effort capture cleanup (may race with active R evaluation)
         let (stdout, stderr) = arf_libr::finish_ipc_capture();
-        let _ = pending.reply.send(IpcResponse::Error {
-            code: R_BUSY,
-            message: format!(
+        let _ = pending.reply.send(IpcResponse::error(
+            R_BUSY,
+            format!(
                 "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
                 pending.timeout.as_secs(),
                 stdout.len(),
                 stderr.len(),
             ),
-        });
+        ));
         // Do NOT set r_is_at_prompt(true) here — R may still be evaluating.
         // The flag will be set when R actually returns to the prompt via
         // set_r_at_prompt(true) in the normal REPL flow.
@@ -367,10 +367,10 @@ fn handle_request(request: IpcRequest) {
     // Normally dispatch_request() catches this first, but this covers the
     // race where a request was queued just before alternate mode was entered.
     if is_in_alternate_mode() {
-        let _ = reply.send(IpcResponse::Error {
-            code: R_NOT_AT_PROMPT,
-            message: "R is not at the command prompt".to_string(),
-        });
+        let _ = reply.send(IpcResponse::error(
+            R_NOT_AT_PROMPT,
+            "R is not at the command prompt".to_string(),
+        ));
         return;
     }
 
@@ -382,10 +382,10 @@ fn handle_request(request: IpcRequest) {
         .unwrap_or_else(|e| e.into_inner())
         .is_some()
     {
-        let _ = reply.send(IpcResponse::Error {
-            code: INPUT_ALREADY_PENDING,
-            message: "Another IPC operation is pending".to_string(),
-        });
+        let _ = reply.send(IpcResponse::error(
+            INPUT_ALREADY_PENDING,
+            "Another IPC operation is pending".to_string(),
+        ));
         return;
     }
 
@@ -397,10 +397,7 @@ fn handle_request(request: IpcRequest) {
         } => {
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(Ordering::Acquire) {
-                let _ = reply.send(IpcResponse::Error {
-                    code: R_BUSY,
-                    message: "R is busy".to_string(),
-                });
+                let _ = reply.send(IpcResponse::error(R_BUSY, "R is busy".to_string()));
                 return;
             }
 
@@ -423,10 +420,10 @@ fn handle_request(request: IpcRequest) {
         IpcMethod::UserInput { code } => {
             // Check if R is at the prompt
             if !r_is_at_prompt().load(Ordering::Acquire) {
-                let _ = reply.send(IpcResponse::Error {
-                    code: R_NOT_AT_PROMPT,
-                    message: "R is not at the command prompt".to_string(),
-                });
+                let _ = reply.send(IpcResponse::error(
+                    R_NOT_AT_PROMPT,
+                    "R is not at the command prompt".to_string(),
+                ));
                 return;
             }
 
@@ -466,19 +463,21 @@ pub fn take_pending_ipc_operation() -> Option<PendingIpcOperation> {
 /// Reject a pending IPC operation because the user is typing.
 ///
 /// Sends a `USER_IS_TYPING` error response to the IPC client.
-/// The current editor buffer is included in the error message so that
-/// callers (e.g. AI agents) can see what the user is typing and decide
-/// whether to retry or abort.
+/// The current editor buffer is included in the JSON-RPC error `data`
+/// field so that callers (e.g. AI agents) can see what the user is
+/// typing and decide whether to retry or abort. The `message` field
+/// is kept stable for pattern matching.
 pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
-    let message = format!("User is typing in the console: {buffer}");
+    let response = IpcResponse::error_with_data(
+        USER_IS_TYPING,
+        "User is typing in the console".to_string(),
+        serde_json::json!({ "buffer": buffer }),
+    );
     match op.kind {
         PendingIpcKind::SilentEvaluate { reply }
         | PendingIpcKind::VisibleEvaluate { reply, .. }
         | PendingIpcKind::UserInput { reply } => {
-            let _ = reply.send(IpcResponse::Error {
-                code: USER_IS_TYPING,
-                message,
-            });
+            let _ = reply.send(response);
         }
     }
 }

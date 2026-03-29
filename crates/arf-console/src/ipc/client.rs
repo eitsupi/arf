@@ -103,8 +103,9 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
         USER_IS_TYPING => (
             "USER_IS_TYPING",
             Some(
-                "The user is typing in the REPL. Wait for them to \
-                 finish or clear their input.",
+                "The user is typing in the REPL. Check error.data.buffer \
+                 for the current input. Wait for them to finish or clear \
+                 their input.",
             ),
         ),
         PARSE_ERROR => ("PARSE_ERROR", None),
@@ -151,7 +152,16 @@ pub fn cmd_list() {
 
     let sessions_json: Vec<serde_json::Value> = sessions
         .iter()
-        .map(|s| serde_json::to_value(s).expect("cmd_list: SessionInfo serialization failed"))
+        .map(|s| {
+            serde_json::to_value(s).unwrap_or_else(|e| {
+                exit_error(
+                    EXIT_PROTOCOL,
+                    "SERIALIZATION_ERROR",
+                    &format!("Failed to serialize session info: {e}"),
+                    Some("This is likely a bug in arf."),
+                );
+            })
+        })
         .collect();
 
     print_json(&serde_json::json!({ "sessions": sessions_json }));

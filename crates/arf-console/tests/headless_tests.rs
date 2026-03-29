@@ -223,6 +223,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -246,6 +247,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -270,6 +272,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -286,6 +289,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -302,6 +306,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -322,6 +327,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -338,6 +344,7 @@ impl HeadlessProcess {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             success: output.status.success(),
+            exit_code: output.status.code(),
         })
     }
 
@@ -395,6 +402,7 @@ struct IpcOutput {
     stdout: String,
     stderr: String,
     success: bool,
+    exit_code: Option<i32>,
 }
 
 // ===========================================================================
@@ -1428,5 +1436,79 @@ fn test_ipc_history_disabled() {
         !result.success,
         "history should fail when disabled: stdout={}, stderr={}",
         result.stdout, result.stderr
+    );
+}
+
+// ── Exit code and structured error tests ─────────────────────────────
+
+/// Test that `arf ipc eval --pid <wrong>` exits with code 3 (SESSION_NOT_FOUND)
+/// and produces structured JSON error on stderr.
+#[test]
+fn test_ipc_exit_code_session_not_found() {
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    let output = Command::new(bin_path)
+        .args(["ipc", "eval", "1", "--pid", "99999"])
+        .output()
+        .expect("should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "exit code should be 3 (session)"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json: serde_json::Value = serde_json::from_str(&stderr)
+        .unwrap_or_else(|e| panic!("stderr should be JSON: {e}\nstderr: {stderr}"));
+    assert_eq!(json["error"]["code"].as_str(), Some("SESSION_NOT_FOUND"));
+    assert!(json["error"]["message"].as_str().is_some());
+    assert!(json["error"]["hint"].as_str().is_some());
+}
+
+/// Test that `arf ipc list` outputs valid JSON even with no sessions.
+#[test]
+fn test_ipc_list_empty_json() {
+    // This test runs without a headless process, so list should return
+    // an empty sessions array (or whatever sessions are running).
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    let output = Command::new(bin_path)
+        .args(["ipc", "list"])
+        .output()
+        .expect("should run");
+
+    assert!(output.status.success(), "list should always succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout should be JSON: {e}\nstdout: {stdout}"));
+    assert!(json["sessions"].is_array(), "should have sessions array");
+}
+
+/// Test that protocol errors (e.g. timeout) produce exit code 4 and
+/// structured JSON error on stderr.
+#[test]
+fn test_ipc_exit_code_protocol_error() {
+    let process = HeadlessProcess::spawn().expect("spawn headless");
+
+    // Use a very short timeout to trigger a protocol-level timeout error
+    let result = process
+        .ipc_eval_with_timeout("Sys.sleep(10)", 500)
+        .expect("eval should run");
+
+    assert!(!result.success, "should fail due to timeout");
+    assert_eq!(
+        result.exit_code,
+        Some(4),
+        "exit code should be 4 (protocol)"
+    );
+
+    let json: serde_json::Value = serde_json::from_str(&result.stderr)
+        .unwrap_or_else(|e| panic!("stderr should be JSON: {e}\nstderr: {}", result.stderr));
+    assert!(
+        json["error"]["code"].as_str().is_some(),
+        "should have string error code"
+    );
+    assert!(
+        json["error"]["message"].as_str().is_some(),
+        "should have message"
     );
 }

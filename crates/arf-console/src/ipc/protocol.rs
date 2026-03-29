@@ -227,5 +227,30 @@ pub enum IpcResponse {
     Evaluate(EvaluateResult),
     UserInput(UserInputResult),
     Session(Box<SessionResult>),
-    Error { code: i32, message: String },
+    Error {
+        code: i32,
+        message: String,
+        /// Optional structured data for the JSON-RPC error `data` field.
+        data: Option<serde_json::Value>,
+    },
+}
+
+impl IpcResponse {
+    /// Create an error response without additional data.
+    pub fn error(code: i32, message: String) -> Self {
+        Self::Error {
+            code,
+            message,
+            data: None,
+        }
+    }
+
+    /// Create an error response with additional structured data.
+    pub fn error_with_data(code: i32, message: String, data: serde_json::Value) -> Self {
+        Self::Error {
+            code,
+            message,
+            data: Some(data),
+        }
+    }
 }

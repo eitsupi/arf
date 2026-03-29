@@ -751,7 +751,17 @@ async fn dispatch_request(
             IpcResponse::Session(result) => {
                 JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
             }
-            IpcResponse::Error { code, message } => JsonRpcResponse::error(id, code, message),
+            IpcResponse::Error {
+                code,
+                message,
+                data,
+            } => {
+                let mut resp = JsonRpcResponse::error(id, code, message);
+                if let Some(ref mut err) = resp.error {
+                    err.data = data;
+                }
+                resp
+            }
         },
         Ok(Err(_)) => {
             if is_session {
