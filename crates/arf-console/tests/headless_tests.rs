@@ -994,7 +994,7 @@ fn test_headless_sighup_shutdown() {
 ///
 /// Verifies that:
 /// - IPC evaluate commands are saved with correct command_line and exit_status
-/// - Metadata fields (hostname, cwd, start_timestamp) are populated
+/// - Metadata fields (hostname, cwd) are populated
 /// - Errors are recorded with exit_status=1
 /// - The --history-dir flag controls the database location
 #[test]
@@ -1020,6 +1020,14 @@ fn test_headless_history_persistence() {
         .ipc_send("invisible(NULL)")
         .expect("send should run");
     assert!(r3.success, "send should succeed");
+
+    // Whitespace-only commands should NOT be persisted to history.
+    let _ = process
+        .ipc_eval("   \n")
+        .expect("whitespace eval should run");
+    let _ = process
+        .ipc_send("  \t  ")
+        .expect("whitespace send should run");
 
     // Small delay to let SQLite flush
     std::thread::sleep(Duration::from_millis(200));
@@ -1073,6 +1081,13 @@ fn test_headless_history_persistence() {
     // user_input (send)
     let send_row = send_row.expect("should find send command in history");
     assert_eq!(send_row.1, Some(0), "send should have exit_status=0");
+
+    // Whitespace-only commands should not appear in history.
+    let whitespace_rows: Vec<_> = rows.iter().filter(|r| r.0.trim().is_empty()).collect();
+    assert!(
+        whitespace_rows.is_empty(),
+        "whitespace-only commands should not be persisted to history"
+    );
 }
 
 /// Test that --no-history prevents history from being saved in headless mode.

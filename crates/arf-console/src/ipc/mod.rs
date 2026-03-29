@@ -608,7 +608,11 @@ pub fn clear_history_session_id() {
 /// Once set, `headless_handle_request` will persist evaluated commands
 /// (both `evaluate` and `user_input`) to the SQLite history database.
 pub fn set_headless_history(history: reedline::SqliteBackedHistory) {
-    let _ = HEADLESS_HISTORY.set(Mutex::new(history));
+    if HEADLESS_HISTORY.set(Mutex::new(history)).is_err() {
+        log::warn!(
+            "Headless history backend already initialized; ignoring duplicate set_headless_history call"
+        );
+    }
 }
 
 /// Store the history database path and session ID for IPC queries.
@@ -974,7 +978,7 @@ fn headless_handle_request(request: IpcRequest) {
             let _ = reply.send(IpcResponse::Evaluate(result));
 
             // Save after reply so SQLite I/O doesn't delay the IPC response.
-            if !code.is_empty() {
+            if !code.trim().is_empty() {
                 let exit_status = if has_error { 1 } else { 0 };
                 save_to_headless_history(&code, Some(exit_status));
             }
@@ -998,7 +1002,7 @@ fn headless_handle_request(request: IpcRequest) {
                 }
             }
 
-            if !code.is_empty() {
+            if !code.trim().is_empty() {
                 save_to_headless_history(&code, Some(exit_status));
             }
         }
