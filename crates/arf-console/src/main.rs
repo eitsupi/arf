@@ -317,6 +317,8 @@ fn run() -> Result<()> {
             quiet,
             json,
             log_file,
+            history_dir,
+            no_history,
             vanilla,
             no_environ,
             no_site_file,
@@ -348,6 +350,8 @@ fn run() -> Result<()> {
                 *quiet,
                 *json,
                 log_file.as_deref(),
+                history_dir.as_deref(),
+                *no_history,
             );
         }
         None => {}
@@ -621,6 +625,8 @@ fn run_headless(
     quiet: bool,
     json: bool,
     log_file: Option<&std::path::Path>,
+    cli_history_dir: Option<&std::path::Path>,
+    no_history: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -635,7 +641,7 @@ fn run_headless(
     let mut warnings: Vec<String> = Vec::new();
 
     // Load config for r_source resolution
-    let config = if json {
+    let mut config = if json {
         load_config_collecting_warnings(config_path, &mut warnings)
     } else {
         load_config_or_warn(config_path)
@@ -677,6 +683,40 @@ fn run_headless(
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
 
+    // Apply CLI history overrides (same logic as the REPL path in main())
+    if no_history {
+        config.history.disabled = true;
+    } else if let Some(history_dir) = cli_history_dir {
+        config.history.dir = Some(history_dir.to_path_buf());
+    }
+
+    // Initialize history for headless mode (same SQLite database as the REPL).
+    // Only advertise history_session_id to IPC if the backend was actually opened.
+    let session_id = create_session_id(&config);
+    let mut session_id_raw = None;
+    if let Some(sid) = session_id {
+        let history_path = {
+            let dir = config.history.dir.clone().or_else(config::history_dir);
+            dir.map(|d| d.join("r.db"))
+        };
+        if let Some(path) = history_path {
+            match reedline::SqliteBackedHistory::with_file(
+                path.clone(),
+                Some(sid),
+                Some(chrono::Utc::now()),
+            ) {
+                Ok(history) => {
+                    ipc::set_headless_history(history);
+                    session_id_raw = Some(i64::from(sid));
+                    log::info!("Headless history enabled: {}", path.display());
+                }
+                Err(e) => {
+                    log::warn!("Failed to open history database {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+
     // Start IPC server (with optional custom bind path)
     let log_file_str = log_file.map(|p| {
         // Convert to absolute path so IPC clients can locate the file
@@ -688,8 +728,8 @@ fn run_headless(
             .display()
             .to_string()
     });
-    let session =
-        ipc::start_server(bind, log_file_str, None).context("Failed to start IPC server")?;
+    let session = ipc::start_server(bind, log_file_str, session_id_raw)
+        .context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
     }

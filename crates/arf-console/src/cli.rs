@@ -335,6 +335,26 @@ Examples:
         #[arg(long = "max-ppsize", hide = true)]
         max_ppsize: Option<u32>,
 
+        /// Custom history directory (overrides default XDG location)
+        ///
+        /// History will be stored at `{dir}/r.db`.
+        ///
+        /// Config: history.dir
+        #[arg(
+            long = "history-dir",
+            value_hint = ValueHint::DirPath,
+            env = "ARF_HISTORY_DIR",
+            hide_short_help = true,
+            value_parser = clap::builder::NonEmptyStringValueParser::new().map(PathBuf::from),
+        )]
+        history_dir: Option<PathBuf>,
+
+        /// Disable history (no history saved)
+        ///
+        /// Config: history.disabled
+        #[arg(long = "no-history", hide_short_help = true)]
+        no_history: bool,
+
         /// [R] Set min number of fixed size obj's ("cons cells") to N
         #[arg(long = "min-nsize", hide = true)]
         min_nsize: Option<String>,
