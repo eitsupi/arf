@@ -188,6 +188,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -228,6 +229,17 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'arf;ipc;history' {
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of entries to return')
+            [CompletionResult]::new('--cwd', '--cwd', [CompletionResultType]::ParameterName, 'Filter entries by exact working directory')
+            [CompletionResult]::new('--grep', '--grep', [CompletionResultType]::ParameterName, 'Filter entries whose command contains this substring')
+            [CompletionResult]::new('--since', '--since', [CompletionResultType]::ParameterName, 'Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)')
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
+            [CompletionResult]::new('--session-only', '--session-only', [CompletionResultType]::ParameterName, 'Only return entries from the current session')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'arf;ipc;help' {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
@@ -235,6 +247,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -254,6 +267,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;shutdown' {
+            break
+        }
+        'arf;ipc;help;history' {
             break
         }
         'arf;ipc;help;help' {
@@ -328,6 +344,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             break
         }
         'arf;help;ipc;list' {
@@ -346,6 +363,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;shutdown' {
+            break
+        }
+        'arf;help;ipc;history' {
             break
         }
         'arf;help;headless' {

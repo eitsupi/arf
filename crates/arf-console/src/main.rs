@@ -468,6 +468,14 @@ fn run() -> Result<()> {
     let session_id = create_session_id(&config);
     let session_id_raw = session_id.map(i64::from);
 
+    // Register history DB path for IPC history queries.
+    if !config.history.disabled {
+        let history_dir = config.history.dir.clone().or_else(config::history_dir);
+        if let Some(dir) = history_dir {
+            ipc::set_history_db_info(dir.join("r.db"), session_id);
+        }
+    }
+
     // Start IPC server if requested.
     //
     // NOTE: The IPC server is started before history databases are opened (which
@@ -707,6 +715,7 @@ fn run_headless(
             ) {
                 Ok(history) => {
                     ipc::set_headless_history(history);
+                    ipc::set_history_db_info(path.clone(), Some(sid));
                     session_id_raw = Some(i64::from(sid));
                     log::info!("Headless history enabled: {}", path.display());
                 }
@@ -996,6 +1005,21 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         IpcAction::Status { pid } => ipc::client::cmd_status(*pid),
         IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
         IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
+        IpcAction::History {
+            limit,
+            session_only,
+            cwd,
+            grep,
+            since,
+            pid,
+        } => ipc::client::cmd_history(
+            *pid,
+            *limit,
+            *session_only,
+            cwd.as_deref(),
+            grep.as_deref(),
+            since.as_deref(),
+        ),
     }
 }
 

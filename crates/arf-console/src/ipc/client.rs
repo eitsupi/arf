@@ -282,6 +282,63 @@ pub fn cmd_session(pid: Option<u32>) -> Result<()> {
     }
 }
 
+/// Query command history via the `history` IPC method.
+///
+/// Output is pretty-printed when stdout is a terminal, compact when piped.
+pub fn cmd_history(
+    pid: Option<u32>,
+    limit: i64,
+    session_only: bool,
+    cwd: Option<&str>,
+    grep: Option<&str>,
+    since: Option<&str>,
+) -> Result<()> {
+    let session = resolve_session(pid)?;
+
+    let mut params = serde_json::json!({
+        "limit": limit,
+        "session_only": session_only,
+    });
+    if let Some(cwd) = cwd {
+        params["cwd"] = serde_json::Value::String(cwd.to_string());
+    }
+    if let Some(grep) = grep {
+        params["grep"] = serde_json::Value::String(grep.to_string());
+    }
+    if let Some(since) = since {
+        params["since"] = serde_json::Value::String(since.to_string());
+    }
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "history",
+        "params": params
+    });
+
+    let transport_timeout = std::time::Duration::from_secs(15);
+    let response = send_request(&session.socket_path, &request, transport_timeout)?;
+
+    if let Some(error) = response.error {
+        eprintln!("Error: {} (code {})", error.message, error.code);
+        std::process::exit(1);
+    }
+
+    match response.result {
+        Some(result) => {
+            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let output = if is_tty {
+                serde_json::to_string_pretty(&result)?
+            } else {
+                serde_json::to_string(&result)?
+            };
+            println!("{output}");
+            Ok(())
+        }
+        None => anyhow::bail!("Server returned empty response"),
+    }
+}
+
 /// Send a JSON-RPC request to the socket and return the response.
 fn send_request(
     socket_path: &str,

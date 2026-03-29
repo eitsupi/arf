@@ -21,9 +21,11 @@ pub mod server;
 pub mod session;
 
 use protocol::{
-    EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING, UserInputResult,
+    EvaluateResult, HistoryEntry, HistoryParams, HistoryResult, INPUT_ALREADY_PENDING, IpcMethod,
+    IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING,
+    UserInputResult,
 };
+use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
@@ -36,6 +38,10 @@ static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 /// History backend for headless mode. When set, evaluated commands are
 /// persisted to the same SQLite history database used by the REPL.
 static HEADLESS_HISTORY: OnceLock<Mutex<reedline::SqliteBackedHistory>> = OnceLock::new();
+
+/// History database path and session ID, shared between REPL and headless modes.
+/// Used by the `history` IPC method to open a read-only connection for queries.
+static HISTORY_DB_INFO: OnceLock<(PathBuf, Option<reedline::HistorySessionId>)> = OnceLock::new();
 
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
@@ -603,6 +609,97 @@ pub fn clear_history_session_id() {
 /// (both `evaluate` and `user_input`) to the SQLite history database.
 pub fn set_headless_history(history: reedline::SqliteBackedHistory) {
     let _ = HEADLESS_HISTORY.set(Mutex::new(history));
+}
+
+/// Store the history database path and session ID for IPC queries.
+///
+/// Called during startup (both REPL and headless) so that the `history`
+/// IPC method can open a read-only connection to query history entries.
+pub fn set_history_db_info(path: PathBuf, session_id: Option<reedline::HistorySessionId>) {
+    let _ = HISTORY_DB_INFO.set((path, session_id));
+}
+
+/// Query the history database and return matching entries.
+///
+/// Opens a temporary read-only `SqliteBackedHistory` connection for each
+/// query. This is safe because SQLite WAL mode supports concurrent readers,
+/// and the main writer (reedline or headless handler) commits each save
+/// immediately.
+pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, String> {
+    let (db_path, session_id) = HISTORY_DB_INFO
+        .get()
+        .ok_or_else(|| "History is not available (no history database configured)".to_string())?;
+
+    let history = reedline::SqliteBackedHistory::with_file(db_path.clone(), None, None)
+        .map_err(|e| format!("Failed to open history database: {e}"))?;
+
+    // Build search filter
+    let filter_session = if params.session_only {
+        *session_id
+    } else {
+        None
+    };
+    let mut filter = reedline::SearchFilter::anything(filter_session);
+
+    if let Some(ref cwd) = params.cwd {
+        filter.cwd_exact = Some(cwd.clone());
+    }
+    if let Some(ref grep) = params.grep {
+        filter.command_line = Some(reedline::CommandLineSearch::Substring(grep.clone()));
+    }
+
+    // Parse --since into a start_time
+    let start_time = if let Some(ref since) = params.since {
+        Some(
+            chrono::DateTime::parse_from_rfc3339(since)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .or_else(|_| {
+                    // Try date-only format (e.g. "2026-03-29")
+                    chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d")
+                        .map(|d| {
+                            d.and_hms_opt(0, 0, 0)
+                                .unwrap()
+                                .and_utc()
+                        })
+                })
+                .map_err(|_| {
+                    format!("Invalid 'since' format: {since}. Use RFC 3339 (e.g. '2026-03-29T00:00:00Z') or date (e.g. '2026-03-29')")
+                })?,
+        )
+    } else {
+        None
+    };
+
+    let query = reedline::SearchQuery {
+        direction: reedline::SearchDirection::Backward,
+        start_time,
+        end_time: None,
+        start_id: None,
+        end_id: None,
+        limit: Some(params.limit),
+        filter,
+    };
+
+    use reedline::History;
+    let items = history
+        .search(query)
+        .map_err(|e| format!("History search failed: {e}"))?;
+
+    let entries = items
+        .into_iter()
+        .map(|item| HistoryEntry {
+            command: item.command_line,
+            timestamp: item.start_timestamp.map(|t| t.to_rfc3339()),
+            cwd: item.cwd,
+            exit_status: item.exit_status,
+            session_id: item.session_id.map(i64::from),
+        })
+        .collect();
+
+    Ok(HistoryResult {
+        entries,
+        session_id: session_id.map(i64::from),
+    })
 }
 
 /// Save a command to the headless history database, if configured.

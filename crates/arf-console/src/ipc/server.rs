@@ -5,9 +5,9 @@
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
 use crate::ipc::protocol::{
-    EvaluateParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod, IpcRequest,
-    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR, ShutdownResult,
-    UserInputParams,
+    EvaluateParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod,
+    IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR,
+    ShutdownResult, UserInputParams,
 };
 use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
@@ -652,6 +652,28 @@ async fn dispatch_request(
             IpcMethod::UserInput { code: params.code }
         }
         "session" => IpcMethod::Session,
+        "history" => {
+            // History is handled directly on the server thread — it only
+            // reads the SQLite database and does not touch R state.
+            let params: HistoryParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        id,
+                        INVALID_PARAMS,
+                        format!("Invalid params: {e}"),
+                    );
+                }
+            };
+            match super::query_history(&params) {
+                Ok(result) => {
+                    return JsonRpcResponse::success(id, serde_json::to_value(result).unwrap());
+                }
+                Err(message) => {
+                    return JsonRpcResponse::error(id, INTERNAL_ERROR, message);
+                }
+            }
+        }
         _ => {
             return JsonRpcResponse::error(
                 id,

@@ -469,6 +469,55 @@ Examples:
         #[arg(long)]
         pid: Option<u32>,
     },
+    /// Query command history from a running session
+    ///
+    /// Returns history entries as JSON, newest first. Output is
+    /// pretty-printed when writing to a terminal and compact when piped.
+    #[command(after_long_help = "\
+Examples:
+  Show recent history (default 50 entries):
+    $ arf ipc history
+
+  Show last 10 entries:
+    $ arf ipc history --limit 10
+
+  Filter by current session only:
+    $ arf ipc history --session-only
+
+  Search for commands containing 'dplyr':
+    $ arf ipc history --grep dplyr
+
+  Filter by working directory:
+    $ arf ipc history --cwd /path/to/project
+
+  Show entries since a date:
+    $ arf ipc history --since 2026-03-29
+
+  Combine filters:
+    $ arf ipc history --session-only --grep 'library' --limit 20
+
+  Extract commands with jq:
+    $ arf ipc history | jq -r '.entries[].command'")]
+    History {
+        /// Maximum number of entries to return
+        #[arg(long, default_value = "50")]
+        limit: i64,
+        /// Only return entries from the current session
+        #[arg(long)]
+        session_only: bool,
+        /// Filter entries by exact working directory
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Filter entries whose command contains this substring
+        #[arg(long)]
+        grep: Option<String>,
+        /// Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
