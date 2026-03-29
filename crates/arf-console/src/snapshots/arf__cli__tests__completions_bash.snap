@@ -107,9 +107,6 @@ _arf() {
             arf__help__ipc,shutdown)
                 cmd="arf__help__ipc__shutdown"
                 ;;
-            arf__help__ipc,status)
-                cmd="arf__help__ipc__status"
-                ;;
             arf__history,export)
                 cmd="arf__history__export"
                 ;;
@@ -155,9 +152,6 @@ _arf() {
             arf__ipc,shutdown)
                 cmd="arf__ipc__shutdown"
                 ;;
-            arf__ipc,status)
-                cmd="arf__ipc__status"
-                ;;
             arf__ipc__help,eval)
                 cmd="arf__ipc__help__eval"
                 ;;
@@ -178,9 +172,6 @@ _arf() {
                 ;;
             arf__ipc__help,shutdown)
                 cmd="arf__ipc__help__shutdown"
-                ;;
-            arf__ipc__help,status)
-                cmd="arf__ipc__help__status"
                 ;;
             *)
                 ;;
@@ -752,7 +743,7 @@ _arf() {
             return 0
             ;;
         arf__help__ipc)
-            opts="list eval send status session shutdown history"
+            opts="list eval send session shutdown history"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -836,20 +827,6 @@ _arf() {
             return 0
             ;;
         arf__help__ipc__shutdown)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        arf__help__ipc__status)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1044,7 +1021,7 @@ _arf() {
             return 0
             ;;
         arf__ipc)
-            opts="-h --help list eval send status session shutdown history help"
+            opts="-h --help list eval send session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1080,7 +1057,7 @@ _arf() {
             return 0
             ;;
         arf__ipc__help)
-            opts="list eval send status session shutdown history help"
+            opts="list eval send session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1191,20 +1168,6 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__status)
-            opts=""
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
         arf__ipc__history)
             opts="-h --limit --all-sessions --cwd --grep --since --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -1290,24 +1253,6 @@ _arf() {
             return 0
             ;;
         arf__ipc__shutdown)
-            opts="-h --pid --help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                --pid)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        arf__ipc__status)
             opts="-h --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )

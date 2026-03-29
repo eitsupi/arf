@@ -182,19 +182,18 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         'arf;ipc' {
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
-            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
-            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
-            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
         'arf;ipc;list' {
-            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
-            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
         'arf;ipc;eval' {
@@ -209,12 +208,6 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
-            break
-        }
-        'arf;ipc;status' {
-            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
-            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
-            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
             break
         }
         'arf;ipc;session' {
@@ -241,12 +234,11 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help' {
-            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
-            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
-            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
@@ -258,9 +250,6 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;send' {
-            break
-        }
-        'arf;ipc;help;status' {
             break
         }
         'arf;ipc;help;session' {
@@ -338,12 +327,11 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc' {
-            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions')
-            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code in a running session (output captured, use --visible to also show in session)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
+            [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
-            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show status of a running arf session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
-            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session')
+            [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             break
         }
@@ -354,9 +342,6 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;send' {
-            break
-        }
-        'arf;help;ipc;status' {
             break
         }
         'arf;help;ipc;session' {

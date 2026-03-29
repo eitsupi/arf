@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** All `arf ipc` subcommands now output JSON to stdout (pretty-printed on terminal, compact when piped). Commands that previously used plain text (`list`, `eval`, `send`, `shutdown`) now return structured JSON. Errors are written to stderr as JSON with `code`, `message`, and `hint` fields. Exit codes now indicate error category: 2 (transport), 3 (session), 4 (protocol).
+- **Breaking:** `arf ipc eval` no longer exits with code 1 for R evaluation errors. R errors are returned as part of the JSON response (exit 0) to distinguish from IPC failures.
+
 ### Removed
 
+- **Breaking:** Remove the `arf ipc status` subcommand, which is superseded by `arf ipc session` (returns a superset of the same information via IPC).
 - Remove `send` as a JSON-RPC method alias for `user_input`. The CLI subcommand `arf ipc send` is unchanged.
 
 ## [0.2.6-alpha.1] - 2026-03-21
@@ -11,7 +17,7 @@
 ### Added
 
 - **Experimental:** Headless mode (`arf headless`) for running R without the interactive REPL, controlled entirely via JSON-RPC IPC. Designed for AI agents and CI environments where a terminal is not available. Supports `--bind`, `--pid-file`, `--quiet`, `--log-file` options and graceful shutdown on SIGTERM/SIGHUP (#119, #122, #123, #124, #125, #126)
-- IPC session info (`arf ipc session`, `arf ipc status`, `arf ipc list`) and session file now include `log_file` field, exposing the headless mode log file path for debugging and monitoring
+- IPC session info (`arf ipc session`, `arf ipc list`) and session file now include `log_file` field, exposing the headless mode log file path for debugging and monitoring
 
 ## [0.2.5] - 2026-03-19
 

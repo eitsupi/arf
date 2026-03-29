@@ -84,6 +84,29 @@ Headless mode automatically configures R for non-interactive use:
 
 All `arf ipc` subcommands connect to a running arf session. If only one session is active, it is used automatically. When multiple sessions are running, use `--pid` to target a specific one.
 
+### Output Format
+
+All subcommands output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
+
+```json
+{
+  "error": {
+    "code": 4,
+    "message": "R is busy",
+    "hint": "R is executing code. Wait for it to finish, or use 'arf ipc session' to check status."
+  }
+}
+```
+
+Exit codes indicate the error category:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 2 | IPC transport error (connection failed, timeout) |
+| 3 | Session resolution error (no session found, ambiguous PID) |
+| 4 | JSON-RPC protocol error (R busy, user typing, etc.) |
+
 ### `arf ipc eval` — Evaluate R Code
 
 Evaluates R code and returns the captured output. The code runs silently by default — output is not shown in the session.
@@ -111,7 +134,16 @@ arf ipc eval --pid 12345 'getwd()'
 | `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes) |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** stdout contains the captured stdout plus the printed value. stderr contains the captured stderr (warnings/messages) and errors, and is printed whenever non-empty. Exit code is non-zero on R errors.
+**Output format:** JSON object with `stdout`, `stderr`, `value` (nullable), and `error` (nullable) fields. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure. Example:
+
+```json
+{
+  "stdout": "[1] 2\n",
+  "stderr": "",
+  "value": null,
+  "error": null
+}
+```
 
 ### `arf ipc send` — Send User Input
 
@@ -124,6 +156,8 @@ arf ipc send 'library(dplyr)'
 # Target a specific session
 arf ipc send --pid 12345 'print(mtcars)'
 ```
+
+**Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`
 
 **When to use `eval` vs `send`:**
 
@@ -186,20 +220,27 @@ When R is idle, the `r` field contains session details (other top-level fields o
 
 ### `arf ipc list` — List Active Sessions
 
-Shows all running arf sessions with IPC enabled.
+Returns all running arf sessions with IPC enabled as JSON.
 
 ```sh
 arf ipc list
+
+# Example output:
+# {
+#   "sessions": [
+#     {
+#       "pid": 12345,
+#       "r_version": "4.4.1",
+#       "socket_path": "/home/user/.cache/arf/sessions/12345.sock",
+#       "cwd": "/workspace",
+#       "started_at": "2026-03-22T10:00:00+09:00",
+#       "log_file": null
+#     }
+#   ]
+# }
 ```
 
-### `arf ipc status` — Show Session Status
-
-Displays human-readable status of a running session (PID, R version, socket path, etc.).
-
-```sh
-arf ipc status
-arf ipc status --pid 12345
-```
+When no sessions are running, returns `{"sessions": []}` (exit 0).
 
 ### `arf ipc history` — Query Command History
 
@@ -256,6 +297,8 @@ arf ipc shutdown
 arf ipc shutdown --pid 12345
 ```
 
+**Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`
+
 ## IPC in Interactive REPL
 
 You can enable IPC in the interactive REPL without headless mode:
@@ -287,6 +330,7 @@ When both a human and an external tool use the same session, arf prevents confli
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
 - Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially
 - The `session` and `history` methods do not touch R and can be called even when R is busy or not at the prompt. `session` always succeeds; `history` may fail if history is disabled or the history database cannot be accessed
+- `list` reads local session files and does not connect to any server, so it always works regardless of R state
 
 ## Transport & Security
 

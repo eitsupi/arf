@@ -367,12 +367,28 @@ Examples:
 
 #[derive(Subcommand, Debug)]
 pub enum IpcAction {
-    /// List active arf sessions
-    List,
-    /// Evaluate R code in a running session (output captured, use --visible to also show in session)
+    /// List active arf sessions as JSON
+    ///
+    /// Returns a JSON object with a `sessions` array. Each entry contains
+    /// pid, r_version, socket_path, cwd, started_at, and log_file.
+    /// Returns `{"sessions": []}` when no sessions are running (exit 0).
     #[command(after_long_help = "\
 Examples:
-  Evaluate an expression and print the result:
+  List all sessions:
+    $ arf ipc list
+
+  Extract PIDs with jq:
+    $ arf ipc list | jq '.sessions[].pid'")]
+    List,
+    /// Evaluate R code and return captured output as JSON
+    ///
+    /// Returns a JSON object with stdout, stderr, value (nullable), and
+    /// error (nullable) fields. R evaluation errors are included in the
+    /// error field with exit code 0 — they are a normal response, not
+    /// an IPC failure.
+    #[command(after_long_help = "\
+Examples:
+  Evaluate an expression:
     $ arf ipc eval '1 + 1'
 
   Run code with a 10-second timeout:
@@ -382,7 +398,10 @@ Examples:
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
   Target a specific session when multiple are running:
-    $ arf ipc eval --pid 12345 'getwd()'")]
+    $ arf ipc eval --pid 12345 'getwd()'
+
+  Extract the value with jq:
+    $ arf ipc eval '1 + 1' | jq -r '.value'")]
     Eval {
         /// R code to evaluate
         code: String,
@@ -402,8 +421,7 @@ Examples:
     /// Unlike `eval`, the code is executed as if the user typed it at the
     /// prompt. Output goes to the session's output streams (the REPL
     /// terminal or headless stdout/log file) and is not captured in the
-    /// IPC response. Use this when you want the output to be visible in
-    /// the session rather than programmatically captured.
+    /// IPC response. Returns JSON `{"accepted": true}` on success.
     #[command(after_long_help = "\
 Examples:
   Send code that appears in the session output:
@@ -450,7 +468,7 @@ Examples:
         #[arg(long)]
         pid: Option<u32>,
     },
-    /// Shut down a running arf headless session
+    /// Shut down a running arf headless session (returns JSON `{"accepted": true}`)
     #[command(after_long_help = "\
 Examples:
   Shut down the only running session:
