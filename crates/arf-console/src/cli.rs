@@ -382,10 +382,11 @@ Examples:
     List,
     /// Evaluate R code and return captured output as JSON
     ///
-    /// Returns a JSON object with stdout, stderr, value (nullable), and
-    /// error (nullable) fields. R evaluation errors are included in the
-    /// error field with exit code 0 — they are a normal response, not
-    /// an IPC failure.
+    /// Returns a JSON object with stdout, stderr, and optional value /
+    /// error fields (omitted when not applicable). In silent mode (the
+    /// default), the printed result appears in value rather than stdout.
+    /// R evaluation errors are included in the error field with exit
+    /// code 0 — they are a normal response, not an IPC failure.
     #[command(after_long_help = "\
 Examples:
   Evaluate an expression:
