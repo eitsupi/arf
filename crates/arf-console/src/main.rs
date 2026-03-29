@@ -1010,7 +1010,7 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
         IpcAction::History {
             limit,
-            session_only,
+            all_sessions,
             cwd,
             grep,
             since,
@@ -1018,7 +1018,7 @@ fn handle_ipc_command(action: &IpcAction) -> Result<()> {
         } => ipc::client::cmd_history(
             *pid,
             *limit,
-            *session_only,
+            *all_sessions,
             cwd.as_deref(),
             grep.as_deref(),
             since.as_deref(),

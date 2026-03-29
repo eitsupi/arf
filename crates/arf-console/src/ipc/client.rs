@@ -288,7 +288,7 @@ pub fn cmd_session(pid: Option<u32>) -> Result<()> {
 pub fn cmd_history(
     pid: Option<u32>,
     limit: i64,
-    session_only: bool,
+    all_sessions: bool,
     cwd: Option<&str>,
     grep: Option<&str>,
     since: Option<&str>,
@@ -297,7 +297,7 @@ pub fn cmd_history(
 
     let mut params = serde_json::json!({
         "limit": limit,
-        "session_only": session_only,
+        "all_sessions": all_sessions,
     });
     if let Some(cwd) = cwd {
         params["cwd"] = serde_json::Value::String(cwd.to_string());

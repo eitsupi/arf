@@ -641,11 +641,11 @@ pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, Str
     let history = reedline::SqliteBackedHistory::with_file(db_path.clone(), None, None)
         .map_err(|e| format!("Failed to open history database: {e}"))?;
 
-    // Build search filter
-    let filter_session = if params.session_only {
-        *session_id
-    } else {
+    // Build search filter — default to current session only
+    let filter_session = if params.all_sessions {
         None
+    } else {
+        *session_id
     };
     let mut filter = reedline::SearchFilter::anything(filter_session);
 

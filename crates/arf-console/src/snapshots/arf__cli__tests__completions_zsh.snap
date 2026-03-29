@@ -295,7 +295,7 @@ _arguments "${_arguments_options[@]}" : \
 '--grep=[Filter entries whose command contains this substring]:GREP:_default' \
 '--since=[Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)]:SINCE:_default' \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
-'--session-only[Only return entries from the current session]' \
+'--all-sessions[Include entries from all sessions, not just the current one]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0

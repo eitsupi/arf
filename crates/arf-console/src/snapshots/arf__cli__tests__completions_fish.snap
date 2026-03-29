@@ -140,7 +140,7 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l grep -d 'Filter entries whose command contains this substring' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l since -d 'Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)' -r
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l pid -d 'PID of the target arf session (optional if only one session is running)' -r
-complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l session-only -d 'Only return entries from the current session'
+complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -l all-sessions -d 'Include entries from all sessions, not just the current one'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from history" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "list" -d 'List active arf sessions'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "eval" -d 'Evaluate R code in a running session (output captured, use --visible to also show in session)'

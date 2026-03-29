@@ -1305,9 +1305,12 @@ fn test_ipc_history_grep() {
     );
 }
 
-/// Test `--session-only` flag restricts to the current session.
+/// Test that the default query returns only the current session's entries.
+///
+/// By default (without `--all-sessions`), history is scoped to the
+/// current session. All returned entries must share the session_id.
 #[test]
-fn test_ipc_history_session_only() {
+fn test_ipc_history_default_session_scoped() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     let history_dir = tmp.path().to_str().unwrap();
 
@@ -1319,17 +1322,15 @@ fn test_ipc_history_session_only() {
 
     std::thread::sleep(Duration::from_millis(200));
 
-    // Query with --session-only
-    let result = process
-        .ipc_history(&["--session-only"])
-        .expect("history session-only");
+    // Default query — should be scoped to the current session
+    let result = process.ipc_history(&[]).expect("history default");
     assert!(result.success);
 
     let json: serde_json::Value = serde_json::from_str(&result.stdout).expect("parse JSON");
     let entries = json["entries"].as_array().expect("entries array");
     assert!(
         !entries.is_empty(),
-        "session-only should still find entries: {json}"
+        "default query should find entries: {json}"
     );
 
     // All entries should have the same session_id as the response

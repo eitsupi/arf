@@ -235,7 +235,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--grep', '--grep', [CompletionResultType]::ParameterName, 'Filter entries whose command contains this substring')
             [CompletionResult]::new('--since', '--since', [CompletionResultType]::ParameterName, 'Only return entries after this timestamp (RFC 3339 or YYYY-MM-DD)')
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
-            [CompletionResult]::new('--session-only', '--session-only', [CompletionResultType]::ParameterName, 'Only return entries from the current session')
+            [CompletionResult]::new('--all-sessions', '--all-sessions', [CompletionResultType]::ParameterName, 'Include entries from all sessions, not just the current one')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break

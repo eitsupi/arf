@@ -160,9 +160,9 @@ pub struct HistoryParams {
     /// Maximum number of entries to return (default: 50).
     #[serde(default = "default_history_limit")]
     pub limit: i64,
-    /// Only return entries from the current session.
+    /// Include entries from all sessions, not just the current one.
     #[serde(default)]
-    pub session_only: bool,
+    pub all_sessions: bool,
     /// Filter entries by exact working directory.
     #[serde(default)]
     pub cwd: Option<String>,

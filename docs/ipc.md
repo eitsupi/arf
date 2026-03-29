@@ -203,17 +203,17 @@ arf ipc status --pid 12345
 
 ### `arf ipc history` — Query Command History
 
-Returns command history entries from the session's SQLite history database as JSON. This method is handled on the server thread and does not touch R, so it works even when R is busy.
+Returns command history entries from the session's SQLite history database as JSON. By default, only entries from the current session are returned. This method is handled on the server thread and does not touch R, so it works even when R is busy.
 
 ```sh
-# Show recent history (default 50 entries)
+# Show recent history from this session (default 50 entries)
 arf ipc history
 
 # Show last 10 entries
 arf ipc history --limit 10
 
-# Filter by current session only
-arf ipc history --session-only
+# Include history from all sessions (not just current)
+arf ipc history --all-sessions
 
 # Search for commands containing 'dplyr'
 arf ipc history --grep dplyr
@@ -225,7 +225,7 @@ arf ipc history --cwd /path/to/project
 arf ipc history --since 2026-03-29
 
 # Combine filters
-arf ipc history --session-only --grep 'library' --limit 20
+arf ipc history --grep 'library' --limit 20
 
 # Extract commands with jq
 arf ipc history | jq -r '.entries[].command'
@@ -236,7 +236,7 @@ arf ipc history | jq -r '.entries[].command'
 | Parameter | Description |
 |-----------|-------------|
 | `--limit <N>` | Maximum number of entries to return (default: 50, must be positive) |
-| `--session-only` | Only return entries from the current session |
+| `--all-sessions` | Include entries from all sessions, not just the current one |
 | `--cwd <PATH>` | Filter entries by exact working directory |
 | `--grep <PATTERN>` | Filter entries whose command contains this substring |
 | `--since <DATE>` | Only return entries after this timestamp (RFC 3339 or `YYYY-MM-DD`) |
@@ -368,7 +368,7 @@ Connection: close
 | `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
 | `user_input` | `code` (string) | Send code as user input |
 | `session` | *(none)* | Get session information |
-| `history` | `limit` (int, default 50), `session_only` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
+| `history` | `limit` (int, default 50), `all_sessions` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
 
 ### Response Examples

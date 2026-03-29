@@ -1206,7 +1206,7 @@ _arf() {
             return 0
             ;;
         arf__ipc__history)
-            opts="-h --limit --session-only --cwd --grep --since --pid --help"
+            opts="-h --limit --all-sessions --cwd --grep --since --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

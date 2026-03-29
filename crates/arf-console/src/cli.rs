@@ -481,9 +481,6 @@ Examples:
   Show last 10 entries:
     $ arf ipc history --limit 10
 
-  Filter by current session only:
-    $ arf ipc history --session-only
-
   Search for commands containing 'dplyr':
     $ arf ipc history --grep dplyr
 
@@ -493,8 +490,11 @@ Examples:
   Show entries since a date:
     $ arf ipc history --since 2026-03-29
 
+  Include history from all sessions (not just current):
+    $ arf ipc history --all-sessions
+
   Combine filters:
-    $ arf ipc history --session-only --grep 'library' --limit 20
+    $ arf ipc history --grep 'library' --limit 20
 
   Extract commands with jq:
     $ arf ipc history | jq -r '.entries[].command'")]
@@ -502,9 +502,9 @@ Examples:
         /// Maximum number of entries to return (must be positive)
         #[arg(long, default_value = "50", value_parser = clap::value_parser!(i64).range(1..))]
         limit: i64,
-        /// Only return entries from the current session
+        /// Include entries from all sessions, not just the current one
         #[arg(long)]
-        session_only: bool,
+        all_sessions: bool,
         /// Filter entries by exact working directory
         #[arg(long)]
         cwd: Option<String>,
