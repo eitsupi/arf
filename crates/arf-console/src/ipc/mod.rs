@@ -20,6 +20,7 @@ pub mod protocol;
 pub mod server;
 pub mod session;
 
+use chrono::TimeZone;
 use protocol::{
     EvaluateResult, HistoryEntry, HistoryParams, HistoryResult, INPUT_ALREADY_PENDING, IpcMethod,
     IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING,
@@ -620,89 +621,132 @@ pub fn set_headless_history(history: reedline::SqliteBackedHistory) {
 /// Called during startup (both REPL and headless) so that the `history`
 /// IPC method can open a read-only connection to query history entries.
 pub fn set_history_db_info(path: PathBuf, session_id: Option<reedline::HistorySessionId>) {
-    let _ = HISTORY_DB_INFO.set((path, session_id));
+    if HISTORY_DB_INFO.set((path, session_id)).is_err() {
+        log::warn!(
+            "History DB info already initialized; ignoring duplicate set_history_db_info call"
+        );
+    }
+}
+
+/// Error type for history query failures, distinguishing parameter
+/// validation errors from internal/database errors.
+pub(crate) enum HistoryQueryError {
+    /// Client provided invalid parameters (maps to INVALID_PARAMS).
+    InvalidParams(String),
+    /// Internal failure such as database open/query error (maps to INTERNAL_ERROR).
+    Internal(String),
 }
 
 /// Query the history database and return matching entries.
 ///
-/// Opens a temporary read-only `SqliteBackedHistory` connection for each
-/// query. This is safe because SQLite WAL mode supports concurrent readers,
-/// and the main writer (reedline or headless handler) commits each save
-/// immediately.
-pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, String> {
+/// Opens a read-only `rusqlite::Connection` for each query to avoid WAL
+/// and DDL side effects that `SqliteBackedHistory::with_file` would cause.
+/// This prevents conflicts with the main REPL/headless history connection.
+pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, HistoryQueryError> {
     if params.limit < 1 {
-        return Err(format!("limit must be positive, got {}", params.limit));
+        return Err(HistoryQueryError::InvalidParams(format!(
+            "limit must be positive, got {}",
+            params.limit
+        )));
     }
 
-    let (db_path, session_id) = HISTORY_DB_INFO
-        .get()
-        .ok_or_else(|| "History is not available (no history database configured)".to_string())?;
+    let (db_path, session_id) = HISTORY_DB_INFO.get().ok_or_else(|| {
+        HistoryQueryError::Internal(
+            "History is not available (no history database configured)".to_string(),
+        )
+    })?;
 
-    let history = reedline::SqliteBackedHistory::with_file(db_path.clone(), None, None)
-        .map_err(|e| format!("Failed to open history database: {e}"))?;
-
-    // Build search filter — default to current session only
-    let filter_session = if params.all_sessions {
-        None
-    } else {
-        *session_id
-    };
-    let mut filter = reedline::SearchFilter::anything(filter_session);
-
-    if let Some(ref cwd) = params.cwd {
-        filter.cwd_exact = Some(cwd.clone());
-    }
-    if let Some(ref grep) = params.grep {
-        filter.command_line = Some(reedline::CommandLineSearch::Substring(grep.clone()));
+    // When not requesting all sessions, require a valid session_id.
+    if !params.all_sessions && session_id.is_none() {
+        return Err(HistoryQueryError::Internal(
+            "Session ID is not available; use all_sessions=true to query without session scope"
+                .to_string(),
+        ));
     }
 
-    // Parse --since into a start_time
-    let start_time = if let Some(ref since) = params.since {
+    // Parse --since before opening the DB so validation errors are cheap.
+    let since_ms = if let Some(ref since) = params.since {
         Some(
             chrono::DateTime::parse_from_rfc3339(since)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .or_else(|_| {
-                    // Try date-only format (e.g. "2026-03-29")
                     chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d")
-                        .map(|d| {
-                            d.and_hms_opt(0, 0, 0)
-                                .unwrap()
-                                .and_utc()
-                        })
+                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
                 })
                 .map_err(|_| {
-                    format!("Invalid 'since' format: {since}. Use RFC 3339 (e.g. '2026-03-29T00:00:00Z') or date (e.g. '2026-03-29')")
-                })?,
+                    HistoryQueryError::InvalidParams(format!(
+                        "Invalid 'since' format: {since}. \
+                         Use RFC 3339 (e.g. '2026-03-29T00:00:00Z') or date (e.g. '2026-03-29')"
+                    ))
+                })?
+                .timestamp_millis(),
         )
     } else {
         None
     };
 
-    let query = reedline::SearchQuery {
-        direction: reedline::SearchDirection::Backward,
-        start_time,
-        end_time: None,
-        start_id: None,
-        end_id: None,
-        limit: Some(params.limit),
-        filter,
-    };
+    // Open read-only to avoid WAL/DDL conflicts with the main history
+    // connection (same pattern as pager/history_browser.rs).
+    let db =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| {
+                HistoryQueryError::Internal(format!("Failed to open history database: {e}"))
+            })?;
 
-    use reedline::History;
-    let items = history
-        .search(query)
-        .map_err(|e| format!("History search failed: {e}"))?;
+    // Build SQL query with optional WHERE clauses.
+    let mut sql = String::from(
+        "SELECT command_line, start_timestamp, session_id, cwd, exit_status \
+         FROM history WHERE 1=1",
+    );
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-    let entries = items
-        .into_iter()
-        .map(|item| HistoryEntry {
-            command: item.command_line,
-            timestamp: item.start_timestamp.map(|t| t.to_rfc3339()),
-            cwd: item.cwd,
-            exit_status: item.exit_status,
-            session_id: item.session_id.map(i64::from),
+    if !params.all_sessions
+        && let Some(sid) = session_id
+    {
+        sql.push_str(" AND session_id = ?");
+        params_vec.push(Box::new(i64::from(*sid)));
+    }
+    if let Some(ref cwd) = params.cwd {
+        sql.push_str(" AND cwd = ?");
+        params_vec.push(Box::new(cwd.clone()));
+    }
+    if let Some(ref grep) = params.grep {
+        sql.push_str(" AND command_line LIKE ?");
+        params_vec.push(Box::new(format!("%{grep}%")));
+    }
+    if let Some(ms) = since_ms {
+        sql.push_str(" AND start_timestamp >= ?");
+        params_vec.push(Box::new(ms));
+    }
+    sql.push_str(" ORDER BY id DESC LIMIT ?");
+    params_vec.push(Box::new(params.limit));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| &**p).collect();
+
+    let mut stmt = db
+        .prepare(&sql)
+        .map_err(|e| HistoryQueryError::Internal(format!("Failed to prepare query: {e}")))?;
+    let entries = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            let ts_ms: Option<i64> = row.get(1)?;
+            let timestamp: Option<String> = ts_ms.and_then(|ms| {
+                chrono::Utc
+                    .timestamp_millis_opt(ms)
+                    .single()
+                    .map(|t| t.to_rfc3339())
+            });
+            let sid: Option<i64> = row.get(2)?;
+            Ok(HistoryEntry {
+                command: row.get(0)?,
+                timestamp,
+                cwd: row.get(3)?,
+                exit_status: row.get(4)?,
+                session_id: sid,
+            })
         })
-        .collect();
+        .map_err(|e| HistoryQueryError::Internal(format!("History query failed: {e}")))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| HistoryQueryError::Internal(format!("Failed to read history row: {e}")))?;
 
     Ok(HistoryResult {
         entries,

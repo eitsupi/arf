@@ -169,7 +169,8 @@ pub struct HistoryParams {
     /// Filter entries whose command line contains this substring.
     #[serde(default)]
     pub grep: Option<String>,
-    /// Only return entries after this timestamp (ISO 8601 / RFC 3339).
+    /// Only return entries after this timestamp (ISO 8601 / RFC 3339 datetime
+    /// or date-only `YYYY-MM-DD`).
     #[serde(default)]
     pub since: Option<String>,
 }

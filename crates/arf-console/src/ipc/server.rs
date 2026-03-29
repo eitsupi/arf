@@ -581,15 +581,14 @@ async fn dispatch_request(
 ) -> JsonRpcResponse {
     let id = request.id.clone();
     let is_session = request.method == "session";
+    let is_history = request.method == "history";
 
     // Reject immediately if in alternate mode (shell, history/help browser).
     // These modes block the main thread, so requests would hang in the mpsc
     // queue until the request timeout expires.
     //
-    // Exception: `session` returns arf-only info when R is unavailable,
-    // so it handles alternate mode gracefully via the main-thread handler.
-    // However, if the idle callback isn't running (alternate mode), the
-    // request would sit in the queue. Return arf-only info directly instead.
+    // Exceptions: `session` and `history` are handled entirely on the server
+    // thread (no main-thread dispatch needed), so they work in alternate mode.
     if super::is_in_alternate_mode() {
         if is_session {
             return session_fallback_response(
@@ -597,11 +596,13 @@ async fn dispatch_request(
                 "R is in alternate mode (shell, history browser, or help browser)",
             );
         }
-        return JsonRpcResponse::error(
-            id,
-            super::protocol::R_NOT_AT_PROMPT,
-            "R is not at the command prompt".to_string(),
-        );
+        if !is_history {
+            return JsonRpcResponse::error(
+                id,
+                super::protocol::R_NOT_AT_PROMPT,
+                "R is not at the command prompt".to_string(),
+            );
+        }
     }
 
     let method = match request.method.as_str() {
@@ -676,7 +677,10 @@ async fn dispatch_request(
                         );
                     }
                 },
-                Err(message) => {
+                Err(super::HistoryQueryError::InvalidParams(message)) => {
+                    return JsonRpcResponse::error(id, INVALID_PARAMS, message);
+                }
+                Err(super::HistoryQueryError::Internal(message)) => {
                     return JsonRpcResponse::error(id, INTERNAL_ERROR, message);
                 }
             }
