@@ -418,12 +418,6 @@ Examples:
         #[arg(long)]
         pid: Option<u32>,
     },
-    /// Show status of a running arf session
-    Status {
-        /// PID of the target arf session (optional if only one session is running)
-        #[arg(long)]
-        pid: Option<u32>,
-    },
     /// Get session information as JSON (arf + R environment)
     ///
     /// Returns structured session information including arf version, OS,
