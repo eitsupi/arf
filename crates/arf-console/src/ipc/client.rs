@@ -4,7 +4,7 @@
 //!
 //! All commands output JSON to stdout (pretty-printed when stdout is a
 //! terminal, compact when piped). Errors are written to stderr as JSON
-//! with `{"error": {"code": N, "message": "...", "hint": "..."}}`.
+//! with `{"error": {"code": "ERROR_CODE", "message": "...", "hint": "..."}}`.
 
 use crate::ipc::protocol::JsonRpcResponse;
 use crate::ipc::session::{find_session, list_sessions};
@@ -44,8 +44,15 @@ fn print_json(value: &serde_json::Value) {
 
 /// Print a structured error to stderr as JSON and exit with the given code.
 ///
-/// The error format is: `{"error": {"code": N, "message": "...", "hint": "..."}}`
-fn exit_error(exit_code: i32, code: i32, message: &str, hint: Option<&str>) -> ! {
+/// The error format is:
+/// `{"error": {"code": "ERROR_CODE", "message": "...", "hint": "..."}}`
+///
+/// Error codes are strings for stable matching by consumers:
+/// - JSON-RPC codes (negative integers) are mapped to descriptive names
+///   (e.g. `"R_BUSY"`, `"PARSE_ERROR"`)
+/// - Application codes use uppercase snake_case (e.g. `"TRANSPORT_ERROR"`,
+///   `"SESSION_NOT_FOUND"`)
+fn exit_error(exit_code: i32, code: &str, message: &str, hint: Option<&str>) -> ! {
     let mut error = serde_json::json!({
         "error": {
             "code": code,
@@ -65,34 +72,71 @@ fn exit_error(exit_code: i32, code: i32, message: &str, hint: Option<&str>) -> !
     std::process::exit(exit_code);
 }
 
-/// Map a JSON-RPC error code to a hint string.
-fn hint_for_rpc_error(code: i32) -> Option<&'static str> {
+/// Map a JSON-RPC numeric error code to a string identifier and hint.
+fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
     use crate::ipc::protocol::*;
     match code {
-        R_BUSY => Some(
-            "R is executing code. Wait for it to finish, or use \
-             'arf ipc session' to check status.",
+        R_BUSY => (
+            "R_BUSY",
+            Some(
+                "R is executing code. Wait for it to finish, or use \
+                 'arf ipc session' to check status.",
+            ),
         ),
-        R_NOT_AT_PROMPT => Some(
-            "R is not at the prompt (e.g. in browser/menu mode). \
-             Complete the current interaction first.",
+        R_NOT_AT_PROMPT => (
+            "R_NOT_AT_PROMPT",
+            Some(
+                "R is not at the prompt (e.g. in browser/menu mode). \
+                 Complete the current interaction first.",
+            ),
         ),
-        INPUT_ALREADY_PENDING => Some(
-            "Another IPC input is already queued. Wait for it to \
-             be processed before sending more.",
+        INPUT_ALREADY_PENDING => (
+            "INPUT_ALREADY_PENDING",
+            Some(
+                "Another IPC input is already queued. Wait for it to \
+                 be processed before sending more.",
+            ),
         ),
-        USER_IS_TYPING => Some(
-            "The user is typing in the REPL. Wait for them to \
-             finish or clear their input.",
+        USER_IS_TYPING => (
+            "USER_IS_TYPING",
+            Some(
+                "The user is typing in the REPL. Wait for them to \
+                 finish or clear their input.",
+            ),
         ),
-        _ => None,
+        PARSE_ERROR => ("PARSE_ERROR", None),
+        INVALID_REQUEST => ("INVALID_REQUEST", None),
+        METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
+        INVALID_PARAMS => ("INVALID_PARAMS", None),
+        INTERNAL_ERROR => ("INTERNAL_ERROR", None),
+        _ => ("PROTOCOL_ERROR", None),
     }
 }
 
-/// Handle a JSON-RPC error response: print structured error and exit.
-fn handle_rpc_error(error: &crate::ipc::protocol::JsonRpcError) -> ! {
-    let hint = hint_for_rpc_error(error.code);
-    exit_error(EXIT_PROTOCOL, error.code, &error.message, hint);
+/// Handle a JSON-RPC response: print result or exit with structured error.
+///
+/// This is the common response handler for all IPC commands that send a
+/// JSON-RPC request and print the result.
+fn handle_response(response: JsonRpcResponse) -> Result<()> {
+    if let Some(ref error) = response.error {
+        let (code, hint) = rpc_error_info(error.code);
+        exit_error(EXIT_PROTOCOL, code, &error.message, hint);
+    }
+
+    match response.result {
+        Some(result) => {
+            print_json(&result);
+            Ok(())
+        }
+        None => {
+            exit_error(
+                EXIT_PROTOCOL,
+                "EMPTY_RESPONSE",
+                "Server returned empty response",
+                None,
+            );
+        }
+    }
 }
 
 /// List all active arf sessions as JSON.
@@ -125,7 +169,7 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
             if let Some(p) = pid {
                 exit_error(
                     EXIT_SESSION,
-                    EXIT_SESSION,
+                    "SESSION_NOT_FOUND",
                     &format!("No active arf session with PID {p}"),
                     Some("Use 'arf ipc list' to see active sessions."),
                 );
@@ -134,14 +178,14 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
                 if sessions.is_empty() {
                     exit_error(
                         EXIT_SESSION,
-                        EXIT_SESSION,
+                        "SESSION_NOT_FOUND",
                         "No active arf sessions found",
                         Some("Start arf with --with-ipc to enable IPC."),
                     );
                 } else {
                     exit_error(
                         EXIT_SESSION,
-                        EXIT_SESSION,
+                        "SESSION_AMBIGUOUS",
                         "Multiple arf sessions running",
                         Some(
                             "Specify --pid to select one. Use 'arf ipc list' \
@@ -187,25 +231,7 @@ pub fn cmd_eval(
     };
 
     let response = send_request(&session.socket_path, &request, transport_timeout);
-
-    if let Some(ref error) = response.error {
-        handle_rpc_error(error);
-    }
-
-    match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
-        None => {
-            exit_error(
-                EXIT_PROTOCOL,
-                EXIT_PROTOCOL,
-                "Server returned empty response",
-                None,
-            );
-        }
-    }
+    handle_response(response)
 }
 
 /// Send code as user input to a running arf session.
@@ -220,25 +246,7 @@ pub fn cmd_send(code: &str, pid: Option<u32>) -> Result<()> {
     });
 
     let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
-
-    if let Some(ref error) = response.error {
-        handle_rpc_error(error);
-    }
-
-    match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
-        None => {
-            exit_error(
-                EXIT_PROTOCOL,
-                EXIT_PROTOCOL,
-                "Server returned empty response",
-                None,
-            );
-        }
-    }
+    handle_response(response)
 }
 
 /// Shut down a running arf headless session.
@@ -253,25 +261,7 @@ pub fn cmd_shutdown(pid: Option<u32>) -> Result<()> {
     });
 
     let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
-
-    if let Some(ref error) = response.error {
-        handle_rpc_error(error);
-    }
-
-    match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
-        None => {
-            exit_error(
-                EXIT_PROTOCOL,
-                EXIT_PROTOCOL,
-                "Server returned empty response",
-                None,
-            );
-        }
-    }
+    handle_response(response)
 }
 
 /// Get session information as JSON via the `session` IPC method.
@@ -291,25 +281,7 @@ pub fn cmd_session(pid: Option<u32>) -> Result<()> {
     let transport_timeout = std::time::Duration::from_secs(15);
 
     let response = send_request(&session.socket_path, &request, transport_timeout);
-
-    if let Some(ref error) = response.error {
-        handle_rpc_error(error);
-    }
-
-    match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
-        None => {
-            exit_error(
-                EXIT_PROTOCOL,
-                EXIT_PROTOCOL,
-                "Server returned empty response",
-                None,
-            );
-        }
-    }
+    handle_response(response)
 }
 
 /// Query command history via the `history` IPC method.
@@ -348,25 +320,7 @@ pub fn cmd_history(
 
     let transport_timeout = std::time::Duration::from_secs(15);
     let response = send_request(&session.socket_path, &request, transport_timeout);
-
-    if let Some(ref error) = response.error {
-        handle_rpc_error(error);
-    }
-
-    match response.result {
-        Some(result) => {
-            print_json(&result);
-            Ok(())
-        }
-        None => {
-            exit_error(
-                EXIT_PROTOCOL,
-                EXIT_PROTOCOL,
-                "Server returned empty response",
-                None,
-            );
-        }
-    }
+    handle_response(response)
 }
 
 /// Send a JSON-RPC request to the socket and return the response.
@@ -383,7 +337,7 @@ fn send_request(
         Err(e) => {
             exit_error(
                 EXIT_TRANSPORT,
-                EXIT_TRANSPORT,
+                "TRANSPORT_ERROR",
                 &format!("{e:#}"),
                 Some("Check that the arf session is running and IPC is enabled."),
             );

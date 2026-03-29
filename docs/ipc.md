@@ -91,21 +91,40 @@ All subcommands output JSON to stdout. Output is pretty-printed when stdout is a
 ```json
 {
   "error": {
-    "code": 4,
+    "code": "R_BUSY",
     "message": "R is busy",
     "hint": "R is executing code. Wait for it to finish, or use 'arf ipc session' to check status."
   }
 }
 ```
 
-Exit codes indicate the error category:
+The `code` field is a string identifier for stable matching. Process exit codes indicate the error category:
 
-| Code | Meaning |
-|------|---------|
+| Exit code | Meaning |
+|-----------|---------|
 | 0 | Success |
 | 2 | IPC transport error (connection failed, timeout) |
 | 3 | Session resolution error (no session found, ambiguous PID) |
 | 4 | JSON-RPC protocol error (R busy, user typing, etc.) |
+
+Error code strings:
+
+| Code | Exit | Description |
+|------|------|-------------|
+| `TRANSPORT_ERROR` | 2 | Socket connection failed, read timeout, etc. |
+| `SESSION_NOT_FOUND` | 3 | No session with the specified PID, or no sessions at all |
+| `SESSION_AMBIGUOUS` | 3 | Multiple sessions running and `--pid` not specified |
+| `R_BUSY` | 4 | R is executing code |
+| `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
+| `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
+| `USER_IS_TYPING` | 4 | User is typing in the REPL |
+| `EMPTY_RESPONSE` | 4 | Server returned no result |
+| `PARSE_ERROR` | 4 | Invalid JSON in request |
+| `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
+| `METHOD_NOT_FOUND` | 4 | Unknown method name |
+| `INVALID_PARAMS` | 4 | Invalid method parameters |
+| `INTERNAL_ERROR` | 4 | Server internal error |
+| `PROTOCOL_ERROR` | 4 | Other JSON-RPC error |
 
 ### `arf ipc eval` — Evaluate R Code
 
