@@ -135,6 +135,13 @@ pub struct RLibrary {
     pub r_signalhandlers: *mut c_int,
     pub r_running_as_main_program: *mut c_int,
 
+    // Interrupt pending flag
+    // Unix: R_interrupts_pending (c_int), Windows: UserBreak (Rboolean, c_int-sized)
+    #[cfg(unix)]
+    pub r_interrupts_pending: *mut c_int,
+    #[cfg(windows)]
+    pub user_break: *mut c_int,
+
     // Windows CharacterMode global (used to switch from RGui to LinkDLL after init)
     #[cfg(windows)]
     pub character_mode: *mut c_int,
@@ -474,6 +481,11 @@ impl RLibrary {
                 .get::<c_int>(b"R_running_as_main_program\0")
                 .map(|s| s.into_raw().into_raw() as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
+            #[cfg(unix)]
+            let r_interrupts_pending: *mut c_int = library
+                .get::<c_int>(b"R_interrupts_pending\0")
+                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
 
             // On Windows, library.get::<T>() requires size_of::<T>() == size_of::<FARPROC>()
             // (pointer-sized). Using c_int (4 bytes) fails the size check on 64-bit Windows.
@@ -495,6 +507,13 @@ impl RLibrary {
             #[cfg(windows)]
             let r_running_as_main_program: *mut c_int = library
                 .get::<usize>(b"R_running_as_main_program\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
+            let user_break: *mut c_int = library
+                .get::<usize>(b"UserBreak\0")
                 .ok()
                 .and_then(|s| s.try_as_raw_ptr())
                 .map(|p| p as *mut c_int)
@@ -594,6 +613,10 @@ impl RLibrary {
                 r_interactive,
                 r_signalhandlers,
                 r_running_as_main_program,
+                #[cfg(unix)]
+                r_interrupts_pending,
+                #[cfg(windows)]
+                user_break,
                 #[cfg(windows)]
                 character_mode,
                 r_processevents,

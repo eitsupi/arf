@@ -493,6 +493,17 @@ impl Repl {
         // Set up the ReadConsole callback
         arf_libr::set_read_console_callback(read_console_callback);
 
+        // Windows: Install Ctrl+C handler to interrupt R evaluation.
+        // Without this, Ctrl+C during R eval terminates the process (STATUS_CONTROL_C_EXIT).
+        // The handler sets R's UserBreak flag; R checks it periodically and interrupts.
+        // On Unix, R's mainloop installs its own SIGINT handler, so we don't interfere.
+        #[cfg(windows)]
+        if let Err(e) = ctrlc::set_handler(|| {
+            arf_libr::set_r_interrupt_pending();
+        }) {
+            log::warn!("Could not set Ctrl+C handler: {e}");
+        }
+
         // Run R's main loop - this doesn't return until EOF
         unsafe {
             arf_libr::run_r_mainloop();
