@@ -1104,14 +1104,17 @@ fn test_headless_ctrl_break_shutdown() {
             )
         });
 
-    // PID file should be cleaned up
-    let pid_cleaned = !pid_path.exists();
-
     assert!(
         status.success(),
         "headless process should exit cleanly after CTRL_BREAK, got: {status}\n\
-         PID file cleaned up: {pid_cleaned}\n\
          Server output:\n{}",
+        process.server_output()
+    );
+
+    // PID file should be cleaned up
+    assert!(
+        !pid_path.exists(),
+        "PID file should be removed after CTRL_BREAK shutdown\nServer output:\n{}",
         process.server_output()
     );
 }
