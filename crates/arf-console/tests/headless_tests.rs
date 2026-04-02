@@ -1035,21 +1035,22 @@ fn test_headless_sighup_shutdown() {
     assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGHUP);
 }
 
-/// Test that SIGINT (Ctrl+C) triggers graceful shutdown with PID file cleanup.
+/// Test that Ctrl+C triggers graceful shutdown with PID file cleanup.
+///
+/// On Unix, sends SIGINT directly. On Windows, uses CTRL_BREAK_EVENT via
+/// CREATE_NEW_PROCESS_GROUP + GenerateConsoleCtrlEvent, which is the only
+/// way to signal a specific child process (CTRL_C_EVENT cannot target a
+/// single process). The ctrlc crate handles both equivalently.
 #[cfg(unix)]
 #[test]
-fn test_headless_sigint_shutdown() {
+fn test_headless_ctrlc_shutdown() {
     assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGINT);
 }
 
-/// Test that CTRL_BREAK triggers graceful shutdown on Windows.
-///
-/// This uses CREATE_NEW_PROCESS_GROUP + GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT)
-/// which is the standard way to signal a child process on Windows.
-/// The ctrlc crate's "termination" feature handles CTRL_BREAK_EVENT.
+/// See [`test_headless_ctrlc_shutdown`] for rationale.
 #[cfg(windows)]
 #[test]
-fn test_headless_ctrl_break_shutdown() {
+fn test_headless_ctrlc_shutdown() {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
     let tmp = tempfile::TempDir::new().expect("create temp dir");
