@@ -1016,6 +1016,100 @@ fn test_headless_sighup_shutdown() {
     assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGHUP);
 }
 
+/// Test that SIGINT (Ctrl+C) triggers graceful shutdown with PID file cleanup.
+#[cfg(unix)]
+#[test]
+fn test_headless_sigint_shutdown() {
+    assert_signal_graceful_shutdown(nix::sys::signal::Signal::SIGINT);
+}
+
+/// Test that CTRL_BREAK triggers graceful shutdown on Windows.
+///
+/// This uses CREATE_NEW_PROCESS_GROUP + GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT)
+/// which is the standard way to signal a child process on Windows.
+/// The ctrlc crate's "termination" feature handles CTRL_BREAK_EVENT.
+#[cfg(windows)]
+#[test]
+fn test_headless_ctrl_break_shutdown() {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_path = tmp.path().join("arf.pid");
+    let pid_str = pid_path.display().to_string();
+
+    // Spawn with CREATE_NEW_PROCESS_GROUP so we can target just this process
+    let mut child = Command::new(bin_path)
+        .args(["headless", "--pid-file", &pid_str])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .expect("Failed to spawn arf headless");
+
+    let child_pid = child.id();
+    let stderr = child.stderr.take().expect("stderr should be piped");
+
+    // Wait for "Headless mode ready" on stderr
+    let start = std::time::Instant::now();
+    let reader = std::io::BufReader::new(stderr);
+    let mut ready = false;
+    for line in reader.lines() {
+        if start.elapsed() > Duration::from_secs(30) {
+            break;
+        }
+        match line {
+            Ok(line) if line.contains("Headless mode ready") => {
+                ready = true;
+                break;
+            }
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+    assert!(ready, "Headless mode should become ready");
+    assert!(pid_path.exists(), "PID file should exist");
+
+    // Send CTRL_BREAK_EVENT to the child's process group
+    unsafe {
+        windows_sys::Win32::System::Console::GenerateConsoleCtrlEvent(
+            windows_sys::Win32::System::Console::CTRL_BREAK_EVENT,
+            child_pid,
+        );
+    }
+
+    // Process should exit gracefully
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                assert!(
+                    status.success(),
+                    "headless process should exit cleanly after CTRL_BREAK, got: {status}"
+                );
+                break;
+            }
+            Ok(None) => {
+                if start.elapsed() > Duration::from_secs(10) {
+                    let _ = child.kill();
+                    panic!("headless process did not exit after CTRL_BREAK");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => panic!("Error waiting for process: {e}"),
+        }
+    }
+
+    // PID file should be cleaned up
+    assert!(
+        !pid_path.exists(),
+        "PID file should be removed after CTRL_BREAK shutdown"
+    );
+}
+
 /// Test that headless mode persists evaluated commands to the history database.
 ///
 /// Verifies that:
