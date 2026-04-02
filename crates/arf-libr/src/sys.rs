@@ -780,19 +780,15 @@ unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -
         }
 
         // Disable R's signal handlers before initialization.
-        // We install our own Ctrl+C handler that sets R_interrupts_pending.
+        // R's mainloop reinstalls its own SIGINT handler later;
+        // on Windows we install a separate Ctrl+C handler in the REPL.
         if !lib.r_signalhandlers.is_null() {
             *lib.r_signalhandlers = 0;
         }
 
         // Store the interrupt flag pointer for use by the Ctrl+C handler
-        #[cfg(unix)]
         if !lib.r_interrupts_pending.is_null() {
             R_INTERRUPT_FLAG.store(lib.r_interrupts_pending, Ordering::Release);
-        }
-        #[cfg(windows)]
-        if !lib.user_break.is_null() {
-            R_INTERRUPT_FLAG.store(lib.user_break, Ordering::Release);
         }
 
         // Prepare arguments for R initialization
@@ -912,17 +908,12 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
 
     unsafe {
         // Disable R's signal handlers first.
-        // We install our own Ctrl+C handler that sets UserBreak.
+        // We install our own Ctrl+C handler that sets UserBreak in the REPL.
         if !lib.r_signalhandlers.is_null() {
             *lib.r_signalhandlers = 0;
         }
 
         // Store the interrupt flag pointer for use by the Ctrl+C handler
-        #[cfg(unix)]
-        if !lib.r_interrupts_pending.is_null() {
-            R_INTERRUPT_FLAG.store(lib.r_interrupts_pending, Ordering::Release);
-        }
-        #[cfg(windows)]
         if !lib.user_break.is_null() {
             R_INTERRUPT_FLAG.store(lib.user_break, Ordering::Release);
         }
