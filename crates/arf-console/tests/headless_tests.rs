@@ -1093,7 +1093,11 @@ fn test_headless_ctrlc_shutdown() {
             process.pid,
         )
     };
-    assert!(result != 0, "GenerateConsoleCtrlEvent failed");
+    assert!(
+        result != 0,
+        "GenerateConsoleCtrlEvent failed: {}",
+        std::io::Error::last_os_error()
+    );
 
     // Process should exit within timeout (not hang)
     let status = process

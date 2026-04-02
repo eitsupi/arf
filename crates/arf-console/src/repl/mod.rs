@@ -498,10 +498,17 @@ impl Repl {
         // The handler sets R's UserBreak flag; R checks it periodically and interrupts.
         // On Unix, R's mainloop installs its own SIGINT handler, so we don't interfere.
         #[cfg(windows)]
-        if let Err(e) = ctrlc::set_handler(|| {
-            arf_libr::set_r_interrupt_pending();
-        }) {
-            log::warn!("Could not set Ctrl+C handler: {e}");
+        if arf_libr::is_r_interrupt_flag_available() {
+            if let Err(e) = ctrlc::set_handler(|| {
+                arf_libr::set_r_interrupt_pending();
+            }) {
+                log::warn!("Could not set Ctrl+C handler: {e}");
+            }
+        } else {
+            log::warn!(
+                "R interrupt flag not available; skipping Ctrl+C handler installation. \
+                 Default console handler will terminate the process on Ctrl+C."
+            );
         }
 
         // Run R's main loop - this doesn't return until EOF

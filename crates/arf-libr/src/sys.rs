@@ -1457,8 +1457,9 @@ unsafe extern "C" fn r_read_console(
     // This handles cases where R finishes evaluation without producing output
     stop_spinner();
 
-    // Clear any pending interrupt flag when returning to the prompt.
-    // This prevents stale Ctrl+C signals from interrupting the next command.
+    // Clear any pending interrupt flag at the start of every ReadConsole
+    // invocation (including nested prompts such as readline(), browser(), etc.).
+    // This prevents stale Ctrl+C signals from interrupting the next input read.
     clear_r_interrupt_pending();
 
     // Safety net: if a previous password read (via rpassword) was interrupted
@@ -2172,9 +2173,17 @@ pub fn set_r_interrupt_pending() {
     }
 }
 
+/// Returns whether the R interrupt flag pointer is available.
+///
+/// When this returns `false`, [`set_r_interrupt_pending`] is a no-op.
+pub fn is_r_interrupt_flag_available() -> bool {
+    !R_INTERRUPT_FLAG.load(Ordering::Acquire).is_null()
+}
+
 /// Clear R's interrupt pending flag.
 ///
-/// Called when R returns to the prompt (ReadConsole) to prevent stale
+/// Called at the start of every `ReadConsole` invocation (including nested
+/// prompts such as `readline()`, `browser()`, etc.) to prevent stale
 /// interrupt flags from triggering on the next evaluation.
 pub fn clear_r_interrupt_pending() {
     let ptr = R_INTERRUPT_FLAG.load(Ordering::Acquire);
