@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-04-02
+
+### Fixed
+
+- Handle Ctrl+C during R evaluation instead of crashing (#143)
+
 ## [0.2.6] - 2026-03-29
 
 ### Added
