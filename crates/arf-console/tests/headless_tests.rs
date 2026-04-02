@@ -1094,19 +1094,25 @@ fn test_headless_ctrl_break_shutdown() {
     };
     assert!(result != 0, "GenerateConsoleCtrlEvent failed");
 
-    // Process should exit gracefully
+    // Process should exit within timeout (not hang)
     let status = process
         .wait_for_exit(Duration::from_secs(10))
-        .unwrap_or_else(|e| panic!("headless process should exit after CTRL_BREAK: {e}"));
-    assert!(
-        status.success(),
-        "headless process should exit cleanly after CTRL_BREAK, got: {status}"
-    );
+        .unwrap_or_else(|e| {
+            panic!(
+                "headless process should exit after CTRL_BREAK: {e}\nServer output:\n{}",
+                process.server_output()
+            )
+        });
 
     // PID file should be cleaned up
+    let pid_cleaned = !pid_path.exists();
+
     assert!(
-        !pid_path.exists(),
-        "PID file should be removed after CTRL_BREAK shutdown"
+        status.success(),
+        "headless process should exit cleanly after CTRL_BREAK, got: {status}\n\
+         PID file cleaned up: {pid_cleaned}\n\
+         Server output:\n{}",
+        process.server_output()
     );
 }
 
