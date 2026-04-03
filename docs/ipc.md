@@ -387,11 +387,13 @@ When both a human and an external tool use the same session, arf prevents confli
 The IPC server listens on a Unix domain socket. The default path depends on the platform:
 
 - **Linux** (with systemd): `$XDG_RUNTIME_DIR/arf/<PID>.sock` (typically `/run/user/<UID>/arf/<PID>.sock`)
-- **macOS / non-systemd Linux**: `/tmp/arf-<UID>/<PID>.sock`
+- **macOS / non-systemd Linux**: `<temp_dir>/arf-<UID>/<PID>.sock` (where `<temp_dir>` is typically `/tmp`)
 
 The socket directory and file are created with restrictive permissions:
 - Socket directory: mode `0700` (owner only)
 - Socket file (`<PID>.sock`): mode `0600` (owner only)
+
+Before using the socket directory, arf validates that it is not a symlink, is owned by the current user, and is not writable by group or other users. If validation fails, a per-process fallback directory is used instead.
 
 Session metadata JSON files (`<PID>.json`) are stored separately in the OS cache directory (e.g., `~/.cache/arf/sessions/` on Linux):
 - Directory: mode `0700` (owner only)

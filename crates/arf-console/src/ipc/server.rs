@@ -246,8 +246,12 @@ pub fn stop_server() {
 /// Get the socket/pipe path for a given PID.
 ///
 /// On Unix, uses `$XDG_RUNTIME_DIR/arf/<pid>.sock` (the XDG-correct location
-/// for runtime sockets).  Falls back to `/tmp/arf-<uid>/<pid>.sock` when
-/// `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
+/// for runtime sockets).  Falls back to `<temp_dir>/arf-<uid>/<pid>.sock`
+/// when `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
+///
+/// The socket directory is validated for safety (not a symlink, owned by
+/// the current user, not writable by group/other).  If validation fails,
+/// a per-process fallback directory is used instead.
 fn get_socket_path(pid: u32) -> String {
     #[cfg(unix)]
     {
@@ -263,17 +267,61 @@ fn get_socket_path(pid: u32) -> String {
             }
         };
 
+        // Validate that an existing directory is safe to use as a socket
+        // directory: not a symlink, owned by us, and not writable by
+        // group/other.  Returns `true` if the directory does not exist yet
+        // (it will be created securely by `create_dir_0700`).
+        let is_dir_safe = |dir: &std::path::Path| -> bool {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            match dir.symlink_metadata() {
+                Err(_) => true, // does not exist yet — will be created
+                Ok(meta) => {
+                    if meta.file_type().is_symlink() {
+                        log::warn!(
+                            "Socket directory {} is a symlink — refusing to use it",
+                            dir.display()
+                        );
+                        return false;
+                    }
+                    if meta.uid() != unsafe { libc::getuid() } {
+                        log::warn!(
+                            "Socket directory {} is not owned by the current user",
+                            dir.display()
+                        );
+                        return false;
+                    }
+                    if meta.permissions().mode() & 0o22 != 0 {
+                        log::warn!(
+                            "Socket directory {} has insecure permissions ({:o})",
+                            dir.display(),
+                            meta.permissions().mode()
+                        );
+                        return false;
+                    }
+                    true
+                }
+            }
+        };
+
         let socket_dir = dirs::runtime_dir()
             .map(|d| d.join("arf"))
             .unwrap_or_else(|| {
                 // Fallback for macOS / non-systemd environments:
-                // /tmp/arf-<uid>/ with mode 0700.
+                // <temp_dir>/arf-<uid>/ with mode 0700.
                 let uid = unsafe { libc::getuid() };
                 std::env::temp_dir().join(format!("arf-{uid}"))
             });
 
-        create_dir_0700(&socket_dir);
-        socket_dir.join(format!("{pid}.sock")).display().to_string()
+        if is_dir_safe(&socket_dir) {
+            create_dir_0700(&socket_dir);
+            socket_dir.join(format!("{pid}.sock")).display().to_string()
+        } else {
+            // Unsafe directory detected — fall back to a per-process
+            // directory under temp dir to avoid the compromised path.
+            let dir = std::env::temp_dir().join(format!("arf-{pid}"));
+            create_dir_0700(&dir);
+            dir.join("ipc.sock").display().to_string()
+        }
     }
     #[cfg(windows)]
     {
