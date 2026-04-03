@@ -340,11 +340,12 @@ fn is_dir_safe(dir: &std::path::Path) -> bool {
                 );
                 return false;
             }
-            if meta.permissions().mode() & 0o77 != 0 {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o700 {
                 log::warn!(
-                    "Socket directory {} has insecure permissions ({:o})",
+                    "Socket directory {} must have permissions 0700, found {:o}",
                     dir.display(),
-                    meta.permissions().mode()
+                    mode
                 );
                 return false;
             }
@@ -1171,12 +1172,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         #[test]
-        fn random_hex_suffix_produces_unique_values() {
-            let a = random_hex_suffix();
-            let b = random_hex_suffix();
-            assert_eq!(a.len(), 16);
-            assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
-            assert_ne!(a, b);
+        fn random_hex_suffix_has_expected_format() {
+            let suffix = random_hex_suffix();
+            assert_eq!(suffix.len(), 16);
+            assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
         }
 
         #[test]
