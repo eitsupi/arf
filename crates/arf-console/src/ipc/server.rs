@@ -54,11 +54,12 @@ pub fn start_server(
     }
 
     let pid = std::process::id();
-    let socket_path = match bind {
-        Some(path) => path.to_string(),
+    let (socket_path, dir_created) = match bind {
+        Some(path) => (path.to_string(), false),
         None => get_socket_path(pid).ok_or_else(|| {
             std::io::Error::other(format!(
                 "Failed to determine a safe IPC socket path for pid {pid}. \
+                 All candidate directories were unsafe or could not be created. \
                  Check the log for details."
             ))
         })?,
@@ -177,7 +178,7 @@ pub fn start_server(
         cancel_token,
         join_handle,
         socket_path: socket_path.clone(),
-        auto_created_dir: bind.is_none(),
+        auto_created_dir: dir_created,
     });
 
     // Note: session metadata is cached in the server thread right before
@@ -272,7 +273,10 @@ pub fn stop_server() {
 ///
 /// The socket directory is validated for safety (not a symlink, owned by
 /// the current user, not writable by group/other).
-fn get_socket_path(pid: u32) -> Option<String> {
+/// Returns `(socket_path, dir_created)` where `dir_created` is `true` when
+/// the socket directory was freshly created by this call (and should be
+/// cleaned up on shutdown).
+fn get_socket_path(pid: u32) -> Option<(String, bool)> {
     #[cfg(unix)]
     {
         let temp_fallback = || {
@@ -288,15 +292,16 @@ fn get_socket_path(pid: u32) -> Option<String> {
     }
     #[cfg(windows)]
     {
-        Some(format!(r"\\.\pipe\arf-ipc-{pid}"))
+        Some((format!(r"\\.\pipe\arf-ipc-{pid}"), false))
     }
 }
 
 /// Generate a short random hex string for use in directory names.
 ///
-/// Uses OS entropy via `HashMap`'s `RandomState` to avoid adding a
-/// `rand` dependency.  The result is 16 hex characters (64 bits of
-/// entropy), which is sufficient to prevent predictable path attacks.
+/// Uses `HashMap`'s `RandomState` (seeded from platform randomness in
+/// the standard library) to avoid adding a `rand` dependency.  The
+/// result is 16 hex characters, which is sufficient to make directory
+/// names unpredictable in practice.
 #[cfg(unix)]
 fn random_hex_suffix() -> String {
     use std::hash::{BuildHasher, Hasher};
@@ -354,15 +359,16 @@ fn is_dir_safe(dir: &std::path::Path) -> bool {
     }
 }
 
-/// Try each candidate directory in order, returning the socket path for
-/// the first one that passes safety validation.  Creates the chosen
+/// Try each candidate directory in order, returning the socket path and
+/// whether the directory was created by this call.  Creates the chosen
 /// directory with mode `0700` if it does not exist.
 #[cfg(unix)]
-fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<String> {
+fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<(String, bool)> {
     use std::os::unix::fs::DirBuilderExt;
 
     for dir in candidates {
         if is_dir_safe(dir) {
+            let existed_before = dir.exists();
             let mut builder = std::fs::DirBuilder::new();
             builder.recursive(true).mode(0o700);
             if let Err(e) = builder.create(dir) {
@@ -380,7 +386,8 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<Stri
                 );
                 continue;
             }
-            return Some(dir.join(format!("{pid}.sock")).display().to_string());
+            let path = dir.join(format!("{pid}.sock")).display().to_string();
+            return Some((path, !existed_before));
         }
     }
 
@@ -1239,9 +1246,13 @@ mod tests {
             std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o700)).unwrap();
             let fallback = tmp.path().join("fallback");
             // First candidate already exists and is safe — should be selected.
-            let result = select_socket_dir(12345, &[existing.clone(), fallback.clone()]);
-            assert!(result.is_some());
-            assert!(result.unwrap().contains("existing"));
+            let (path, created) =
+                select_socket_dir(12345, &[existing.clone(), fallback.clone()]).unwrap();
+            assert!(path.contains("existing"));
+            assert!(
+                !created,
+                "dir already existed, should not report as created"
+            );
             assert!(!fallback.exists(), "fallback should not have been created");
         }
 
@@ -1251,9 +1262,10 @@ mod tests {
             let good = tmp.path().join("good");
             let also_good = tmp.path().join("also-good");
             // Neither exists yet — both are safe, first should win.
-            let result = select_socket_dir(12345, &[good.clone(), also_good.clone()]);
-            assert!(result.is_some());
-            assert!(result.unwrap().contains("good"));
+            let (path, created) =
+                select_socket_dir(12345, &[good.clone(), also_good.clone()]).unwrap();
+            assert!(path.contains("good"));
+            assert!(created, "dir did not exist, should report as created");
             assert!(good.exists(), "first candidate should have been created");
             assert!(
                 !also_good.exists(),
@@ -1268,9 +1280,9 @@ mod tests {
             std::fs::create_dir(&bad).unwrap();
             std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o777)).unwrap();
             let good = tmp.path().join("fallback");
-            let result = select_socket_dir(12345, &[bad, good.clone()]);
-            assert!(result.is_some());
-            assert!(result.unwrap().contains("fallback"));
+            let (path, created) = select_socket_dir(12345, &[bad, good.clone()]).unwrap();
+            assert!(path.contains("fallback"));
+            assert!(created, "fallback dir should have been created");
         }
 
         #[test]
