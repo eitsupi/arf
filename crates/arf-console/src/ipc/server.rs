@@ -1189,10 +1189,14 @@ mod tests {
             let good = tmp.path().join("good");
             let also_good = tmp.path().join("also-good");
             // Neither exists yet — both are safe, first should win.
-            let result = select_socket_dir(12345, &[good.clone(), also_good]);
+            let result = select_socket_dir(12345, &[good.clone(), also_good.clone()]);
             assert!(result.is_some());
             assert!(result.unwrap().contains("good"));
             assert!(good.exists(), "first candidate should have been created");
+            assert!(
+                !also_good.exists(),
+                "second candidate should not have been created"
+            );
         }
 
         #[test]
