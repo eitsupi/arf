@@ -368,13 +368,19 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<(Str
 
     for dir in candidates {
         if is_dir_safe(dir) {
-            let existed_before = dir.exists();
+            // Attempt a non-recursive mkdir to atomically determine
+            // whether we created the directory.  Parent directories
+            // (e.g. $XDG_RUNTIME_DIR, $TMPDIR) are expected to exist.
             let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            if let Err(e) = builder.create(dir) {
-                log::warn!("Failed to create directory {}: {e}", dir.display());
-                continue;
-            }
+            builder.mode(0o700);
+            let created = match builder.create(dir) {
+                Ok(()) => true,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,
+                Err(e) => {
+                    log::warn!("Failed to create directory {}: {e}", dir.display());
+                    continue;
+                }
+            };
             // Re-validate after creation to close the TOCTOU window: if
             // another process created the directory between our initial
             // check and DirBuilder::create, it may have different
@@ -387,7 +393,7 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<(Str
                 continue;
             }
             let path = dir.join(format!("{pid}.sock")).display().to_string();
-            return Some((path, !existed_before));
+            return Some((path, created));
         }
     }
 
