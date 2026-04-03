@@ -52,7 +52,13 @@ pub fn start_server(
     let pid = std::process::id();
     let socket_path = match bind {
         Some(path) => path.to_string(),
-        None => get_socket_path(pid),
+        None => get_socket_path(pid).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Cannot find a safe directory for the IPC socket. \
+                 Check the log for details.",
+            )
+        })?,
     };
 
     // Remove stale socket file if it exists. When a custom --bind path is
@@ -252,7 +258,7 @@ pub fn stop_server() {
 /// The socket directory is validated for safety (not a symlink, owned by
 /// the current user, not writable by group/other).  If validation fails,
 /// a per-process fallback directory is used instead.
-fn get_socket_path(pid: u32) -> String {
+fn get_socket_path(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -318,30 +324,27 @@ fn get_socket_path(pid: u32) -> String {
 
         if is_dir_safe(&socket_dir) {
             create_dir_0700(&socket_dir);
-            socket_dir.join(format!("{pid}.sock")).display().to_string()
+            Some(socket_dir.join(format!("{pid}.sock")).display().to_string())
         } else {
             // Primary directory is unsafe — try a per-process fallback.
             let dir = std::env::temp_dir().join(format!("arf-{pid}"));
             if is_dir_safe(&dir) {
                 create_dir_0700(&dir);
-                dir.join("ipc.sock").display().to_string()
+                Some(dir.join("ipc.sock").display().to_string())
             } else {
-                // Both directories are compromised.  Return the primary
-                // path anyway so the caller gets a meaningful error from
-                // bind(), but log a prominent warning.
                 log::error!(
                     "Both socket directories are unsafe: {} and {}. \
-                     IPC server will likely fail to start.",
+                     Refusing to start IPC server.",
                     socket_dir.display(),
                     dir.display()
                 );
-                socket_dir.join(format!("{pid}.sock")).display().to_string()
+                None
             }
         }
     }
     #[cfg(windows)]
     {
-        format!(r"\\.\pipe\arf-ipc-{pid}")
+        Some(format!(r"\\.\pipe\arf-ipc-{pid}"))
     }
 }
 
