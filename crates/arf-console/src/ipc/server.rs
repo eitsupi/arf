@@ -293,6 +293,13 @@ fn get_socket_path(pid: u32) -> Option<String> {
                         );
                         return false;
                     }
+                    if !meta.is_dir() {
+                        log::warn!(
+                            "Socket directory path {} exists but is not a directory",
+                            dir.display()
+                        );
+                        return false;
+                    }
                     if meta.uid() != unsafe { libc::getuid() } {
                         log::warn!(
                             "Socket directory {} is not owned by the current user",

@@ -386,8 +386,8 @@ When both a human and an external tool use the same session, arf prevents confli
 
 The IPC server listens on a Unix domain socket. The default path depends on the platform:
 
-- **Linux** (with systemd): `$XDG_RUNTIME_DIR/arf/<PID>.sock` (typically `/run/user/<UID>/arf/<PID>.sock`)
-- **macOS / non-systemd Linux**: `<temp_dir>/arf-<UID>/<PID>.sock` (where `<temp_dir>` is typically `/tmp`)
+- When `$XDG_RUNTIME_DIR` is set: `$XDG_RUNTIME_DIR/arf/<PID>.sock` (typically `/run/user/<UID>/arf/<PID>.sock` on Linux with systemd)
+- When `$XDG_RUNTIME_DIR` is not set (e.g. macOS): `<temp_dir>/arf-<UID>/<PID>.sock` (where `<temp_dir>` is typically `/tmp`)
 
 The socket directory and file are created with restrictive permissions:
 - Socket directory: mode `0700` (owner only)
@@ -571,7 +571,7 @@ The socket exists but the server is not responding.
 - The arf process crashed but the socket file was not cleaned up
 - R is stuck in an infinite loop or blocking operation
 
-**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket file manually (e.g., `$XDG_RUNTIME_DIR/arf/<PID>.sock` on Linux) and the session metadata file (`~/.cache/arf/sessions/<PID>.json`).
+**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket file shown in the `socket_path` field (for example, `$XDG_RUNTIME_DIR/arf/<PID>.sock` or `<temp_dir>/arf-<UID>/<PID>.sock` on Unix) and the session metadata file (`~/.cache/arf/sessions/<PID>.json`).
 
 ### Permission denied on socket
 
