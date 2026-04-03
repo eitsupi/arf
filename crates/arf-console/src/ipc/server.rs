@@ -261,98 +261,95 @@ pub fn stop_server() {
 fn get_socket_path(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-
-        // Helper: create directory with mode 0700 atomically to avoid
-        // TOCTOU race between create_dir_all and set_permissions.
-        let create_dir_0700 = |dir: &std::path::Path| {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            if let Err(e) = builder.create(dir) {
-                log::warn!("Failed to create directory {}: {e}", dir.display());
-            }
-        };
-
-        // Validate that an existing directory is safe to use as a socket
-        // directory: not a symlink, owned by us, and accessible only by
-        // the owner (mode 0700).  Returns `true` if the directory does not
-        // exist yet (it will be created securely by `create_dir_0700`).
-        let is_dir_safe = |dir: &std::path::Path| -> bool {
-            use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            match dir.symlink_metadata() {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-                Err(e) => {
-                    log::warn!("Cannot stat socket directory {}: {e}", dir.display());
-                    false
-                }
-                Ok(meta) => {
-                    if meta.file_type().is_symlink() {
-                        log::warn!(
-                            "Socket directory {} is a symlink — refusing to use it",
-                            dir.display()
-                        );
-                        return false;
-                    }
-                    if !meta.is_dir() {
-                        log::warn!(
-                            "Socket directory path {} exists but is not a directory",
-                            dir.display()
-                        );
-                        return false;
-                    }
-                    if meta.uid() != unsafe { libc::getuid() } {
-                        log::warn!(
-                            "Socket directory {} is not owned by the current user",
-                            dir.display()
-                        );
-                        return false;
-                    }
-                    if meta.permissions().mode() & 0o77 != 0 {
-                        log::warn!(
-                            "Socket directory {} has insecure permissions ({:o})",
-                            dir.display(),
-                            meta.permissions().mode()
-                        );
-                        return false;
-                    }
-                    true
-                }
-            }
-        };
-
-        let socket_dir = dirs::runtime_dir()
+        let primary = dirs::runtime_dir()
             .map(|d| d.join("arf"))
             .unwrap_or_else(|| {
-                // Fallback for macOS / non-systemd environments:
-                // <temp_dir>/arf-<uid>/ with mode 0700.
                 let uid = unsafe { libc::getuid() };
                 std::env::temp_dir().join(format!("arf-{uid}"))
             });
-
-        if is_dir_safe(&socket_dir) {
-            create_dir_0700(&socket_dir);
-            Some(socket_dir.join(format!("{pid}.sock")).display().to_string())
-        } else {
-            // Primary directory is unsafe — try a per-process fallback.
-            let dir = std::env::temp_dir().join(format!("arf-{pid}"));
-            if is_dir_safe(&dir) {
-                create_dir_0700(&dir);
-                Some(dir.join("ipc.sock").display().to_string())
-            } else {
-                log::error!(
-                    "Both socket directories are unsafe: {} and {}. \
-                     Refusing to start IPC server.",
-                    socket_dir.display(),
-                    dir.display()
-                );
-                None
-            }
-        }
+        let fallback = std::env::temp_dir().join(format!("arf-{pid}"));
+        select_socket_dir(pid, &[primary, fallback])
     }
     #[cfg(windows)]
     {
         Some(format!(r"\\.\pipe\arf-ipc-{pid}"))
     }
+}
+
+/// Validate that a directory is safe to use for an IPC socket: not a
+/// symlink, is a directory, owned by the current user, and accessible only
+/// by the owner (mode `0700`).  Returns `true` if the path does not exist
+/// yet (it will be created securely by the caller).
+#[cfg(unix)]
+fn is_dir_safe(dir: &std::path::Path) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    match dir.symlink_metadata() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(e) => {
+            log::warn!("Cannot stat socket directory {}: {e}", dir.display());
+            false
+        }
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                log::warn!(
+                    "Socket directory {} is a symlink — refusing to use it",
+                    dir.display()
+                );
+                return false;
+            }
+            if !meta.is_dir() {
+                log::warn!(
+                    "Socket directory path {} exists but is not a directory",
+                    dir.display()
+                );
+                return false;
+            }
+            if meta.uid() != unsafe { libc::getuid() } {
+                log::warn!(
+                    "Socket directory {} is not owned by the current user",
+                    dir.display()
+                );
+                return false;
+            }
+            if meta.permissions().mode() & 0o77 != 0 {
+                log::warn!(
+                    "Socket directory {} has insecure permissions ({:o})",
+                    dir.display(),
+                    meta.permissions().mode()
+                );
+                return false;
+            }
+            true
+        }
+    }
+}
+
+/// Try each candidate directory in order, returning the socket path for
+/// the first one that passes safety validation.  Creates the chosen
+/// directory with mode `0700` if it does not exist.
+#[cfg(unix)]
+fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<String> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    for dir in candidates {
+        if is_dir_safe(dir) {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            if let Err(e) = builder.create(dir) {
+                log::warn!("Failed to create directory {}: {e}", dir.display());
+                continue;
+            }
+            return Some(dir.join(format!("{pid}.sock")).display().to_string());
+        }
+    }
+
+    let dirs: Vec<_> = candidates.iter().map(|d| d.display().to_string()).collect();
+    log::error!(
+        "All socket directory candidates are unsafe: {}. \
+         Refusing to start IPC server.",
+        dirs.join(", ")
+    );
+    None
 }
 
 /// Run the actual server loop.
@@ -1126,5 +1123,101 @@ mod tests {
             json["history_session_id"].is_null(),
             "history_session_id should be null when not set"
         );
+    }
+
+    #[cfg(unix)]
+    mod socket_dir_tests {
+        use super::super::{is_dir_safe, select_socket_dir};
+        use std::os::unix::fs::PermissionsExt;
+
+        #[test]
+        fn nonexistent_dir_is_safe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let candidate = tmp.path().join("does-not-exist");
+            assert!(is_dir_safe(&candidate));
+        }
+
+        #[test]
+        fn dir_with_0700_is_safe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("good");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(is_dir_safe(&dir));
+        }
+
+        #[test]
+        fn dir_with_group_read_is_unsafe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("leaky");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+            assert!(!is_dir_safe(&dir));
+        }
+
+        #[test]
+        fn dir_with_other_write_is_unsafe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("world");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o702)).unwrap();
+            assert!(!is_dir_safe(&dir));
+        }
+
+        #[test]
+        fn symlink_is_unsafe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let target = tmp.path().join("real");
+            std::fs::create_dir(&target).unwrap();
+            let link = tmp.path().join("link");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(!is_dir_safe(&link));
+        }
+
+        #[test]
+        fn regular_file_is_unsafe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let file = tmp.path().join("not-a-dir");
+            std::fs::write(&file, "").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(!is_dir_safe(&file));
+        }
+
+        #[test]
+        fn select_uses_first_safe_candidate() {
+            let tmp = tempfile::tempdir().unwrap();
+            let good = tmp.path().join("good");
+            let also_good = tmp.path().join("also-good");
+            // Neither exists yet — both are safe, first should win.
+            let result = select_socket_dir(12345, &[good.clone(), also_good]);
+            assert!(result.is_some());
+            assert!(result.unwrap().contains("good"));
+            assert!(good.exists(), "first candidate should have been created");
+        }
+
+        #[test]
+        fn select_skips_unsafe_candidate() {
+            let tmp = tempfile::tempdir().unwrap();
+            let bad = tmp.path().join("bad");
+            std::fs::create_dir(&bad).unwrap();
+            std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o777)).unwrap();
+            let good = tmp.path().join("fallback");
+            let result = select_socket_dir(12345, &[bad, good.clone()]);
+            assert!(result.is_some());
+            assert!(result.unwrap().contains("fallback"));
+        }
+
+        #[test]
+        fn select_returns_none_when_all_unsafe() {
+            let tmp = tempfile::tempdir().unwrap();
+            let bad1 = tmp.path().join("bad1");
+            std::fs::create_dir(&bad1).unwrap();
+            std::fs::set_permissions(&bad1, std::fs::Permissions::from_mode(0o777)).unwrap();
+            let bad2 = tmp.path().join("bad2");
+            std::fs::write(&bad2, "").unwrap(); // regular file, not a dir
+            std::fs::set_permissions(&bad2, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = select_socket_dir(12345, &[bad1, bad2]);
+            assert!(result.is_none());
+        }
     }
 }
