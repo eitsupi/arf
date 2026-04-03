@@ -268,13 +268,17 @@ fn get_socket_path(pid: u32) -> String {
         };
 
         // Validate that an existing directory is safe to use as a socket
-        // directory: not a symlink, owned by us, and not writable by
-        // group/other.  Returns `true` if the directory does not exist yet
-        // (it will be created securely by `create_dir_0700`).
+        // directory: not a symlink, owned by us, and accessible only by
+        // the owner (mode 0700).  Returns `true` if the directory does not
+        // exist yet (it will be created securely by `create_dir_0700`).
         let is_dir_safe = |dir: &std::path::Path| -> bool {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
             match dir.symlink_metadata() {
-                Err(_) => true, // does not exist yet — will be created
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                Err(e) => {
+                    log::warn!("Cannot stat socket directory {}: {e}", dir.display());
+                    false
+                }
                 Ok(meta) => {
                     if meta.file_type().is_symlink() {
                         log::warn!(
@@ -290,7 +294,7 @@ fn get_socket_path(pid: u32) -> String {
                         );
                         return false;
                     }
-                    if meta.permissions().mode() & 0o22 != 0 {
+                    if meta.permissions().mode() & 0o77 != 0 {
                         log::warn!(
                             "Socket directory {} has insecure permissions ({:o})",
                             dir.display(),
@@ -316,11 +320,23 @@ fn get_socket_path(pid: u32) -> String {
             create_dir_0700(&socket_dir);
             socket_dir.join(format!("{pid}.sock")).display().to_string()
         } else {
-            // Unsafe directory detected — fall back to a per-process
-            // directory under temp dir to avoid the compromised path.
+            // Primary directory is unsafe — try a per-process fallback.
             let dir = std::env::temp_dir().join(format!("arf-{pid}"));
-            create_dir_0700(&dir);
-            dir.join("ipc.sock").display().to_string()
+            if is_dir_safe(&dir) {
+                create_dir_0700(&dir);
+                dir.join("ipc.sock").display().to_string()
+            } else {
+                // Both directories are compromised.  Return the primary
+                // path anyway so the caller gets a meaningful error from
+                // bind(), but log a prominent warning.
+                log::error!(
+                    "Both socket directories are unsafe: {} and {}. \
+                     IPC server will likely fail to start.",
+                    socket_dir.display(),
+                    dir.display()
+                );
+                socket_dir.join(format!("{pid}.sock")).display().to_string()
+            }
         }
     }
     #[cfg(windows)]
