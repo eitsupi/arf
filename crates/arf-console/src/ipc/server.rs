@@ -53,11 +53,10 @@ pub fn start_server(
     let socket_path = match bind {
         Some(path) => path.to_string(),
         None => get_socket_path(pid).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "Cannot find a safe directory for the IPC socket. \
-                 Check the log for details.",
-            )
+            std::io::Error::other(format!(
+                "Failed to determine a safe IPC socket path for pid {pid}. \
+                 Check the log for details."
+            ))
         })?,
     };
 
@@ -252,7 +251,7 @@ pub fn stop_server() {
 /// Get the socket/pipe path for a given PID.
 ///
 /// On Unix, uses `$XDG_RUNTIME_DIR/arf/<pid>.sock` (the XDG-correct location
-/// for runtime sockets).  Falls back to `<temp_dir>/arf-<uid>/<pid>.sock`
+/// for runtime sockets).  Falls back to `<temp_dir>/arf-<random>/<pid>.sock`
 /// when `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
 ///
 /// The socket directory is validated for safety (not a symlink, owned by
@@ -264,16 +263,32 @@ fn get_socket_path(pid: u32) -> Option<String> {
         let primary = dirs::runtime_dir()
             .map(|d| d.join("arf"))
             .unwrap_or_else(|| {
-                let uid = unsafe { libc::getuid() };
-                std::env::temp_dir().join(format!("arf-{uid}"))
+                let suffix = random_hex_suffix();
+                std::env::temp_dir().join(format!("arf-{suffix}"))
             });
-        let fallback = std::env::temp_dir().join(format!("arf-{pid}"));
+        let fallback = {
+            let suffix = random_hex_suffix();
+            std::env::temp_dir().join(format!("arf-{suffix}"))
+        };
         select_socket_dir(pid, &[primary, fallback])
     }
     #[cfg(windows)]
     {
         Some(format!(r"\\.\pipe\arf-ipc-{pid}"))
     }
+}
+
+/// Generate a short random hex string for use in directory names.
+///
+/// Uses OS entropy via `HashMap`'s `RandomState` to avoid adding a
+/// `rand` dependency.  The result is 16 hex characters (64 bits of
+/// entropy), which is sufficient to prevent predictable path attacks.
+#[cfg(unix)]
+fn random_hex_suffix() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let state = std::collections::hash_map::RandomState::new();
+    let hash = state.build_hasher().finish();
+    format!("{hash:016x}")
 }
 
 /// Validate that a directory is safe to use for an IPC socket: not a
@@ -345,7 +360,7 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<Stri
 
     let dirs: Vec<_> = candidates.iter().map(|d| d.display().to_string()).collect();
     log::error!(
-        "All socket directory candidates are unsafe: {}. \
+        "All socket directory candidates failed (unsafe or could not be created): {}. \
          Refusing to start IPC server.",
         dirs.join(", ")
     );

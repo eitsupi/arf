@@ -387,7 +387,7 @@ When both a human and an external tool use the same session, arf prevents confli
 The IPC server listens on a Unix domain socket. The default path depends on the platform:
 
 - When `$XDG_RUNTIME_DIR` is set: `$XDG_RUNTIME_DIR/arf/<PID>.sock` (typically `/run/user/<UID>/arf/<PID>.sock` on Linux with systemd)
-- When `$XDG_RUNTIME_DIR` is not set (e.g. macOS): `<temp_dir>/arf-<UID>/<PID>.sock` (where `<temp_dir>` is typically `/tmp`)
+- When `$XDG_RUNTIME_DIR` is not set (e.g. macOS): `<temp_dir>/arf-<random>/<PID>.sock` (where `<temp_dir>` is the system temp directory, e.g. `$TMPDIR`; on Linux this is typically `/tmp`)
 
 The socket directory and file are created with restrictive permissions:
 - Socket directory: mode `0700` (owner only)
