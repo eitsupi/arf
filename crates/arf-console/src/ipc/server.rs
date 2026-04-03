@@ -25,6 +25,10 @@ struct ServerState {
     /// cleaned up automatically when the server is dropped).
     #[cfg_attr(windows, allow(dead_code))]
     socket_path: String,
+    /// Whether the socket directory was auto-created (not a custom `--bind`
+    /// path).  Only auto-created directories are cleaned up on shutdown.
+    #[cfg_attr(windows, allow(dead_code))]
+    auto_created_dir: bool,
 }
 
 /// Start the IPC server in a background thread.
@@ -173,6 +177,7 @@ pub fn start_server(
         cancel_token,
         join_handle,
         socket_path: socket_path.clone(),
+        auto_created_dir: bind.is_none(),
     });
 
     // Note: session metadata is cached in the server thread right before
@@ -234,16 +239,19 @@ pub fn stop_server() {
         log::debug!("Shutting down IPC server, in-flight connections will be dropped");
         state.cancel_token.cancel();
 
-        // Remove socket file so accept() fails (unblocks the loop),
-        // then remove the parent directory if it is now empty (randomized
-        // fallback dirs are unique per server start, so we must clean up).
+        // Remove the socket pathname to prevent new clients from connecting
+        // during shutdown.  For auto-created directories (not custom --bind),
+        // also remove the parent directory if it is now empty.
         #[cfg(unix)]
         {
             let _ = std::fs::remove_file(&state.socket_path);
-            if let Some(parent) = std::path::Path::new(&state.socket_path).parent() {
-                // remove_dir only succeeds if the directory is empty, which
-                // is the desired behavior — we must not remove XDG_RUNTIME_DIR/arf/
-                // if other arf processes have sockets there.
+            if state.auto_created_dir
+                && let Some(parent) = std::path::Path::new(&state.socket_path).parent()
+            {
+                // remove_dir only succeeds if the directory is empty,
+                // which is the desired behavior — we must not remove
+                // XDG_RUNTIME_DIR/arf/ if other arf processes have
+                // sockets there.
                 let _ = std::fs::remove_dir(parent);
             }
         }
@@ -260,20 +268,23 @@ pub fn stop_server() {
 ///
 /// On Unix, uses `$XDG_RUNTIME_DIR/arf/<pid>.sock` (the XDG-correct location
 /// for runtime sockets).  Falls back to `<temp_dir>/arf-<random>/<pid>.sock`
-/// when `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
+/// when `XDG_RUNTIME_DIR` is not set or its directory fails safety validation.
 ///
 /// The socket directory is validated for safety (not a symlink, owned by
 /// the current user, not writable by group/other).
 fn get_socket_path(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        let candidate = dirs::runtime_dir()
-            .map(|d| d.join("arf"))
-            .unwrap_or_else(|| {
-                let suffix = random_hex_suffix();
-                std::env::temp_dir().join(format!("arf-{suffix}"))
-            });
-        select_socket_dir(pid, &[candidate])
+        let temp_fallback = || {
+            let suffix = random_hex_suffix();
+            std::env::temp_dir().join(format!("arf-{suffix}"))
+        };
+        let mut candidates = Vec::with_capacity(2);
+        if let Some(runtime_dir) = dirs::runtime_dir() {
+            candidates.push(runtime_dir.join("arf"));
+        }
+        candidates.push(temp_fallback());
+        select_socket_dir(pid, &candidates)
     }
     #[cfg(windows)]
     {
@@ -355,6 +366,17 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<Stri
             builder.recursive(true).mode(0o700);
             if let Err(e) = builder.create(dir) {
                 log::warn!("Failed to create directory {}: {e}", dir.display());
+                continue;
+            }
+            // Re-validate after creation to close the TOCTOU window: if
+            // another process created the directory between our initial
+            // check and DirBuilder::create, it may have different
+            // ownership or permissions.
+            if !is_dir_safe(dir) {
+                log::warn!(
+                    "Socket directory {} failed safety validation after creation",
+                    dir.display()
+                );
                 continue;
             }
             return Some(dir.join(format!("{pid}.sock")).display().to_string());

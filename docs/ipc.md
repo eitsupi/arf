@@ -571,11 +571,11 @@ The socket exists but the server is not responding.
 - The arf process crashed but the socket file was not cleaned up
 - R is stuck in an infinite loop or blocking operation
 
-**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket file shown in the `socket_path` field (for example, `$XDG_RUNTIME_DIR/arf/<PID>.sock` or `<temp_dir>/arf-<UID>/<PID>.sock` on Unix) and the session metadata file (`~/.cache/arf/sessions/<PID>.json`).
+**Fix:** Check if the process is still running with `arf ipc list`. If the session is stale, remove the socket file shown in the `socket_path` field (for example, `$XDG_RUNTIME_DIR/arf/<PID>.sock` or `<temp_dir>/arf-<random>/<PID>.sock` on Unix) and the session metadata file (`~/.cache/arf/sessions/<PID>.json`).
 
 ### Permission denied on socket
 
 On Unix, the socket directory and files are created with restrictive permissions (mode `0700`/`0600`). If you see permission errors:
 
 - Ensure you are connecting as the same user who started arf
-- Check that the socket directory (`$XDG_RUNTIME_DIR/arf/` or `/tmp/arf-<UID>/`) has the correct ownership
+- Check that the socket directory (`$XDG_RUNTIME_DIR/arf/` or `<temp_dir>/arf-<random>/`) has the correct ownership
