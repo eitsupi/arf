@@ -393,7 +393,7 @@ The socket directory and file are created with restrictive permissions:
 - Socket directory: mode `0700` (owner only)
 - Socket file (`<PID>.sock`): mode `0600` (owner only)
 
-Before using the socket directory, arf validates that it is not a symlink, is owned by the current user, and is not writable by group or other users. If validation fails, a per-process fallback directory is used instead.
+Before using the socket directory, arf validates that it is not a symlink, is owned by the current user, and is not writable by group or other users. If validation fails, arf attempts to use a per-process fallback directory instead. If all candidate directories are unsafe or cannot be created, IPC does not start and arf returns an error rather than continuing without IPC.
 
 Session metadata JSON files (`<PID>.json`) are stored separately in the OS cache directory (e.g., `~/.cache/arf/sessions/` on Linux):
 - Directory: mode `0700` (owner only)

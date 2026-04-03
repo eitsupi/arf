@@ -1232,6 +1232,20 @@ mod tests {
         }
 
         #[test]
+        fn select_uses_existing_safe_candidate() {
+            let tmp = tempfile::tempdir().unwrap();
+            let existing = tmp.path().join("existing");
+            std::fs::create_dir(&existing).unwrap();
+            std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let fallback = tmp.path().join("fallback");
+            // First candidate already exists and is safe — should be selected.
+            let result = select_socket_dir(12345, &[existing.clone(), fallback.clone()]);
+            assert!(result.is_some());
+            assert!(result.unwrap().contains("existing"));
+            assert!(!fallback.exists(), "fallback should not have been created");
+        }
+
+        #[test]
         fn select_uses_first_safe_candidate() {
             let tmp = tempfile::tempdir().unwrap();
             let good = tmp.path().join("good");
