@@ -234,10 +234,18 @@ pub fn stop_server() {
         log::debug!("Shutting down IPC server, in-flight connections will be dropped");
         state.cancel_token.cancel();
 
-        // Remove socket file so accept() fails (unblocks the loop)
+        // Remove socket file so accept() fails (unblocks the loop),
+        // then remove the parent directory if it is now empty (randomized
+        // fallback dirs are unique per server start, so we must clean up).
         #[cfg(unix)]
         {
             let _ = std::fs::remove_file(&state.socket_path);
+            if let Some(parent) = std::path::Path::new(&state.socket_path).parent() {
+                // remove_dir only succeeds if the directory is empty, which
+                // is the desired behavior — we must not remove XDG_RUNTIME_DIR/arf/
+                // if other arf processes have sockets there.
+                let _ = std::fs::remove_dir(parent);
+            }
         }
 
         // Wait for the server thread to finish
@@ -255,22 +263,17 @@ pub fn stop_server() {
 /// when `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
 ///
 /// The socket directory is validated for safety (not a symlink, owned by
-/// the current user, not writable by group/other).  If validation fails,
-/// a per-process fallback directory is used instead.
+/// the current user, not writable by group/other).
 fn get_socket_path(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        let primary = dirs::runtime_dir()
+        let candidate = dirs::runtime_dir()
             .map(|d| d.join("arf"))
             .unwrap_or_else(|| {
                 let suffix = random_hex_suffix();
                 std::env::temp_dir().join(format!("arf-{suffix}"))
             });
-        let fallback = {
-            let suffix = random_hex_suffix();
-            std::env::temp_dir().join(format!("arf-{suffix}"))
-        };
-        select_socket_dir(pid, &[primary, fallback])
+        select_socket_dir(pid, &[candidate])
     }
     #[cfg(windows)]
     {
@@ -1142,8 +1145,17 @@ mod tests {
 
     #[cfg(unix)]
     mod socket_dir_tests {
-        use super::super::{is_dir_safe, select_socket_dir};
+        use super::super::{is_dir_safe, random_hex_suffix, select_socket_dir};
         use std::os::unix::fs::PermissionsExt;
+
+        #[test]
+        fn random_hex_suffix_produces_unique_values() {
+            let a = random_hex_suffix();
+            let b = random_hex_suffix();
+            assert_eq!(a.len(), 16);
+            assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+            assert_ne!(a, b);
+        }
 
         #[test]
         fn nonexistent_dir_is_safe() {
