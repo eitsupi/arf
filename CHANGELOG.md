@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Experimental:** Place IPC Unix socket in `$XDG_RUNTIME_DIR/arf/` instead of `~/.cache/arf/sessions/`, which is the correct XDG location for runtime sockets. Falls back to `/tmp/arf-<uid>/` when `XDG_RUNTIME_DIR` is not set (e.g. macOS)
+
 ## [0.2.7] - 2026-04-02
 
 ### Fixed
