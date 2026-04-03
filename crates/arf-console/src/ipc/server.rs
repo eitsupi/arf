@@ -244,10 +244,13 @@ pub fn stop_server() {
 }
 
 /// Get the socket/pipe path for a given PID.
+///
+/// On Unix, uses `$XDG_RUNTIME_DIR/arf/<pid>.sock` (the XDG-correct location
+/// for runtime sockets).  Falls back to `/tmp/arf-<uid>/<pid>.sock` when
+/// `XDG_RUNTIME_DIR` is not set (e.g. macOS, non-systemd Linux).
 fn get_socket_path(pid: u32) -> String {
     #[cfg(unix)]
     {
-        use crate::ipc::session::sessions_dir;
         use std::os::unix::fs::DirBuilderExt;
 
         // Helper: create directory with mode 0700 atomically to avoid
@@ -260,16 +263,17 @@ fn get_socket_path(pid: u32) -> String {
             }
         };
 
-        if let Some(dir) = sessions_dir() {
-            create_dir_0700(&dir);
-            dir.join(format!("{pid}.sock")).display().to_string()
-        } else {
-            // Fallback: create a per-process directory under temp dir with
-            // mode 0700 so the socket is not accessible to other users.
-            let dir = std::env::temp_dir().join(format!("arf-{pid}"));
-            create_dir_0700(&dir);
-            dir.join("ipc.sock").display().to_string()
-        }
+        let socket_dir = dirs::runtime_dir()
+            .map(|d| d.join("arf"))
+            .unwrap_or_else(|| {
+                // Fallback for macOS / non-systemd environments:
+                // /tmp/arf-<uid>/ with mode 0700.
+                let uid = unsafe { libc::getuid() };
+                std::env::temp_dir().join(format!("arf-{uid}"))
+            });
+
+        create_dir_0700(&socket_dir);
+        socket_dir.join(format!("{pid}.sock")).display().to_string()
     }
     #[cfg(windows)]
     {
