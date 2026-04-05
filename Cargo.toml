@@ -33,10 +33,10 @@ toml = "0.9"
 
 # Tree-sitter parsing
 tree-sitter = "0.24"
-tree-sitter-r = { git = "https://github.com/r-lib/tree-sitter-r", rev = "95aff097aa927a66bb357f715b58cde821be8867" }
+tree-sitter-r = "1.2"
 
 # Rd to Markdown conversion
-rd2qmd-core = { git = "https://github.com/eitsupi/rd2qmd", rev = "81023220584d355395fae24030aafe0fe6afa231", features = ["roxygen"] }
+rd2qmd-core = { version = "0.1", features = ["roxygen"] }
 
 # Markdown parsing
 pulldown-cmark = "0.13"
