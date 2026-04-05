@@ -468,6 +468,7 @@ mod tests {
         let config = default_prompt_config();
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();
+        let masked = mask_home_path(&path);
         let lines = generate_info_lines(
             &config,
             &Some(path),
@@ -480,6 +481,11 @@ mod tests {
             .iter()
             .find(|l| l.starts_with("Config file:"))
             .unwrap();
+        assert!(
+            config_line.contains(&masked),
+            "Existing path should contain the file path: {}",
+            config_line
+        );
         assert!(
             !config_line.contains("not found"),
             "Existing path should not say 'not found': {}",
