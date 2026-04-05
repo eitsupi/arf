@@ -1,12 +1,9 @@
 //! Meta command processing.
 
 use crate::completion::path::expand_tilde;
-use crate::config::{ConfigStatus, RSourceStatus};
+use crate::config::RSourceStatus;
 use crate::external::formatter;
-use crate::pager::{
-    HistoryBrowserResult, HistoryDbMode, display_changelog, display_session_info, run_help_browser,
-    run_history_browser, text_utils,
-};
+use crate::pager::HistoryDbMode;
 use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
 
@@ -26,6 +23,16 @@ pub enum MetaCommandResult {
     ShellExecuted,
     /// Restart the process with optional R version
     Restart(Option<String>),
+    /// Open the help browser with the given query (caller runs pager)
+    ShowHelpBrowser(String),
+    /// Display session info (caller runs pager)
+    ShowSessionInfo,
+    /// Display changelog (caller runs pager)
+    ShowChangelog,
+    /// Open the history browser (caller runs pager)
+    ShowHistoryBrowser { path: PathBuf, mode: HistoryDbMode },
+    /// Display history schema (caller runs pager)
+    ShowHistorySchema,
 }
 
 /// Process a meta command (starting with `:`) and return the result.
@@ -33,8 +40,6 @@ pub enum MetaCommandResult {
 pub fn process_meta_command(
     input: &str,
     prompt_config: &mut PromptRuntimeConfig,
-    config_path: &Option<PathBuf>,
-    config_status: ConfigStatus,
     r_history_path: &Option<PathBuf>,
     shell_history_path: &Option<PathBuf>,
     r_source_status: &RSourceStatus,
@@ -182,12 +187,7 @@ pub fn process_meta_command(
                         prompt_config.is_shell_enabled(),
                     )
                 }
-                "schema" => {
-                    if let Err(e) = crate::pager::history_schema::show_schema_pager() {
-                        arf_println!("Error: {}", e);
-                    }
-                    Some(MetaCommandResult::Handled)
-                }
+                "schema" => Some(MetaCommandResult::ShowHistorySchema),
                 "" => {
                     arf_println!("Usage: :history <subcommand>");
                     println!("#   browse - Browse and manage command history");
@@ -208,34 +208,10 @@ pub fn process_meta_command(
             // Fuzzy help search for R documentation
             // Inspired by the felp package: https://github.com/atusy/felp
             let query = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-            // Mark alternate mode so IPC requests are rejected immediately
-            // instead of hanging. Save and restore the previous state so that
-            // nested alternate modes (e.g., help inside shell mode) are not
-            // clobbered. No RAII guard: a panic here aborts the process.
-            let was_alternate = crate::ipc::is_in_alternate_mode();
-            crate::ipc::set_in_alternate_mode(true);
-            let help_result = run_help_browser(&query);
-            crate::ipc::set_in_alternate_mode(was_alternate);
-            if let Err(e) = help_result {
-                arf_println!("Error in help browser: {}", e);
-            }
-            Some(MetaCommandResult::Handled)
+            Some(MetaCommandResult::ShowHelpBrowser(query))
         }
-        "info" | "session" => {
-            display_session_info(
-                prompt_config,
-                config_path,
-                config_status,
-                r_history_path,
-                shell_history_path,
-                r_source_status,
-            );
-            Some(MetaCommandResult::Handled)
-        }
-        "changelog" => {
-            display_changelog();
-            Some(MetaCommandResult::Handled)
-        }
+        "info" | "session" => Some(MetaCommandResult::ShowSessionInfo),
+        "changelog" => Some(MetaCommandResult::ShowChangelog),
         "cd" => {
             let path_arg = trimmed[1..].strip_prefix("cd").unwrap_or("").trim();
             match meta_cd(path_arg) {
@@ -357,28 +333,10 @@ fn process_history_browse(
         return Some(MetaCommandResult::Handled);
     };
 
-    // Mark alternate mode so IPC requests are rejected immediately
-    // instead of hanging. Save and restore the previous state so that
-    // nested alternate modes (e.g., history inside shell mode) are not
-    // clobbered. No RAII guard: a panic here aborts the process.
-    let was_alternate = crate::ipc::is_in_alternate_mode();
-    crate::ipc::set_in_alternate_mode(true);
-    let browser_result = run_history_browser(db_path, mode);
-    crate::ipc::set_in_alternate_mode(was_alternate);
-
-    match browser_result {
-        Ok(HistoryBrowserResult::Copied(cmd)) => {
-            // Truncate long commands for display (display-width aware)
-            let display = text_utils::truncate_to_width(&cmd, 60);
-            arf_println!("Copied: {}", display);
-            Some(MetaCommandResult::Handled)
-        }
-        Ok(HistoryBrowserResult::Cancelled) => Some(MetaCommandResult::Handled),
-        Err(e) => {
-            arf_println!("Error: {}", e);
-            Some(MetaCommandResult::Handled)
-        }
-    }
+    Some(MetaCommandResult::ShowHistoryBrowser {
+        path: db_path.clone(),
+        mode,
+    })
 }
 
 /// Process :history clear command.
@@ -566,7 +524,6 @@ mod tests {
     fn call_meta(
         input: &str,
         config: &mut PromptRuntimeConfig,
-        config_path: &Option<PathBuf>,
         r_history_path: &Option<PathBuf>,
         shell_history_path: &Option<PathBuf>,
         status: &RSourceStatus,
@@ -575,8 +532,6 @@ mod tests {
         process_meta_command(
             input,
             config,
-            config_path,
-            ConfigStatus::Ok,
             r_history_path,
             shell_history_path,
             status,
@@ -589,7 +544,7 @@ mod tests {
     fn test_process_meta_command_not_meta() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta("print(x)", &mut config, &None, &None, &None, &status);
+        let result = call_meta("print(x)", &mut config, &None, &None, &status);
         assert!(result.is_none());
     }
 
@@ -599,11 +554,11 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_reprex_enabled());
 
-        let result = call_meta(":reprex", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":reprex", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_reprex_enabled());
 
-        let result = call_meta(":reprex", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":reprex", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_reprex_enabled());
     }
@@ -612,72 +567,34 @@ mod tests {
     fn test_process_meta_command_commands() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":commands", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":commands", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // Test alias
-        let result = call_meta(":cmds", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":cmds", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
     #[test]
-    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
     fn test_process_meta_command_info() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":info", &mut config, &None, &None, &None, &status);
-        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        let result = call_meta(":info", &mut config, &None, &None, &status);
+        assert!(matches!(result, Some(MetaCommandResult::ShowSessionInfo)));
 
         // Test alias
-        let result = call_meta(":session", &mut config, &None, &None, &None, &status);
-        assert!(matches!(result, Some(MetaCommandResult::Handled)));
-    }
-
-    #[test]
-    #[cfg_attr(windows, ignore)] // Windows CI lacks terminal for interactive pager
-    fn test_process_meta_command_info_with_config_path() {
-        let mut config = create_test_prompt_config();
-        let status = default_r_source_status();
-
-        // Test with existing config path (using tempfile)
-        let temp_file = tempfile::NamedTempFile::new().unwrap();
-        let existing_path = temp_file.path().to_path_buf();
-        let result = call_meta(
-            ":info",
-            &mut config,
-            &Some(existing_path),
-            &None,
-            &None,
-            &status,
-        );
-        assert!(matches!(result, Some(MetaCommandResult::Handled)));
-
-        // Test with non-existing config path (using tempfile directory with fake filename)
-        let temp_dir = tempfile::tempdir().unwrap();
-        let non_existing_path = temp_dir.path().join("nonexistent_config.toml");
-        let result = call_meta(
-            ":info",
-            &mut config,
-            &Some(non_existing_path),
-            &None,
-            &None,
-            &status,
-        );
-        assert!(matches!(result, Some(MetaCommandResult::Handled)));
-
-        // Test with None config path (using defaults)
-        let result = call_meta(":info", &mut config, &None, &None, &None, &status);
-        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        let result = call_meta(":session", &mut config, &None, &None, &status);
+        assert!(matches!(result, Some(MetaCommandResult::ShowSessionInfo)));
     }
 
     #[test]
     fn test_process_meta_command_quit() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":quit", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":quit", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Exit)));
 
-        let result = call_meta(":exit", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":exit", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Exit)));
     }
 
@@ -685,7 +602,7 @@ mod tests {
     fn test_process_meta_command_unknown() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":unknown", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":unknown", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
     }
 
@@ -693,7 +610,7 @@ mod tests {
     fn test_process_meta_command_empty_colon() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -701,7 +618,7 @@ mod tests {
     fn test_process_meta_command_with_whitespace() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta("  :reprex  ", &mut config, &None, &None, &None, &status);
+        let result = call_meta("  :reprex  ", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_reprex_enabled());
     }
@@ -712,7 +629,7 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
 
-        let result = call_meta(":shell", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":shell", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(config.is_shell_enabled());
     }
@@ -724,7 +641,7 @@ mod tests {
         config.set_shell(true);
         assert!(config.is_shell_enabled());
 
-        let result = call_meta(":r", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":r", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled());
     }
@@ -736,7 +653,7 @@ mod tests {
         config.set_shell(true);
         assert!(config.is_shell_enabled());
 
-        let result = call_meta(":R", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":R", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled());
     }
@@ -747,7 +664,7 @@ mod tests {
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
 
-        let result = call_meta(":r", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":r", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert!(!config.is_shell_enabled()); // Still not in shell
     }
@@ -756,14 +673,7 @@ mod tests {
     fn test_process_meta_command_system() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(
-            ":system echo hello",
-            &mut config,
-            &None,
-            &None,
-            &None,
-            &status,
-        );
+        let result = call_meta(":system echo hello", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::ShellExecuted)));
     }
 
@@ -771,7 +681,7 @@ mod tests {
     fn test_process_meta_command_system_empty() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta(":system", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":system", &mut config, &None, &None, &status);
         // Empty :system should still be handled
         assert!(matches!(result, Some(MetaCommandResult::ShellExecuted)));
     }
@@ -782,14 +692,7 @@ mod tests {
 
         // With PATH mode (rig not enabled), :switch should show error
         let status_path = RSourceStatus::Path;
-        let result = call_meta(
-            ":switch 4.4",
-            &mut config,
-            &None,
-            &None,
-            &None,
-            &status_path,
-        );
+        let result = call_meta(":switch 4.4", &mut config, &None, &None, &status_path);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
 
         // With Rig mode (rig enabled), :switch should work (but needs confirmation which we can't test here)
@@ -799,7 +702,7 @@ mod tests {
         };
         // Note: This will prompt for confirmation, so we can't fully test it in unit tests
         // Just testing the setup path here
-        let result = call_meta(":switch", &mut config, &None, &None, &None, &status_rig);
+        let result = call_meta(":switch", &mut config, &None, &None, &status_rig);
         // Without version argument, it should show usage
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
@@ -940,8 +843,6 @@ mod tests {
             &format!(":cd {}", tmp.path().display()),
             &mut config,
             &None,
-            ConfigStatus::Ok,
-            &None,
             &None,
             &status,
             &mut dir_stack,
@@ -962,8 +863,6 @@ mod tests {
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
             &None,
-            ConfigStatus::Ok,
-            &None,
             &None,
             &status,
             &mut dir_stack,
@@ -975,8 +874,6 @@ mod tests {
         let result = process_meta_command(
             ":popd",
             &mut config,
-            &None,
-            ConfigStatus::Ok,
             &None,
             &None,
             &status,
@@ -1022,7 +919,7 @@ mod tests {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         // :restart! should skip confirmation and return Restart directly
-        let result = call_meta(":restart!", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":restart!", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Restart(None))));
     }
 
@@ -1030,7 +927,7 @@ mod tests {
     fn test_process_meta_command_restart_force_with_whitespace() {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
-        let result = call_meta("  :restart!  ", &mut config, &None, &None, &None, &status);
+        let result = call_meta("  :restart!  ", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Restart(None))));
     }
 
@@ -1040,14 +937,7 @@ mod tests {
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
         };
-        let result = call_meta(
-            ":switch! 4.4",
-            &mut config,
-            &None,
-            &None,
-            &None,
-            &status_rig,
-        );
+        let result = call_meta(":switch! 4.4", &mut config, &None, &None, &status_rig);
         assert!(matches!(result, Some(MetaCommandResult::Restart(Some(ref v))) if v == "4.4"));
     }
 
@@ -1058,7 +948,7 @@ mod tests {
             version: "4.4.0".to_string(),
         };
         // :switch! without version should still show usage
-        let result = call_meta(":switch!", &mut config, &None, &None, &None, &status_rig);
+        let result = call_meta(":switch!", &mut config, &None, &None, &status_rig);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
 
@@ -1067,7 +957,7 @@ mod tests {
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         // :shell! is not a valid command (! only supported on restart/switch)
-        let result = call_meta(":shell!", &mut config, &None, &None, &None, &status);
+        let result = call_meta(":shell!", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
     }
 }

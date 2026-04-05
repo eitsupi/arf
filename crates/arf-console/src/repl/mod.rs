@@ -663,8 +663,6 @@ impl Repl {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut prompt_config,
-                        &self.config_path,
-                        self.config_status,
                         &r_history_path,
                         &shell_history_path,
                         &self.r_source_status,
@@ -694,6 +692,35 @@ impl Repl {
                             }
                             MetaCommandResult::Restart(version) => {
                                 restart_process(version.as_deref());
+                                continue;
+                            }
+                            MetaCommandResult::ShowHelpBrowser(query) => {
+                                run_pager_help_browser(&query);
+                                continue;
+                            }
+                            MetaCommandResult::ShowSessionInfo => {
+                                crate::pager::display_session_info(
+                                    &prompt_config,
+                                    &self.config_path,
+                                    self.config_status,
+                                    &r_history_path,
+                                    &shell_history_path,
+                                    &self.r_source_status,
+                                );
+                                continue;
+                            }
+                            MetaCommandResult::ShowChangelog => {
+                                crate::pager::display_changelog();
+                                continue;
+                            }
+                            MetaCommandResult::ShowHistoryBrowser { path, mode } => {
+                                run_pager_history_browser(&path, mode);
+                                continue;
+                            }
+                            MetaCommandResult::ShowHistorySchema => {
+                                if let Err(e) = crate::pager::history_schema::show_schema_pager() {
+                                    arf_println!("Error: {}", e);
+                                }
                                 continue;
                             }
                         }
@@ -1001,8 +1028,6 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut state.prompt_config,
-                        &state.config_path,
-                        state.config_status,
                         &state.r_history_path,
                         &state.shell_history_path,
                         &state.r_source_status,
@@ -1037,6 +1062,35 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 restart_process(version.as_deref());
                                 // If restart_process returns, it means exec failed
                                 // Continue with the current session
+                                continue;
+                            }
+                            MetaCommandResult::ShowHelpBrowser(query) => {
+                                run_pager_help_browser(&query);
+                                continue;
+                            }
+                            MetaCommandResult::ShowSessionInfo => {
+                                crate::pager::display_session_info(
+                                    &state.prompt_config,
+                                    &state.config_path,
+                                    state.config_status,
+                                    &state.r_history_path,
+                                    &state.shell_history_path,
+                                    &state.r_source_status,
+                                );
+                                continue;
+                            }
+                            MetaCommandResult::ShowChangelog => {
+                                crate::pager::display_changelog();
+                                continue;
+                            }
+                            MetaCommandResult::ShowHistoryBrowser { path, mode } => {
+                                run_pager_history_browser(&path, mode);
+                                continue;
+                            }
+                            MetaCommandResult::ShowHistorySchema => {
+                                if let Err(e) = crate::pager::history_schema::show_schema_pager() {
+                                    arf_println!("Error: {}", e);
+                                }
                                 continue;
                             }
                         }
@@ -1210,6 +1264,36 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
             }
         }
     })
+}
+
+/// Run the help browser pager, wrapping with IPC alternate mode.
+fn run_pager_help_browser(query: &str) {
+    let was_alternate = crate::ipc::is_in_alternate_mode();
+    crate::ipc::set_in_alternate_mode(true);
+    let help_result = crate::pager::run_help_browser(query);
+    crate::ipc::set_in_alternate_mode(was_alternate);
+    if let Err(e) = help_result {
+        arf_println!("Error in help browser: {}", e);
+    }
+}
+
+/// Run the history browser pager, wrapping with IPC alternate mode.
+fn run_pager_history_browser(path: &std::path::Path, mode: crate::pager::HistoryDbMode) {
+    let was_alternate = crate::ipc::is_in_alternate_mode();
+    crate::ipc::set_in_alternate_mode(true);
+    let browser_result = crate::pager::run_history_browser(path, mode);
+    crate::ipc::set_in_alternate_mode(was_alternate);
+
+    match browser_result {
+        Ok(crate::pager::HistoryBrowserResult::Copied(cmd)) => {
+            let display = crate::pager::text_utils::truncate_to_width(&cmd, 60);
+            arf_println!("Copied: {}", display);
+        }
+        Ok(crate::pager::HistoryBrowserResult::Cancelled) => {}
+        Err(e) => {
+            arf_println!("Error: {}", e);
+        }
+    }
 }
 
 /// Check if the prompt is R's standard command prompt (top-level).
