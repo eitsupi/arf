@@ -431,4 +431,136 @@ mod tests {
         let content = SessionInfoContent::new(lines);
         assert_eq!(content.line_count(), 2);
     }
+
+    // --- generate_info_lines config_path tests ---
+
+    use crate::editor::prompt::PromptFormatter;
+    use crate::repl::state::PromptRuntimeConfig;
+
+    fn default_prompt_config() -> PromptRuntimeConfig {
+        PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
+    }
+
+    #[test]
+    fn test_generate_info_lines_config_path_none() {
+        let config = default_prompt_config();
+        let lines = generate_info_lines(
+            &config,
+            &None,
+            ConfigStatus::Ok,
+            &None,
+            &None,
+            &RSourceStatus::Path,
+        );
+        let config_line = lines
+            .iter()
+            .find(|l| l.starts_with("Config file:"))
+            .unwrap();
+        assert!(
+            config_line.contains("using defaults"),
+            "None path should show defaults: {}",
+            config_line
+        );
+    }
+
+    #[test]
+    fn test_generate_info_lines_config_path_existing() {
+        let config = default_prompt_config();
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+        let lines = generate_info_lines(
+            &config,
+            &Some(path),
+            ConfigStatus::Ok,
+            &None,
+            &None,
+            &RSourceStatus::Path,
+        );
+        let config_line = lines
+            .iter()
+            .find(|l| l.starts_with("Config file:"))
+            .unwrap();
+        assert!(
+            !config_line.contains("not found"),
+            "Existing path should not say 'not found': {}",
+            config_line
+        );
+        assert!(
+            !config_line.contains("using defaults"),
+            "Existing path should not say 'using defaults': {}",
+            config_line
+        );
+    }
+
+    #[test]
+    fn test_generate_info_lines_config_path_nonexistent() {
+        let config = default_prompt_config();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("nonexistent_config.toml");
+        let lines = generate_info_lines(
+            &config,
+            &Some(path),
+            ConfigStatus::Ok,
+            &None,
+            &None,
+            &RSourceStatus::Path,
+        );
+        let config_line = lines
+            .iter()
+            .find(|l| l.starts_with("Config file:"))
+            .unwrap();
+        assert!(
+            config_line.contains("not found"),
+            "Non-existing path should say 'not found': {}",
+            config_line
+        );
+    }
+
+    #[test]
+    fn test_generate_info_lines_config_parse_error() {
+        let config = default_prompt_config();
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+        let lines = generate_info_lines(
+            &config,
+            &Some(path),
+            ConfigStatus::ParseError,
+            &None,
+            &None,
+            &RSourceStatus::Path,
+        );
+        let config_line = lines
+            .iter()
+            .find(|l| l.starts_with("Config file:"))
+            .unwrap();
+        assert!(
+            config_line.contains("parse error"),
+            "Parse error should be shown: {}",
+            config_line
+        );
+    }
+
+    #[test]
+    fn test_generate_info_lines_config_read_error() {
+        let config = default_prompt_config();
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+        let lines = generate_info_lines(
+            &config,
+            &Some(path),
+            ConfigStatus::ReadError,
+            &None,
+            &None,
+            &RSourceStatus::Path,
+        );
+        let config_line = lines
+            .iter()
+            .find(|l| l.starts_with("Config file:"))
+            .unwrap();
+        assert!(
+            config_line.contains("read error"),
+            "Read error should be shown: {}",
+            config_line
+        );
+    }
 }

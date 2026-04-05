@@ -699,18 +699,20 @@ impl Repl {
                                 continue;
                             }
                             MetaCommandResult::ShowSessionInfo => {
-                                crate::pager::display_session_info(
-                                    &prompt_config,
-                                    &self.config_path,
-                                    self.config_status,
-                                    &r_history_path,
-                                    &shell_history_path,
-                                    &self.r_source_status,
-                                );
+                                with_ipc_alternate_guard(|| {
+                                    crate::pager::display_session_info(
+                                        &prompt_config,
+                                        &self.config_path,
+                                        self.config_status,
+                                        &r_history_path,
+                                        &shell_history_path,
+                                        &self.r_source_status,
+                                    );
+                                });
                                 continue;
                             }
                             MetaCommandResult::ShowChangelog => {
-                                crate::pager::display_changelog();
+                                with_ipc_alternate_guard(crate::pager::display_changelog);
                                 continue;
                             }
                             MetaCommandResult::ShowHistoryBrowser { path, mode } => {
@@ -718,7 +720,9 @@ impl Repl {
                                 continue;
                             }
                             MetaCommandResult::ShowHistorySchema => {
-                                if let Err(e) = crate::pager::history_schema::show_schema_pager() {
+                                if let Err(e) = with_ipc_alternate_guard(
+                                    crate::pager::history_schema::show_schema_pager,
+                                ) {
                                     arf_println!("Error: {}", e);
                                 }
                                 continue;
@@ -1069,18 +1073,20 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 continue;
                             }
                             MetaCommandResult::ShowSessionInfo => {
-                                crate::pager::display_session_info(
-                                    &state.prompt_config,
-                                    &state.config_path,
-                                    state.config_status,
-                                    &state.r_history_path,
-                                    &state.shell_history_path,
-                                    &state.r_source_status,
-                                );
+                                with_ipc_alternate_guard(|| {
+                                    crate::pager::display_session_info(
+                                        &state.prompt_config,
+                                        &state.config_path,
+                                        state.config_status,
+                                        &state.r_history_path,
+                                        &state.shell_history_path,
+                                        &state.r_source_status,
+                                    );
+                                });
                                 continue;
                             }
                             MetaCommandResult::ShowChangelog => {
-                                crate::pager::display_changelog();
+                                with_ipc_alternate_guard(crate::pager::display_changelog);
                                 continue;
                             }
                             MetaCommandResult::ShowHistoryBrowser { path, mode } => {
@@ -1088,7 +1094,9 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                                 continue;
                             }
                             MetaCommandResult::ShowHistorySchema => {
-                                if let Err(e) = crate::pager::history_schema::show_schema_pager() {
+                                if let Err(e) = with_ipc_alternate_guard(
+                                    crate::pager::history_schema::show_schema_pager,
+                                ) {
                                     arf_println!("Error: {}", e);
                                 }
                                 continue;
@@ -1266,12 +1274,21 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
     })
 }
 
-/// Run the help browser pager, wrapping with IPC alternate mode.
-fn run_pager_help_browser(query: &str) {
+/// Run a closure with IPC alternate mode enabled, restoring the previous state afterward.
+///
+/// Pagers that enter crossterm's alternate screen must be wrapped with this guard
+/// so that IPC requests are rejected immediately instead of hanging.
+fn with_ipc_alternate_guard<R>(f: impl FnOnce() -> R) -> R {
     let was_alternate = crate::ipc::is_in_alternate_mode();
     crate::ipc::set_in_alternate_mode(true);
-    let help_result = crate::pager::run_help_browser(query);
+    let result = f();
     crate::ipc::set_in_alternate_mode(was_alternate);
+    result
+}
+
+/// Run the help browser pager, wrapping with IPC alternate mode.
+fn run_pager_help_browser(query: &str) {
+    let help_result = with_ipc_alternate_guard(|| crate::pager::run_help_browser(query));
     if let Err(e) = help_result {
         arf_println!("Error in help browser: {}", e);
     }
@@ -1279,10 +1296,7 @@ fn run_pager_help_browser(query: &str) {
 
 /// Run the history browser pager, wrapping with IPC alternate mode.
 fn run_pager_history_browser(path: &std::path::Path, mode: crate::pager::HistoryDbMode) {
-    let was_alternate = crate::ipc::is_in_alternate_mode();
-    crate::ipc::set_in_alternate_mode(true);
-    let browser_result = crate::pager::run_history_browser(path, mode);
-    crate::ipc::set_in_alternate_mode(was_alternate);
+    let browser_result = with_ipc_alternate_guard(|| crate::pager::run_history_browser(path, mode));
 
     match browser_result {
         Ok(crate::pager::HistoryBrowserResult::Copied(cmd)) => {
