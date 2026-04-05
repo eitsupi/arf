@@ -672,60 +672,19 @@ impl Repl {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         prompt_config.clear_command_duration();
-                        match result {
-                            MetaCommandResult::Handled => {
-                                continue;
-                            }
-                            MetaCommandResult::Exit => {
+                        let ctx = SessionInfoContext {
+                            prompt_config: &prompt_config,
+                            config_path: &self.config_path,
+                            config_status: self.config_status,
+                            r_history_path: &r_history_path,
+                            shell_history_path: &shell_history_path,
+                            r_source_status: &self.r_source_status,
+                        };
+                        match handle_meta_command_result(result, &ctx) {
+                            MetaAction::Continue => continue,
+                            MetaAction::Exit => {
                                 println!("\nGoodbye!");
                                 return Ok(());
-                            }
-                            MetaCommandResult::Unknown(cmd) => {
-                                arf_println!(
-                                    "Unknown command: {}. Type :commands for available commands.",
-                                    cmd
-                                );
-                                continue;
-                            }
-                            MetaCommandResult::ShellExecuted => {
-                                continue;
-                            }
-                            MetaCommandResult::Restart(version) => {
-                                restart_process(version.as_deref());
-                                continue;
-                            }
-                            MetaCommandResult::ShowHelpBrowser(query) => {
-                                run_pager_help_browser(&query);
-                                continue;
-                            }
-                            MetaCommandResult::ShowSessionInfo => {
-                                with_ipc_alternate_guard(|| {
-                                    crate::pager::display_session_info(
-                                        &prompt_config,
-                                        &self.config_path,
-                                        self.config_status,
-                                        &r_history_path,
-                                        &shell_history_path,
-                                        &self.r_source_status,
-                                    );
-                                });
-                                continue;
-                            }
-                            MetaCommandResult::ShowChangelog => {
-                                with_ipc_alternate_guard(crate::pager::display_changelog);
-                                continue;
-                            }
-                            MetaCommandResult::ShowHistoryBrowser { path, mode } => {
-                                run_pager_history_browser(&path, mode);
-                                continue;
-                            }
-                            MetaCommandResult::ShowHistorySchema => {
-                                if let Err(e) = with_ipc_alternate_guard(
-                                    crate::pager::history_schema::show_schema_pager,
-                                ) {
-                                    arf_println!("Error: {}", e);
-                                }
-                                continue;
                             }
                         }
                     }
@@ -1041,65 +1000,19 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         state.prompt_config.clear_command_duration();
-                        match result {
-                            MetaCommandResult::Handled => {
-                                // Command processed, show new prompt
-                                continue;
-                            }
-                            MetaCommandResult::Exit => {
+                        let ctx = SessionInfoContext {
+                            prompt_config: &state.prompt_config,
+                            config_path: &state.config_path,
+                            config_status: state.config_status,
+                            r_history_path: &state.r_history_path,
+                            shell_history_path: &state.shell_history_path,
+                            r_source_status: &state.r_source_status,
+                        };
+                        match handle_meta_command_result(result, &ctx) {
+                            MetaAction::Continue => continue,
+                            MetaAction::Exit => {
                                 state.should_exit = true;
                                 return None;
-                            }
-                            MetaCommandResult::Unknown(cmd) => {
-                                arf_println!(
-                                    "Unknown command: {}. Type :commands for available commands.",
-                                    cmd
-                                );
-                                continue;
-                            }
-                            MetaCommandResult::ShellExecuted => {
-                                // Shell command was executed, show new prompt
-                                continue;
-                            }
-                            MetaCommandResult::Restart(version) => {
-                                // Restart the process, optionally with a new R version
-                                restart_process(version.as_deref());
-                                // If restart_process returns, it means exec failed
-                                // Continue with the current session
-                                continue;
-                            }
-                            MetaCommandResult::ShowHelpBrowser(query) => {
-                                run_pager_help_browser(&query);
-                                continue;
-                            }
-                            MetaCommandResult::ShowSessionInfo => {
-                                with_ipc_alternate_guard(|| {
-                                    crate::pager::display_session_info(
-                                        &state.prompt_config,
-                                        &state.config_path,
-                                        state.config_status,
-                                        &state.r_history_path,
-                                        &state.shell_history_path,
-                                        &state.r_source_status,
-                                    );
-                                });
-                                continue;
-                            }
-                            MetaCommandResult::ShowChangelog => {
-                                with_ipc_alternate_guard(crate::pager::display_changelog);
-                                continue;
-                            }
-                            MetaCommandResult::ShowHistoryBrowser { path, mode } => {
-                                run_pager_history_browser(&path, mode);
-                                continue;
-                            }
-                            MetaCommandResult::ShowHistorySchema => {
-                                if let Err(e) = with_ipc_alternate_guard(
-                                    crate::pager::history_schema::show_schema_pager,
-                                ) {
-                                    arf_println!("Error: {}", e);
-                                }
-                                continue;
                             }
                         }
                     }
@@ -1323,6 +1236,83 @@ fn run_pager_history_browser(path: &std::path::Path, mode: crate::pager::History
         Ok(crate::pager::HistoryBrowserResult::Cancelled) => {}
         Err(e) => {
             arf_println!("Error: {}", e);
+        }
+    }
+}
+
+/// Result of handling a meta command in the REPL loop.
+enum MetaAction {
+    /// Continue the REPL loop (show next prompt).
+    Continue,
+    /// The user requested exit.
+    Exit,
+}
+
+/// Context for displaying session info in the pager.
+struct SessionInfoContext<'a> {
+    prompt_config: &'a PromptRuntimeConfig,
+    config_path: &'a Option<std::path::PathBuf>,
+    config_status: ConfigStatus,
+    r_history_path: &'a Option<std::path::PathBuf>,
+    shell_history_path: &'a Option<std::path::PathBuf>,
+    r_source_status: &'a RSourceStatus,
+}
+
+/// Handle a `MetaCommandResult`, executing pager side effects as needed.
+///
+/// Returns `MetaAction::Exit` if the user wants to quit, otherwise `MetaAction::Continue`.
+/// This is the single place where all `MetaCommandResult` variants are dispatched,
+/// shared by both `Repl::run` (pre-R-init loop) and `read_console_callback` (main REPL).
+fn handle_meta_command_result(
+    result: MetaCommandResult,
+    ctx: &SessionInfoContext<'_>,
+) -> MetaAction {
+    match result {
+        MetaCommandResult::Handled | MetaCommandResult::ShellExecuted => MetaAction::Continue,
+        MetaCommandResult::Exit => MetaAction::Exit,
+        MetaCommandResult::Unknown(cmd) => {
+            arf_println!(
+                "Unknown command: {}. Type :commands for available commands.",
+                cmd
+            );
+            MetaAction::Continue
+        }
+        MetaCommandResult::Restart(version) => {
+            restart_process(version.as_deref());
+            MetaAction::Continue
+        }
+        MetaCommandResult::ShowHelpBrowser(query) => {
+            run_pager_help_browser(&query);
+            MetaAction::Continue
+        }
+        MetaCommandResult::ShowSessionInfo => {
+            with_ipc_alternate_guard(|| {
+                crate::pager::display_session_info(
+                    ctx.prompt_config,
+                    ctx.config_path,
+                    ctx.config_status,
+                    ctx.r_history_path,
+                    ctx.shell_history_path,
+                    ctx.r_source_status,
+                );
+            });
+            MetaAction::Continue
+        }
+        MetaCommandResult::ShowChangelog => {
+            with_ipc_alternate_guard(crate::pager::display_changelog);
+            MetaAction::Continue
+        }
+        MetaCommandResult::ShowHistoryBrowser { path, mode } => {
+            run_pager_history_browser(&path, mode);
+            MetaAction::Continue
+        }
+        MetaCommandResult::ShowHistorySchema => {
+            if let Err(e) =
+                with_ipc_alternate_guard(crate::pager::history_schema::show_schema_pager)
+            {
+                arf_println!("Error: {}", e);
+            }
+            MetaAction::Continue
         }
     }
 }
