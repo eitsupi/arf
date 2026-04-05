@@ -1278,7 +1278,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 ///
 /// Pagers that enter crossterm's alternate screen must be wrapped with this guard
 /// so that IPC requests are rejected immediately instead of hanging.
-/// Using a drop guard ensures the state is restored even if the closure panics.
+/// The drop guard also restores the state on panic unwind (where the panic strategy permits it).
 struct IpcAlternateGuard {
     was_alternate: bool,
 }
