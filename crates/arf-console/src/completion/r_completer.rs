@@ -1387,6 +1387,20 @@ mod tests {
     }
 
     #[test]
+    fn test_is_prefix_extension_bracket_not_extension() {
+        // "l[" extends "l" by "[" — bracket access changes completion context
+        let c = completer_with_cache("l", vec!["list".to_string()]);
+        assert!(!c.is_prefix_extension("l["));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_colon_not_extension() {
+        // "pkg::foo" extends "pkg:" by ":foo" — namespace operator, fresh fetch needed
+        let c = completer_with_cache("pkg:", vec!["pkg::foo".to_string()]);
+        assert!(!c.is_prefix_extension("pkg::foo"));
+    }
+
+    #[test]
     fn test_is_prefix_extension_no_cache() {
         let c = RCompleter::new();
         assert!(!c.is_prefix_extension("pri"));
