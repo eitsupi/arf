@@ -346,7 +346,19 @@ impl RCompleter {
         if let Some(cache) = &self.cache {
             // New token must start with the cached token
             // e.g., "pri" extends "pr", but "po" does not
-            new_token.starts_with(&cache.token) && new_token != cache.token
+            if !new_token.starts_with(&cache.token) || new_token == cache.token {
+                return false;
+            }
+            // Only reuse the cache when the extension consists solely of identifier
+            // characters (alphanumeric, `.`, `_`).  Structural operators such as `$`,
+            // `@`, `[`, or `:` change the completion context entirely, so a fresh
+            // fetch is required.
+            // Example: "l$a$" extends "l$" by "a$" — the `$` means we are now
+            // completing inside a nested list and the old completions are irrelevant.
+            let extension = &new_token[cache.token.len()..];
+            extension
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
         } else {
             false
         }
@@ -1320,5 +1332,63 @@ mod tests {
                 start_pos: 8,
             })
         );
+    }
+
+    // --- Prefix extension cache tests ---
+
+    fn completer_with_cache(token: &str, completions: Vec<String>) -> RCompleter {
+        let mut c = RCompleter::new();
+        c.cache = Some(CompletionCache {
+            token: token.to_string(),
+            completions,
+            timestamp: Instant::now(),
+        });
+        c
+    }
+
+    #[test]
+    fn test_is_prefix_extension_identifier_only() {
+        // "pri" extends "pr" — pure identifier extension, cache is valid
+        let c = completer_with_cache("pr", vec!["print".to_string()]);
+        assert!(c.is_prefix_extension("pri"));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_dot_underscore() {
+        // "my_f" extends "my_" and "st.g" extends "st." — dots/underscores are ok
+        let c = completer_with_cache("my_", vec!["my_func".to_string()]);
+        assert!(c.is_prefix_extension("my_f"));
+
+        let c = completer_with_cache("st.", vec!["st.geo".to_string()]);
+        assert!(c.is_prefix_extension("st.g"));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_dollar_sign_not_extension() {
+        // "l$a$" extends "l$" by "a$" — the `$` means a new $ access context;
+        // cached completions for "l$" ([l$a, l$b]) are irrelevant for "l$a$".
+        // This is the nested-list completion bug: must return false so fresh
+        // completions are fetched.
+        let c = completer_with_cache("l$", vec!["l$a".to_string(), "l$b".to_string()]);
+        assert!(!c.is_prefix_extension("l$a$"));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_at_sign_not_extension() {
+        // "obj@field$" extends "obj@" by "field$" — structural operator
+        let c = completer_with_cache("obj@", vec!["obj@slot".to_string()]);
+        assert!(!c.is_prefix_extension("obj@slot$"));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_same_token_not_extension() {
+        let c = completer_with_cache("pri", vec!["print".to_string()]);
+        assert!(!c.is_prefix_extension("pri"));
+    }
+
+    #[test]
+    fn test_is_prefix_extension_no_cache() {
+        let c = RCompleter::new();
+        assert!(!c.is_prefix_extension("pri"));
     }
 }
