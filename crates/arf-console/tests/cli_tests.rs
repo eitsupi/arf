@@ -528,7 +528,7 @@ fn test_script_file_function() {
         .output()
         .expect("Failed to run arf with script file");
 
-    assert!(output.status.success(), "arf script.R should succeed");
+    assert!(output.status.success(), "arf -f script.R should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -606,6 +606,23 @@ fn test_positional_script_rejected() {
     assert!(
         !output.status.success(),
         "positional script arg should be rejected"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        (stderr.contains("unrecognized subcommand")
+            || stderr.contains("unexpected argument")
+            || stderr.contains("unknown argument"))
+            && stderr.contains("some_script.R"),
+        "Should show a clap parse error for the positional script arg: {}",
+        stderr
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "positional script rejection should use clap's parse error exit code: stderr={}",
+        stderr
     );
 }
 
