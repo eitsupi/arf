@@ -344,21 +344,19 @@ impl RCompleter {
     /// Check if the new token extends the cached token (prefix extension).
     fn is_prefix_extension(&self, new_token: &str) -> bool {
         if let Some(cache) = &self.cache {
-            // New token must start with the cached token
-            // e.g., "pri" extends "pr", but "po" does not
-            if !new_token.starts_with(&cache.token) || new_token == cache.token {
-                return false;
-            }
             // Only reuse the cache when the extension consists solely of identifier
             // characters (alphanumeric, `.`, `_`).  Structural operators such as `$`,
             // `@`, `[`, or `:` change the completion context entirely, so a fresh
             // fetch is required.
             // Example: "l$a$" extends "l$" by "a$" — the `$` means we are now
             // completing inside a nested list and the old completions are irrelevant.
-            let extension = &new_token[cache.token.len()..];
-            extension
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+            let Some(extension) = new_token.strip_prefix(cache.token.as_str()) else {
+                return false;
+            };
+            !extension.is_empty()
+                && extension
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
         } else {
             false
         }
