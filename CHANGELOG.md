@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** Positional script argument (`arf file.R`) has been removed. Use `-f`/`--file` instead: `arf -f file.R`
+
 ### Fixed
 
 - **Experimental:** Place IPC Unix socket in `$XDG_RUNTIME_DIR/arf/` instead of `~/.cache/arf/sessions/`, which is the correct XDG location for runtime sockets. Falls back to a randomized temporary directory when `XDG_RUNTIME_DIR` is not set (e.g. macOS). The socket directory is now validated for safe ownership and permissions

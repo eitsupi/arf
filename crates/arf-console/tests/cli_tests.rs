@@ -498,11 +498,12 @@ fn test_script_file() {
     writeln!(file, "x + y").expect("Failed to write");
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg(file.path())
         .output()
         .expect("Failed to run arf with script file");
 
-    assert!(output.status.success(), "arf script.R should succeed");
+    assert!(output.status.success(), "arf -f script.R should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -522,11 +523,12 @@ fn test_script_file_function() {
     writeln!(file, "f(10)").expect("Failed to write");
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg(file.path())
         .output()
         .expect("Failed to run arf with script file");
 
-    assert!(output.status.success(), "arf script.R should succeed");
+    assert!(output.status.success(), "arf -f script.R should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -545,13 +547,14 @@ fn test_script_file_reprex() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
         .arg("--reprex")
+        .arg("-f")
         .arg(file.path())
         .output()
-        .expect("Failed to run arf --reprex script.R");
+        .expect("Failed to run arf --reprex -f script.R");
 
     assert!(
         output.status.success(),
-        "arf --reprex script.R should succeed"
+        "arf --reprex -f script.R should succeed"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -573,6 +576,7 @@ fn test_script_file_reprex() {
 #[test]
 fn test_script_file_not_found() {
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg("/nonexistent/path/to/script.R")
         .output()
         .expect("Failed to run arf");
@@ -586,6 +590,92 @@ fn test_script_file_not_found() {
     assert!(
         stderr.contains("Failed to read") || stderr.contains("No such file"),
         "Should show file not found error: {}",
+        stderr
+    );
+}
+
+/// Test that positional script argument is rejected (regression test).
+/// The old `arf file.R` syntax was removed; clap now rejects it as an unknown subcommand/argument.
+#[test]
+fn test_positional_script_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("some_script.R")
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        !output.status.success(),
+        "positional script arg should be rejected"
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "positional script rejection should use clap's parse error exit code"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("some_script.R"),
+        "Error should mention the offending token: {}",
+        stderr
+    );
+}
+
+/// Test that -e/--eval combined with a subcommand is rejected with exit code 2.
+#[test]
+fn test_eval_with_subcommand_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["-e", "1+1", "completions", "bash"])
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        !output.status.success(),
+        "--eval with subcommand should be rejected"
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--eval with subcommand should exit with code 2"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--eval")
+            && stderr.contains("cannot be used")
+            && stderr.contains("completions"),
+        "Should show conflict error mentioning --eval and the subcommand: {}",
+        stderr
+    );
+}
+
+/// Test that -f/--file combined with a subcommand is rejected with exit code 2.
+#[test]
+fn test_file_with_subcommand_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["-f", "some.R", "completions", "bash"])
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        !output.status.success(),
+        "--file with subcommand should be rejected"
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--file with subcommand should exit with code 2"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--file")
+            && stderr.contains("cannot be used")
+            && stderr.contains("completions"),
+        "Should show conflict error mentioning --file and the subcommand: {}",
         stderr
     );
 }

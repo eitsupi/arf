@@ -18,7 +18,7 @@ mod traps;
 mod test_utils;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction, RArgsBuilder};
 use config::{
     Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
@@ -277,6 +277,31 @@ fn run() -> Result<()> {
     // once based on the parsed command. This avoids the fragile pre-parse
     // detection that could miss global options before the subcommand.
     let cli = Cli::parse();
+
+    // Reject combinations of -f/--file or -e/--eval with a subcommand.
+    // clap cannot enforce this via conflicts_with because subcommand fields are
+    // not referenceable as argument IDs in the derive API.
+    if (cli.eval.is_some() || cli.file.is_some()) && cli.command.is_some() {
+        let flag = if cli.eval.is_some() {
+            "--eval"
+        } else {
+            "--file"
+        };
+        let subcommand = match &cli.command {
+            Some(Commands::Completions { .. }) => "completions",
+            Some(Commands::Config { .. }) => "config",
+            Some(Commands::History { .. }) => "history",
+            Some(Commands::Ipc { .. }) => "ipc",
+            Some(Commands::Headless { .. }) => "headless",
+            None => unreachable!(),
+        };
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!("the argument '{flag}' cannot be used with subcommand '{subcommand}'"),
+            )
+            .exit();
+    }
 
     // Extract log_file from headless command (if applicable) and initialize
     // the logger once. Non-headless modes use the default stderr target.
