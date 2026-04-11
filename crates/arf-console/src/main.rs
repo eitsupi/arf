@@ -18,7 +18,7 @@ mod traps;
 mod test_utils;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, ConfigAction, HistoryAction, ImportSource, IpcAction, RArgsBuilder};
 use config::{
     Config, ConfigLoadError, ConfigStatus, RSource, RSourceMode, RSourceStatus, config_file_path,
@@ -287,11 +287,12 @@ fn run() -> Result<()> {
         } else {
             "--file"
         };
-        let err = clap::Command::new("arf").error(
-            clap::error::ErrorKind::ArgumentConflict,
-            format!("the argument '{flag}' cannot be used with a subcommand"),
-        );
-        err.exit();
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!("the argument '{flag}' cannot be used with a subcommand"),
+            )
+            .exit();
     }
 
     // Extract log_file from headless command (if applicable) and initialize

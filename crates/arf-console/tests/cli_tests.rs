@@ -626,6 +626,60 @@ fn test_positional_script_rejected() {
     );
 }
 
+/// Test that -e/--eval combined with a subcommand is rejected with exit code 2.
+#[test]
+fn test_eval_with_subcommand_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["-e", "1+1", "completions", "bash"])
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        !output.status.success(),
+        "--eval with subcommand should be rejected"
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--eval with subcommand should exit with code 2"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--eval") && stderr.contains("cannot be used"),
+        "Should show conflict error mentioning --eval: {}",
+        stderr
+    );
+}
+
+/// Test that -f/--file combined with a subcommand is rejected with exit code 2.
+#[test]
+fn test_file_with_subcommand_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["-f", "some.R", "completions", "bash"])
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        !output.status.success(),
+        "--file with subcommand should be rejected"
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--file with subcommand should exit with code 2"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--file") && stderr.contains("cannot be used"),
+        "Should show conflict error mentioning --file: {}",
+        stderr
+    );
+}
+
 // ============================================================================
 // R Completion Tests (using R's internal completion functions)
 // ============================================================================
