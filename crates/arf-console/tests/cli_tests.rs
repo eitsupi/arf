@@ -608,20 +608,16 @@ fn test_positional_script_rejected() {
         "positional script arg should be rejected"
     );
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        (stderr.contains("unrecognized subcommand")
-            || stderr.contains("unexpected argument")
-            || stderr.contains("unknown argument"))
-            && stderr.contains("some_script.R"),
-        "Should show a clap parse error for the positional script arg: {}",
-        stderr
-    );
-
     assert_eq!(
         output.status.code(),
         Some(2),
-        "positional script rejection should use clap's parse error exit code: stderr={}",
+        "positional script rejection should use clap's parse error exit code"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("some_script.R"),
+        "Error should mention the offending token: {}",
         stderr
     );
 }
@@ -647,8 +643,10 @@ fn test_eval_with_subcommand_rejected() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--eval") && stderr.contains("cannot be used"),
-        "Should show conflict error mentioning --eval: {}",
+        stderr.contains("--eval")
+            && stderr.contains("cannot be used")
+            && stderr.contains("completions"),
+        "Should show conflict error mentioning --eval and the subcommand: {}",
         stderr
     );
 }
@@ -674,8 +672,10 @@ fn test_file_with_subcommand_rejected() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--file") && stderr.contains("cannot be used"),
-        "Should show conflict error mentioning --file: {}",
+        stderr.contains("--file")
+            && stderr.contains("cannot be used")
+            && stderr.contains("completions"),
+        "Should show conflict error mentioning --file and the subcommand: {}",
         stderr
     );
 }

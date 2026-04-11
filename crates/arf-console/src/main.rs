@@ -287,10 +287,18 @@ fn run() -> Result<()> {
         } else {
             "--file"
         };
+        let subcommand = match &cli.command {
+            Some(Commands::Completions { .. }) => "completions",
+            Some(Commands::Config { .. }) => "config",
+            Some(Commands::History { .. }) => "history",
+            Some(Commands::Ipc { .. }) => "ipc",
+            Some(Commands::Headless { .. }) => "headless",
+            None => unreachable!(),
+        };
         Cli::command()
             .error(
                 clap::error::ErrorKind::ArgumentConflict,
-                format!("the argument '{flag}' cannot be used with a subcommand"),
+                format!("the argument '{flag}' cannot be used with subcommand '{subcommand}'"),
             )
             .exit();
     }
