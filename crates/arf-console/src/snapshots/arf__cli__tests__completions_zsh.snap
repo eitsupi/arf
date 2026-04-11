@@ -21,8 +21,8 @@ _arf() {
     _arguments "${_arguments_options[@]}" : \
 '-e+[Evaluate R expression and exit]:EVAL:_default' \
 '--eval=[Evaluate R expression and exit]:EVAL:_default' \
-'-f+[\[R\] Take input from FILE]:FILE:_files' \
-'--file=[\[R\] Take input from FILE]:FILE:_files' \
+'(-e --eval)-f+[\[R\] Take input from FILE]:FILE:_files' \
+'(-e --eval)--file=[\[R\] Take input from FILE]:FILE:_files' \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \

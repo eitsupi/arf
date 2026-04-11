@@ -278,6 +278,22 @@ fn run() -> Result<()> {
     // detection that could miss global options before the subcommand.
     let cli = Cli::parse();
 
+    // Reject combinations of -f/--file or -e/--eval with a subcommand.
+    // clap cannot enforce this via conflicts_with because subcommand fields are
+    // not referenceable as argument IDs in the derive API.
+    if (cli.eval.is_some() || cli.file.is_some()) && cli.command.is_some() {
+        let flag = if cli.eval.is_some() {
+            "--eval"
+        } else {
+            "--file"
+        };
+        let err = clap::Command::new("arf").error(
+            clap::error::ErrorKind::ArgumentConflict,
+            format!("the argument '{flag}' cannot be used with a subcommand"),
+        );
+        err.exit();
+    }
+
     // Extract log_file from headless command (if applicable) and initialize
     // the logger once. Non-headless modes use the default stderr target.
     // In headless mode, also redirect stderr to the log file so that all

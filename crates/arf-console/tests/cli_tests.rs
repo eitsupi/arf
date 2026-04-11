@@ -595,7 +595,7 @@ fn test_script_file_not_found() {
 }
 
 /// Test that positional script argument is rejected (regression test).
-/// The old `arf file.R` syntax was removed; clap now treats it as an unknown subcommand.
+/// The old `arf file.R` syntax was removed; clap now rejects it as an unknown subcommand/argument.
 #[test]
 fn test_positional_script_rejected() {
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))

@@ -18,7 +18,7 @@ pub struct Cli {
     pub eval: Option<String>,
 
     /// [R] Take input from FILE
-    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, hide_short_help = true)]
+    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, conflicts_with = "eval", hide_short_help = true)]
     pub file: Option<PathBuf>,
 
     /// Enable reprex mode (no prompt, output prefixed with #>)
