@@ -89,7 +89,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
-":: :_arf__config_commands" \
+":: :_arf__subcmd__config_commands" \
 "*::: :->config" \
 && ret=0
 
@@ -117,7 +117,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__config__help_commands" \
+":: :_arf__subcmd__config__subcmd__help_commands" \
 "*::: :->help" \
 && ret=0
 
@@ -151,7 +151,7 @@ esac
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
-":: :_arf__history_commands" \
+":: :_arf__subcmd__history_commands" \
 "*::: :->history" \
 && ret=0
 
@@ -194,7 +194,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__history__help_commands" \
+":: :_arf__subcmd__history__subcmd__help_commands" \
 "*::: :->help" \
 && ret=0
 
@@ -232,7 +232,7 @@ esac
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
-":: :_arf__ipc_commands" \
+":: :_arf__subcmd__ipc_commands" \
 "*::: :->ipc" \
 && ret=0
 
@@ -294,7 +294,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__ipc__help_commands" \
+":: :_arf__subcmd__ipc__subcmd__help_commands" \
 "*::: :->help" \
 && ret=0
 
@@ -367,7 +367,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__help_commands" \
+":: :_arf__subcmd__help_commands" \
 "*::: :->help" \
 && ret=0
 
@@ -383,7 +383,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (config)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__help__config_commands" \
+":: :_arf__subcmd__help__subcmd__config_commands" \
 "*::: :->config" \
 && ret=0
 
@@ -407,7 +407,7 @@ esac
 ;;
 (history)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__help__history_commands" \
+":: :_arf__subcmd__help__subcmd__history_commands" \
 "*::: :->history" \
 && ret=0
 
@@ -435,7 +435,7 @@ esac
 ;;
 (ipc)
 _arguments "${_arguments_options[@]}" : \
-":: :_arf__help__ipc_commands" \
+":: :_arf__subcmd__help__subcmd__ipc_commands" \
 "*::: :->ipc" \
 && ret=0
 
@@ -502,13 +502,13 @@ _arf_commands() {
     )
     _describe -t commands 'arf commands' commands "$@"
 }
-(( $+functions[_arf__completions_commands] )) ||
-_arf__completions_commands() {
+(( $+functions[_arf__subcmd__completions_commands] )) ||
+_arf__subcmd__completions_commands() {
     local commands; commands=()
     _describe -t commands 'arf completions commands' commands "$@"
 }
-(( $+functions[_arf__config_commands] )) ||
-_arf__config_commands() {
+(( $+functions[_arf__subcmd__config_commands] )) ||
+_arf__subcmd__config_commands() {
     local commands; commands=(
 'init:Generate a default configuration file' \
 'check:Validate the configuration file' \
@@ -516,13 +516,13 @@ _arf__config_commands() {
     )
     _describe -t commands 'arf config commands' commands "$@"
 }
-(( $+functions[_arf__config__check_commands] )) ||
-_arf__config__check_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__check_commands] )) ||
+_arf__subcmd__config__subcmd__check_commands() {
     local commands; commands=()
     _describe -t commands 'arf config check commands' commands "$@"
 }
-(( $+functions[_arf__config__help_commands] )) ||
-_arf__config__help_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__help_commands] )) ||
+_arf__subcmd__config__subcmd__help_commands() {
     local commands; commands=(
 'init:Generate a default configuration file' \
 'check:Validate the configuration file' \
@@ -530,33 +530,33 @@ _arf__config__help_commands() {
     )
     _describe -t commands 'arf config help commands' commands "$@"
 }
-(( $+functions[_arf__config__help__check_commands] )) ||
-_arf__config__help__check_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__help__subcmd__check_commands] )) ||
+_arf__subcmd__config__subcmd__help__subcmd__check_commands() {
     local commands; commands=()
     _describe -t commands 'arf config help check commands' commands "$@"
 }
-(( $+functions[_arf__config__help__help_commands] )) ||
-_arf__config__help__help_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__help__subcmd__help_commands] )) ||
+_arf__subcmd__config__subcmd__help__subcmd__help_commands() {
     local commands; commands=()
     _describe -t commands 'arf config help help commands' commands "$@"
 }
-(( $+functions[_arf__config__help__init_commands] )) ||
-_arf__config__help__init_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__help__subcmd__init_commands] )) ||
+_arf__subcmd__config__subcmd__help__subcmd__init_commands() {
     local commands; commands=()
     _describe -t commands 'arf config help init commands' commands "$@"
 }
-(( $+functions[_arf__config__init_commands] )) ||
-_arf__config__init_commands() {
+(( $+functions[_arf__subcmd__config__subcmd__init_commands] )) ||
+_arf__subcmd__config__subcmd__init_commands() {
     local commands; commands=()
     _describe -t commands 'arf config init commands' commands "$@"
 }
-(( $+functions[_arf__headless_commands] )) ||
-_arf__headless_commands() {
+(( $+functions[_arf__subcmd__headless_commands] )) ||
+_arf__subcmd__headless_commands() {
     local commands; commands=()
     _describe -t commands 'arf headless commands' commands "$@"
 }
-(( $+functions[_arf__help_commands] )) ||
-_arf__help_commands() {
+(( $+functions[_arf__subcmd__help_commands] )) ||
+_arf__subcmd__help_commands() {
     local commands; commands=(
 'completions:Generate shell completion scripts' \
 'config:Configuration management' \
@@ -567,41 +567,41 @@ _arf__help_commands() {
     )
     _describe -t commands 'arf help commands' commands "$@"
 }
-(( $+functions[_arf__help__completions_commands] )) ||
-_arf__help__completions_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__completions_commands] )) ||
+_arf__subcmd__help__subcmd__completions_commands() {
     local commands; commands=()
     _describe -t commands 'arf help completions commands' commands "$@"
 }
-(( $+functions[_arf__help__config_commands] )) ||
-_arf__help__config_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__config_commands] )) ||
+_arf__subcmd__help__subcmd__config_commands() {
     local commands; commands=(
 'init:Generate a default configuration file' \
 'check:Validate the configuration file' \
     )
     _describe -t commands 'arf help config commands' commands "$@"
 }
-(( $+functions[_arf__help__config__check_commands] )) ||
-_arf__help__config__check_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__config__subcmd__check_commands] )) ||
+_arf__subcmd__help__subcmd__config__subcmd__check_commands() {
     local commands; commands=()
     _describe -t commands 'arf help config check commands' commands "$@"
 }
-(( $+functions[_arf__help__config__init_commands] )) ||
-_arf__help__config__init_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__config__subcmd__init_commands] )) ||
+_arf__subcmd__help__subcmd__config__subcmd__init_commands() {
     local commands; commands=()
     _describe -t commands 'arf help config init commands' commands "$@"
 }
-(( $+functions[_arf__help__headless_commands] )) ||
-_arf__help__headless_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__headless_commands] )) ||
+_arf__subcmd__help__subcmd__headless_commands() {
     local commands; commands=()
     _describe -t commands 'arf help headless commands' commands "$@"
 }
-(( $+functions[_arf__help__help_commands] )) ||
-_arf__help__help_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__help_commands] )) ||
+_arf__subcmd__help__subcmd__help_commands() {
     local commands; commands=()
     _describe -t commands 'arf help help commands' commands "$@"
 }
-(( $+functions[_arf__help__history_commands] )) ||
-_arf__help__history_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__history_commands] )) ||
+_arf__subcmd__help__subcmd__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
@@ -609,23 +609,23 @@ _arf__help__history_commands() {
     )
     _describe -t commands 'arf help history commands' commands "$@"
 }
-(( $+functions[_arf__help__history__export_commands] )) ||
-_arf__help__history__export_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__history__subcmd__export_commands] )) ||
+_arf__subcmd__help__subcmd__history__subcmd__export_commands() {
     local commands; commands=()
     _describe -t commands 'arf help history export commands' commands "$@"
 }
-(( $+functions[_arf__help__history__import_commands] )) ||
-_arf__help__history__import_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__history__subcmd__import_commands] )) ||
+_arf__subcmd__help__subcmd__history__subcmd__import_commands() {
     local commands; commands=()
     _describe -t commands 'arf help history import commands' commands "$@"
 }
-(( $+functions[_arf__help__history__schema_commands] )) ||
-_arf__help__history__schema_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__history__subcmd__schema_commands] )) ||
+_arf__subcmd__help__subcmd__history__subcmd__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf help history schema commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc_commands] )) ||
-_arf__help__ipc_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc_commands] )) ||
+_arf__subcmd__help__subcmd__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions as JSON' \
 'eval:Evaluate R code and return captured output as JSON' \
@@ -636,38 +636,38 @@ _arf__help__ipc_commands() {
     )
     _describe -t commands 'arf help ipc commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__eval_commands] )) ||
-_arf__help__ipc__eval_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__eval_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__eval_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc eval commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__history_commands] )) ||
-_arf__help__ipc__history_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__history_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__history_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc history commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__list_commands] )) ||
-_arf__help__ipc__list_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__list_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc list commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__send_commands] )) ||
-_arf__help__ipc__send_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__send_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc send commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__session_commands] )) ||
-_arf__help__ipc__session_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__session_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__session_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc session commands' commands "$@"
 }
-(( $+functions[_arf__help__ipc__shutdown_commands] )) ||
-_arf__help__ipc__shutdown_commands() {
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__shutdown_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__shutdown_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc shutdown commands' commands "$@"
 }
-(( $+functions[_arf__history_commands] )) ||
-_arf__history_commands() {
+(( $+functions[_arf__subcmd__history_commands] )) ||
+_arf__subcmd__history_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
@@ -676,13 +676,13 @@ _arf__history_commands() {
     )
     _describe -t commands 'arf history commands' commands "$@"
 }
-(( $+functions[_arf__history__export_commands] )) ||
-_arf__history__export_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__export_commands] )) ||
+_arf__subcmd__history__subcmd__export_commands() {
     local commands; commands=()
     _describe -t commands 'arf history export commands' commands "$@"
 }
-(( $+functions[_arf__history__help_commands] )) ||
-_arf__history__help_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__help_commands] )) ||
+_arf__subcmd__history__subcmd__help_commands() {
     local commands; commands=(
 'schema:Display history database schema and example R code' \
 'import:Import history from another source (experimental)' \
@@ -691,38 +691,38 @@ _arf__history__help_commands() {
     )
     _describe -t commands 'arf history help commands' commands "$@"
 }
-(( $+functions[_arf__history__help__export_commands] )) ||
-_arf__history__help__export_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__help__subcmd__export_commands] )) ||
+_arf__subcmd__history__subcmd__help__subcmd__export_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help export commands' commands "$@"
 }
-(( $+functions[_arf__history__help__help_commands] )) ||
-_arf__history__help__help_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__help__subcmd__help_commands] )) ||
+_arf__subcmd__history__subcmd__help__subcmd__help_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help help commands' commands "$@"
 }
-(( $+functions[_arf__history__help__import_commands] )) ||
-_arf__history__help__import_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__help__subcmd__import_commands] )) ||
+_arf__subcmd__history__subcmd__help__subcmd__import_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help import commands' commands "$@"
 }
-(( $+functions[_arf__history__help__schema_commands] )) ||
-_arf__history__help__schema_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__help__subcmd__schema_commands] )) ||
+_arf__subcmd__history__subcmd__help__subcmd__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf history help schema commands' commands "$@"
 }
-(( $+functions[_arf__history__import_commands] )) ||
-_arf__history__import_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__import_commands] )) ||
+_arf__subcmd__history__subcmd__import_commands() {
     local commands; commands=()
     _describe -t commands 'arf history import commands' commands "$@"
 }
-(( $+functions[_arf__history__schema_commands] )) ||
-_arf__history__schema_commands() {
+(( $+functions[_arf__subcmd__history__subcmd__schema_commands] )) ||
+_arf__subcmd__history__subcmd__schema_commands() {
     local commands; commands=()
     _describe -t commands 'arf history schema commands' commands "$@"
 }
-(( $+functions[_arf__ipc_commands] )) ||
-_arf__ipc_commands() {
+(( $+functions[_arf__subcmd__ipc_commands] )) ||
+_arf__subcmd__ipc_commands() {
     local commands; commands=(
 'list:List active arf sessions as JSON' \
 'eval:Evaluate R code and return captured output as JSON' \
@@ -734,13 +734,13 @@ _arf__ipc_commands() {
     )
     _describe -t commands 'arf ipc commands' commands "$@"
 }
-(( $+functions[_arf__ipc__eval_commands] )) ||
-_arf__ipc__eval_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__eval_commands] )) ||
+_arf__subcmd__ipc__subcmd__eval_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc eval commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help_commands] )) ||
-_arf__ipc__help_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help_commands] )) ||
+_arf__subcmd__ipc__subcmd__help_commands() {
     local commands; commands=(
 'list:List active arf sessions as JSON' \
 'eval:Evaluate R code and return captured output as JSON' \
@@ -752,63 +752,63 @@ _arf__ipc__help_commands() {
     )
     _describe -t commands 'arf ipc help commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__eval_commands] )) ||
-_arf__ipc__help__eval_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__eval_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__eval_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help eval commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__help_commands] )) ||
-_arf__ipc__help__help_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__help_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__help_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help help commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__history_commands] )) ||
-_arf__ipc__help__history_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__history_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__history_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help history commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__list_commands] )) ||
-_arf__ipc__help__list_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__list_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help list commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__send_commands] )) ||
-_arf__ipc__help__send_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__send_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help send commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__session_commands] )) ||
-_arf__ipc__help__session_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__session_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__session_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help session commands' commands "$@"
 }
-(( $+functions[_arf__ipc__help__shutdown_commands] )) ||
-_arf__ipc__help__shutdown_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__shutdown_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__shutdown_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help shutdown commands' commands "$@"
 }
-(( $+functions[_arf__ipc__history_commands] )) ||
-_arf__ipc__history_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__history_commands] )) ||
+_arf__subcmd__ipc__subcmd__history_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc history commands' commands "$@"
 }
-(( $+functions[_arf__ipc__list_commands] )) ||
-_arf__ipc__list_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__list_commands] )) ||
+_arf__subcmd__ipc__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc list commands' commands "$@"
 }
-(( $+functions[_arf__ipc__send_commands] )) ||
-_arf__ipc__send_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__send_commands] )) ||
+_arf__subcmd__ipc__subcmd__send_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc send commands' commands "$@"
 }
-(( $+functions[_arf__ipc__session_commands] )) ||
-_arf__ipc__session_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__session_commands] )) ||
+_arf__subcmd__ipc__subcmd__session_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc session commands' commands "$@"
 }
-(( $+functions[_arf__ipc__shutdown_commands] )) ||
-_arf__ipc__shutdown_commands() {
+(( $+functions[_arf__subcmd__ipc__subcmd__shutdown_commands] )) ||
+_arf__subcmd__ipc__subcmd__shutdown_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc shutdown commands' commands "$@"
 }

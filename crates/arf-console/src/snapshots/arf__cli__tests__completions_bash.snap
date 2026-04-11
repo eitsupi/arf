@@ -21,157 +21,157 @@ _arf() {
                 cmd="arf"
                 ;;
             arf,completions)
-                cmd="arf__completions"
+                cmd="arf__subcmd__completions"
                 ;;
             arf,config)
-                cmd="arf__config"
+                cmd="arf__subcmd__config"
                 ;;
             arf,headless)
-                cmd="arf__headless"
+                cmd="arf__subcmd__headless"
                 ;;
             arf,help)
-                cmd="arf__help"
+                cmd="arf__subcmd__help"
                 ;;
             arf,history)
-                cmd="arf__history"
+                cmd="arf__subcmd__history"
                 ;;
             arf,ipc)
-                cmd="arf__ipc"
+                cmd="arf__subcmd__ipc"
                 ;;
-            arf__config,check)
-                cmd="arf__config__check"
+            arf__subcmd__config,check)
+                cmd="arf__subcmd__config__subcmd__check"
                 ;;
-            arf__config,help)
-                cmd="arf__config__help"
+            arf__subcmd__config,help)
+                cmd="arf__subcmd__config__subcmd__help"
                 ;;
-            arf__config,init)
-                cmd="arf__config__init"
+            arf__subcmd__config,init)
+                cmd="arf__subcmd__config__subcmd__init"
                 ;;
-            arf__config__help,check)
-                cmd="arf__config__help__check"
+            arf__subcmd__config__subcmd__help,check)
+                cmd="arf__subcmd__config__subcmd__help__subcmd__check"
                 ;;
-            arf__config__help,help)
-                cmd="arf__config__help__help"
+            arf__subcmd__config__subcmd__help,help)
+                cmd="arf__subcmd__config__subcmd__help__subcmd__help"
                 ;;
-            arf__config__help,init)
-                cmd="arf__config__help__init"
+            arf__subcmd__config__subcmd__help,init)
+                cmd="arf__subcmd__config__subcmd__help__subcmd__init"
                 ;;
-            arf__help,completions)
-                cmd="arf__help__completions"
+            arf__subcmd__help,completions)
+                cmd="arf__subcmd__help__subcmd__completions"
                 ;;
-            arf__help,config)
-                cmd="arf__help__config"
+            arf__subcmd__help,config)
+                cmd="arf__subcmd__help__subcmd__config"
                 ;;
-            arf__help,headless)
-                cmd="arf__help__headless"
+            arf__subcmd__help,headless)
+                cmd="arf__subcmd__help__subcmd__headless"
                 ;;
-            arf__help,help)
-                cmd="arf__help__help"
+            arf__subcmd__help,help)
+                cmd="arf__subcmd__help__subcmd__help"
                 ;;
-            arf__help,history)
-                cmd="arf__help__history"
+            arf__subcmd__help,history)
+                cmd="arf__subcmd__help__subcmd__history"
                 ;;
-            arf__help,ipc)
-                cmd="arf__help__ipc"
+            arf__subcmd__help,ipc)
+                cmd="arf__subcmd__help__subcmd__ipc"
                 ;;
-            arf__help__config,check)
-                cmd="arf__help__config__check"
+            arf__subcmd__help__subcmd__config,check)
+                cmd="arf__subcmd__help__subcmd__config__subcmd__check"
                 ;;
-            arf__help__config,init)
-                cmd="arf__help__config__init"
+            arf__subcmd__help__subcmd__config,init)
+                cmd="arf__subcmd__help__subcmd__config__subcmd__init"
                 ;;
-            arf__help__history,export)
-                cmd="arf__help__history__export"
+            arf__subcmd__help__subcmd__history,export)
+                cmd="arf__subcmd__help__subcmd__history__subcmd__export"
                 ;;
-            arf__help__history,import)
-                cmd="arf__help__history__import"
+            arf__subcmd__help__subcmd__history,import)
+                cmd="arf__subcmd__help__subcmd__history__subcmd__import"
                 ;;
-            arf__help__history,schema)
-                cmd="arf__help__history__schema"
+            arf__subcmd__help__subcmd__history,schema)
+                cmd="arf__subcmd__help__subcmd__history__subcmd__schema"
                 ;;
-            arf__help__ipc,eval)
-                cmd="arf__help__ipc__eval"
+            arf__subcmd__help__subcmd__ipc,eval)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__eval"
                 ;;
-            arf__help__ipc,history)
-                cmd="arf__help__ipc__history"
+            arf__subcmd__help__subcmd__ipc,history)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__history"
                 ;;
-            arf__help__ipc,list)
-                cmd="arf__help__ipc__list"
+            arf__subcmd__help__subcmd__ipc,list)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__list"
                 ;;
-            arf__help__ipc,send)
-                cmd="arf__help__ipc__send"
+            arf__subcmd__help__subcmd__ipc,send)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__send"
                 ;;
-            arf__help__ipc,session)
-                cmd="arf__help__ipc__session"
+            arf__subcmd__help__subcmd__ipc,session)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__session"
                 ;;
-            arf__help__ipc,shutdown)
-                cmd="arf__help__ipc__shutdown"
+            arf__subcmd__help__subcmd__ipc,shutdown)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__shutdown"
                 ;;
-            arf__history,export)
-                cmd="arf__history__export"
+            arf__subcmd__history,export)
+                cmd="arf__subcmd__history__subcmd__export"
                 ;;
-            arf__history,help)
-                cmd="arf__history__help"
+            arf__subcmd__history,help)
+                cmd="arf__subcmd__history__subcmd__help"
                 ;;
-            arf__history,import)
-                cmd="arf__history__import"
+            arf__subcmd__history,import)
+                cmd="arf__subcmd__history__subcmd__import"
                 ;;
-            arf__history,schema)
-                cmd="arf__history__schema"
+            arf__subcmd__history,schema)
+                cmd="arf__subcmd__history__subcmd__schema"
                 ;;
-            arf__history__help,export)
-                cmd="arf__history__help__export"
+            arf__subcmd__history__subcmd__help,export)
+                cmd="arf__subcmd__history__subcmd__help__subcmd__export"
                 ;;
-            arf__history__help,help)
-                cmd="arf__history__help__help"
+            arf__subcmd__history__subcmd__help,help)
+                cmd="arf__subcmd__history__subcmd__help__subcmd__help"
                 ;;
-            arf__history__help,import)
-                cmd="arf__history__help__import"
+            arf__subcmd__history__subcmd__help,import)
+                cmd="arf__subcmd__history__subcmd__help__subcmd__import"
                 ;;
-            arf__history__help,schema)
-                cmd="arf__history__help__schema"
+            arf__subcmd__history__subcmd__help,schema)
+                cmd="arf__subcmd__history__subcmd__help__subcmd__schema"
                 ;;
-            arf__ipc,eval)
-                cmd="arf__ipc__eval"
+            arf__subcmd__ipc,eval)
+                cmd="arf__subcmd__ipc__subcmd__eval"
                 ;;
-            arf__ipc,help)
-                cmd="arf__ipc__help"
+            arf__subcmd__ipc,help)
+                cmd="arf__subcmd__ipc__subcmd__help"
                 ;;
-            arf__ipc,history)
-                cmd="arf__ipc__history"
+            arf__subcmd__ipc,history)
+                cmd="arf__subcmd__ipc__subcmd__history"
                 ;;
-            arf__ipc,list)
-                cmd="arf__ipc__list"
+            arf__subcmd__ipc,list)
+                cmd="arf__subcmd__ipc__subcmd__list"
                 ;;
-            arf__ipc,send)
-                cmd="arf__ipc__send"
+            arf__subcmd__ipc,send)
+                cmd="arf__subcmd__ipc__subcmd__send"
                 ;;
-            arf__ipc,session)
-                cmd="arf__ipc__session"
+            arf__subcmd__ipc,session)
+                cmd="arf__subcmd__ipc__subcmd__session"
                 ;;
-            arf__ipc,shutdown)
-                cmd="arf__ipc__shutdown"
+            arf__subcmd__ipc,shutdown)
+                cmd="arf__subcmd__ipc__subcmd__shutdown"
                 ;;
-            arf__ipc__help,eval)
-                cmd="arf__ipc__help__eval"
+            arf__subcmd__ipc__subcmd__help,eval)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__eval"
                 ;;
-            arf__ipc__help,help)
-                cmd="arf__ipc__help__help"
+            arf__subcmd__ipc__subcmd__help,help)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__help"
                 ;;
-            arf__ipc__help,history)
-                cmd="arf__ipc__help__history"
+            arf__subcmd__ipc__subcmd__help,history)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__history"
                 ;;
-            arf__ipc__help,list)
-                cmd="arf__ipc__help__list"
+            arf__subcmd__ipc__subcmd__help,list)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__list"
                 ;;
-            arf__ipc__help,send)
-                cmd="arf__ipc__help__send"
+            arf__subcmd__ipc__subcmd__help,send)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__send"
                 ;;
-            arf__ipc__help,session)
-                cmd="arf__ipc__help__session"
+            arf__subcmd__ipc__subcmd__help,session)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__session"
                 ;;
-            arf__ipc__help,shutdown)
-                cmd="arf__ipc__help__shutdown"
+            arf__subcmd__ipc__subcmd__help,shutdown)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__shutdown"
                 ;;
             *)
                 ;;
@@ -323,7 +323,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__completions)
+        arf__subcmd__completions)
             opts="-h --help bash elvish fish powershell zsh"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -337,7 +337,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config)
+        arf__subcmd__config)
             opts="-h --help init check help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -351,7 +351,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__check)
+        arf__subcmd__config__subcmd__check)
             opts="-c -h --config --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -395,7 +395,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__help)
+        arf__subcmd__config__subcmd__help)
             opts="init check help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -409,7 +409,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__help__check)
+        arf__subcmd__config__subcmd__help__subcmd__check)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -423,7 +423,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__help__help)
+        arf__subcmd__config__subcmd__help__subcmd__help)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -437,7 +437,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__help__init)
+        arf__subcmd__config__subcmd__help__subcmd__init)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -451,7 +451,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__config__init)
+        arf__subcmd__config__subcmd__init)
             opts="-f -h --force --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -465,7 +465,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__headless)
+        arf__subcmd__headless)
             opts="-c -h --config --with-r-version --r-home --bind --pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --history-dir --no-history --min-nsize --min-vsize --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -588,7 +588,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help)
+        arf__subcmd__help)
             opts="completions config history ipc headless help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -602,7 +602,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__completions)
+        arf__subcmd__help__subcmd__completions)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -616,7 +616,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__config)
+        arf__subcmd__help__subcmd__config)
             opts="init check"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -630,7 +630,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__config__check)
+        arf__subcmd__help__subcmd__config__subcmd__check)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -644,7 +644,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__config__init)
+        arf__subcmd__help__subcmd__config__subcmd__init)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -658,7 +658,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__headless)
+        arf__subcmd__help__subcmd__headless)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -672,7 +672,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__help)
+        arf__subcmd__help__subcmd__help)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -686,7 +686,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__history)
+        arf__subcmd__help__subcmd__history)
             opts="schema import export"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -700,7 +700,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__history__export)
+        arf__subcmd__help__subcmd__history__subcmd__export)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -714,7 +714,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__history__import)
+        arf__subcmd__help__subcmd__history__subcmd__import)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -728,7 +728,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__history__schema)
+        arf__subcmd__help__subcmd__history__subcmd__schema)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -742,7 +742,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc)
+        arf__subcmd__help__subcmd__ipc)
             opts="list eval send session shutdown history"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -756,7 +756,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__eval)
+        arf__subcmd__help__subcmd__ipc__subcmd__eval)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -770,7 +770,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__history)
+        arf__subcmd__help__subcmd__ipc__subcmd__history)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -784,7 +784,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__list)
+        arf__subcmd__help__subcmd__ipc__subcmd__list)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -798,7 +798,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__send)
+        arf__subcmd__help__subcmd__ipc__subcmd__send)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -812,7 +812,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__session)
+        arf__subcmd__help__subcmd__ipc__subcmd__session)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -826,7 +826,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__help__ipc__shutdown)
+        arf__subcmd__help__subcmd__ipc__subcmd__shutdown)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -840,7 +840,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history)
+        arf__subcmd__history)
             opts="-h --help schema import export help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -854,7 +854,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__export)
+        arf__subcmd__history__subcmd__export)
             opts="-h --file --r-table --shell-table --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -891,7 +891,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help)
+        arf__subcmd__history__subcmd__help)
             opts="schema import export help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -905,7 +905,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help__export)
+        arf__subcmd__history__subcmd__help__subcmd__export)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -919,7 +919,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help__help)
+        arf__subcmd__history__subcmd__help__subcmd__help)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -933,7 +933,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help__import)
+        arf__subcmd__history__subcmd__help__subcmd__import)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -947,7 +947,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__help__schema)
+        arf__subcmd__history__subcmd__help__subcmd__schema)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -961,7 +961,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__import)
+        arf__subcmd__history__subcmd__import)
             opts="-h --from --file --hostname --dry-run --import-duplicates --unified --r-table --shell-table --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1006,7 +1006,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__history__schema)
+        arf__subcmd__history__subcmd__schema)
             opts="-h --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1020,7 +1020,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc)
+        arf__subcmd__ipc)
             opts="-h --help list eval send session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1034,7 +1034,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__eval)
+        arf__subcmd__ipc__subcmd__eval)
             opts="-h --pid --visible --timeout --help <CODE>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1056,7 +1056,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help)
+        arf__subcmd__ipc__subcmd__help)
             opts="list eval send session shutdown history help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1070,7 +1070,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__eval)
+        arf__subcmd__ipc__subcmd__help__subcmd__eval)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1084,7 +1084,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__help)
+        arf__subcmd__ipc__subcmd__help__subcmd__help)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1098,7 +1098,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__history)
+        arf__subcmd__ipc__subcmd__help__subcmd__history)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1112,7 +1112,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__list)
+        arf__subcmd__ipc__subcmd__help__subcmd__list)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1126,7 +1126,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__send)
+        arf__subcmd__ipc__subcmd__help__subcmd__send)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1140,7 +1140,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__session)
+        arf__subcmd__ipc__subcmd__help__subcmd__session)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1154,7 +1154,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__help__shutdown)
+        arf__subcmd__ipc__subcmd__help__subcmd__shutdown)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1168,7 +1168,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__history)
+        arf__subcmd__ipc__subcmd__history)
             opts="-h --limit --all-sessions --cwd --grep --since --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1202,7 +1202,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__list)
+        arf__subcmd__ipc__subcmd__list)
             opts="-h --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1216,7 +1216,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__send)
+        arf__subcmd__ipc__subcmd__send)
             opts="-h --pid --help <CODE>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1234,7 +1234,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__session)
+        arf__subcmd__ipc__subcmd__session)
             opts="-h --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1252,7 +1252,7 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__ipc__shutdown)
+        arf__subcmd__ipc__subcmd__shutdown)
             opts="-h --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
