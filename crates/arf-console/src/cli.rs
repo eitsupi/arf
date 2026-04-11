@@ -13,16 +13,12 @@ use std::path::PathBuf;
 #[command(name = "arf")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// R script file to execute (non-interactive mode)
-    #[arg(value_hint = ValueHint::FilePath, conflicts_with = "file")]
-    pub script: Option<PathBuf>,
-
     /// Evaluate R expression and exit
     #[arg(short = 'e', long = "eval")]
     pub eval: Option<String>,
 
-    /// [R] Take input from FILE (same as positional SCRIPT argument)
-    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, conflicts_with = "script", hide_short_help = true)]
+    /// [R] Take input from FILE
+    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, hide_short_help = true)]
     pub file: Option<PathBuf>,
 
     /// Enable reprex mode (no prompt, output prefixed with #>)
@@ -792,9 +788,9 @@ impl Cli {
         Some(values)
     }
 
-    /// Returns the script file path from either `-f`/`--file` or the positional argument.
+    /// Returns the script file path from `-f`/`--file`.
     pub fn script_file(&self) -> Option<&PathBuf> {
-        self.script.as_ref().or(self.file.as_ref())
+        self.file.as_ref()
     }
 
     /// Generate R initialization arguments based on CLI flags.

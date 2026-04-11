@@ -498,11 +498,12 @@ fn test_script_file() {
     writeln!(file, "x + y").expect("Failed to write");
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg(file.path())
         .output()
         .expect("Failed to run arf with script file");
 
-    assert!(output.status.success(), "arf script.R should succeed");
+    assert!(output.status.success(), "arf -f script.R should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -522,6 +523,7 @@ fn test_script_file_function() {
     writeln!(file, "f(10)").expect("Failed to write");
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg(file.path())
         .output()
         .expect("Failed to run arf with script file");
@@ -545,13 +547,14 @@ fn test_script_file_reprex() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
         .arg("--reprex")
+        .arg("-f")
         .arg(file.path())
         .output()
-        .expect("Failed to run arf --reprex script.R");
+        .expect("Failed to run arf --reprex -f script.R");
 
     assert!(
         output.status.success(),
-        "arf --reprex script.R should succeed"
+        "arf --reprex -f script.R should succeed"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -573,6 +576,7 @@ fn test_script_file_reprex() {
 #[test]
 fn test_script_file_not_found() {
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .arg("-f")
         .arg("/nonexistent/path/to/script.R")
         .output()
         .expect("Failed to run arf");

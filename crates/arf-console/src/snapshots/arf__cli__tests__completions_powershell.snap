@@ -27,8 +27,8 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         'arf' {
             [CompletionResult]::new('-e', '-e', [CompletionResultType]::ParameterName, 'Evaluate R expression and exit')
             [CompletionResult]::new('--eval', '--eval', [CompletionResultType]::ParameterName, 'Evaluate R expression and exit')
-            [CompletionResult]::new('-f', '-f', [CompletionResultType]::ParameterName, '[R] Take input from FILE (same as positional SCRIPT argument)')
-            [CompletionResult]::new('--file', '--file', [CompletionResultType]::ParameterName, '[R] Take input from FILE (same as positional SCRIPT argument)')
+            [CompletionResult]::new('-f', '-f', [CompletionResultType]::ParameterName, '[R] Take input from FILE')
+            [CompletionResult]::new('--file', '--file', [CompletionResultType]::ParameterName, '[R] Take input from FILE')
             [CompletionResult]::new('-c', '-c', [CompletionResultType]::ParameterName, 'Path to configuration file')
             [CompletionResult]::new('--config', '--config', [CompletionResultType]::ParameterName, 'Path to configuration file')
             [CompletionResult]::new('--with-r-version', '--with-r-version', [CompletionResultType]::ParameterName, 'R version to use via rig (overrides r_source config)')

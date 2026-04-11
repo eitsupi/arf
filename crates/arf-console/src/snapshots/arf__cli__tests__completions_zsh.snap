@@ -21,8 +21,8 @@ _arf() {
     _arguments "${_arguments_options[@]}" : \
 '-e+[Evaluate R expression and exit]:EVAL:_default' \
 '--eval=[Evaluate R expression and exit]:EVAL:_default' \
-'()-f+[\[R\] Take input from FILE (same as positional SCRIPT argument)]:FILE:_files' \
-'()--file=[\[R\] Take input from FILE (same as positional SCRIPT argument)]:FILE:_files' \
+'-f+[\[R\] Take input from FILE]:FILE:_files' \
+'--file=[\[R\] Take input from FILE]:FILE:_files' \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--r-home)--with-r-version=[R version to use via rig (overrides r_source config)]:R_VERSION:_default' \
@@ -69,16 +69,15 @@ _arf() {
 '--help[Print help (see more with '\''--help'\'')]' \
 '-V[Print version]' \
 '--version[Print version]' \
-'::script -- R script file to execute (non-interactive mode):_files' \
 ":: :_arf_commands" \
 "*::: :->arf" \
 && ret=0
     case $state in
     (arf)
-        words=($line[2] "${words[@]}")
+        words=($line[1] "${words[@]}")
         (( CURRENT += 1 ))
-        curcontext="${curcontext%:*:*}:arf-command-$line[2]:"
-        case $line[2] in
+        curcontext="${curcontext%:*:*}:arf-command-$line[1]:"
+        case $line[1] in
             (completions)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \

@@ -29,7 +29,7 @@ function __fish_arf_using_subcommand
 end
 
 complete -c arf -n "__fish_arf_needs_command" -s e -l eval -d 'Evaluate R expression and exit' -r
-complete -c arf -n "__fish_arf_needs_command" -s f -l file -d '[R] Take input from FILE (same as positional SCRIPT argument)' -r -F
+complete -c arf -n "__fish_arf_needs_command" -s f -l file -d '[R] Take input from FILE' -r -F
 complete -c arf -n "__fish_arf_needs_command" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
 complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
@@ -70,12 +70,12 @@ complete -c arf -n "__fish_arf_needs_command" -l no-completion -d 'Disable compl
 complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Disable history (no history saved or loaded)'
 complete -c arf -n "__fish_arf_needs_command" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_needs_command" -s V -l version -d 'Print version'
-complete -c arf -n "__fish_arf_needs_command" -a "completions" -d 'Generate shell completion scripts'
-complete -c arf -n "__fish_arf_needs_command" -a "config" -d 'Configuration management'
-complete -c arf -n "__fish_arf_needs_command" -a "history" -d 'History management'
-complete -c arf -n "__fish_arf_needs_command" -a "ipc" -d 'Interact with a running arf session via IPC'
-complete -c arf -n "__fish_arf_needs_command" -a "headless" -d 'Run R with IPC server only (no interactive REPL)'
-complete -c arf -n "__fish_arf_needs_command" -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c arf -n "__fish_arf_needs_command" -f -a "completions" -d 'Generate shell completion scripts'
+complete -c arf -n "__fish_arf_needs_command" -f -a "config" -d 'Configuration management'
+complete -c arf -n "__fish_arf_needs_command" -f -a "history" -d 'History management'
+complete -c arf -n "__fish_arf_needs_command" -f -a "ipc" -d 'Interact with a running arf session via IPC'
+complete -c arf -n "__fish_arf_needs_command" -f -a "headless" -d 'Run R with IPC server only (no interactive REPL)'
+complete -c arf -n "__fish_arf_needs_command" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand completions" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init check help" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand config; and not __fish_seen_subcommand_from init check help" -f -a "init" -d 'Generate a default configuration file'
