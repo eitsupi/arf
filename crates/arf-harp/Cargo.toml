@@ -3,6 +3,7 @@ name = "arf-harp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "High-level R abstractions for safe R object manipulation"
 
 [dependencies]

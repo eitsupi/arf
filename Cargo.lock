@@ -1580,8 +1580,9 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.46.0"
-source = "git+https://github.com/nushell/reedline.git?rev=beb43685030b8feab8afb3bda47d901451bc4698#beb43685030b8feab8afb3bda47d901451bc4698"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2066729dce9fecd28d1c6850a159ee68719130f149b22467c362353e16994e90"
 dependencies = [
  "chrono",
  "crossterm",
