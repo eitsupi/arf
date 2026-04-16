@@ -68,7 +68,7 @@ unicode-width = "0.2"
 # Unix
 exec = "0.3"
 libc = "0.2"
-nix = { version = "0.30", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 
 # Windows
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
