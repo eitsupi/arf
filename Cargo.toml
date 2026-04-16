@@ -29,7 +29,7 @@ reedline = { version = "0.47", features = ["sqlite", "idle_callback"] }
 dirs = "6.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.9"
+toml = "1.1"
 
 # Tree-sitter parsing
 tree-sitter = "0.24"
