@@ -131,6 +131,50 @@ fn test_call_dot_first_sys_does_not_error() {
     });
 }
 
+#[test]
+fn test_call_dot_first_sys_evaluates_in_base_env() {
+    // Guard against regressing the eval environment used for .First.sys().
+    // R's main.c evaluates the call in R_BaseEnv so parent.frame() inside
+    // .First.sys() returns R_BaseEnv. Evaluating in R_BaseNamespace instead
+    // would silently change that contract.
+    //
+    // The test overrides base::.First.sys with a probe that records its
+    // caller frame, invokes call_dot_first_sys(), and asserts the recorded
+    // frame is identical to baseenv(). Every operation uses base-package
+    // primitives so no extra packages (utils / methods) are required.
+    with_r(|| {
+        eval_string(
+            "local({ \
+                 ns <- asNamespace('base'); \
+                 unlockBinding('.First.sys', ns); \
+                 .arf_saved_first_sys <<- ns$.First.sys; \
+                 ns$.First.sys <- function() { \
+                     assign('.arf_captured_frame', parent.frame(), envir = globalenv()) \
+                 } \
+             })",
+        )
+        .expect("should install .First.sys probe");
+
+        let invoked = call_dot_first_sys();
+
+        // Always restore the original binding, even if the assertions below fail.
+        let restored = eval_string(
+            "local({ \
+                 ns <- asNamespace('base'); \
+                 ns$.First.sys <- .arf_saved_first_sys; \
+                 lockBinding('.First.sys', ns); \
+                 rm('.arf_saved_first_sys', envir = globalenv()) \
+             })",
+        );
+
+        assert!(invoked, ".First.sys must be reported as invoked");
+        eval_string("stopifnot(identical(.arf_captured_frame, baseenv()))")
+            .expect(".First.sys must be evaluated in R_BaseEnv");
+        eval_string("rm('.arf_captured_frame', envir = globalenv())").ok();
+        restored.expect(".First.sys restoration should succeed");
+    });
+}
+
 // Windows does not use LD_LIBRARY_PATH, so package shared libraries are located
 // differently. Exclude this test on Windows until a Windows-equivalent check exists.
 #[cfg(not(windows))]
