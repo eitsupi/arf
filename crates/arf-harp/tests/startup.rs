@@ -53,7 +53,7 @@ fn ld_library_path_is_set() -> bool {
 fn test_call_dot_first_noop_when_undefined() {
     // .First is not defined after plain R initialization — call should be a no-op.
     with_r(|| {
-        eval_string("rm(list = intersect('.First', ls(.GlobalEnv)))").ok();
+        eval_string("try(rm('.First', envir = .GlobalEnv), silent = TRUE)").ok();
         // Must not panic or error
         call_dot_first();
     });
@@ -98,6 +98,9 @@ fn test_call_dot_first_sys_does_not_error() {
     });
 }
 
+// Windows does not use LD_LIBRARY_PATH, so package shared libraries are located
+// differently. Exclude this test on Windows until a Windows-equivalent check exists.
+#[cfg(not(windows))]
 #[test]
 fn test_call_dot_first_sys_loads_default_packages() {
     // After call_dot_first_sys(), the standard default packages should be attached.
