@@ -286,7 +286,9 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
     unsafe {
         let mut protect = RProtect::new();
         let sym = install_symbol(".First.sys")?;
-        // Look up in base namespace, eval in base env (mirrors R's main.c)
+        // Look up and evaluate in R_BaseNamespace so the symbol is always
+        // findable. R's main.c evaluates the call in R_BaseEnv, but
+        // .First.sys is not exported there in all R versions.
         let base_ns = *lib.r_basenamespace;
         let val = (lib.rf_findvar)(sym, base_ns);
 
