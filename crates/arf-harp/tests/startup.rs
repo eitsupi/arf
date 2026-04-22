@@ -51,11 +51,14 @@ fn ld_library_path_is_set() -> bool {
 
 #[test]
 fn test_call_dot_first_noop_when_undefined() {
-    // .First is not defined after plain R initialization — call should be a no-op.
+    // .First is not defined after plain R initialization — call must return
+    // false (skipped) and must not panic or error.
     with_r(|| {
         eval_string("try(rm('.First', envir = .GlobalEnv), silent = TRUE)").ok();
-        // Must not panic or error
-        call_dot_first();
+        assert!(
+            !call_dot_first(),
+            ".First is undefined, so call_dot_first() must report skipped"
+        );
     });
 }
 
@@ -66,7 +69,10 @@ fn test_call_dot_first_invokes_function() {
         eval_string(".arf_test_first_called <- FALSE").unwrap();
         eval_string(".First <- function() { .arf_test_first_called <<- TRUE }").unwrap();
 
-        call_dot_first();
+        assert!(
+            call_dot_first(),
+            "closure .First must be reported as invoked"
+        );
 
         eval_string("stopifnot(isTRUE(.arf_test_first_called))")
             .expect(".First() should have been called and set .arf_test_first_called");
@@ -79,10 +85,13 @@ fn test_call_dot_first_invokes_function() {
 #[test]
 fn test_call_dot_first_skips_non_function() {
     with_r(|| {
-        // .First is defined but is not a function — should be skipped silently
+        // .First is defined but is not a function — must be skipped silently.
         eval_string(".First <- 42L").unwrap();
 
-        call_dot_first(); // must not panic or error
+        assert!(
+            !call_dot_first(),
+            "non-function .First must be reported as skipped"
+        );
 
         eval_string("rm('.First', envir = .GlobalEnv)").ok();
     });
@@ -91,15 +100,18 @@ fn test_call_dot_first_skips_non_function() {
 #[test]
 fn test_call_dot_first_accepts_builtin() {
     // .First can legitimately be bound to a BUILTINSXP primitive (e.g. `sum`).
-    // The callable-function detection must accept builtins, not only closures,
-    // so invocation must not panic or error. `sum()` with no args returns 0L,
-    // which is a safe no-side-effect call.
+    // The callable-function detection must accept builtins, not only closures.
+    // `sum()` with no args returns 0L, which is a safe no-side-effect call.
     with_r(|| {
         eval_string(".First <- sum").unwrap();
         eval_string("stopifnot(typeof(.First) == 'builtin')")
             .expect(".First should be bound to a BUILTINSXP primitive");
 
-        call_dot_first(); // must not panic or error
+        assert!(
+            call_dot_first(),
+            "builtin .First must be reported as invoked — \
+             returning false would indicate it was silently skipped"
+        );
 
         eval_string("rm('.First', envir = .GlobalEnv)").ok();
     });
@@ -109,9 +121,13 @@ fn test_call_dot_first_accepts_builtin() {
 fn test_call_dot_first_sys_does_not_error() {
     // .First.sys() loads default packages via require(). On Linux, R's
     // setup_Rmainloop() already called it during initialization, so calling
-    // it again exercises the idempotent require() path.
+    // it again exercises the idempotent require() path. It must be reported
+    // as invoked since the base namespace always defines it.
     with_r(|| {
-        call_dot_first_sys(); // must not panic or error
+        assert!(
+            call_dot_first_sys(),
+            ".First.sys from R's base namespace must always be reported as invoked"
+        );
     });
 }
 
@@ -131,7 +147,10 @@ fn test_call_dot_first_sys_loads_default_packages() {
     }
 
     with_r(|| {
-        call_dot_first_sys();
+        assert!(
+            call_dot_first_sys(),
+            ".First.sys from R's base namespace must always be reported as invoked"
+        );
         eval_string("stopifnot(isNamespaceLoaded('utils'))")
             .expect("utils namespace should be loaded after .First.sys()");
     });

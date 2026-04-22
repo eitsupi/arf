@@ -210,16 +210,21 @@ unsafe fn install_symbol(name: &str) -> HarpResult<SEXP> {
 /// Mirrors R's `main.c` startup sequence: after profiles are sourced,
 /// call `.First()` if it was defined by the user's `.Rprofile`.
 /// Uses `R_ToplevelExec` for safe error handling.
-pub fn call_dot_first() {
+///
+/// Returns `true` if `.First` was invoked, `false` if it was undefined,
+/// bound to a non-function, or if the call raised an R error.
+pub fn call_dot_first() -> bool {
     match call_dot_first_impl() {
         Ok(called) => {
             if called {
                 log::info!("Called .First()");
             }
+            called
         }
         Err(err) => {
             log::error!("Error calling .First(): {err}");
             eprintln!("Error in .First():\n{err}");
+            false
         }
     }
 }
@@ -229,16 +234,20 @@ pub fn call_dot_first() {
 /// `.First.sys()` loads the default packages (utils, grDevices, etc.) via
 /// `require()`. It must be called after `.First()` in the startup sequence.
 /// Uses `R_ToplevelExec` for safe error handling.
-pub fn call_dot_first_sys() {
+///
+/// Returns `true` if `.First.sys` was invoked, `false` otherwise.
+pub fn call_dot_first_sys() -> bool {
     match call_dot_first_sys_impl() {
         Ok(called) => {
             if called {
                 log::info!("Called .First.sys()");
             }
+            called
         }
         Err(err) => {
             log::error!("Error calling .First.sys(): {err}");
             eprintln!("Error in .First.sys():\n{err}");
+            false
         }
     }
 }
