@@ -89,6 +89,23 @@ fn test_call_dot_first_skips_non_function() {
 }
 
 #[test]
+fn test_call_dot_first_accepts_builtin() {
+    // .First can legitimately be bound to a BUILTINSXP primitive (e.g. `sum`).
+    // The callable-function detection must accept builtins, not only closures,
+    // so invocation must not panic or error. `sum()` with no args returns 0L,
+    // which is a safe no-side-effect call.
+    with_r(|| {
+        eval_string(".First <- sum").unwrap();
+        eval_string("stopifnot(typeof(.First) == 'builtin')")
+            .expect(".First should be bound to a BUILTINSXP primitive");
+
+        call_dot_first(); // must not panic or error
+
+        eval_string("rm('.First', envir = .GlobalEnv)").ok();
+    });
+}
+
+#[test]
 fn test_call_dot_first_sys_does_not_error() {
     // .First.sys() loads default packages via require(). On Linux, R's
     // setup_Rmainloop() already called it during initialization, so calling

@@ -594,6 +594,61 @@ fn test_script_file_not_found() {
     );
 }
 
+/// Test that `arf -e` sources the user's `.Rprofile` during startup.
+///
+/// Verifies the full script-mode startup sequence: .Rprofile sourced →
+/// side effect observable in output. This covers both Unix (R's built-in
+/// profile loading via `setup_Rmainloop`) and Windows (manual
+/// `source_r_profiles()` in `run_script()`), so it guards against
+/// regressions on either path.
+#[test]
+fn test_eval_sources_user_rprofile() {
+    let mut rprofile = NamedTempFile::new().expect("Failed to create temp .Rprofile");
+    writeln!(rprofile, "cat('ARF_RPROFILE_MARKER\\n')").expect("Failed to write .Rprofile");
+    let rprofile_path = rprofile.path().to_path_buf();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .env("R_PROFILE_USER", &rprofile_path)
+        .args(["-e", "1"])
+        .output()
+        .expect("Failed to run arf -e");
+
+    assert!(output.status.success(), "arf -e should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("ARF_RPROFILE_MARKER") || stderr.contains("ARF_RPROFILE_MARKER"),
+        ".Rprofile should be sourced by arf -e. stdout={stdout}, stderr={stderr}"
+    );
+}
+
+/// Test that `arf --vanilla -e` does NOT source the user's `.Rprofile`.
+///
+/// `--vanilla` implies `--no-init-file`, which must suppress .Rprofile
+/// loading on both Unix and Windows startup paths.
+#[test]
+fn test_eval_vanilla_skips_user_rprofile() {
+    let mut rprofile = NamedTempFile::new().expect("Failed to create temp .Rprofile");
+    writeln!(rprofile, "cat('ARF_RPROFILE_MARKER\\n')").expect("Failed to write .Rprofile");
+    let rprofile_path = rprofile.path().to_path_buf();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .env("R_PROFILE_USER", &rprofile_path)
+        .args(["--vanilla", "-e", "1"])
+        .output()
+        .expect("Failed to run arf --vanilla -e");
+
+    assert!(output.status.success(), "arf --vanilla -e should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("ARF_RPROFILE_MARKER") && !stderr.contains("ARF_RPROFILE_MARKER"),
+        ".Rprofile must not be sourced under --vanilla. stdout={stdout}, stderr={stderr}"
+    );
+}
+
 /// Test that positional script argument is rejected (regression test).
 /// The old `arf file.R` syntax was removed; clap now rejects it as an unknown subcommand/argument.
 #[test]
