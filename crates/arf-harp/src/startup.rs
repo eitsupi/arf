@@ -25,7 +25,7 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
-use arf_libr::{SEXP, SexpType, r_library, r_nil_value};
+use arf_libr::{RLibrary, SEXP, SexpType, r_library, r_nil_value};
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
@@ -179,6 +179,22 @@ unsafe extern "C" fn source_callback(payload: *mut std::ffi::c_void) {
     data.result = Some(result);
 }
 
+/// Return `true` if `val` is bound to a callable R function.
+///
+/// R functions can be any of three SEXPTYPEs: `CLOSXP` (user-defined closures),
+/// `BUILTINSXP` (built-in functions with eager argument evaluation), and
+/// `SPECIALSXP` (built-in functions with lazy argument evaluation — e.g. `if`,
+/// `quote`). Mirrors the semantics of `Rf_isFunction`.
+unsafe fn is_callable_function(val: SEXP, lib: &RLibrary) -> bool {
+    if val == unsafe { *lib.r_unboundvalue } {
+        return false;
+    }
+    let t = unsafe { (lib.rf_typeof)(val) };
+    t == SexpType::ClosSxp as std::os::raw::c_int
+        || t == SexpType::BuiltinSxp as std::os::raw::c_int
+        || t == SexpType::SpecialSxp as std::os::raw::c_int
+}
+
 /// Install (intern) an R symbol by name.
 unsafe fn install_symbol(name: &str) -> HarpResult<SEXP> {
     let lib = r_library()?;
@@ -236,10 +252,9 @@ fn call_dot_first_impl() -> HarpResult<bool> {
         let global_env = *lib.r_globalenv;
         let val = (lib.rf_findvar)(sym, global_env);
 
-        // Only call if .First is defined and is a closure (function)
-        let is_closure = val != *lib.r_unboundvalue
-            && (lib.rf_typeof)(val) == SexpType::ClosSxp as std::os::raw::c_int;
-        if !is_closure {
+        // Only call if .First is defined and bound to a function (any of the
+        // three callable SEXPTYPEs — closure, builtin, or special).
+        if !is_callable_function(val, lib) {
             return Ok(false);
         }
 
@@ -275,9 +290,7 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
         let base_ns = *lib.r_basenamespace;
         let val = (lib.rf_findvar)(sym, base_ns);
 
-        let is_closure = val != *lib.r_unboundvalue
-            && (lib.rf_typeof)(val) == SexpType::ClosSxp as std::os::raw::c_int;
-        if !is_closure {
+        if !is_callable_function(val, lib) {
             return Ok(false);
         }
 

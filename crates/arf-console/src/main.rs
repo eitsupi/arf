@@ -1347,6 +1347,10 @@ fn run_script(cli: &Cli) -> Result<()> {
         arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
     }
 
+    // Source R profile files (Windows only)
+    #[cfg(windows)]
+    source_r_profiles(&r_args);
+
     // Get the code to execute
     let code = if let Some(eval_code) = &cli.eval {
         eval_code.clone()
