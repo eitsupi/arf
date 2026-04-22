@@ -295,20 +295,27 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
     unsafe {
         let mut protect = RProtect::new();
         let sym = install_symbol(".First.sys")?;
-        // Look up and evaluate in R_BaseNamespace so the symbol is always
-        // findable. R's main.c evaluates the call in R_BaseEnv, but
-        // .First.sys is not exported there in all R versions.
+        // Resolve the function value in R_BaseNamespace (where .First.sys is
+        // defined — it is not exported to R_BaseEnv in all R versions), then
+        // build the call with the function value as its head. Using the
+        // resolved value skips a symbol lookup during eval and lets us
+        // evaluate in R_BaseEnv, matching R's main.c semantics so
+        // parent.frame() / sys.parent() inside .First.sys() see R_BaseEnv.
         let base_ns = *lib.r_basenamespace;
-        let val = (lib.rf_findvar)(sym, base_ns);
+        let val = protect.protect((lib.rf_findvar)(sym, base_ns));
 
         if !is_callable_function(val, lib) {
             return Ok(false);
         }
 
         let nil = r_nil_value()?;
-        let call = protect.protect((lib.rf_lcons)(sym, nil));
+        let call = protect.protect((lib.rf_lcons)(val, nil));
 
-        let mut payload = CallPayload { call, env: base_ns };
+        let base_env = *lib.r_baseenv;
+        let mut payload = CallPayload {
+            call,
+            env: base_env,
+        };
         let success = (lib.r_toplevelexec)(
             Some(call_callback),
             &mut payload as *mut CallPayload as *mut std::ffi::c_void,
