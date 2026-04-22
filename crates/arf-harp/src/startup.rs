@@ -284,10 +284,7 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
         let nil = r_nil_value()?;
         let call = protect.protect((lib.rf_lcons)(sym, nil));
 
-        let mut payload = CallPayload {
-            call,
-            env: *lib.r_baseenv,
-        };
+        let mut payload = CallPayload { call, env: base_ns };
         let success = (lib.r_toplevelexec)(
             Some(call_callback),
             &mut payload as *mut CallPayload as *mut std::ffi::c_void,
