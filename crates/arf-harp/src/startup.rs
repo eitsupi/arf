@@ -231,6 +231,7 @@ fn call_dot_first_impl() -> HarpResult<bool> {
     let lib = r_library()?;
 
     unsafe {
+        let mut protect = RProtect::new();
         let sym = install_symbol(".First")?;
         let global_env = *lib.r_globalenv;
         let val = (lib.rf_findvar)(sym, global_env);
@@ -244,7 +245,7 @@ fn call_dot_first_impl() -> HarpResult<bool> {
 
         // Build call: (.First) — lang1 equivalent
         let nil = r_nil_value()?;
-        let call = (lib.rf_lcons)(sym, nil);
+        let call = protect.protect((lib.rf_lcons)(sym, nil));
 
         let mut payload = CallPayload {
             call,
@@ -268,6 +269,7 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
     let lib = r_library()?;
 
     unsafe {
+        let mut protect = RProtect::new();
         let sym = install_symbol(".First.sys")?;
         // Look up in base namespace, eval in base env (mirrors R's main.c)
         let base_ns = *lib.r_basenamespace;
@@ -280,7 +282,7 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
         }
 
         let nil = r_nil_value()?;
-        let call = (lib.rf_lcons)(sym, nil);
+        let call = protect.protect((lib.rf_lcons)(sym, nil));
 
         let mut payload = CallPayload {
             call,
