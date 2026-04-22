@@ -25,7 +25,7 @@
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
-use arf_libr::{SEXP, r_library, r_nil_value};
+use arf_libr::{SEXP, SexpType, r_library, r_nil_value};
 
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
@@ -187,6 +187,133 @@ unsafe fn install_symbol(name: &str) -> HarpResult<SEXP> {
         actual: "string with null byte".to_string(),
     })?;
     unsafe { Ok((lib.rf_install)(name_cstring.as_ptr())) }
+}
+
+/// Call `.First()` if it is defined as a function in `.GlobalEnv`.
+///
+/// Mirrors R's `main.c` startup sequence: after profiles are sourced,
+/// call `.First()` if it was defined by the user's `.Rprofile`.
+/// Uses `R_ToplevelExec` for safe error handling.
+pub fn call_dot_first() {
+    match call_dot_first_impl() {
+        Ok(called) => {
+            if called {
+                log::info!("Called .First()");
+            }
+        }
+        Err(err) => {
+            log::error!("Error calling .First(): {err}");
+            eprintln!("Error in .First():\n{err}");
+        }
+    }
+}
+
+/// Call `.First.sys()` from the base namespace.
+///
+/// `.First.sys()` loads the default packages (utils, grDevices, etc.) via
+/// `require()`. It must be called after `.First()` in the startup sequence.
+/// Uses `R_ToplevelExec` for safe error handling.
+pub fn call_dot_first_sys() {
+    match call_dot_first_sys_impl() {
+        Ok(called) => {
+            if called {
+                log::info!("Called .First.sys()");
+            }
+        }
+        Err(err) => {
+            log::error!("Error calling .First.sys(): {err}");
+            eprintln!("Error in .First.sys():\n{err}");
+        }
+    }
+}
+
+fn call_dot_first_impl() -> HarpResult<bool> {
+    let lib = r_library()?;
+
+    unsafe {
+        let sym = install_symbol(".First")?;
+        let global_env = *lib.r_globalenv;
+        let val = (lib.rf_findvar)(sym, global_env);
+
+        // Only call if .First is defined and is a closure (function)
+        let is_closure = val != *lib.r_unboundvalue
+            && (lib.rf_typeof)(val) == SexpType::ClosSxp as std::os::raw::c_int;
+        if !is_closure {
+            return Ok(false);
+        }
+
+        // Build call: (.First) — lang1 equivalent
+        let nil = r_nil_value()?;
+        let call = (lib.rf_lcons)(sym, nil);
+
+        let mut payload = CallPayload {
+            call,
+            env: global_env,
+        };
+        let success = (lib.r_toplevelexec)(
+            Some(call_callback),
+            &mut payload as *mut CallPayload as *mut std::ffi::c_void,
+        );
+
+        if success == 0 {
+            return Err(HarpError::RError(arf_libr::RError::EvalError(
+                "Error in .First() (R error occurred)".to_string(),
+            )));
+        }
+    }
+    Ok(true)
+}
+
+fn call_dot_first_sys_impl() -> HarpResult<bool> {
+    let lib = r_library()?;
+
+    unsafe {
+        let sym = install_symbol(".First.sys")?;
+        // Look up in base namespace, eval in base env (mirrors R's main.c)
+        let base_ns = *lib.r_basenamespace;
+        let val = (lib.rf_findvar)(sym, base_ns);
+
+        let is_closure = val != *lib.r_unboundvalue
+            && (lib.rf_typeof)(val) == SexpType::ClosSxp as std::os::raw::c_int;
+        if !is_closure {
+            return Ok(false);
+        }
+
+        let nil = r_nil_value()?;
+        let call = (lib.rf_lcons)(sym, nil);
+
+        let mut payload = CallPayload {
+            call,
+            env: *lib.r_baseenv,
+        };
+        let success = (lib.r_toplevelexec)(
+            Some(call_callback),
+            &mut payload as *mut CallPayload as *mut std::ffi::c_void,
+        );
+
+        if success == 0 {
+            return Err(HarpError::RError(arf_libr::RError::EvalError(
+                "Error in .First.sys() (R error occurred)".to_string(),
+            )));
+        }
+    }
+    Ok(true)
+}
+
+/// Payload for call_callback.
+struct CallPayload {
+    call: SEXP,
+    env: SEXP,
+}
+
+/// R_ToplevelExec callback for calling a no-arg R function.
+unsafe extern "C" fn call_callback(payload: *mut std::ffi::c_void) {
+    let data = unsafe { &mut *(payload as *mut CallPayload) };
+    let lib = match r_library() {
+        Ok(lib) => lib,
+        Err(_) => return,
+    };
+    unsafe { (lib.rf_eval)(data.call, data.env) };
 }
 
 /// Find site-level R profile.

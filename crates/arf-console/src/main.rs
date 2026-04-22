@@ -1590,6 +1590,15 @@ fn source_r_profiles(r_args: &[String]) {
     } else {
         log::trace!("Skipping user R profile (--no-init-file or --vanilla)");
     }
+
+    // Call .First() then .First.sys() to mirror R's standard startup sequence.
+    // R's main.c calls these after profiles are loaded:
+    //   1. .First()     — user hook defined in .Rprofile (e.g. vscode-R session watcher)
+    //   2. .First.sys() — base package hook that loads default packages (utils, grDevices, ...)
+    // On Windows we source profiles manually (profiles disabled in setup_Rmainloop for
+    // globalCallingHandlers compatibility), so we must call these hooks manually too.
+    arf_harp::call_dot_first();
+    arf_harp::call_dot_first_sys();
 }
 
 /// Generate a history session ID when history is enabled and a history directory

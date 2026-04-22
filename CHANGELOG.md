@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- (Windows) `.First()` and `.First.sys()` are now called after `.Rprofile` is sourced, matching R's standard startup sequence. Previously these hooks were skipped, causing vscode-R session watcher connections to fail and user-defined startup logic in `.First()` to be ignored.
+
 ## [0.3.0] - 2026-04-16
 
 ### Removed

@@ -77,6 +77,7 @@ pub struct RLibrary {
     pub r_nilvalue: *mut SEXP,
     pub r_globalenv: *mut SEXP,
     pub r_baseenv: *mut SEXP,
+    pub r_basenamespace: *mut SEXP,
     pub r_unboundvalue: *mut SEXP,
 
     // Environment and variable manipulation
@@ -332,6 +333,7 @@ impl RLibrary {
             load_ptr!(r_nilvalue, b"R_NilValue\0", SEXP);
             load_ptr!(r_globalenv, b"R_GlobalEnv\0", SEXP);
             load_ptr!(r_baseenv, b"R_BaseEnv\0", SEXP);
+            load_ptr!(r_basenamespace, b"R_BaseNamespace\0", SEXP);
             load_ptr!(r_unboundvalue, b"R_UnboundValue\0", SEXP);
 
             // Load environment and variable manipulation functions
@@ -579,6 +581,7 @@ impl RLibrary {
                 r_nilvalue,
                 r_globalenv,
                 r_baseenv,
+                r_basenamespace,
                 r_unboundvalue,
                 rf_findvar,
                 rf_definevar,
