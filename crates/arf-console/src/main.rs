@@ -1595,8 +1595,8 @@ fn source_r_profiles(r_args: &[String]) {
         log::trace!("Skipping user R profile (--no-init-file or --vanilla)");
     }
 
-    // Call .First() then .First.sys() to mirror R's standard startup sequence.
-    // R's main.c calls these after profiles are loaded:
+    // Call .First() then .First.sys() to match R's documented startup sequence
+    // (see `?Startup`). After profiles are loaded:
     //   1. .First()     — user hook defined in .Rprofile (e.g. vscode-R session watcher)
     //   2. .First.sys() — base package hook that loads default packages (utils, grDevices, ...)
     // On Windows we source profiles manually (profiles disabled in setup_Rmainloop for

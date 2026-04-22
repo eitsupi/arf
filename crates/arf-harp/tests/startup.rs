@@ -134,9 +134,9 @@ fn test_call_dot_first_sys_does_not_error() {
 #[test]
 fn test_call_dot_first_sys_evaluates_in_base_env() {
     // Guard against regressing the eval environment used for .First.sys().
-    // R's main.c evaluates the call in R_BaseEnv so parent.frame() inside
-    // .First.sys() returns R_BaseEnv. Evaluating in R_BaseNamespace instead
-    // would silently change that contract.
+    // R's normal startup evaluates the call in R_BaseEnv so parent.frame()
+    // inside .First.sys() returns R_BaseEnv. Evaluating in R_BaseNamespace
+    // instead would silently change that contract.
     //
     // The test overrides base::.First.sys with a probe that records its
     // caller frame, invokes call_dot_first_sys(), and asserts the recorded

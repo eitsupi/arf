@@ -207,8 +207,9 @@ unsafe fn install_symbol(name: &str) -> HarpResult<SEXP> {
 
 /// Call `.First()` if it is defined as a function in `.GlobalEnv`.
 ///
-/// Mirrors R's `main.c` startup sequence: after profiles are sourced,
-/// call `.First()` if it was defined by the user's `.Rprofile`.
+/// Matches R's documented startup sequence (see `?Startup`):
+/// after profiles are sourced, call `.First()` if it was defined by
+/// the user's `.Rprofile`.
 /// Uses `R_ToplevelExec` for safe error handling.
 ///
 /// Returns `true` if `.First` was invoked, `false` if it was undefined,
@@ -299,8 +300,8 @@ fn call_dot_first_sys_impl() -> HarpResult<bool> {
         // defined — it is not exported to R_BaseEnv in all R versions), then
         // build the call with the function value as its head. Using the
         // resolved value skips a symbol lookup during eval and lets us
-        // evaluate in R_BaseEnv, matching R's main.c semantics so
-        // parent.frame() / sys.parent() inside .First.sys() see R_BaseEnv.
+        // evaluate in R_BaseEnv so parent.frame() / sys.parent() inside
+        // .First.sys() see R_BaseEnv, matching R's normal startup behavior.
         let base_ns = *lib.r_basenamespace;
         let val = protect.protect((lib.rf_findvar)(sym, base_ns));
 
