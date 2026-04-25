@@ -3,6 +3,7 @@
 mod cli;
 mod completion;
 mod config;
+mod console_mode;
 mod editor;
 mod external;
 mod fuzzy;
@@ -392,6 +393,11 @@ fn run() -> Result<()> {
     }
 
     log::info!("Starting arf");
+
+    // Save the parent shell's console input mode before reedline/crossterm can
+    // enable Windows VT input. R's quit() may bypass Rust destructors, so the
+    // guard also registers an atexit fallback on Windows.
+    let _console_mode_guard = console_mode::ConsoleModeGuard::install();
 
     // Ensure XDG directories exist
     ensure_directories()?;
