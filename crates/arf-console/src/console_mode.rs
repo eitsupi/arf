@@ -100,8 +100,6 @@ mod imp {
             Self
         }
     }
-
-    pub(crate) fn restore_original_input_mode() {}
 }
 
 pub(crate) use imp::ConsoleModeGuard;
