@@ -179,12 +179,12 @@ impl HelpBrowser {
                             }
 
                             // Navigation
-                            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                                if self.selected > 0 {
-                                    self.selected -= 1;
-                                    if self.selected < self.scroll_offset {
-                                        self.scroll_offset = self.selected;
-                                    }
+                            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
+                                if self.selected > 0 =>
+                            {
+                                self.selected -= 1;
+                                if self.selected < self.scroll_offset {
+                                    self.scroll_offset = self.selected;
                                 }
                             }
                             (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
@@ -275,33 +275,31 @@ demo("{name}", package = "{pkg}")"#,
                             }
 
                             // Backspace - delete character before cursor
-                            (KeyCode::Backspace, _) => {
-                                if self.cursor_pos > 0 {
-                                    // Find byte position of character before cursor
-                                    let byte_pos = self
-                                        .query
-                                        .char_indices()
-                                        .nth(self.cursor_pos - 1)
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(0);
-                                    self.query.remove(byte_pos);
-                                    self.cursor_pos -= 1;
-                                    self.update_filter();
-                                }
+                            (KeyCode::Backspace, _) if self.cursor_pos > 0 => {
+                                // Find byte position of character before cursor
+                                let byte_pos = self
+                                    .query
+                                    .char_indices()
+                                    .nth(self.cursor_pos - 1)
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(0);
+                                self.query.remove(byte_pos);
+                                self.cursor_pos -= 1;
+                                self.update_filter();
                             }
 
                             // Delete - delete character at cursor
-                            (KeyCode::Delete, _) => {
-                                if self.cursor_pos < self.query.chars().count() {
-                                    let byte_pos = self
-                                        .query
-                                        .char_indices()
-                                        .nth(self.cursor_pos)
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(self.query.len());
-                                    self.query.remove(byte_pos);
-                                    self.update_filter();
-                                }
+                            (KeyCode::Delete, _)
+                                if self.cursor_pos < self.query.chars().count() =>
+                            {
+                                let byte_pos = self
+                                    .query
+                                    .char_indices()
+                                    .nth(self.cursor_pos)
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(self.query.len());
+                                self.query.remove(byte_pos);
+                                self.update_filter();
                             }
 
                             // Clear query
@@ -326,15 +324,15 @@ demo("{name}", package = "{pkg}")"#,
                             }
 
                             // Cursor movement
-                            (KeyCode::Left, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-                                if self.cursor_pos > 0 {
-                                    self.cursor_pos -= 1;
-                                }
+                            (KeyCode::Left, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL)
+                                if self.cursor_pos > 0 =>
+                            {
+                                self.cursor_pos -= 1;
                             }
-                            (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                                if self.cursor_pos < self.query.chars().count() {
-                                    self.cursor_pos += 1;
-                                }
+                            (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL)
+                                if self.cursor_pos < self.query.chars().count() =>
+                            {
+                                self.cursor_pos += 1;
                             }
                             (KeyCode::Home, _) | (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
                                 self.cursor_pos = 0;
@@ -516,7 +514,7 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
         .collect();
 
     // Sort by score (descending)
-    results.sort_by(|a, b| b.1.cmp(&a.1));
+    results.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     // Limit results
     results.truncate(MAX_FILTERED_RESULTS);

@@ -246,15 +246,11 @@ impl EditorState {
                 self.uncertain = true;
             }
             // Navigation events (used in UntilFound for arrow keys)
-            ReedlineEvent::Left => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
-                }
+            ReedlineEvent::Left if self.cursor_pos > 0 => {
+                self.cursor_pos -= 1;
             }
-            ReedlineEvent::Right => {
-                if self.cursor_pos < self.buffer_len {
-                    self.cursor_pos += 1;
-                }
+            ReedlineEvent::Right if self.cursor_pos < self.buffer_len => {
+                self.cursor_pos += 1;
             }
             ReedlineEvent::Up | ReedlineEvent::Down => {
                 // History navigation - we can't know the new buffer state.

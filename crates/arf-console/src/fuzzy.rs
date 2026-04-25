@@ -76,7 +76,7 @@ where
         .collect();
 
     // Sort by score (descending)
-    results.sort_by(|a, b| b.1.score.cmp(&a.1.score));
+    results.sort_by_key(|entry| std::cmp::Reverse(entry.1.score));
 
     results
 }

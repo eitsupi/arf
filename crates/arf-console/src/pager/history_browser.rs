@@ -256,7 +256,7 @@ impl HistoryBrowser {
 
             // Sort by score (descending) if we have fuzzy scores
             if !self.filter.command_pattern.is_empty() {
-                results.sort_by(|a, b| b.1.cmp(&a.1));
+                results.sort_by_key(|entry| std::cmp::Reverse(entry.1));
             }
 
             self.filtered = results;
@@ -584,10 +584,10 @@ impl HistoryBrowser {
                                 }
 
                                 // Cursor movement
-                                (KeyCode::Left, KeyModifiers::NONE) => {
-                                    if self.filter.cursor_pos > 0 {
-                                        self.filter.cursor_pos -= 1;
-                                    }
+                                (KeyCode::Left, KeyModifiers::NONE)
+                                    if self.filter.cursor_pos > 0 =>
+                                {
+                                    self.filter.cursor_pos -= 1;
                                 }
                                 (KeyCode::Right, KeyModifiers::NONE) => {
                                     let query_len = self.filter.raw_query.chars().count();

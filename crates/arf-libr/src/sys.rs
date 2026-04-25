@@ -859,18 +859,18 @@ fn enable_windows_virtual_terminal() {
         // Enable for stdout
         let stdout = std::io::stdout().as_raw_handle();
         let mut mode: u32 = 0;
-        if GetConsoleMode(stdout as *mut _, &mut mode) != 0 {
-            if SetConsoleMode(stdout as *mut _, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 {
-                log::debug!("[WINDOWS] Enabled virtual terminal processing for stdout");
-            }
+        if GetConsoleMode(stdout as *mut _, &mut mode) != 0
+            && SetConsoleMode(stdout as *mut _, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+        {
+            log::debug!("[WINDOWS] Enabled virtual terminal processing for stdout");
         }
 
         // Enable for stderr
         let stderr = std::io::stderr().as_raw_handle();
-        if GetConsoleMode(stderr as *mut _, &mut mode) != 0 {
-            if SetConsoleMode(stderr as *mut _, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 {
-                log::debug!("[WINDOWS] Enabled virtual terminal processing for stderr");
-            }
+        if GetConsoleMode(stderr as *mut _, &mut mode) != 0
+            && SetConsoleMode(stderr as *mut _, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+        {
+            log::debug!("[WINDOWS] Enabled virtual terminal processing for stderr");
         }
     }
 }
@@ -1095,10 +1095,8 @@ extern "C" fn r_callback() {
 /// Windows callback for ShowMessage.
 #[cfg(windows)]
 extern "C" fn r_show_message(msg: *const c_char) {
-    if !msg.is_null() {
-        if let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
-            log::info!("[R ShowMessage] {}", s);
-        }
+    if !msg.is_null() && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
+        log::info!("[R ShowMessage] {}", s);
     }
 }
 
@@ -1108,10 +1106,10 @@ extern "C" fn r_show_message(msg: *const c_char) {
 extern "C" fn r_yes_no_cancel(question: *const c_char) -> c_int {
     // This is used during R's CleanUp when SA_SAVEASK is used.
     // We return -1 (No) to avoid saving.
-    if !question.is_null() {
-        if let Ok(s) = unsafe { std::ffi::CStr::from_ptr(question) }.to_str() {
-            log::warn!("[R YesNoCancel] Ignoring question: '{}'. Returning NO.", s);
-        }
+    if !question.is_null()
+        && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(question) }.to_str()
+    {
+        log::warn!("[R YesNoCancel] Ignoring question: '{}'. Returning NO.", s);
     }
     -1 // NO
 }
@@ -1125,11 +1123,9 @@ extern "C" fn r_busy(_which: c_int) {
 /// Windows callback for Suicide (fatal error).
 #[cfg(windows)]
 extern "C" fn r_suicide(msg: *const c_char) {
-    if !msg.is_null() {
-        if let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
-            log::error!("[R FATAL] {}", s);
-            eprintln!("R fatal error: {}", s);
-        }
+    if !msg.is_null() && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
+        log::error!("[R FATAL] {}", s);
+        eprintln!("R fatal error: {}", s);
     }
     std::process::exit(1);
 }

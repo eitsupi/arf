@@ -846,11 +846,7 @@ fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
     // Iteratively lock columns whose natural width fits in the fair share.
     loop {
         let remaining = available.saturating_sub(locked_total);
-        let share = if unlocked_count > 0 {
-            remaining / unlocked_count
-        } else {
-            0
-        };
+        let share = remaining.checked_div(unlocked_count).unwrap_or(0);
 
         let mut changed = false;
         for i in 0..n {
@@ -869,7 +865,7 @@ fn distribute_column_widths(natural: &[usize], available: usize) -> Vec<usize> {
     // Distribute remaining space among unlocked (wide) columns.
     if unlocked_count > 0 {
         let remaining = available.saturating_sub(locked_total);
-        let share = remaining / unlocked_count;
+        let share = remaining.checked_div(unlocked_count).unwrap_or(0);
         let extra = remaining % unlocked_count;
         let mut idx = 0;
         for i in 0..n {
