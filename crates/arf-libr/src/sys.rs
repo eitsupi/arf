@@ -1095,7 +1095,9 @@ extern "C" fn r_callback() {
 /// Windows callback for ShowMessage.
 #[cfg(windows)]
 extern "C" fn r_show_message(msg: *const c_char) {
-    if !msg.is_null() && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
+    if !msg.is_null()
+        && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str()
+    {
         log::info!("[R ShowMessage] {}", s);
     }
 }
@@ -1123,7 +1125,9 @@ extern "C" fn r_busy(_which: c_int) {
 /// Windows callback for Suicide (fatal error).
 #[cfg(windows)]
 extern "C" fn r_suicide(msg: *const c_char) {
-    if !msg.is_null() && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str() {
+    if !msg.is_null()
+        && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str()
+    {
         log::error!("[R FATAL] {}", s);
         eprintln!("R fatal error: {}", s);
     }
