@@ -24,14 +24,14 @@ mod imp {
 
     impl ConsoleModeGuard {
         pub(crate) fn install() -> Self {
-            if !HAS_ORIGINAL_INPUT_MODE.load(Ordering::Acquire) {
-                if let Some(handle) = stdin_handle() {
-                    let mut mode = 0;
-                    if unsafe { GetConsoleMode(handle, &mut mode) } != 0 {
-                        ORIGINAL_INPUT_HANDLE.store(handle, Ordering::Release);
-                        ORIGINAL_INPUT_MODE.store(mode, Ordering::Release);
-                        HAS_ORIGINAL_INPUT_MODE.store(true, Ordering::Release);
-                    }
+            if !HAS_ORIGINAL_INPUT_MODE.load(Ordering::Acquire)
+                && let Some(handle) = stdin_handle()
+            {
+                let mut mode = 0;
+                if unsafe { GetConsoleMode(handle, &mut mode) } != 0 {
+                    ORIGINAL_INPUT_HANDLE.store(handle, Ordering::Release);
+                    ORIGINAL_INPUT_MODE.store(mode, Ordering::Release);
+                    HAS_ORIGINAL_INPUT_MODE.store(true, Ordering::Release);
                 }
             }
 
