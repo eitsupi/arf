@@ -51,7 +51,12 @@ jobs:
       - name: Run cargo clippy
         run: |
           rustup component add clippy
-          cargo clippy --all-targets --all-features --locked -- -D warnings
+          cargo clippy \
+            --all-targets \
+            --all-features \
+            --locked \
+            -- \
+            -D warnings
 
   test:
     strategy:
