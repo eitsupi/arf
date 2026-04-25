@@ -85,8 +85,8 @@ mod imp {
         }
 
         let mode = ORIGINAL_INPUT_MODE.load(Ordering::Acquire);
-        unsafe {
-            let _ = SetConsoleMode(handle, mode);
+        if unsafe { SetConsoleMode(handle, mode) } == 0 {
+            log::warn!("Failed to restore original console input mode");
         }
     }
 }
