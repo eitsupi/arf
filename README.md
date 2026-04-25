@@ -66,6 +66,13 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/la
 winget install --id eitsupi.arf
 ```
 
+### Scoop (Windows)
+
+```sh
+scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+scoop install r-bucket/arf
+```
+
 ### cargo-binstall
 
 ```sh
