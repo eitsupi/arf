@@ -28,7 +28,7 @@ jobs:
   cargo-fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run cargo fmt
         run: |
           rustup component add rustfmt
@@ -45,9 +45,9 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Run cargo clippy
         shell: bash
         run: |
@@ -69,21 +69,21 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Set up Air CLI
-        uses: posit-dev/setup-air@v1
+        uses: posit-dev/setup-air@cf390573ff4fe0f198f35df3a642b1409328d859 # v1
       - name: Install R
-        uses: r-lib/actions/setup-r@v2
+        uses: r-lib/actions/setup-r@6f6e5bc62fba3a704f74e7ad7ef7676c5c6a2590 # v2
         with:
           use-public-rspm: true
           Ncpus: "2"
       - name: Install R packages for tests
-        uses: r-lib/actions/setup-r-dependencies@v2
+        uses: r-lib/actions/setup-r-dependencies@6f6e5bc62fba3a704f74e7ad7ef7676c5c6a2590 # v2
         with:
           working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Run tests
         run: >
           cargo test
