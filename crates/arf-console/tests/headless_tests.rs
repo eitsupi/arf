@@ -1624,3 +1624,48 @@ fn test_ipc_exit_code_protocol_error() {
         "should have message"
     );
 }
+
+/// On Windows, `.Platform$GUI` must be `"arf-console"` so that packages
+/// checking for `"Rgui"` do not call Windows-GUI-only functions.
+#[cfg(windows)]
+#[test]
+fn test_platform_gui_windows() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval(r#".Platform$GUI"#)
+        .expect("eval should run");
+    assert!(
+        result.success,
+        "eval should succeed. stderr: {}",
+        result.stderr
+    );
+    assert!(
+        result.stdout.contains(r#"[1] "arf-console""#),
+        r#".Platform$GUI should be "arf-console", got: {}"#,
+        result.stdout
+    );
+}
+
+/// On non-Windows, arf must not set `.Platform$GUI` to `"Rgui"`.
+/// The actual value depends on the environment ("unknown", "X11", etc.),
+/// but `"Rgui"` is always wrong on non-Windows platforms.
+#[cfg(not(windows))]
+#[test]
+fn test_platform_gui_non_windows() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval(r#".Platform$GUI"#)
+        .expect("eval should run");
+    assert!(
+        result.success,
+        "eval should succeed. stderr: {}",
+        result.stderr
+    );
+    assert!(
+        !result.stdout.contains(r#"[1] "Rgui""#),
+        r#".Platform$GUI must not be "Rgui" on non-Windows, got: {}"#,
+        result.stdout
+    );
+}
