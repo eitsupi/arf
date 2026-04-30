@@ -1673,8 +1673,7 @@ fn test_platform_gui_non_windows() {
         .as_str()
         .expect(".Platform$GUI eval should return a non-null string value");
     assert_ne!(
-        value,
-        r#"[1] "arf-console""#,
+        value, r#"[1] "arf-console""#,
         r#".Platform$GUI must not be "arf-console" on non-Windows, got: {}"#,
         result.stdout
     );
