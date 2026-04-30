@@ -1647,9 +1647,8 @@ fn test_platform_gui_windows() {
     );
 }
 
-/// On non-Windows, arf must not set `.Platform$GUI` to `"Rgui"`.
-/// The actual value depends on the environment ("unknown", "X11", etc.),
-/// but `"Rgui"` is always wrong on non-Windows platforms.
+/// On non-Windows, `.Platform$GUI` must not be `"arf-console"`: the
+/// Windows-only override must not apply on other platforms.
 #[cfg(not(windows))]
 #[test]
 fn test_platform_gui_non_windows() {
@@ -1664,8 +1663,8 @@ fn test_platform_gui_non_windows() {
         result.stderr
     );
     assert!(
-        !result.stdout.contains(r#"[1] "Rgui""#),
-        r#".Platform$GUI must not be "Rgui" on non-Windows, got: {}"#,
+        !result.stdout.contains(r#"[1] "arf-console""#),
+        r#".Platform$GUI must not be "arf-console" on non-Windows, got: {}"#,
         result.stdout
     );
 }
