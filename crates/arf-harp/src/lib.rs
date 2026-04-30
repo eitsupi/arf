@@ -14,6 +14,8 @@ pub use error::*;
 pub use help::*;
 pub use object::*;
 pub use protect::*;
+#[cfg(windows)]
+pub use startup::override_platform_gui;
 pub use startup::{
     call_dot_first, call_dot_first_sys, should_ignore_site_r_profile, should_ignore_user_r_profile,
     source_site_r_profile, source_user_r_profile,
