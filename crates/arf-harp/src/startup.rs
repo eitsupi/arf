@@ -30,6 +30,40 @@ use arf_libr::{RLibrary, SEXP, SexpType, r_library, r_nil_value};
 use crate::error::{HarpError, HarpResult};
 use crate::protect::RProtect;
 
+/// Override `.Platform$GUI` to `"arf-console"` in `baseenv()`.
+///
+/// On Windows, arf initializes R with `CharacterMode = RGui` so that R sets up
+/// console callbacks correctly. As a side effect, R sets `.Platform$GUI` to
+/// `"Rgui"`, which causes packages such as `limma` to call Windows-GUI-only
+/// functions (e.g. `winMenuAddItem`) that fail outside an actual Rgui window.
+///
+/// Switching `CharacterMode` to `LinkDLL` before `setup_Rmainloop()` (done to
+/// fix `system()` hangs, see GH#116) does not retroactively update
+/// `.Platform$GUI`, so we correct it here by assigning the proper frontend name.
+///
+/// This follows the same pattern used by ark, which sets `.Platform$GUI` to its
+/// own frontend name via `env_bind_force()`.
+///
+/// Must be called after R is initialised and before any R profiles or packages
+/// are loaded, so that `.onAttach` hooks in user packages see the correct value.
+#[cfg(windows)]
+pub fn override_platform_gui() {
+    let code = r##"local({
+        p <- base::.Platform
+        p[["GUI"]] <- "arf-console"
+        e <- baseenv()
+        locked <- bindingIsLocked(".Platform", e)
+        if (locked) unlockBinding(".Platform", e)
+        assign(".Platform", p, envir = e, inherits = FALSE)
+        if (locked) lockBinding(".Platform", e)
+    })"##;
+
+    match crate::eval_string(code) {
+        Ok(_) => log::info!(r#"[WINDOWS] .Platform$GUI set to "arf-console""#),
+        Err(err) => log::error!("[WINDOWS] Failed to override .Platform$GUI: {err}"),
+    }
+}
+
 /// Check if site R profile loading should be skipped based on command line args.
 pub fn should_ignore_site_r_profile(args: &[String]) -> bool {
     args.iter()

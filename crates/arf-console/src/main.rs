@@ -1578,6 +1578,10 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
 /// source these files here.
 #[cfg(windows)]
 fn source_r_profiles(r_args: &[String]) {
+    // Fix .Platform$GUI before any R profiles or packages are loaded.
+    // See: https://github.com/eitsupi/arf/issues/168
+    arf_harp::override_platform_gui();
+
     // Get R_HOME from environment (set earlier in setup_r)
     let r_home = match std::env::var("R_HOME") {
         Ok(path) => PathBuf::from(path),
