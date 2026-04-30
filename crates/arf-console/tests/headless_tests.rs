@@ -1676,3 +1676,29 @@ fn test_platform_gui_non_windows() {
         result.stdout
     );
 }
+
+/// `system("echo ok")` must succeed in headless mode.
+///
+/// On Windows this is a regression test for the `.Platform$GUI` override
+/// introduced in GH#168: verifies that `CharacterMode` still works correctly
+/// after initialization.
+#[test]
+fn test_system_works() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval(r#"system("echo ok", ignore.stdout = TRUE, ignore.stderr = TRUE) == 0L"#)
+        .expect("eval should run");
+    assert!(
+        result.success,
+        "eval should succeed. stderr: {}",
+        result.stderr
+    );
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some("[1] TRUE"),
+        r#"system("echo ok") should return exit code 0, got: {}"#,
+        result.stdout
+    );
+}
