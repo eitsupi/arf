@@ -1640,8 +1640,12 @@ fn test_platform_gui_windows() {
         "eval should succeed. stderr: {}",
         result.stderr
     );
-    assert!(
-        result.stdout.contains(r#"[1] "arf-console""#),
+    // ipc_eval returns raw JSON; parse it and check the `value` field to avoid
+    // issues with JSON-escaped quotes (e.g. `\"arf-console\"` vs `"arf-console"`).
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some(r#"[1] "arf-console""#),
         r#".Platform$GUI should be "arf-console", got: {}"#,
         result.stdout
     );
@@ -1662,8 +1666,12 @@ fn test_platform_gui_non_windows() {
         "eval should succeed. stderr: {}",
         result.stderr
     );
-    assert!(
-        !result.stdout.contains(r#"[1] "arf-console""#),
+    // ipc_eval returns raw JSON; parse it and check the `value` field to avoid
+    // issues with JSON-escaped quotes.
+    let json = parse_ipc_json(&result);
+    assert_ne!(
+        json["value"].as_str(),
+        Some(r#"[1] "arf-console""#),
         r#".Platform$GUI must not be "arf-console" on non-Windows, got: {}"#,
         result.stdout
     );
