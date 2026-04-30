@@ -1680,17 +1680,22 @@ fn test_platform_gui_non_windows() {
     );
 }
 
-/// `system("echo ok")` must succeed in headless mode.
+/// `system()` must succeed in headless mode.
 ///
 /// On Windows this is a regression test for the `.Platform$GUI` override
 /// introduced in GH#168: verifies that `CharacterMode` still works correctly
 /// after initialization.
+///
+/// Uses `Rscript --version` via `R.home("bin")` as a guaranteed cross-platform
+/// executable (avoids relying on `echo` as a shell builtin).
 #[test]
 fn test_system_works() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
     let result = process
-        .ipc_eval(r#"system("echo ok", ignore.stdout = TRUE, ignore.stderr = TRUE) == 0L"#)
+        .ipc_eval(
+            r#"system(paste(shQuote(file.path(R.home("bin"), "Rscript")), "--version"), ignore.stdout = TRUE, ignore.stderr = TRUE) == 0L"#,
+        )
         .expect("eval should run");
     assert!(
         result.success,
@@ -1701,7 +1706,7 @@ fn test_system_works() {
     assert_eq!(
         json["value"].as_str(),
         Some("[1] TRUE"),
-        r#"system("echo ok") should return exit code 0, got: {}"#,
+        "system(Rscript --version) should return exit code 0, got: {}",
         result.stdout
     );
 }
