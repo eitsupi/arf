@@ -40,6 +40,24 @@ pub struct ExperimentalConfig {
     /// R code completion configuration (fuzzy matching, package functions).
     #[serde(default)]
     pub r_completion: RCompletionConfig,
+
+    /// Shell mode completion configuration.
+    #[serde(default)]
+    pub shell_completion: ShellCompletionConfig,
+}
+
+/// Configuration for shell mode completion.
+///
+/// Controls what is suggested when Tab is pressed in shell mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ShellCompletionConfig {
+    /// Enable completion of executable command names from PATH.
+    ///
+    /// When enabled, pressing Tab at the start of a shell command suggests
+    /// executable names found in PATH directories in addition to path completions.
+    /// When disabled (default), only file/directory path completion is provided.
+    pub command_names: bool,
 }
 
 /// Configuration for R code completion (namespace and library fuzzy matching).
@@ -161,6 +179,9 @@ struct ExperimentalConfigSchema {
 
     /// R code completion configuration (fuzzy matching, package functions).
     pub r_completion: RCompletionConfig,
+
+    /// Shell mode completion configuration.
+    pub shell_completion: ShellCompletionConfig,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -331,6 +352,7 @@ mod tests {
             config.r_completion.package_functions,
             vec!["library".to_string(), "require".to_string()]
         );
+        assert!(!config.shell_completion.command_names); // Disabled by default
     }
 
     #[test]
@@ -397,5 +419,21 @@ fuzzy = true
             config.experimental.r_completion.package_functions,
             vec!["library".to_string(), "require".to_string()]
         );
+    }
+
+    #[test]
+    fn test_shell_completion_default() {
+        let config = ShellCompletionConfig::default();
+        assert!(!config.command_names);
+    }
+
+    #[test]
+    fn test_parse_shell_completion() {
+        let toml_str = r#"
+[experimental.shell_completion]
+command_names = true
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(config.experimental.shell_completion.command_names);
     }
 }

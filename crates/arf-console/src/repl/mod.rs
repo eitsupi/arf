@@ -7,8 +7,9 @@ mod reprex;
 mod shell;
 pub(crate) mod state;
 
-use crate::completion::completer::{CombinedCompleter, MetaCommandCompleter};
+use crate::completion::completer::CombinedCompleter;
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
+use crate::completion::shell::ShellCompleter;
 use crate::config::{
     AutoSuggestions, Config, ConfigStatus, EditorMode, ModeIndicatorPosition, RSourceStatus,
     history_dir,
@@ -748,27 +749,11 @@ impl Repl {
             }
         };
 
-        // Set up meta command completer only (no R completion in shell mode) if completion is enabled
+        // Set up shell mode completer with path completion if completion is enabled
         if self.config.completion.enabled {
-            // Exclude Shell mode-irrelevant commands:
-            // - `:shell` - already in Shell mode
-            // - `:system` - can run system commands directly
-            // - `:autoformat`, `:format` - R code formatting
-            // - `:restart` - R session restart
-            // - `:reprex` - R reproducible examples
-            // - `:switch` - R version switching
-            // - `:h`, `:help` - R help browser
-            let completer = Box::new(MetaCommandCompleter::with_exclusions(vec![
-                "shell",
-                "system",
-                "autoformat",
-                "format",
-                "restart",
-                "reprex",
-                "switch",
-                "h",
-                "help",
-            ]));
+            let completer = Box::new(ShellCompleter::new(
+                self.config.experimental.shell_completion.command_names,
+            ));
             shell_editor = shell_editor.with_completer(completer);
 
             // Set up completion menu with height limit for better UX

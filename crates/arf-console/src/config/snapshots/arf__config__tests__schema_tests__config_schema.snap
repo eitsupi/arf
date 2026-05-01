@@ -89,6 +89,9 @@ expression: schema
             "library",
             "require"
           ]
+        },
+        "shell_completion": {
+          "command_names": false
         }
       }
     },
@@ -1603,6 +1606,13 @@ expression: schema
               "require"
             ]
           }
+        },
+        "shell_completion": {
+          "description": "Shell mode completion configuration.",
+          "$ref": "#/$defs/ShellCompletionConfig",
+          "default": {
+            "command_names": false
+          }
         }
       }
     },
@@ -1857,6 +1867,17 @@ expression: schema
           "description": "Comment prefix for output (default: \"#> \").",
           "type": "string",
           "default": "#> "
+        }
+      }
+    },
+    "ShellCompletionConfig": {
+      "description": "Configuration for shell mode completion.\n\nControls what is suggested when Tab is pressed in shell mode.",
+      "type": "object",
+      "properties": {
+        "command_names": {
+          "description": "Enable completion of executable command names from PATH.\n\nWhen enabled, pressing Tab at the start of a shell command suggests\nexecutable names found in PATH directories in addition to path completions.\nWhen disabled (default), only file/directory path completion is provided.",
+          "type": "boolean",
+          "default": false
         }
       }
     },

@@ -7,4 +7,5 @@ pub mod menu;
 mod meta;
 pub(crate) mod path;
 mod r_completer;
+pub mod shell;
 mod string_context;

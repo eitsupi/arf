@@ -113,3 +113,6 @@ package_functions = [
     "library",
     "require",
 ]
+
+[experimental.shell_completion]
+command_names = false
