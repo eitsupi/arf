@@ -200,6 +200,31 @@ The `"cwd"` mode filters suggestions to show only history entries that were reco
 > [!NOTE]
 > The `"cwd"` setting only affects R mode suggestions. Shell mode (`#!` prefix) always searches all history regardless of this setting.
 
+## Shell Mode Completion
+
+In shell mode, tab completion uses `ShellCompleter`.
+
+### Configuration
+
+```toml
+[experimental.shell_completion]
+command_names = false  # Suggest executable names from PATH at command position
+```
+
+`command_names` is disabled by default. When enabled, executable names from `PATH` are suggested only when the cursor is at command position (for example, the first token in a command segment).
+
+### Behavior
+
+- Meta commands (starting with `:`) are delegated to `MetaCommandCompleter`
+- File and directory paths are completed at any token position
+- Command segments are split by separators like `|` and `;`
+- Paths containing spaces are wrapped in double quotes
+
+### Known Limitations
+
+- Quote-aware tokenization is not implemented. Pressing Tab again inside an already-quoted path may produce incorrect span positions.
+- Quoting is optimized for common paths and does not fully escape all shell metacharacters. Paths containing uncommon characters (for example `$`, backticks, or embedded quotes) may require manual editing before execution.
+
 ## Keyboard Shortcuts
 
 arf supports configurable keyboard shortcuts using the [crokey](https://github.com/Canop/crokey) format.
