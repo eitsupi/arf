@@ -8,8 +8,10 @@ use super::path::PathCompletionOptions;
 use super::string_context::path_to_suggestions;
 use reedline::{Completer, Span, Suggestion};
 
-/// Shell command separators that start a new token and command context.
-const SEPARATORS: &[char] = &['|', ';', '&', '<', '>'];
+/// Shell separators that start a new token.
+const TOKEN_SEPARATORS: &[char] = &['|', ';', '&', '<', '>'];
+/// Shell separators that start a new command segment.
+const COMMAND_SEPARATORS: &[char] = &['|', ';', '&'];
 
 /// Find the byte position where the current token starts.
 ///
@@ -25,7 +27,7 @@ fn current_token_start(line: &str, pos: usize) -> usize {
     let slice = &line[..pos];
     let mut last_sep_end = 0;
     for (byte_pos, ch) in slice.char_indices() {
-        if ch.is_whitespace() || SEPARATORS.contains(&ch) {
+        if ch.is_whitespace() || TOKEN_SEPARATORS.contains(&ch) {
             last_sep_end = byte_pos + ch.len_utf8();
         }
     }
@@ -44,7 +46,7 @@ fn is_command_position(line: &str, pos: usize) -> bool {
     let last_sep_end = {
         let mut sep_end = 0;
         for (byte_pos, ch) in before_token.char_indices() {
-            if SEPARATORS.contains(&ch) {
+            if COMMAND_SEPARATORS.contains(&ch) {
                 sep_end = byte_pos + ch.len_utf8();
             }
         }
@@ -69,7 +71,11 @@ fn collect_executables_from_path_str(path_str: &str) -> Vec<String> {
     for dir in std::env::split_paths(path_str) {
         if let Ok(read_dir) = std::fs::read_dir(&dir) {
             for entry in read_dir.filter_map(|e| e.ok()) {
-                names.insert(entry.file_name().to_string_lossy().into_owned());
+                if let Ok(file_type) = entry.file_type()
+                    && (file_type.is_file() || file_type.is_symlink())
+                {
+                    names.insert(entry.file_name().to_string_lossy().into_owned());
+                }
             }
         }
     }
@@ -149,8 +155,17 @@ impl Completer for ShellCompleter {
         // Robust shell escaping (e.g. single-quote strategy) is deferred to a
         // future version.
         for s in &mut suggestions {
+            #[cfg(windows)]
+            {
+                s.value = s.value.replace('/', "\\");
+            }
             if s.value.contains(' ') {
                 s.value = format!("\"{}\"", s.value);
+                if let Some(match_indices) = &mut s.match_indices {
+                    for index in match_indices.iter_mut() {
+                        *index += 1;
+                    }
+                }
             }
         }
 
@@ -236,6 +251,11 @@ mod tests {
     }
 
     #[test]
+    fn test_is_command_position_after_redirection_is_false() {
+        assert!(!is_command_position("echo hi > out", 13));
+    }
+
+    #[test]
     fn test_shell_completer_delegates_meta_commands() {
         let mut completer = ShellCompleter::new(false);
         // :cd is available in shell mode (not excluded)
@@ -289,6 +309,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("mybin"), b"").unwrap();
         std::fs::write(dir.path().join("othertool"), b"").unwrap();
+        std::fs::create_dir(dir.path().join("not-a-command-dir")).unwrap();
 
         let path_str = dir.path().to_string_lossy();
         let names = collect_executables_from_path_str(&path_str);
@@ -297,6 +318,10 @@ mod tests {
         assert!(
             names.contains(&"othertool".to_string()),
             "should find othertool"
+        );
+        assert!(
+            !names.contains(&"not-a-command-dir".to_string()),
+            "should not include directory names"
         );
     }
 
