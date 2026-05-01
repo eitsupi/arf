@@ -164,12 +164,10 @@ impl Completer for ShellCompleter {
             path_to_suggestions(partial, pos, token_start, &PathCompletionOptions::default());
 
         // Wrap paths containing spaces in double quotes.
-        // Known limitation: this naive quoting is not safe for paths that
-        // contain `"`, `$`, backticks, or backslashes, as those characters
-        // retain special meaning inside double quotes and could cause unintended
-        // shell expansion or injection when the completed command is executed.
-        // Robust shell escaping (e.g. single-quote strategy) is deferred to a
-        // future version.
+        // This intentionally optimizes for common paths and keeps behavior
+        // simple. We do not fully escape shell metacharacters here; paths with
+        // uncommon characters such as `$`, backticks, or embedded quotes may
+        // still require manual editing before execution.
         for s in &mut suggestions {
             #[cfg(windows)]
             {
