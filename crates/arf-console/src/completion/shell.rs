@@ -15,6 +15,12 @@ const SEPARATORS: &[char] = &['|', ';', '&', '<', '>'];
 ///
 /// Walks forward through the line up to `pos`, tracking the position after
 /// the last whitespace or shell separator character.
+///
+/// Known limitation: quote state is not tracked. Whitespace inside a quoted
+/// segment (e.g. `"dir with spaces/"`) is still treated as a token boundary,
+/// so Tab-completing again inside an already-inserted quoted path may produce
+/// incorrect span positions. Quote-aware tokenization is deferred to a future
+/// version.
 fn current_token_start(line: &str, pos: usize) -> usize {
     let slice = &line[..pos];
     let mut last_sep_end = 0;
@@ -135,7 +141,13 @@ impl Completer for ShellCompleter {
         let mut suggestions =
             path_to_suggestions(partial, pos, token_start, &PathCompletionOptions::default());
 
-        // Wrap paths containing spaces in double quotes for shell safety
+        // Wrap paths containing spaces in double quotes.
+        // Known limitation: this naive quoting is not safe for paths that
+        // contain `"`, `$`, backticks, or backslashes, as those characters
+        // retain special meaning inside double quotes and could cause unintended
+        // shell expansion or injection when the completed command is executed.
+        // Robust shell escaping (e.g. single-quote strategy) is deferred to a
+        // future version.
         for s in &mut suggestions {
             if s.value.contains(' ') {
                 s.value = format!("\"{}\"", s.value);
