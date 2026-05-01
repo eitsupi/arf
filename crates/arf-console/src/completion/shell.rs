@@ -118,17 +118,9 @@ impl ShellCompleter {
     /// command also suggests executable names from PATH directories.
     pub fn new(command_names: bool) -> Self {
         Self {
-            meta_completer: MetaCommandCompleter::with_exclusions(vec![
-                "shell",
-                "system",
-                "autoformat",
-                "format",
-                "restart",
-                "reprex",
-                "switch",
-                "h",
-                "help",
-            ]),
+            meta_completer: MetaCommandCompleter::with_exclusions(
+                MetaCommandCompleter::shell_mode_exclusions(),
+            ),
             command_names,
             command_cache: None,
         }

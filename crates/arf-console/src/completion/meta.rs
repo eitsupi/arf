@@ -157,6 +157,21 @@ impl MetaCommandCompleter {
         MetaCommandCompleter { excluded_commands }
     }
 
+    /// Commands excluded from meta completion while in shell mode.
+    pub(crate) fn shell_mode_exclusions() -> Vec<&'static str> {
+        vec![
+            "shell",
+            "system",
+            "autoformat",
+            "format",
+            "restart",
+            "reprex",
+            "switch",
+            "h",
+            "help",
+        ]
+    }
+
     /// Complete meta commands.
     fn complete_commands(&self, line: &str, pos: usize) -> Vec<Suggestion> {
         let trimmed = line.trim_start();
@@ -574,17 +589,8 @@ mod tests {
     #[test]
     fn test_meta_command_completer_excludes_shell_mode_commands() {
         // In Shell mode, R-specific commands should be excluded from completion
-        let mut completer = MetaCommandCompleter::with_exclusions(vec![
-            "shell",
-            "system",
-            "autoformat",
-            "format",
-            "restart",
-            "reprex",
-            "switch",
-            "h",
-            "help",
-        ]);
+        let mut completer =
+            MetaCommandCompleter::with_exclusions(MetaCommandCompleter::shell_mode_exclusions());
         let suggestions = completer.complete(":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
 
