@@ -11,7 +11,7 @@ use reedline::{Completer, Span, Suggestion};
 /// Shell separators that start a new token.
 const TOKEN_SEPARATORS: &[char] = &['|', ';', '&', '<', '>'];
 /// Shell separators that start a new command segment.
-const COMMAND_SEPARATORS: &[char] = &['|', ';', '&'];
+const COMMAND_SEPARATORS: &[char] = &['|', ';'];
 
 /// Find the byte position where the current token starts.
 ///
@@ -24,6 +24,10 @@ const COMMAND_SEPARATORS: &[char] = &['|', ';', '&'];
 /// incorrect span positions. Quote-aware tokenization is deferred to a future
 /// version.
 fn current_token_start(line: &str, pos: usize) -> usize {
+    let pos = pos.min(line.len());
+    if !line.is_char_boundary(pos) {
+        return 0;
+    }
     let slice = &line[..pos];
     let mut last_sep_end = 0;
     for (byte_pos, ch) in slice.char_indices() {
@@ -39,16 +43,24 @@ fn current_token_start(line: &str, pos: usize) -> usize {
 /// Returns true if the current token is the first non-whitespace token in the
 /// current command segment (i.e., after the last shell separator like `|`, `;`).
 fn is_command_position(line: &str, pos: usize) -> bool {
+    let pos = pos.min(line.len());
+    if !line.is_char_boundary(pos) {
+        return false;
+    }
     let token_start = current_token_start(line, pos);
     let before_token = &line[..token_start];
 
     // Find the byte position after the last shell segment separator
     let last_sep_end = {
         let mut sep_end = 0;
+        let mut prev: Option<char> = None;
         for (byte_pos, ch) in before_token.char_indices() {
-            if COMMAND_SEPARATORS.contains(&ch) {
+            let is_separator = COMMAND_SEPARATORS.contains(&ch)
+                || (ch == '&' && !matches!(prev, Some('<' | '>')));
+            if is_separator {
                 sep_end = byte_pos + ch.len_utf8();
             }
+            prev = Some(ch);
         }
         sep_end
     };
@@ -132,6 +144,10 @@ impl ShellCompleter {
 
 impl Completer for ShellCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+        let pos = pos.min(line.len());
+        if !line.is_char_boundary(pos) {
+            return vec![];
+        }
         let trimmed = line.trim_start();
 
         // Delegate meta commands to MetaCommandCompleter
@@ -160,6 +176,10 @@ impl Completer for ShellCompleter {
                 s.value = s.value.replace('/', "\\");
             }
             if s.value.contains(' ') {
+                #[cfg(windows)]
+                if s.value.ends_with('\\') {
+                    s.value.push('\\');
+                }
                 s.value = format!("\"{}\"", s.value);
                 if let Some(match_indices) = &mut s.match_indices {
                     for index in match_indices.iter_mut() {
@@ -226,6 +246,11 @@ mod tests {
     }
 
     #[test]
+    fn test_current_token_start_non_char_boundary_is_safe() {
+        assert_eq!(current_token_start("aé", 2), 0);
+    }
+
+    #[test]
     fn test_is_command_position_first_token() {
         assert!(is_command_position("ls", 2));
         assert!(is_command_position("  ls", 4));
@@ -253,6 +278,8 @@ mod tests {
     #[test]
     fn test_is_command_position_after_redirection_is_false() {
         assert!(!is_command_position("echo hi > out", 13));
+        assert!(!is_command_position("echo hi 2>&1", "echo hi 2>&1".len()));
+        assert!(!is_command_position("echo hi <&0", "echo hi <&0".len()));
     }
 
     #[test]
