@@ -52,15 +52,15 @@ fn is_command_position(line: &str, pos: usize) -> bool {
         .all(|c| c.is_whitespace())
 }
 
-/// Collect all names of files found in PATH directories.
+/// Collect all file names found in the directories listed in `path_str`.
 ///
 /// Results are sorted and deduplicated. No executable-bit filtering is applied
 /// (false positives are acceptable for completion purposes).
-fn collect_path_executables() -> Vec<String> {
-    let path_var = std::env::var("PATH").unwrap_or_default();
+/// Separated from `collect_path_executables` for testability.
+fn collect_executables_from_path_str(path_str: &str) -> Vec<String> {
     let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for dir in std::env::split_paths(&path_var) {
+    for dir in std::env::split_paths(path_str) {
         if let Ok(read_dir) = std::fs::read_dir(&dir) {
             for entry in read_dir.filter_map(|e| e.ok()) {
                 names.insert(entry.file_name().to_string_lossy().into_owned());
@@ -71,6 +71,10 @@ fn collect_path_executables() -> Vec<String> {
     let mut result: Vec<String> = names.into_iter().collect();
     result.sort();
     result
+}
+
+fn collect_path_executables() -> Vec<String> {
+    collect_executables_from_path_str(&std::env::var("PATH").unwrap_or_default())
 }
 
 /// Completer for shell mode.
@@ -266,5 +270,108 @@ mod tests {
         for s in &suggestions {
             assert_eq!(s.span.start, 4, "span should start at the token start (4)");
         }
+    }
+
+    #[test]
+    fn test_collect_executables_from_path_str_finds_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mybin"), b"").unwrap();
+        std::fs::write(dir.path().join("othertool"), b"").unwrap();
+
+        let path_str = dir.path().to_string_lossy();
+        let names = collect_executables_from_path_str(&path_str);
+
+        assert!(names.contains(&"mybin".to_string()), "should find mybin");
+        assert!(
+            names.contains(&"othertool".to_string()),
+            "should find othertool"
+        );
+    }
+
+    #[test]
+    fn test_collect_executables_from_path_str_deduplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("shared"), b"").unwrap();
+
+        // Same directory listed twice via std::env::join_paths
+        let twice = std::env::join_paths([dir.path(), dir.path()]).unwrap();
+        let path_str = twice.to_string_lossy();
+        let names = collect_executables_from_path_str(&path_str);
+        let count = names.iter().filter(|n| n.as_str() == "shared").count();
+        assert_eq!(
+            count, 1,
+            "duplicates from repeated PATH entries should be removed"
+        );
+    }
+
+    #[test]
+    fn test_collect_executables_from_path_str_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("zz_last"), b"").unwrap();
+        std::fs::write(dir.path().join("aa_first"), b"").unwrap();
+
+        let path_str = dir.path().to_string_lossy();
+        let names = collect_executables_from_path_str(&path_str);
+
+        let aa = names.iter().position(|n| n == "aa_first").unwrap();
+        let zz = names.iter().position(|n| n == "zz_last").unwrap();
+        assert!(aa < zz, "results should be sorted alphabetically");
+    }
+
+    #[test]
+    fn test_collect_executables_from_path_str_ignores_missing_dirs() {
+        let names =
+            collect_executables_from_path_str("/nonexistent_path_that_does_not_exist_12345");
+        assert!(
+            names.is_empty(),
+            "missing directories should not cause a panic or yield results"
+        );
+    }
+
+    #[test]
+    fn test_shell_completer_command_names_prefix_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("myapp"), b"").unwrap();
+        std::fs::write(dir.path().join("myother"), b"").unwrap();
+        std::fs::write(dir.path().join("unrelated"), b"").unwrap();
+
+        let path_str = dir.path().to_string_lossy().into_owned();
+        let mut completer = ShellCompleter::new(true);
+        // Pre-populate cache with our controlled directory
+        completer.command_cache = Some(collect_executables_from_path_str(&path_str));
+
+        let suggestions = completer.complete("my", 2);
+        let cmd_values: Vec<&str> = suggestions
+            .iter()
+            .filter(|s| s.description.as_deref() == Some("command"))
+            .map(|s| s.value.as_str())
+            .collect();
+
+        assert!(cmd_values.contains(&"myapp"), "should suggest myapp");
+        assert!(cmd_values.contains(&"myother"), "should suggest myother");
+        assert!(
+            !cmd_values.contains(&"unrelated"),
+            "should not suggest unrelated"
+        );
+    }
+
+    #[test]
+    fn test_shell_completer_command_names_not_in_arg_position() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mybin"), b"").unwrap();
+
+        let path_str = dir.path().to_string_lossy().into_owned();
+        let mut completer = ShellCompleter::new(true);
+        completer.command_cache = Some(collect_executables_from_path_str(&path_str));
+
+        // "ls my" — cursor is in argument position, not command position
+        let suggestions = completer.complete("ls my", 5);
+        let has_cmd = suggestions
+            .iter()
+            .any(|s| s.description.as_deref() == Some("command") && s.value == "mybin");
+        assert!(
+            !has_cmd,
+            "command names should not appear in argument position"
+        );
     }
 }
