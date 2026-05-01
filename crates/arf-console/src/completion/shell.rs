@@ -55,8 +55,8 @@ fn is_command_position(line: &str, pos: usize) -> bool {
         let mut sep_end = 0;
         let mut prev: Option<char> = None;
         for (byte_pos, ch) in before_token.char_indices() {
-            let is_separator = COMMAND_SEPARATORS.contains(&ch)
-                || (ch == '&' && !matches!(prev, Some('<' | '>')));
+            let is_separator =
+                COMMAND_SEPARATORS.contains(&ch) || (ch == '&' && !matches!(prev, Some('<' | '>')));
             if is_separator {
                 sep_end = byte_pos + ch.len_utf8();
             }
