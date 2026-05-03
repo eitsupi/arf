@@ -120,6 +120,11 @@ impl HeadlessProcess {
         Self::spawn_inner(pre_args, &[], &[], None)
     }
 
+    /// Spawn with a custom sessions directory (sets `ARF_IPC_SESSIONS_DIR`).
+    fn spawn_with_sessions_dir(sessions_dir: &str) -> Result<Self, String> {
+        Self::spawn_inner(&[], &[], &[("ARF_IPC_SESSIONS_DIR", sessions_dir)], None)
+    }
+
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
     #[cfg(windows)]
     fn spawn_with_creation_flags(extra_args: &[&str], flags: u32) -> Result<Self, String> {
@@ -2268,6 +2273,47 @@ fn test_headless_utf8_multibyte() {
         json2["value"].as_str().is_none(),
         "cat() check should not return value: {}",
         result2.stdout
+    );
+}
+
+/// Test that `ARF_IPC_SESSIONS_DIR` is honoured by the writer (headless) path.
+///
+/// Spawns `arf headless` with the env var set to a temp directory and
+/// verifies that the session file lands there. This exercises the writer
+/// path in `write_session`; `test_ipc_exit_code_transport_error` only
+/// exercises the reader path with a synthetic session file.
+#[test]
+fn test_sessions_dir_override_writer() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let sessions_dir = tmp.path().to_str().expect("sessions_dir is valid utf-8");
+
+    let process = HeadlessProcess::spawn_with_sessions_dir(sessions_dir)
+        .expect("Failed to spawn headless with sessions dir override");
+
+    // Wait for the session file to appear in the override directory.
+    // write_session() is called before the "IPC server listening" message, so
+    // the file should already exist by the time spawn_with_sessions_dir returns.
+    let session_file = tmp.path().join(format!("{}.json", process.pid));
+    let start = std::time::Instant::now();
+    loop {
+        if session_file.exists() {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "session file not found at {} within timeout",
+            session_file.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // IPC should work via the same sessions dir override.
+    let result = process.ipc_eval("1 + 1").expect("eval should work");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    assert!(
+        result.stdout.contains("[1] 2"),
+        "should return result: {}",
+        result.stdout
     );
 }
 

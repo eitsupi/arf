@@ -7,6 +7,18 @@
 //! Set `ARF_IPC_SESSIONS_DIR` to override the sessions directory for both
 //! writers and readers. This is useful for hermetic tests and explicit
 //! multi-instance isolation.
+//!
+//! # `ARF_IPC_SESSIONS_DIR` usage notes
+//!
+//! - **Use an absolute path.** Relative paths are resolved against each
+//!   process's current working directory; if the writer and reader start
+//!   from different directories they will silently look in different
+//!   locations.
+//! - **Use a user-private directory.** The default (`~/.cache/arf/sessions`)
+//!   is created with mode 0700. When overriding to an already-existing
+//!   directory (e.g. `/tmp/my-dir`), ensure it is not world-accessible;
+//!   although session files themselves are mode 0600, their filenames
+//!   (which reveal PIDs) would be visible to other users.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
