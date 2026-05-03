@@ -257,7 +257,8 @@ when piped). Errors are written to stderr as JSON. Exit codes: \
 Session discovery:
   By default, sessions are discovered from the platform cache directory.
   Set ARF_IPC_SESSIONS_DIR to explicitly override the session metadata \
-directory for both `arf headless`/`--with-ipc` writers and `arf ipc` readers.")]
+directory for all IPC writers (`arf headless`, `--with-ipc`, `:ipc start`) \
+and `arf ipc` readers.")]
     Ipc {
         #[command(subcommand)]
         action: IpcAction,
