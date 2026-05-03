@@ -42,20 +42,28 @@ where
 {
     let start = std::time::Instant::now();
     let mut last_json = serde_json::json!({});
+    let mut last_error = String::new();
     loop {
-        let result = process
-            .ipc_history(extra_args)
-            .unwrap_or_else(|e| panic!("history query failed: {e}"));
-        assert!(result.success, "history should succeed: {}", result.stderr);
-        let json = parse_ipc_json(&result);
-        if predicate(&json) {
-            return json;
+        match process.ipc_history(extra_args) {
+            Ok(result) if result.success => {
+                let json = parse_ipc_json(&result);
+                if predicate(&json) {
+                    return json;
+                }
+                last_json = json;
+            }
+            Ok(result) => {
+                last_error = format!("ipc_history returned non-success: {}", result.stderr);
+            }
+            Err(e) => {
+                last_error = format!("ipc_history command failed: {e}");
+            }
         }
-        last_json = json;
-        assert!(
-            start.elapsed() <= timeout,
-            "timeout waiting for expected history state; last response: {last_json}"
-        );
+        if start.elapsed() > timeout {
+            panic!(
+                "timeout waiting for expected history state; last response: {last_json}; last error: {last_error}"
+            );
+        }
         std::thread::sleep(poll_interval);
     }
 }
@@ -1689,9 +1697,11 @@ fn test_ipc_history_cwd_filter() {
         Duration::from_secs(5),
         Duration::from_millis(50),
         |json| {
-            !json["entries"]
-                .as_array()
-                .is_none_or(|entries| entries.is_empty())
+            json["entries"].as_array().is_some_and(|entries| {
+                entries.iter().any(|e| {
+                    e["command"].as_str() == Some("1 + 1") && e["cwd"].as_str() == Some(&cwd)
+                })
+            })
         },
     );
     let match_entries = match_json["entries"].as_array().expect("entries array");
