@@ -1784,22 +1784,16 @@ fn test_headless_large_output() {
         .as_str()
         .expect("value should be present for print(1:1000)");
 
-    // Output must start with the first element and include the last
-    assert!(
-        value.contains("[1]"),
-        "output should contain index [1]: {}",
+    // Count numeric tokens (integers 1-1000); index markers like "[16]" are
+    // not parseable as u32, so exactly 1000 tokens should parse successfully.
+    let count = value
+        .split_whitespace()
+        .filter(|s| s.parse::<u32>().is_ok())
+        .count();
+    assert_eq!(
+        count, 1000,
+        "output should contain exactly 1000 integers (got {count}): {}",
         value
-    );
-    assert!(
-        value.contains("1000"),
-        "output should contain element 1000: {}",
-        value
-    );
-    // 1000 integers printed with indices span many lines; sanity-check size
-    assert!(
-        value.len() > 500,
-        "output should be substantial (got {} bytes)",
-        value.len()
     );
 }
 
@@ -1829,6 +1823,11 @@ fn test_headless_message_capture() {
         "message() should not appear in stdout: {}",
         result.stdout
     );
+    assert!(
+        json["value"].as_str().is_none(),
+        "message() should not produce a value: {}",
+        result.stdout
+    );
 }
 
 /// Test that `warning()` output is captured in the `stderr` JSON field.
@@ -1849,6 +1848,16 @@ fn test_headless_warning_capture() {
             .as_str()
             .is_some_and(|s| s.contains("test warning")),
         "warning() output should appear in stderr field: {}",
+        result.stdout
+    );
+    assert!(
+        json["stdout"].as_str().is_none_or(|s| s.is_empty()),
+        "warning() should not appear in stdout: {}",
+        result.stdout
+    );
+    assert!(
+        json["value"].as_str().is_none(),
+        "warning() should not produce a value: {}",
         result.stdout
     );
 }
@@ -1884,8 +1893,18 @@ fn test_headless_utf8_multibyte() {
     assert!(
         json2["stdout"]
             .as_str()
-            .is_some_and(|s| s.contains('\u{65e5}') && s.contains('\u{672c}')),
-        "cat() multibyte output should appear in stdout field: {}",
+            .is_some_and(|s| s.contains("日本語")),
+        "cat() multibyte output should appear in stdout field intact: {}",
+        result2.stdout
+    );
+    assert!(
+        json2["stderr"].as_str().is_none_or(|s| s.is_empty()),
+        "cat() should not write to stderr: {}",
+        result2.stdout
+    );
+    assert!(
+        json2["value"].as_str().is_none(),
+        "cat() should not produce a value: {}",
         result2.stdout
     );
 }
