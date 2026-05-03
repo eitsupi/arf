@@ -1897,26 +1897,29 @@ fn test_ipc_exit_code_transport_error() {
     let session_path = session_dir.join(format!("{test_pid}.json"));
     struct SessionFileCleanupGuard {
         path: std::path::PathBuf,
-        original: Option<String>,
+        original: Option<Vec<u8>>,
+        had_read_error: bool,
     }
 
     impl Drop for SessionFileCleanupGuard {
         fn drop(&mut self) {
-            match &self.original {
-                Some(contents) => {
-                    let _ = std::fs::write(&self.path, contents);
-                }
-                None => {
-                    let _ = std::fs::remove_file(&self.path);
-                }
+            if let Some(contents) = &self.original {
+                let _ = std::fs::write(&self.path, contents);
+            } else if !self.had_read_error {
+                let _ = std::fs::remove_file(&self.path);
             }
         }
     }
 
-    let original = std::fs::read_to_string(&session_path).ok();
+    let (original, had_read_error) = match std::fs::read(&session_path) {
+        Ok(bytes) => (Some(bytes), false),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (None, false),
+        Err(_) => (None, true),
+    };
     let _cleanup_guard = SessionFileCleanupGuard {
         path: session_path.clone(),
         original,
+        had_read_error,
     };
 
     let session_json = serde_json::json!({
@@ -2252,20 +2255,30 @@ fn test_headless_utf8_multibyte() {
         result.stdout
     );
 
-    // Validate UTF-8 byte sequence transport through a printable ASCII form.
+    // Validate UTF-8 byte sequence transport through stdout in printable ASCII form.
     let result2 = process
         .ipc_eval(
-            r#"paste(sprintf("%02x", as.integer(charToRaw(enc2utf8("\u65e5\u672c\u8a9e")))), collapse = " ")"#,
+            r#"cat(paste(sprintf("%02x", as.integer(charToRaw(enc2utf8("\u65e5\u672c\u8a9e")))), collapse = " "))"#,
         )
         .expect("eval should run");
     assert!(result2.success, "eval should succeed: {}", result2.stderr);
     let json2 = parse_ipc_json(&result2);
-    let value2 = json2["value"]
+    let stdout2 = json2["stdout"]
         .as_str()
-        .expect("value should be present for raw-byte check");
+        .expect("stdout should be present for raw-byte check");
     assert!(
-        value2.contains("e6 97 a5 e6 9c ac e8 aa 9e"),
-        "UTF-8 bytes should match expected sequence: {}",
+        stdout2.contains("e6 97 a5 e6 9c ac e8 aa 9e"),
+        "UTF-8 bytes should match expected sequence in stdout: {}",
+        result2.stdout
+    );
+    assert!(
+        json2["stderr"].as_str().is_none_or(|s| s.is_empty()),
+        "stderr should be empty for UTF-8 stdout check: {}",
+        result2.stdout
+    );
+    assert!(
+        json2["value"].as_str().is_none(),
+        "cat() check should not return value: {}",
         result2.stdout
     );
 }
