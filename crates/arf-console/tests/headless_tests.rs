@@ -1889,3 +1889,51 @@ fn test_headless_utf8_multibyte() {
         result2.stdout
     );
 }
+
+/// Test that `.libPaths()` returns valid, accessible directories.
+///
+/// Verifies that R's library search path is non-empty, all returned paths
+/// exist on disk, and the default library (`R.home("library")`) is included.
+#[test]
+fn test_headless_lib_paths_valid() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // .libPaths() must be non-empty
+    let result = process
+        .ipc_eval("length(.libPaths()) > 0L")
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some("[1] TRUE"),
+        ".libPaths() should not be empty: {}",
+        result.stdout
+    );
+
+    // Every path returned by .libPaths() must exist on disk
+    let result2 = process
+        .ipc_eval("all(dir.exists(.libPaths()))")
+        .expect("eval should run");
+    assert!(result2.success, "eval should succeed: {}", result2.stderr);
+    let json2 = parse_ipc_json(&result2);
+    assert_eq!(
+        json2["value"].as_str(),
+        Some("[1] TRUE"),
+        "all .libPaths() entries should exist on disk: {}",
+        result2.stdout
+    );
+
+    // The default R library directory must be present in .libPaths()
+    let result3 = process
+        .ipc_eval(r#"R.home("library") %in% .libPaths()"#)
+        .expect("eval should run");
+    assert!(result3.success, "eval should succeed: {}", result3.stderr);
+    let json3 = parse_ipc_json(&result3);
+    assert_eq!(
+        json3["value"].as_str(),
+        Some("[1] TRUE"),
+        "R.home(\"library\") should be in .libPaths(): {}",
+        result3.stdout
+    );
+}
