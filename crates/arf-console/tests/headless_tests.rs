@@ -2195,7 +2195,7 @@ fn test_headless_utf8_multibyte() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
     let locale_result = process
-        .ipc_eval(r#"grepl("UTF-8", Sys.getlocale("LC_CTYPE"), fixed = TRUE)"#)
+        .ipc_eval(r#"grepl("utf-?8", Sys.getlocale("LC_CTYPE"), ignore.case = TRUE)"#)
         .expect("locale probe should run");
     assert!(
         locale_result.success,
