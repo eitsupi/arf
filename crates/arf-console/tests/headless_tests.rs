@@ -1774,6 +1774,17 @@ fn test_ipc_list_empty_json() {
 /// a nonexistent socket path, then invoking `arf ipc eval --pid <pid>`.
 #[test]
 fn test_ipc_exit_code_transport_error() {
+    struct SessionFileRestoreGuard {
+        path: std::path::PathBuf,
+        original: String,
+    }
+
+    impl Drop for SessionFileRestoreGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.path, &self.original);
+        }
+    }
+
     let process = HeadlessProcess::spawn().expect("spawn headless");
 
     let session_path = dirs::cache_dir()
@@ -1783,6 +1794,10 @@ fn test_ipc_exit_code_transport_error() {
         .join(format!("{}.json", process.pid));
     let session_raw = std::fs::read_to_string(&session_path)
         .unwrap_or_else(|e| panic!("read session file {}: {e}", session_path.display()));
+    let _restore_guard = SessionFileRestoreGuard {
+        path: session_path.clone(),
+        original: session_raw.clone(),
+    };
     let mut session_json: serde_json::Value = serde_json::from_str(&session_raw)
         .unwrap_or_else(|e| panic!("parse session file {}: {e}", session_path.display()));
 
