@@ -1768,3 +1768,37 @@ fn test_headless_no_echo_flag() {
         result.stdout
     );
 }
+
+/// Test that large R output (1000 elements) is captured completely.
+///
+/// Verifies that the IPC capture pipeline does not truncate output when
+/// R prints a long result spanning many lines.
+#[test]
+fn test_headless_large_output() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process.ipc_eval("print(1:1000)").expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    let value = json["value"]
+        .as_str()
+        .expect("value should be present for print(1:1000)");
+
+    // Output must start with the first element and include the last
+    assert!(
+        value.contains("[1]"),
+        "output should contain index [1]: {}",
+        value
+    );
+    assert!(
+        value.contains("1000"),
+        "output should contain element 1000: {}",
+        value
+    );
+    // 1000 integers printed with indices span many lines; sanity-check size
+    assert!(
+        value.len() > 500,
+        "output should be substantial (got {} bytes)",
+        value.len()
+    );
+}
