@@ -252,7 +252,12 @@ Quick start:
 
 All commands output JSON to stdout (pretty-printed on terminal, compact \
 when piped). Errors are written to stderr as JSON. Exit codes: \
-0 = success, 2 = transport error, 3 = session error, 4 = protocol error.")]
+0 = success, 2 = transport error, 3 = session error, 4 = protocol error.
+
+Session discovery:
+  By default, sessions are discovered from the platform cache directory.
+  Set ARF_IPC_SESSIONS_DIR to explicitly override the session metadata \
+directory for both `arf headless`/`--with-ipc` writers and `arf ipc` readers.")]
     Ipc {
         #[command(subcommand)]
         action: IpcAction,

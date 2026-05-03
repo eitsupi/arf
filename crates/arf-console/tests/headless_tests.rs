@@ -1893,15 +1893,7 @@ fn test_ipc_list_empty_json() {
 fn test_ipc_exit_code_transport_error() {
     let test_pid = std::process::id();
     let tmp = tempfile::tempdir().expect("tempdir");
-    #[cfg(unix)]
-    let cache_root = tmp.path().to_path_buf();
-    #[cfg(windows)]
-    let cache_root = tmp.path().join("LocalAppData");
-    #[cfg(windows)]
-    std::fs::create_dir_all(&cache_root)
-        .unwrap_or_else(|e| panic!("create local app data dir {}: {e}", cache_root.display()));
-
-    let session_dir = cache_root.join("arf").join("sessions");
+    let session_dir = tmp.path().join("sessions");
     std::fs::create_dir_all(&session_dir)
         .unwrap_or_else(|e| panic!("create session dir {}: {e}", session_dir.display()));
 
@@ -1927,22 +1919,12 @@ fn test_ipc_exit_code_transport_error() {
     .unwrap_or_else(|e| panic!("write session file {}: {e}", session_path.display()));
 
     let pid_arg = test_pid.to_string();
-    #[cfg(unix)]
     let env_overrides = vec![(
-        "XDG_CACHE_HOME",
-        cache_root.to_str().expect("cache_root must be valid utf-8"),
+        "ARF_IPC_SESSIONS_DIR",
+        session_dir
+            .to_str()
+            .expect("session_dir must be valid utf-8"),
     )];
-    #[cfg(windows)]
-    let env_overrides = vec![
-        (
-            "LOCALAPPDATA",
-            cache_root.to_str().expect("cache_root must be valid utf-8"),
-        ),
-        (
-            "APPDATA",
-            cache_root.to_str().expect("cache_root must be valid utf-8"),
-        ),
-    ];
 
     let output = run_ipc_command_with_env(&["ipc", "eval", "1", "--pid", &pid_arg], &env_overrides);
     assert_eq!(
