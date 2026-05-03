@@ -77,17 +77,6 @@ fn run_ipc_command(args: &[&str]) -> std::process::Output {
         .expect("run arf ipc")
 }
 
-/// Run `arf ipc ...` with extra environment variables.
-fn run_ipc_command_with_env(args: &[&str], envs: &[(&str, &str)]) -> std::process::Output {
-    let bin_path = env!("CARGO_BIN_EXE_arf");
-    let mut cmd = Command::new(bin_path);
-    cmd.args(args);
-    for (key, value) in envs {
-        cmd.env(key, value);
-    }
-    cmd.output().expect("run arf ipc with env")
-}
-
 /// Wrapper around a headless arf process.
 ///
 /// Spawns `arf headless` and waits for IPC readiness by monitoring
@@ -1889,47 +1878,12 @@ fn test_ipc_list_empty_json() {
 
 /// Test that transport failures produce `TRANSPORT_ERROR` (exit code 2).
 ///
-/// Uses an isolated cache/home environment and a synthetic session file
-/// pointing at a nonexistent socket path.
+/// Uses a synthetic session file pointing at a nonexistent socket path.
 #[test]
 fn test_ipc_exit_code_transport_error() {
-    let tmp = tempfile::TempDir::new().expect("create temp dir");
-    let home_root = tmp.path().join("home");
-    let cache_root = tmp.path().join("cache");
-    std::fs::create_dir_all(&home_root).expect("create isolated home root");
-    std::fs::create_dir_all(&cache_root).expect("create isolated cache root");
-    let home_root = home_root.to_string_lossy().to_string();
-    let cache_root = cache_root.to_string_lossy().to_string();
-
-    #[cfg(windows)]
-    let cache_env = [
-        ("LOCALAPPDATA", cache_root.as_str()),
-        ("USERPROFILE", home_root.as_str()),
-    ];
-    #[cfg(target_os = "macos")]
-    let cache_env = [
-        ("HOME", home_root.as_str()),
-        ("XDG_CACHE_HOME", cache_root.as_str()),
-    ];
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let cache_env = [
-        ("HOME", home_root.as_str()),
-        ("XDG_CACHE_HOME", cache_root.as_str()),
-    ];
-
     let test_pid = std::process::id();
-    #[cfg(windows)]
-    let session_dir = std::path::Path::new(&cache_root)
-        .join("arf")
-        .join("sessions");
-    #[cfg(target_os = "macos")]
-    let session_dir = std::path::Path::new(&home_root)
-        .join("Library")
-        .join("Caches")
-        .join("arf")
-        .join("sessions");
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let session_dir = std::path::Path::new(&cache_root)
+    let session_dir = dirs::cache_dir()
+        .expect("cache dir")
         .join("arf")
         .join("sessions");
     std::fs::create_dir_all(&session_dir)
@@ -1941,6 +1895,20 @@ fn test_ipc_exit_code_transport_error() {
     let bogus_socket = format!(r"\\.\pipe\arf-missing-{}", test_pid);
 
     let session_path = session_dir.join(format!("{test_pid}.json"));
+    struct SessionFileCleanupGuard {
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for SessionFileCleanupGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    let _cleanup_guard = SessionFileCleanupGuard {
+        path: session_path.clone(),
+    };
+
     let session_json = serde_json::json!({
         "pid": test_pid,
         "socket_path": bogus_socket,
@@ -1957,7 +1925,7 @@ fn test_ipc_exit_code_transport_error() {
     .unwrap_or_else(|e| panic!("write session file {}: {e}", session_path.display()));
 
     let pid_arg = test_pid.to_string();
-    let output = run_ipc_command_with_env(&["ipc", "eval", "1", "--pid", &pid_arg], &cache_env);
+    let output = run_ipc_command(&["ipc", "eval", "1", "--pid", &pid_arg]);
     assert_eq!(
         output.status.code(),
         Some(2),
