@@ -2121,7 +2121,10 @@ fn test_headless_utf8_multibyte() {
 /// exist on disk, and the default library (`R.home("library")`) is included.
 #[test]
 fn test_headless_lib_paths_valid() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    // Run under --vanilla so user/site startup profiles cannot customize
+    // library paths and make this invariant environment-dependent.
+    let process =
+        HeadlessProcess::spawn_with_args(&["--vanilla"]).expect("Failed to spawn headless");
 
     // .libPaths() must be non-empty
     let result = process
