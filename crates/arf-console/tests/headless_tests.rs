@@ -1802,3 +1802,53 @@ fn test_headless_large_output() {
         value.len()
     );
 }
+
+/// Test that `message()` output is captured in the `stderr` JSON field.
+///
+/// `message()` writes to R's stderr stream (WriteConsoleEx type=1), so it
+/// should appear in the `stderr` field of the evaluate result, not in
+/// `stdout` or `value`.
+#[test]
+fn test_headless_message_capture() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval(r#"message("hello from message"); invisible(NULL)"#)
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    assert!(
+        json["stderr"]
+            .as_str()
+            .is_some_and(|s| s.contains("hello from message")),
+        "message() output should appear in stderr field: {}",
+        result.stdout
+    );
+    assert!(
+        json["stdout"].as_str().is_none_or(|s| s.is_empty()),
+        "message() should not appear in stdout: {}",
+        result.stdout
+    );
+}
+
+/// Test that `warning()` output is captured in the `stderr` JSON field.
+///
+/// With `options(warn = 1)`, warnings are emitted immediately via
+/// WriteConsoleEx type=1 (stderr), so they appear in the `stderr` field.
+#[test]
+fn test_headless_warning_capture() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval(r#"options(warn = 1); warning("test warning"); invisible(NULL)"#)
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    assert!(
+        json["stderr"]
+            .as_str()
+            .is_some_and(|s| s.contains("test warning")),
+        "warning() output should appear in stderr field: {}",
+        result.stdout
+    );
+}
