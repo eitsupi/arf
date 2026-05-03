@@ -2135,8 +2135,10 @@ fn test_headless_utf8_multibyte() {
 
 /// Test that `.libPaths()` returns valid, accessible directories.
 ///
-/// Verifies that R's library search path is non-empty, all returned paths
-/// exist on disk, and the default library (`R.home("library")`) is included.
+/// Verifies that R's library search path is non-empty and all returned paths
+/// exist on disk. For non-macOS, also verifies that `R.home("library")` is
+/// included in `.libPaths()`. For macOS, validates that `R.home("library")`
+/// exists on disk (runner setups can legitimately exclude it from `.libPaths()`).
 #[test]
 fn test_headless_lib_paths_valid() {
     // Run under --vanilla so user/site startup profiles cannot customize
@@ -2170,14 +2172,24 @@ fn test_headless_lib_paths_valid() {
         result2.stdout
     );
 
-    // The base R library directory itself must exist on disk.
-    // On some environments (e.g., macOS runner setups), it is not always
-    // guaranteed to be included in .libPaths() even in --vanilla mode.
+    #[cfg(not(target_os = "macos"))]
+    let result3 = process
+        .ipc_eval(r#"R.home("library") %in% .libPaths()"#)
+        .expect("eval should run");
+    #[cfg(target_os = "macos")]
     let result3 = process
         .ipc_eval(r#"dir.exists(R.home("library"))"#)
         .expect("eval should run");
     assert!(result3.success, "eval should succeed: {}", result3.stderr);
     let json3 = parse_ipc_json(&result3);
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(
+        json3["value"].as_str(),
+        Some("[1] TRUE"),
+        r#"R.home("library") should be in .libPaths(): {}"#,
+        result3.stdout
+    );
+    #[cfg(target_os = "macos")]
     assert_eq!(
         json3["value"].as_str(),
         Some("[1] TRUE"),
