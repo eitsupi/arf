@@ -1897,16 +1897,26 @@ fn test_ipc_exit_code_transport_error() {
     let session_path = session_dir.join(format!("{test_pid}.json"));
     struct SessionFileCleanupGuard {
         path: std::path::PathBuf,
+        original: Option<String>,
     }
 
     impl Drop for SessionFileCleanupGuard {
         fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.path);
+            match &self.original {
+                Some(contents) => {
+                    let _ = std::fs::write(&self.path, contents);
+                }
+                None => {
+                    let _ = std::fs::remove_file(&self.path);
+                }
+            }
         }
     }
 
+    let original = std::fs::read_to_string(&session_path).ok();
     let _cleanup_guard = SessionFileCleanupGuard {
         path: session_path.clone(),
+        original,
     };
 
     let session_json = serde_json::json!({
