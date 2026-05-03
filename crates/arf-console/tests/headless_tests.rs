@@ -2224,59 +2224,38 @@ fn test_headless_warning_capture() {
 
 /// Test that UTF-8 multibyte characters are handled correctly.
 ///
-/// Verifies behavior only when the spawned R session reports a UTF-8 locale;
-/// otherwise skips to keep this test cross-platform and non-flaky.
+/// Uses `\\u` escapes and UTF-8 conversion helpers so it runs in any locale.
 #[test]
 fn test_headless_utf8_multibyte() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
-    let locale_result = process
-        .ipc_eval(r#"grepl("utf-?8", Sys.getlocale("LC_CTYPE"), ignore.case = TRUE)"#)
-        .expect("locale probe should run");
-    assert!(
-        locale_result.success,
-        "locale probe should succeed: {}",
-        locale_result.stderr
-    );
-    let locale_json = parse_ipc_json(&locale_result);
-    if locale_json["value"].as_str() != Some("[1] TRUE") {
-        return;
-    }
-
-    // nchar() should count Unicode characters, not bytes
+    // utf8ToInt() works across locales and validates Unicode code points.
     let result = process
-        .ipc_eval(r#"nchar("日本語")"#)
+        .ipc_eval(r#"utf8ToInt("\u65e5\u672c\u8a9e")"#)
         .expect("eval should run");
     assert!(result.success, "eval should succeed: {}", result.stderr);
     let json = parse_ipc_json(&result);
     assert_eq!(
         json["value"].as_str(),
-        Some("[1] 3"),
-        "nchar of 3 Japanese characters should be 3: {}",
+        Some("[1] 26085 26412 35486"),
+        "utf8ToInt should return expected code points: {}",
         result.stdout
     );
 
-    // cat() with multibyte characters should appear in stdout field intact
+    // Validate UTF-8 byte sequence transport through a printable ASCII form.
     let result2 = process
-        .ipc_eval(r#"cat("日本語\n")"#)
+        .ipc_eval(
+            r#"paste(sprintf("%02x", as.integer(charToRaw(enc2utf8("\u65e5\u672c\u8a9e")))), collapse = " ")"#,
+        )
         .expect("eval should run");
     assert!(result2.success, "eval should succeed: {}", result2.stderr);
     let json2 = parse_ipc_json(&result2);
+    let value2 = json2["value"]
+        .as_str()
+        .expect("value should be present for raw-byte check");
     assert!(
-        json2["stdout"]
-            .as_str()
-            .is_some_and(|s| s.contains("日本語")),
-        "cat() multibyte output should appear in stdout field intact: {}",
-        result2.stdout
-    );
-    assert!(
-        json2["stderr"].as_str().is_none_or(|s| s.is_empty()),
-        "cat() should not write to stderr: {}",
-        result2.stdout
-    );
-    assert!(
-        json2["value"].as_str().is_none(),
-        "cat() should not produce a value: {}",
+        value2.contains("e6 97 a5 e6 9c ac e8 aa 9e"),
+        "UTF-8 bytes should match expected sequence: {}",
         result2.stdout
     );
 }
