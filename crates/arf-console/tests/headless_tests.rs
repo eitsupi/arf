@@ -38,6 +38,17 @@ fn run_ipc_command(args: &[&str]) -> std::process::Output {
         .expect("run arf ipc")
 }
 
+/// Run `arf ipc ...` with extra environment variables.
+fn run_ipc_command_with_env(args: &[&str], envs: &[(&str, &str)]) -> std::process::Output {
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    let mut cmd = Command::new(bin_path);
+    cmd.args(args);
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("run arf ipc with env")
+}
+
 /// Wrapper around a headless arf process.
 ///
 /// Spawns `arf headless` and waits for IPC readiness by monitoring
@@ -45,6 +56,7 @@ fn run_ipc_command(args: &[&str]) -> std::process::Output {
 struct HeadlessProcess {
     child: Child,
     pid: u32,
+    env_overrides: Vec<(String, String)>,
     _stderr_thread: Option<thread::JoinHandle<()>>,
     _stdout_thread: Option<thread::JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
@@ -62,23 +74,29 @@ impl HeadlessProcess {
 
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, None)
+        Self::spawn_inner(&[], extra_args, &[], None)
     }
 
     /// Spawn `arf headless` with global flags placed before the subcommand.
     fn spawn_with_pre_args(pre_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(pre_args, &[], None)
+        Self::spawn_inner(pre_args, &[], &[], None)
+    }
+
+    /// Spawn `arf headless` with environment variable overrides.
+    fn spawn_with_env(extra_args: &[&str], env_overrides: &[(&str, &str)]) -> Result<Self, String> {
+        Self::spawn_inner(&[], extra_args, env_overrides, None)
     }
 
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
     #[cfg(windows)]
     fn spawn_with_creation_flags(extra_args: &[&str], flags: u32) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, Some(flags))
+        Self::spawn_inner(&[], extra_args, &[], Some(flags))
     }
 
     fn spawn_inner(
         pre_subcommand_args: &[&str],
         extra_args: &[&str],
+        env_overrides: &[(&str, &str)],
         #[allow(unused)] creation_flags: Option<u32>,
     ) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -97,6 +115,9 @@ impl HeadlessProcess {
         cmd.arg("headless");
         for arg in extra_args {
             cmd.arg(arg);
+        }
+        for (key, value) in env_overrides {
+            cmd.env(key, value);
         }
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
@@ -200,17 +221,20 @@ impl HeadlessProcess {
                     ));
                 }
                 // Try a real RPC to confirm R is ready
-                let probe = Command::new(bin_path)
-                    .args([
-                        "ipc",
-                        "eval",
-                        "1",
-                        "--pid",
-                        &pid.to_string(),
-                        "--timeout",
-                        "500",
-                    ])
-                    .output();
+                let mut probe = Command::new(bin_path);
+                probe.args([
+                    "ipc",
+                    "eval",
+                    "1",
+                    "--pid",
+                    &pid.to_string(),
+                    "--timeout",
+                    "500",
+                ]);
+                for (key, value) in env_overrides {
+                    probe.env(key, value);
+                }
+                let probe = probe.output();
                 match probe {
                     Ok(output) if output.status.success() => break,
                     Ok(output) => {
@@ -239,6 +263,10 @@ impl HeadlessProcess {
         Ok(HeadlessProcess {
             child,
             pid,
+            env_overrides: env_overrides
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
             _stderr_thread: Some(stderr_thread),
             _stdout_thread: Some(stdout_thread),
             shutdown,
@@ -251,8 +279,12 @@ impl HeadlessProcess {
     fn ipc_eval(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args(["ipc", "eval", code, "--pid", &self.pid.to_string()])
+        let mut cmd = Command::new(bin_path);
+        cmd.args(["ipc", "eval", code, "--pid", &self.pid.to_string()]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc eval: {e}"))?;
 
@@ -268,15 +300,19 @@ impl HeadlessProcess {
     fn ipc_eval_visible(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args([
-                "ipc",
-                "eval",
-                code,
-                "--pid",
-                &self.pid.to_string(),
-                "--visible",
-            ])
+        let mut cmd = Command::new(bin_path);
+        cmd.args([
+            "ipc",
+            "eval",
+            code,
+            "--pid",
+            &self.pid.to_string(),
+            "--visible",
+        ]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc eval --visible: {e}"))?;
 
@@ -292,16 +328,20 @@ impl HeadlessProcess {
     fn ipc_eval_with_timeout(&self, code: &str, timeout_ms: u64) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args([
-                "ipc",
-                "eval",
-                code,
-                "--pid",
-                &self.pid.to_string(),
-                "--timeout",
-                &timeout_ms.to_string(),
-            ])
+        let mut cmd = Command::new(bin_path);
+        cmd.args([
+            "ipc",
+            "eval",
+            code,
+            "--pid",
+            &self.pid.to_string(),
+            "--timeout",
+            &timeout_ms.to_string(),
+        ]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc eval --timeout: {e}"))?;
 
@@ -317,8 +357,12 @@ impl HeadlessProcess {
     fn ipc_send(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args(["ipc", "send", code, "--pid", &self.pid.to_string()])
+        let mut cmd = Command::new(bin_path);
+        cmd.args(["ipc", "send", code, "--pid", &self.pid.to_string()]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc send: {e}"))?;
 
@@ -334,8 +378,12 @@ impl HeadlessProcess {
     fn ipc_session(&self) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args(["ipc", "session", "--pid", &self.pid.to_string()])
+        let mut cmd = Command::new(bin_path);
+        cmd.args(["ipc", "session", "--pid", &self.pid.to_string()]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc session: {e}"))?;
 
@@ -355,8 +403,12 @@ impl HeadlessProcess {
         let mut args = vec!["ipc", "history", "--pid", &pid_str];
         args.extend_from_slice(extra_args);
 
-        let output = Command::new(bin_path)
-            .args(&args)
+        let mut cmd = Command::new(bin_path);
+        cmd.args(&args);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc history: {e}"))?;
 
@@ -372,8 +424,12 @@ impl HeadlessProcess {
     fn ipc_shutdown(&self) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
-        let output = Command::new(bin_path)
-            .args(["ipc", "shutdown", "--pid", &self.pid.to_string()])
+        let mut cmd = Command::new(bin_path);
+        cmd.args(["ipc", "shutdown", "--pid", &self.pid.to_string()]);
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run arf ipc shutdown: {e}"))?;
 
@@ -1770,34 +1826,28 @@ fn test_ipc_list_empty_json() {
 
 /// Test that transport failures produce `TRANSPORT_ERROR` (exit code 2).
 ///
-/// Simulates transport failure by rewriting a live session file to reference
-/// a nonexistent socket path, then invoking `arf ipc eval --pid <pid>`.
+/// Uses an isolated cache directory so session-file mutation cannot affect
+/// other tests or local `arf ipc` clients.
 #[test]
 fn test_ipc_exit_code_transport_error() {
-    struct SessionFileRestoreGuard {
-        path: std::path::PathBuf,
-        original: String,
-    }
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let cache_root = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache_root).expect("create isolated cache root");
+    let cache_root = cache_root.to_string_lossy().to_string();
 
-    impl Drop for SessionFileRestoreGuard {
-        fn drop(&mut self) {
-            let _ = std::fs::write(&self.path, &self.original);
-        }
-    }
+    #[cfg(windows)]
+    let cache_env = [("LOCALAPPDATA", cache_root.as_str())];
+    #[cfg(not(windows))]
+    let cache_env = [("XDG_CACHE_HOME", cache_root.as_str())];
 
-    let process = HeadlessProcess::spawn().expect("spawn headless");
+    let process = HeadlessProcess::spawn_with_env(&[], &cache_env).expect("spawn headless");
 
-    let session_path = dirs::cache_dir()
-        .expect("cache dir")
+    let session_path = std::path::Path::new(&cache_root)
         .join("arf")
         .join("sessions")
         .join(format!("{}.json", process.pid));
     let session_raw = std::fs::read_to_string(&session_path)
         .unwrap_or_else(|e| panic!("read session file {}: {e}", session_path.display()));
-    let _restore_guard = SessionFileRestoreGuard {
-        path: session_path.clone(),
-        original: session_raw.clone(),
-    };
     let mut session_json: serde_json::Value = serde_json::from_str(&session_raw)
         .unwrap_or_else(|e| panic!("parse session file {}: {e}", session_path.display()));
 
@@ -1814,7 +1864,7 @@ fn test_ipc_exit_code_transport_error() {
     .unwrap_or_else(|e| panic!("rewrite session file {}: {e}", session_path.display()));
 
     let pid_arg = process.pid.to_string();
-    let output = run_ipc_command(&["ipc", "eval", "1", "--pid", &pid_arg]);
+    let output = run_ipc_command_with_env(&["ipc", "eval", "1", "--pid", &pid_arg], &cache_env);
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -2021,6 +2071,31 @@ fn test_headless_large_output() {
     );
 }
 
+/// Test that large printed output is captured in `stdout` with `--visible`.
+#[test]
+fn test_headless_large_output_stdout_visible() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let result = process
+        .ipc_eval_visible(r#"print(1:1000)"#)
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    let stdout = json["stdout"]
+        .as_str()
+        .expect("stdout should be present for visible print");
+
+    let count = stdout
+        .split_whitespace()
+        .filter(|s| s.parse::<u32>().is_ok())
+        .count();
+    assert_eq!(
+        count, 1000,
+        "stdout should contain exactly 1000 integers (got {count}): {}",
+        stdout
+    );
+}
+
 /// Test that `message()` output is captured in the `stderr` JSON field.
 ///
 /// `message()` writes to R's stderr stream (WriteConsoleEx type=1), so it
@@ -2088,12 +2163,24 @@ fn test_headless_warning_capture() {
 
 /// Test that UTF-8 multibyte characters are handled correctly.
 ///
-/// Verifies that R's string operations on multibyte characters produce
-/// correct results, and that `cat()` output containing multibyte characters
-/// is captured without corruption in the `stdout` field.
+/// Verifies behavior only when the spawned R session reports a UTF-8 locale;
+/// otherwise skips to keep this test cross-platform and non-flaky.
 #[test]
 fn test_headless_utf8_multibyte() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    let locale_result = process
+        .ipc_eval(r#"grepl("UTF-8", Sys.getlocale("LC_CTYPE"), fixed = TRUE)"#)
+        .expect("locale probe should run");
+    assert!(
+        locale_result.success,
+        "locale probe should succeed: {}",
+        locale_result.stderr
+    );
+    let locale_json = parse_ipc_json(&locale_result);
+    if locale_json["value"].as_str() != Some("[1] TRUE") {
+        return;
+    }
 
     // nchar() should count Unicode characters, not bytes
     let result = process
