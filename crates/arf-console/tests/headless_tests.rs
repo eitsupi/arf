@@ -29,6 +29,12 @@ fn parse_ipc_json(output: &IpcOutput) -> serde_json::Value {
     })
 }
 
+/// Run `arf ipc ...` directly and capture output.
+fn run_ipc_command(args: &[&str]) -> std::process::Output {
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    Command::new(bin_path).args(args).output().expect("run arf ipc")
+}
+
 /// Wrapper around a headless arf process.
 ///
 /// Spawns `arf headless` and waits for IPC readiness by monitoring
@@ -1538,6 +1544,138 @@ fn test_ipc_history_metadata() {
     );
 }
 
+/// Test `--since` filters history entries by timestamp.
+#[test]
+fn test_ipc_history_since_filter() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    let r = process.ipc_eval("1 + 1").expect("eval");
+    assert!(r.success);
+    std::thread::sleep(Duration::from_millis(200));
+
+    let future = process
+        .ipc_history(&["--since", "2999-01-01"])
+        .expect("history since future");
+    assert!(future.success, "history should succeed: {}", future.stderr);
+    let future_json = parse_ipc_json(&future);
+    let future_entries = future_json["entries"].as_array().expect("entries array");
+    assert!(
+        future_entries.is_empty(),
+        "future since filter should return no entries: {future_json}"
+    );
+
+    let past = process
+        .ipc_history(&["--since", "1970-01-01"])
+        .expect("history since past");
+    assert!(past.success, "history should succeed: {}", past.stderr);
+    let past_json = parse_ipc_json(&past);
+    let past_entries = past_json["entries"].as_array().expect("entries array");
+    assert!(
+        past_entries
+            .iter()
+            .any(|e| e["command"].as_str() == Some("1 + 1")),
+        "past since filter should include command: {past_json}"
+    );
+}
+
+/// Test `--cwd` exact-match filtering.
+#[test]
+fn test_ipc_history_cwd_filter() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+    let process =
+        HeadlessProcess::spawn_with_args(&["--history-dir", history_dir]).expect("spawn headless");
+
+    let r = process.ipc_eval("1 + 1").expect("eval");
+    assert!(r.success);
+    std::thread::sleep(Duration::from_millis(200));
+
+    let cwd = std::env::current_dir()
+        .expect("current dir")
+        .display()
+        .to_string();
+    let match_result = process
+        .ipc_history(&["--cwd", &cwd])
+        .expect("history cwd match");
+    assert!(match_result.success, "history should succeed");
+    let match_json = parse_ipc_json(&match_result);
+    let match_entries = match_json["entries"].as_array().expect("entries array");
+    assert!(
+        !match_entries.is_empty(),
+        "cwd match should return entries: {match_json}"
+    );
+
+    let miss_result = process
+        .ipc_history(&["--cwd", "/definitely/nonexistent/cwd"])
+        .expect("history cwd miss");
+    assert!(miss_result.success, "history should succeed");
+    let miss_json = parse_ipc_json(&miss_result);
+    let miss_entries = miss_json["entries"].as_array().expect("entries array");
+    assert!(
+        miss_entries.is_empty(),
+        "cwd miss should return no entries: {miss_json}"
+    );
+}
+
+/// Test `--all-sessions` includes entries from another running headless session.
+#[test]
+fn test_ipc_history_all_sessions() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().to_str().unwrap();
+
+    let p1 = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir])
+        .expect("spawn headless #1");
+    let p2 = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir])
+        .expect("spawn headless #2");
+
+    let r1 = p1.ipc_eval("cmd_from_p1 <- 1").expect("eval p1");
+    assert!(r1.success);
+    let r2 = p2.ipc_eval("cmd_from_p2 <- 2").expect("eval p2");
+    assert!(r2.success);
+    std::thread::sleep(Duration::from_millis(250));
+
+    let default_result = p1.ipc_history(&[]).expect("history default");
+    assert!(default_result.success, "history default should succeed");
+    let default_json = parse_ipc_json(&default_result);
+    let default_commands: Vec<&str> = default_json["entries"]
+        .as_array()
+        .expect("entries array")
+        .iter()
+        .filter_map(|e| e["command"].as_str())
+        .collect();
+    assert!(
+        default_commands.contains(&"cmd_from_p1 <- 1"),
+        "default history should include own command: {default_commands:?}"
+    );
+    assert!(
+        !default_commands.contains(&"cmd_from_p2 <- 2"),
+        "default history should not include other session command: {default_commands:?}"
+    );
+
+    let all_result = p1
+        .ipc_history(&["--all-sessions"])
+        .expect("history all-sessions");
+    assert!(all_result.success, "history all-sessions should succeed");
+    let all_json = parse_ipc_json(&all_result);
+    let all_commands: Vec<&str> = all_json["entries"]
+        .as_array()
+        .expect("entries array")
+        .iter()
+        .filter_map(|e| e["command"].as_str())
+        .collect();
+    assert!(
+        all_commands.contains(&"cmd_from_p1 <- 1"),
+        "all-sessions should include own command: {all_commands:?}"
+    );
+    assert!(
+        all_commands.contains(&"cmd_from_p2 <- 2"),
+        "all-sessions should include other session command: {all_commands:?}"
+    );
+}
+
 /// Test that history returns an error when history is disabled.
 #[test]
 fn test_ipc_history_disabled() {
@@ -1586,6 +1724,29 @@ fn test_ipc_exit_code_session_not_found() {
     assert!(json["error"]["hint"].as_str().is_some());
 }
 
+/// Test that omitting `--pid` with multiple sessions returns
+/// `SESSION_AMBIGUOUS` (exit code 3).
+#[test]
+fn test_ipc_exit_code_session_ambiguous() {
+    let p1 = HeadlessProcess::spawn().expect("spawn headless #1");
+    let p2 = HeadlessProcess::spawn().expect("spawn headless #2");
+    let _keep_alive = (&p1, &p2);
+
+    let output = run_ipc_command(&["ipc", "eval", "1"]);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "exit code should be 3 (session ambiguous/not found)"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json: serde_json::Value = serde_json::from_str(&stderr)
+        .unwrap_or_else(|e| panic!("stderr should be JSON: {e}\nstderr: {stderr}"));
+    assert_eq!(json["error"]["code"].as_str(), Some("SESSION_AMBIGUOUS"));
+    assert!(json["error"]["message"].as_str().is_some());
+    assert!(json["error"]["hint"].as_str().is_some());
+}
+
 /// Test that `arf ipc list` outputs valid JSON even with no sessions.
 #[test]
 fn test_ipc_list_empty_json() {
@@ -1602,6 +1763,51 @@ fn test_ipc_list_empty_json() {
     let json: serde_json::Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|e| panic!("stdout should be JSON: {e}\nstdout: {stdout}"));
     assert!(json["sessions"].is_array(), "should have sessions array");
+}
+
+/// Test that transport failures produce `TRANSPORT_ERROR` (exit code 2).
+///
+/// Simulates transport failure by rewriting a live session file to reference
+/// a nonexistent socket path, then invoking `arf ipc eval --pid <pid>`.
+#[test]
+fn test_ipc_exit_code_transport_error() {
+    let process = HeadlessProcess::spawn().expect("spawn headless");
+
+    let session_path = dirs::cache_dir()
+        .expect("cache dir")
+        .join("arf")
+        .join("sessions")
+        .join(format!("{}.json", process.pid));
+    let session_raw = std::fs::read_to_string(&session_path)
+        .unwrap_or_else(|e| panic!("read session file {}: {e}", session_path.display()));
+    let mut session_json: serde_json::Value = serde_json::from_str(&session_raw)
+        .unwrap_or_else(|e| panic!("parse session file {}: {e}", session_path.display()));
+
+    #[cfg(unix)]
+    let bogus_socket = format!("/tmp/arf-missing-{}.sock", process.pid);
+    #[cfg(windows)]
+    let bogus_socket = format!(r"\\.\pipe\arf-missing-{}", process.pid);
+
+    session_json["socket_path"] = serde_json::Value::String(bogus_socket);
+    std::fs::write(
+        &session_path,
+        serde_json::to_string_pretty(&session_json).expect("serialize session file"),
+    )
+    .unwrap_or_else(|e| panic!("rewrite session file {}: {e}", session_path.display()));
+
+    let pid_arg = process.pid.to_string();
+    let output = run_ipc_command(&["ipc", "eval", "1", "--pid", &pid_arg]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code should be 2 (transport)"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json: serde_json::Value = serde_json::from_str(&stderr)
+        .unwrap_or_else(|e| panic!("stderr should be JSON: {e}\nstderr: {stderr}"));
+    assert_eq!(json["error"]["code"].as_str(), Some("TRANSPORT_ERROR"));
+    assert!(json["error"]["message"].as_str().is_some());
 }
 
 /// Test that protocol errors (e.g. timeout) produce exit code 4 and
@@ -1769,20 +1975,20 @@ fn test_headless_no_echo_flag() {
     );
 }
 
-/// Test that large R output (1000 elements) is captured completely.
+/// Test that a large R value (1000 elements) is returned completely.
 ///
-/// Verifies that the IPC capture pipeline does not truncate output when
-/// R prints a long result spanning many lines.
+/// Uses a pure expression (`1:1000`) instead of `print(1:1000)` so this test
+/// only validates `value` transport, not stdout capture behavior.
 #[test]
 fn test_headless_large_output() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
-    let result = process.ipc_eval("print(1:1000)").expect("eval should run");
+    let result = process.ipc_eval("1:1000").expect("eval should run");
     assert!(result.success, "eval should succeed: {}", result.stderr);
     let json = parse_ipc_json(&result);
     let value = json["value"]
         .as_str()
-        .expect("value should be present for print(1:1000)");
+        .expect("value should be present for 1:1000");
 
     // Count numeric tokens (integers 1-1000); index markers like "[16]" are
     // not parseable as u32, so exactly 1000 tokens should parse successfully.
