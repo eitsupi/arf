@@ -53,16 +53,22 @@ impl HeadlessProcess {
 
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(extra_args, None)
+        Self::spawn_inner(&[], extra_args, None)
+    }
+
+    /// Spawn `arf headless` with global flags placed before the subcommand.
+    fn spawn_with_pre_args(pre_args: &[&str]) -> Result<Self, String> {
+        Self::spawn_inner(pre_args, &[], None)
     }
 
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
     #[cfg(windows)]
     fn spawn_with_creation_flags(extra_args: &[&str], flags: u32) -> Result<Self, String> {
-        Self::spawn_inner(extra_args, Some(flags))
+        Self::spawn_inner(&[], extra_args, Some(flags))
     }
 
     fn spawn_inner(
+        pre_subcommand_args: &[&str],
         extra_args: &[&str],
         #[allow(unused)] creation_flags: Option<u32>,
     ) -> Result<Self, String> {
@@ -76,6 +82,9 @@ impl HeadlessProcess {
             || extra_args.contains(&"--log-file");
 
         let mut cmd = Command::new(bin_path);
+        for arg in pre_subcommand_args {
+            cmd.arg(arg);
+        }
         cmd.arg("headless");
         for arg in extra_args {
             cmd.arg(arg);
@@ -1706,6 +1715,56 @@ fn test_system_works() {
         json["value"].as_str(),
         Some("[1] TRUE"),
         "system(Rscript --version) should return exit code 0, got: {}",
+        result.stdout
+    );
+}
+
+/// Test that `--slave` (a global CLI flag) is accepted without crashing.
+///
+/// `--slave` is a global flag that must be placed before the subcommand
+/// (`arf --slave headless`). In headless mode it is currently ignored, so
+/// this test verifies that the flag does not prevent IPC from working.
+#[test]
+fn test_headless_slave_flag() {
+    let process =
+        HeadlessProcess::spawn_with_pre_args(&["--slave"]).expect("Failed to spawn with --slave");
+
+    let result = process.ipc_eval("1 + 1").expect("eval should run");
+    assert!(
+        result.success,
+        "IPC eval should work with --slave: {}",
+        result.stderr
+    );
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some("[1] 2"),
+        "should return result: {}",
+        result.stdout
+    );
+}
+
+/// Test that `--no-echo` (a global CLI flag) is accepted without crashing.
+///
+/// Like `--slave`, `--no-echo` must precede the subcommand. In headless mode
+/// it is currently ignored, so this test verifies that the flag does not
+/// prevent IPC from working.
+#[test]
+fn test_headless_no_echo_flag() {
+    let process = HeadlessProcess::spawn_with_pre_args(&["--no-echo"])
+        .expect("Failed to spawn with --no-echo");
+
+    let result = process.ipc_eval("1 + 1").expect("eval should run");
+    assert!(
+        result.success,
+        "IPC eval should work with --no-echo: {}",
+        result.stderr
+    );
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some("[1] 2"),
+        "should return result: {}",
         result.stdout
     );
 }
