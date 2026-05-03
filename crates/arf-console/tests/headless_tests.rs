@@ -1852,3 +1852,40 @@ fn test_headless_warning_capture() {
         result.stdout
     );
 }
+
+/// Test that UTF-8 multibyte characters are handled correctly.
+///
+/// Verifies that R's string operations on multibyte characters produce
+/// correct results, and that `cat()` output containing multibyte characters
+/// is captured without corruption in the `stdout` field.
+#[test]
+fn test_headless_utf8_multibyte() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+
+    // nchar() should count Unicode characters, not bytes
+    let result = process
+        .ipc_eval(r#"nchar("日本語")"#)
+        .expect("eval should run");
+    assert!(result.success, "eval should succeed: {}", result.stderr);
+    let json = parse_ipc_json(&result);
+    assert_eq!(
+        json["value"].as_str(),
+        Some("[1] 3"),
+        "nchar of 3 Japanese characters should be 3: {}",
+        result.stdout
+    );
+
+    // cat() with multibyte characters should appear in stdout field intact
+    let result2 = process
+        .ipc_eval(r#"cat("日本語\n")"#)
+        .expect("eval should run");
+    assert!(result2.success, "eval should succeed: {}", result2.stderr);
+    let json2 = parse_ipc_json(&result2);
+    assert!(
+        json2["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains('\u{65e5}') && s.contains('\u{672c}')),
+        "cat() multibyte output should appear in stdout field: {}",
+        result2.stdout
+    );
+}
