@@ -4,16 +4,16 @@ members = ["crates/*"]
 default-members = ["crates/arf-console"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/eitsupi/arf"
 
 [workspace.dependencies]
 # Internal crates
-arf-harp = { version = "0.3.1", path = "crates/arf-harp" }
-arf-libr = { version = "0.3.1", path = "crates/arf-libr" }
-r-vignette-to-md = { version = "0.3.1", path = "crates/r-vignette-to-md" }
+arf-harp = { version = "0.3.2", path = "crates/arf-harp" }
+arf-libr = { version = "0.3.2", path = "crates/arf-libr" }
+r-vignette-to-md = { version = "0.3.2", path = "crates/r-vignette-to-md" }
 
 # R FFI
 libloading = "0.9"

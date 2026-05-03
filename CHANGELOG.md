@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-03
+
+### Added
+
+- Shell mode now supports path completion (#170)
+
+### Fixed
+
+- (Windows) Set `.Platform$GUI` to `"arf-console"` to avoid Rgui-only code paths that can break behavior under arf (#169)
+- **Experimental:** Ensure `ARF_IPC_SESSIONS_DIR` override is consistently honored in headless/IPC paths across platforms (#173)
+
 ## [0.3.1] - 2026-04-26
 
 ### Added
