@@ -1,5 +1,6 @@
 use super::support::*;
 
+#[cfg(windows)]
 #[test]
 fn test_platform_gui_windows() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
