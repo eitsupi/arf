@@ -29,6 +29,37 @@ fn parse_ipc_json(output: &IpcOutput) -> serde_json::Value {
     })
 }
 
+/// Poll `ipc history` until `predicate` returns true or timeout.
+fn wait_for_history_until<F>(
+    process: &HeadlessProcess,
+    extra_args: &[&str],
+    timeout: Duration,
+    poll_interval: Duration,
+    mut predicate: F,
+) -> serde_json::Value
+where
+    F: FnMut(&serde_json::Value) -> bool,
+{
+    let start = std::time::Instant::now();
+    let mut last_json = serde_json::json!({});
+    loop {
+        let result = process
+            .ipc_history(extra_args)
+            .unwrap_or_else(|e| panic!("history query failed: {e}"));
+        assert!(result.success, "history should succeed: {}", result.stderr);
+        let json = parse_ipc_json(&result);
+        if predicate(&json) {
+            return json;
+        }
+        last_json = json;
+        assert!(
+            start.elapsed() <= timeout,
+            "timeout waiting for expected history state; last response: {last_json}"
+        );
+        std::thread::sleep(poll_interval);
+    }
+}
+
 /// Run `arf ipc ...` directly and capture output.
 fn run_ipc_command(args: &[&str]) -> std::process::Output {
     let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -1608,7 +1639,6 @@ fn test_ipc_history_since_filter() {
 
     let r = process.ipc_eval("1 + 1").expect("eval");
     assert!(r.success);
-    std::thread::sleep(Duration::from_millis(200));
 
     let future = process
         .ipc_history(&["--since", "2999-01-01"])
@@ -1621,18 +1651,21 @@ fn test_ipc_history_since_filter() {
         "future since filter should return no entries: {future_json}"
     );
 
-    let past = process
-        .ipc_history(&["--since", "1970-01-01"])
-        .expect("history since past");
-    assert!(past.success, "history should succeed: {}", past.stderr);
-    let past_json = parse_ipc_json(&past);
-    let past_entries = past_json["entries"].as_array().expect("entries array");
-    assert!(
-        past_entries
-            .iter()
-            .any(|e| e["command"].as_str() == Some("1 + 1")),
-        "past since filter should include command: {past_json}"
+    let past_json = wait_for_history_until(
+        &process,
+        &["--since", "1970-01-01"],
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+        |json| {
+            json["entries"].as_array().is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|e| e["command"].as_str() == Some("1 + 1"))
+            })
+        },
     );
+    let past_entries = past_json["entries"].as_array().expect("entries array");
+    assert!(!past_entries.is_empty(), "past entries should not be empty");
 }
 
 /// Test `--cwd` exact-match filtering.
@@ -1645,17 +1678,22 @@ fn test_ipc_history_cwd_filter() {
 
     let r = process.ipc_eval("1 + 1").expect("eval");
     assert!(r.success);
-    std::thread::sleep(Duration::from_millis(200));
 
     let cwd = std::env::current_dir()
         .expect("current dir")
         .display()
         .to_string();
-    let match_result = process
-        .ipc_history(&["--cwd", &cwd])
-        .expect("history cwd match");
-    assert!(match_result.success, "history should succeed");
-    let match_json = parse_ipc_json(&match_result);
+    let match_json = wait_for_history_until(
+        &process,
+        &["--cwd", &cwd],
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+        |json| {
+            !json["entries"]
+                .as_array()
+                .is_none_or(|entries| entries.is_empty())
+        },
+    );
     let match_entries = match_json["entries"].as_array().expect("entries array");
     assert!(
         !match_entries.is_empty(),
@@ -1689,11 +1727,19 @@ fn test_ipc_history_all_sessions() {
     assert!(r1.success);
     let r2 = p2.ipc_eval("cmd_from_p2 <- 2").expect("eval p2");
     assert!(r2.success);
-    std::thread::sleep(Duration::from_millis(250));
-
-    let default_result = p1.ipc_history(&[]).expect("history default");
-    assert!(default_result.success, "history default should succeed");
-    let default_json = parse_ipc_json(&default_result);
+    let default_json = wait_for_history_until(
+        &p1,
+        &[],
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+        |json| {
+            json["entries"].as_array().is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|e| e["command"].as_str() == Some("cmd_from_p1 <- 1"))
+            })
+        },
+    );
     let default_commands: Vec<&str> = default_json["entries"]
         .as_array()
         .expect("entries array")
@@ -1709,11 +1755,23 @@ fn test_ipc_history_all_sessions() {
         "default history should not include other session command: {default_commands:?}"
     );
 
-    let all_result = p1
-        .ipc_history(&["--all-sessions"])
-        .expect("history all-sessions");
-    assert!(all_result.success, "history all-sessions should succeed");
-    let all_json = parse_ipc_json(&all_result);
+    let all_json = wait_for_history_until(
+        &p1,
+        &["--all-sessions"],
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+        |json| {
+            json["entries"].as_array().is_some_and(|entries| {
+                let has_p1 = entries
+                    .iter()
+                    .any(|e| e["command"].as_str() == Some("cmd_from_p1 <- 1"));
+                let has_p2 = entries
+                    .iter()
+                    .any(|e| e["command"].as_str() == Some("cmd_from_p2 <- 2"));
+                has_p1 && has_p2
+            })
+        },
+    );
     let all_commands: Vec<&str> = all_json["entries"]
         .as_array()
         .expect("entries array")
