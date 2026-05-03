@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.3-alpha.1] - 2026-05-03
+
+### Fixed
+
+- (Windows) Clear `ENABLE_VIRTUAL_TERMINAL_INPUT` (`VT_INPUT`) on exit to restore key handling in shells such as nushell running in Windows Terminal (#175)
+
 ## [0.3.2] - 2026-05-03
 
 ### Added
