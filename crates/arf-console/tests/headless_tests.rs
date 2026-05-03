@@ -1911,15 +1911,18 @@ fn test_ipc_exit_code_transport_error() {
         }
     }
 
-    let (original, had_read_error) = match std::fs::read(&session_path) {
-        Ok(bytes) => (Some(bytes), false),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (None, false),
-        Err(_) => (None, true),
+    let original = match std::fs::read(&session_path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => panic!(
+            "failed to read existing session file {} before test: {err}",
+            session_path.display()
+        ),
     };
     let _cleanup_guard = SessionFileCleanupGuard {
         path: session_path.clone(),
         original,
-        had_read_error,
+        had_read_error: false,
     };
 
     let session_json = serde_json::json!({
