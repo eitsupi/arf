@@ -82,11 +82,6 @@ impl HeadlessProcess {
         Self::spawn_inner(pre_args, &[], &[], None)
     }
 
-    /// Spawn `arf headless` with environment variable overrides.
-    fn spawn_with_env(extra_args: &[&str], env_overrides: &[(&str, &str)]) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, env_overrides, None)
-    }
-
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
     #[cfg(windows)]
     fn spawn_with_creation_flags(extra_args: &[&str], flags: u32) -> Result<Self, String> {
@@ -1826,44 +1821,74 @@ fn test_ipc_list_empty_json() {
 
 /// Test that transport failures produce `TRANSPORT_ERROR` (exit code 2).
 ///
-/// Uses an isolated cache directory so session-file mutation cannot affect
-/// other tests or local `arf ipc` clients.
+/// Uses an isolated cache/home environment and a synthetic session file
+/// pointing at a nonexistent socket path.
 #[test]
 fn test_ipc_exit_code_transport_error() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let home_root = tmp.path().join("home");
     let cache_root = tmp.path().join("cache");
+    std::fs::create_dir_all(&home_root).expect("create isolated home root");
     std::fs::create_dir_all(&cache_root).expect("create isolated cache root");
+    let home_root = home_root.to_string_lossy().to_string();
     let cache_root = cache_root.to_string_lossy().to_string();
 
     #[cfg(windows)]
-    let cache_env = [("LOCALAPPDATA", cache_root.as_str())];
-    #[cfg(not(windows))]
-    let cache_env = [("XDG_CACHE_HOME", cache_root.as_str())];
+    let cache_env = [
+        ("LOCALAPPDATA", cache_root.as_str()),
+        ("USERPROFILE", home_root.as_str()),
+    ];
+    #[cfg(target_os = "macos")]
+    let cache_env = [
+        ("HOME", home_root.as_str()),
+        ("XDG_CACHE_HOME", cache_root.as_str()),
+    ];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let cache_env = [
+        ("HOME", home_root.as_str()),
+        ("XDG_CACHE_HOME", cache_root.as_str()),
+    ];
 
-    let process = HeadlessProcess::spawn_with_env(&[], &cache_env).expect("spawn headless");
-
-    let session_path = std::path::Path::new(&cache_root)
+    let test_pid = std::process::id();
+    #[cfg(windows)]
+    let session_dir = std::path::Path::new(&cache_root)
         .join("arf")
-        .join("sessions")
-        .join(format!("{}.json", process.pid));
-    let session_raw = std::fs::read_to_string(&session_path)
-        .unwrap_or_else(|e| panic!("read session file {}: {e}", session_path.display()));
-    let mut session_json: serde_json::Value = serde_json::from_str(&session_raw)
-        .unwrap_or_else(|e| panic!("parse session file {}: {e}", session_path.display()));
+        .join("sessions");
+    #[cfg(target_os = "macos")]
+    let session_dir = std::path::Path::new(&home_root)
+        .join("Library")
+        .join("Caches")
+        .join("arf")
+        .join("sessions");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let session_dir = std::path::Path::new(&cache_root)
+        .join("arf")
+        .join("sessions");
+    std::fs::create_dir_all(&session_dir)
+        .unwrap_or_else(|e| panic!("create session dir {}: {e}", session_dir.display()));
 
     #[cfg(unix)]
-    let bogus_socket = format!("/tmp/arf-missing-{}.sock", process.pid);
+    let bogus_socket = format!("/tmp/arf-missing-{}.sock", test_pid);
     #[cfg(windows)]
-    let bogus_socket = format!(r"\\.\pipe\arf-missing-{}", process.pid);
+    let bogus_socket = format!(r"\\.\pipe\arf-missing-{}", test_pid);
 
-    session_json["socket_path"] = serde_json::Value::String(bogus_socket);
+    let session_path = session_dir.join(format!("{test_pid}.json"));
+    let session_json = serde_json::json!({
+        "pid": test_pid,
+        "socket_path": bogus_socket,
+        "r_version": null,
+        "cwd": ".",
+        "started_at": "1970-01-01T00:00:00Z",
+        "log_file": null,
+        "history_session_id": null
+    });
     std::fs::write(
         &session_path,
         serde_json::to_string_pretty(&session_json).expect("serialize session file"),
     )
-    .unwrap_or_else(|e| panic!("rewrite session file {}: {e}", session_path.display()));
+    .unwrap_or_else(|e| panic!("write session file {}: {e}", session_path.display()));
 
-    let pid_arg = process.pid.to_string();
+    let pid_arg = test_pid.to_string();
     let output = run_ipc_command_with_env(&["ipc", "eval", "1", "--pid", &pid_arg], &cache_env);
     assert_eq!(
         output.status.code(),
