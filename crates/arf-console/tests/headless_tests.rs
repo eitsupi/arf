@@ -77,6 +77,16 @@ fn run_ipc_command(args: &[&str]) -> std::process::Output {
         .expect("run arf ipc")
 }
 
+fn run_ipc_command_with_env(args: &[&str], env_overrides: &[(&str, &str)]) -> std::process::Output {
+    let bin_path = env!("CARGO_BIN_EXE_arf");
+    let mut cmd = Command::new(bin_path);
+    cmd.args(args);
+    for (key, value) in env_overrides {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("run arf ipc")
+}
+
 /// Wrapper around a headless arf process.
 ///
 /// Spawns `arf headless` and waits for IPC readiness by monitoring
@@ -1882,10 +1892,16 @@ fn test_ipc_list_empty_json() {
 #[test]
 fn test_ipc_exit_code_transport_error() {
     let test_pid = std::process::id();
-    let session_dir = dirs::cache_dir()
-        .expect("cache dir")
-        .join("arf")
-        .join("sessions");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    #[cfg(unix)]
+    let cache_root = tmp.path().to_path_buf();
+    #[cfg(windows)]
+    let cache_root = tmp.path().join("LocalAppData");
+    #[cfg(windows)]
+    std::fs::create_dir_all(&cache_root)
+        .unwrap_or_else(|e| panic!("create local app data dir {}: {e}", cache_root.display()));
+
+    let session_dir = cache_root.join("arf").join("sessions");
     std::fs::create_dir_all(&session_dir)
         .unwrap_or_else(|e| panic!("create session dir {}: {e}", session_dir.display()));
 
@@ -1895,36 +1911,6 @@ fn test_ipc_exit_code_transport_error() {
     let bogus_socket = format!(r"\\.\pipe\arf-missing-{}", test_pid);
 
     let session_path = session_dir.join(format!("{test_pid}.json"));
-    struct SessionFileCleanupGuard {
-        path: std::path::PathBuf,
-        original: Option<Vec<u8>>,
-        had_read_error: bool,
-    }
-
-    impl Drop for SessionFileCleanupGuard {
-        fn drop(&mut self) {
-            if let Some(contents) = &self.original {
-                let _ = std::fs::write(&self.path, contents);
-            } else if !self.had_read_error {
-                let _ = std::fs::remove_file(&self.path);
-            }
-        }
-    }
-
-    let original = match std::fs::read(&session_path) {
-        Ok(bytes) => Some(bytes),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => panic!(
-            "failed to read existing session file {} before test: {err}",
-            session_path.display()
-        ),
-    };
-    let _cleanup_guard = SessionFileCleanupGuard {
-        path: session_path.clone(),
-        original,
-        had_read_error: false,
-    };
-
     let session_json = serde_json::json!({
         "pid": test_pid,
         "socket_path": bogus_socket,
@@ -1941,7 +1927,24 @@ fn test_ipc_exit_code_transport_error() {
     .unwrap_or_else(|e| panic!("write session file {}: {e}", session_path.display()));
 
     let pid_arg = test_pid.to_string();
-    let output = run_ipc_command(&["ipc", "eval", "1", "--pid", &pid_arg]);
+    #[cfg(unix)]
+    let env_overrides = vec![(
+        "XDG_CACHE_HOME",
+        cache_root.to_str().expect("cache_root must be valid utf-8"),
+    )];
+    #[cfg(windows)]
+    let env_overrides = vec![
+        (
+            "LOCALAPPDATA",
+            cache_root.to_str().expect("cache_root must be valid utf-8"),
+        ),
+        (
+            "APPDATA",
+            cache_root.to_str().expect("cache_root must be valid utf-8"),
+        ),
+    ];
+
+    let output = run_ipc_command_with_env(&["ipc", "eval", "1", "--pid", &pid_arg], &env_overrides);
     assert_eq!(
         output.status.code(),
         Some(2),
