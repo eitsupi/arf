@@ -95,7 +95,7 @@ vt100 = "0.16"
 # Patch crossterm with Windows VT input support (bracketed paste)
 # https://github.com/crossterm-rs/crossterm/pull/1030
 [patch.crates-io]
-crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "1a5df027974316ce2cf095bb0103c6b16208e399" }
+crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "33c393a04f0198cb7d9ae68357cfc92269894d36" }
 
 # The profile that 'dist' will build with
 [profile.dist]

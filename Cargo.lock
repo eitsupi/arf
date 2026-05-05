@@ -391,7 +391,7 @@ dependencies = [
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "git+https://github.com/crossterm-rs/crossterm?rev=1a5df027974316ce2cf095bb0103c6b16208e399#1a5df027974316ce2cf095bb0103c6b16208e399"
+source = "git+https://github.com/crossterm-rs/crossterm?rev=33c393a04f0198cb7d9ae68357cfc92269894d36#33c393a04f0198cb7d9ae68357cfc92269894d36"
 dependencies = [
  "bitflags 2.11.1",
  "crossterm_winapi",
