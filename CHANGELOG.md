@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.3-alpha.2] - 2026-05-05
+
+### Fixed
+
+- (Windows) Bump patched `crossterm` revision to include a Windows VT input boundary fix (#181)
+
 ## [0.3.3-alpha.1] - 2026-05-03
 
 ### Fixed
