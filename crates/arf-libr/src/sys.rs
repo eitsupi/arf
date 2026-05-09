@@ -1698,7 +1698,7 @@ local({
 
     # Set up our error handler using options(error = ...)
     # This is called at the END of R's error handling, just before returning to prompt
-    options(error = quote({
+    options(error = function() {
         # Mark that an error occurred
         env <- get(".arf_error_state", envir = globalenv())
         env$had_error <- TRUE
@@ -1706,9 +1706,9 @@ local({
         # Chain to the previous handler if it exists
         prev <- get(".arf_prev_error_handler", envir = globalenv())
         if (!is.null(prev)) {
-            eval(prev)
+            if (is.function(prev)) prev() else eval(prev, envir = globalenv())
         }
-    }))
+    })
 
     invisible(NULL)
 })
