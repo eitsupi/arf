@@ -680,3 +680,39 @@ auto_width = false
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Regression test: error handler must not pollute .GlobalEnv.
+///
+/// The `options(error = ...)` handler previously used `quote({...})`, which caused
+/// temporary variables to be assigned in .GlobalEnv on every error. Using
+/// `function() {...}` scopes them locally, leaving no user-visible objects in
+/// .GlobalEnv after an error.
+#[test]
+#[cfg(unix)]
+fn test_pty_error_handler_no_globalenv_leak() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match", "--vanilla"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Trigger an error
+    terminal
+        .send_line("nonexistent_object")
+        .expect("Should send expression");
+    terminal
+        .clear_and_expect("'nonexistent_object'")
+        .expect("Should see error message");
+    terminal
+        .wait_for_prompt()
+        .expect("Should return to prompt after error");
+
+    // .GlobalEnv should have no user-visible objects after an error
+    terminal
+        .send_line("identical(ls(), character(0))")
+        .expect("Should send ls() check");
+    terminal.clear_and_expect("[1] TRUE").expect(
+        ".GlobalEnv should be empty after an error — error handler must not leak variables",
+    );
+
+    terminal.quit().expect("Should quit cleanly");
+}
