@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A cross-platform R console written in Rust"
+readme = "../../README.md"
 
 [[bin]]
 name = "arf"
