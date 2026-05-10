@@ -2,22 +2,18 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-10
+
 ### Added
 
 - `arf -f -`: read R script from stdin when `-` is passed as the file argument
 - `arf ipc eval` and `arf ipc send`: `code` argument is now optional; when omitted, code is read from stdin (exits with an error if stdin is a TTY)
 
-## [0.3.3-alpha.2] - 2026-05-05
-
 ### Fixed
 
-- (Windows) Bump patched `crossterm` revision to include a Windows VT input boundary fix (#181)
-
-## [0.3.3-alpha.1] - 2026-05-03
-
-### Fixed
-
-- (Windows) Clear `ENABLE_VIRTUAL_TERMINAL_INPUT` (`VT_INPUT`) on exit to restore key handling in shells such as nushell running in Windows Terminal (#175)
+- (Windows) `crossterm` patch updates for VT input handling in interactive terminals (#175, #181)
+  - Clear `ENABLE_VIRTUAL_TERMINAL_INPUT` (`VT_INPUT`) on exit to restore key handling in shells such as nushell running in Windows Terminal
+  - Bump patched `crossterm` revision to include a VT input batch-boundary parsing fix
 
 ## [0.3.2] - 2026-05-03
 
