@@ -1027,16 +1027,6 @@ fn handle_history_command(
     }
 }
 
-fn read_code_from_stdin() -> anyhow::Result<String> {
-    use std::io::{IsTerminal, Read};
-    if std::io::stdin().is_terminal() {
-        anyhow::bail!("no code provided: pass code as an argument or pipe via stdin");
-    }
-    let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf)?;
-    Ok(buf)
-}
-
 fn handle_ipc_command(action: &IpcAction) {
     match action {
         IpcAction::List => ipc::client::cmd_list(),
@@ -1045,32 +1035,8 @@ fn handle_ipc_command(action: &IpcAction) {
             pid,
             visible,
             timeout,
-        } => {
-            let code = match code {
-                Some(c) => c.clone(),
-                None => match read_code_from_stdin() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("Error: {:#}", e);
-                        std::process::exit(1);
-                    }
-                },
-            };
-            ipc::client::cmd_eval(&code, *pid, *visible, *timeout)
-        }
-        IpcAction::Send { code, pid } => {
-            let code = match code {
-                Some(c) => c.clone(),
-                None => match read_code_from_stdin() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("Error: {:#}", e);
-                        std::process::exit(1);
-                    }
-                },
-            };
-            ipc::client::cmd_send(&code, *pid)
-        }
+        } => ipc::client::cmd_eval(code.as_deref(), *pid, *visible, *timeout),
+        IpcAction::Send { code, pid } => ipc::client::cmd_send(code.as_deref(), *pid),
         IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
         IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
         IpcAction::History {

@@ -220,12 +220,48 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
     }
 }
 
+/// Read code from stdin, or exit with a structured JSON error if stdin is a TTY.
+fn require_stdin_code() -> String {
+    use std::io::{IsTerminal, Read};
+    if std::io::stdin().is_terminal() {
+        exit_error(
+            EXIT_TRANSPORT,
+            "NO_CODE_PROVIDED",
+            "No code provided and stdin is a terminal",
+            Some("Pass code as an argument or pipe it via stdin."),
+            None,
+        );
+    }
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .unwrap_or_else(|e| {
+            exit_error(
+                EXIT_TRANSPORT,
+                "STDIN_READ_ERROR",
+                &format!("Failed to read code from stdin: {e}"),
+                None,
+                None,
+            );
+        });
+    buf
+}
+
 /// Evaluate R code in a running arf session.
 ///
 /// On success, prints the structured result as JSON to stdout.
 /// R evaluation errors are returned as part of the JSON result (exit 0)
 /// — they are a normal response, not an IPC failure.
-pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+/// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+    let owned;
+    let code = match code {
+        Some(c) => c,
+        None => {
+            owned = require_stdin_code();
+            &owned
+        }
+    };
     let session = resolve_session(pid);
 
     let mut params = serde_json::json!({ "code": code, "visible": visible });
@@ -252,7 +288,17 @@ pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool, timeout_ms: Option<
 }
 
 /// Send code as user input to a running arf session.
-pub fn cmd_send(code: &str, pid: Option<u32>) {
+///
+/// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+pub fn cmd_send(code: Option<&str>, pid: Option<u32>) {
+    let owned;
+    let code = match code {
+        Some(c) => c,
+        None => {
+            owned = require_stdin_code();
+            &owned
+        }
+    };
     let session = resolve_session(pid);
 
     let request = serde_json::json!({

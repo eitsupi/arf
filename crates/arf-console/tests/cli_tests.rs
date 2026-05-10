@@ -671,8 +671,10 @@ fn test_script_file_stdin_reprex() {
 /// The command fails at IPC (no running session) not at argument parsing.
 #[test]
 fn test_ipc_eval_stdin_fallback() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
     let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
         .args(["ipc", "eval"])
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -708,8 +710,10 @@ fn test_ipc_eval_stdin_fallback() {
 /// Test that `arf ipc send` without a code argument reads from stdin.
 #[test]
 fn test_ipc_send_stdin_fallback() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
     let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
         .args(["ipc", "send"])
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
