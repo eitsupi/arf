@@ -514,9 +514,29 @@ mod ipc_tests {
             2,
             "should exit with code 2 (client-side failure): output={output}"
         );
+
+        // Extract and parse the JSON error from the PTY output.
+        // PTY merges stdout+stderr; find the first {...} block and parse it.
+        let json_start = output
+            .find('{')
+            .unwrap_or_else(|| panic!("no JSON object found in PTY output: {output}"));
+        let json_str = &output[json_start..];
+        // Trim any trailing whitespace/control characters after the JSON.
+        let json_str = json_str.trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '}');
+        let json: serde_json::Value = serde_json::from_str(json_str)
+            .unwrap_or_else(|e| panic!("PTY output is not valid JSON: {e}\noutput: {output}"));
+        assert_eq!(
+            json["error"]["code"].as_str(),
+            Some("NO_CODE_PROVIDED"),
+            "error.code should be NO_CODE_PROVIDED: {json}"
+        );
         assert!(
-            output.contains("NO_CODE_PROVIDED"),
-            "stderr should contain NO_CODE_PROVIDED: {output}"
+            json["error"]["message"].as_str().is_some(),
+            "error.message should be present: {json}"
+        );
+        assert!(
+            json["error"]["hint"].as_str().is_some(),
+            "error.hint should be present: {json}"
         );
     }
 }
