@@ -700,7 +700,7 @@ fn test_pty_error_handler_no_globalenv_leak() {
         .send_line("nonexistent_object")
         .expect("Should send expression");
     terminal
-        .expect("nonexistent_object")
+        .clear_and_expect("'nonexistent_object'")
         .expect("Should see error message");
     terminal
         .wait_for_prompt()
