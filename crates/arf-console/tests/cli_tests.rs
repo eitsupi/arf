@@ -672,23 +672,16 @@ fn test_script_file_stdin_reprex() {
 #[test]
 fn test_ipc_eval_stdin_fallback() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+    // Piped stdin is sufficient to make is_terminal() return false; no data
+    // needs to be written since the process exits at session resolution first.
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
         .args(["ipc", "eval"])
         .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .expect("Failed to spawn arf");
-
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"1 + 1\n")
-        .expect("Failed to write to stdin");
-
-    let output = child.wait_with_output().expect("Failed to wait for arf");
 
     // Should fail at IPC level (no running session), not with "no code provided"
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -711,23 +704,16 @@ fn test_ipc_eval_stdin_fallback() {
 #[test]
 fn test_ipc_send_stdin_fallback() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+    // Piped stdin is sufficient to make is_terminal() return false; no data
+    // needs to be written since the process exits at session resolution first.
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
         .args(["ipc", "send"])
         .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .expect("Failed to spawn arf");
-
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"print('hello')\n")
-        .expect("Failed to write to stdin");
-
-    let output = child.wait_with_output().expect("Failed to wait for arf");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
