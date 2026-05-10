@@ -89,6 +89,12 @@ Download the archive for your platform from [GitHub Releases](https://github.com
 cargo install --git https://github.com/eitsupi/arf.git
 ```
 
+> [!NOTE]
+> **For Windows**: A fix for VT input handling (bracketed paste, etc.) is pending in an upstream dependency
+> ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030)).
+>
+> So installing from crates.io (`cargo install arf-console`) is **not recommended**.
+
 ## Third-Party distributions
 
 ### AUR (Arch Linux/Manjaro)
