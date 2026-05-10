@@ -516,13 +516,15 @@ mod ipc_tests {
         );
 
         // Extract and parse the JSON error from the PTY output.
-        // PTY merges stdout+stderr; find the first {...} block and parse it.
+        // PTY merges stdout+stderr; slice from first '{' to last '}' to handle
+        // any ANSI escape sequences or control characters before/after the JSON.
         let json_start = output
             .find('{')
             .unwrap_or_else(|| panic!("no JSON object found in PTY output: {output}"));
-        let json_str = &output[json_start..];
-        // Trim any trailing whitespace/control characters after the JSON.
-        let json_str = json_str.trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '}');
+        let json_end = output
+            .rfind('}')
+            .unwrap_or_else(|| panic!("no closing '}}' found in PTY output: {output}"));
+        let json_str = &output[json_start..=json_end];
         let json: serde_json::Value = serde_json::from_str(json_str)
             .unwrap_or_else(|e| panic!("PTY output is not valid JSON: {e}\noutput: {output}"));
         assert_eq!(
