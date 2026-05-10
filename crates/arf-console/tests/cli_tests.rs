@@ -694,7 +694,7 @@ fn test_ipc_eval_stdin_fallback() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains("no code provided"),
+        !stderr.contains("NO_CODE_PROVIDED"),
         "Should not complain about missing code when stdin is provided: {}",
         stderr
     );
@@ -732,7 +732,7 @@ fn test_ipc_send_stdin_fallback() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains("no code provided"),
+        !stderr.contains("NO_CODE_PROVIDED"),
         "Should not complain about missing code when stdin is provided: {}",
         stderr
     );

@@ -222,9 +222,10 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
     }
 }
 
-/// Read code from stdin, or exit with a structured JSON error if stdin is a TTY.
-fn require_stdin_code() -> String {
-    use std::io::{IsTerminal, Read};
+/// Exit with a structured JSON error if stdin is a TTY (instant, no I/O).
+/// Called before session resolution so TTY errors are reported immediately.
+fn require_stdin_not_tty() {
+    use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
         exit_error(
             EXIT_TRANSPORT,
@@ -234,6 +235,12 @@ fn require_stdin_code() -> String {
             None,
         );
     }
+}
+
+/// Read all of stdin into a string, or exit with a structured JSON error on failure.
+/// Call `require_stdin_not_tty()` before session resolution to guard against TTY.
+fn read_stdin_code() -> String {
+    use std::io::Read;
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
@@ -255,16 +262,21 @@ fn require_stdin_code() -> String {
 /// R evaluation errors are returned as part of the JSON result (exit 0)
 /// — they are a normal response, not an IPC failure.
 /// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+/// The TTY check runs first (instant), then session is resolved, then stdin is drained,
+/// so a missing-session error is reported without consuming a long stdin stream.
 pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+    if code.is_none() {
+        require_stdin_not_tty();
+    }
+    let session = resolve_session(pid);
     let owned;
     let code = match code {
         Some(c) => c,
         None => {
-            owned = require_stdin_code();
+            owned = read_stdin_code();
             &owned
         }
     };
-    let session = resolve_session(pid);
 
     let mut params = serde_json::json!({ "code": code, "visible": visible });
     if let Some(ms) = timeout_ms {
@@ -292,16 +304,21 @@ pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms:
 /// Send code as user input to a running arf session.
 ///
 /// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+/// The TTY check runs first (instant), then session is resolved, then stdin is drained,
+/// so a missing-session error is reported without consuming a long stdin stream.
 pub fn cmd_send(code: Option<&str>, pid: Option<u32>) {
+    if code.is_none() {
+        require_stdin_not_tty();
+    }
+    let session = resolve_session(pid);
     let owned;
     let code = match code {
         Some(c) => c,
         None => {
-            owned = require_stdin_code();
+            owned = read_stdin_code();
             &owned
         }
     };
-    let session = resolve_session(pid);
 
     let request = serde_json::json!({
         "jsonrpc": "2.0",
