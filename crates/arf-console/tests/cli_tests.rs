@@ -690,9 +690,17 @@ fn test_ipc_eval_stdin_fallback() {
 
     // Should fail at IPC level (no running session), not with "no code provided"
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         !stderr.contains("no code provided"),
         "Should not complain about missing code when stdin is provided: {}",
+        stderr
+    );
+    // Confirm failure reached IPC execution (SESSION_NOT_FOUND), not argument parsing
+    assert!(
+        stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+        "Should fail at IPC level with SESSION_NOT_FOUND: stdout={} stderr={}",
+        stdout,
         stderr
     );
 }
@@ -718,9 +726,17 @@ fn test_ipc_send_stdin_fallback() {
     let output = child.wait_with_output().expect("Failed to wait for arf");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         !stderr.contains("no code provided"),
         "Should not complain about missing code when stdin is provided: {}",
+        stderr
+    );
+    // Confirm failure reached IPC execution (SESSION_NOT_FOUND), not argument parsing
+    assert!(
+        stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+        "Should fail at IPC level with SESSION_NOT_FOUND: stdout={} stderr={}",
+        stdout,
         stderr
     );
 }
