@@ -685,12 +685,13 @@ auto_width = false
 ///
 /// The `options(error = ...)` handler previously used `quote({...})`, which caused
 /// temporary variables to be assigned in .GlobalEnv on every error. Using
-/// `function() {...}` scopes them locally, leaving .GlobalEnv empty after an error.
+/// `function() {...}` scopes them locally, leaving no user-visible objects in
+/// .GlobalEnv after an error.
 #[test]
 #[cfg(unix)]
 fn test_pty_error_handler_no_globalenv_leak() {
     let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
+        Terminal::spawn_with_args(&["--no-auto-match", "--vanilla"]).expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
@@ -699,7 +700,7 @@ fn test_pty_error_handler_no_globalenv_leak() {
         .send_line("nonexistent_object")
         .expect("Should send expression");
     terminal
-        .expect("not found")
+        .expect("nonexistent_object")
         .expect("Should see error message");
     terminal
         .wait_for_prompt()
