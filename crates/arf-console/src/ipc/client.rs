@@ -23,7 +23,7 @@ const DEFAULT_TRANSPORT_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 /// Client-side failure before IPC: transport error (socket connection failed,
 /// timeout, etc.) or missing/unreadable code input (stdin is a TTY, read error).
-const EXIT_TRANSPORT: i32 = 2;
+const EXIT_CLIENT: i32 = 2;
 /// Session resolution error (no session found, ambiguous PID, etc.).
 const EXIT_SESSION: i32 = 3;
 /// JSON-RPC protocol error (R_BUSY, INPUT_ALREADY_PENDING, etc.).
@@ -228,7 +228,7 @@ fn require_stdin_not_tty() {
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
         exit_error(
-            EXIT_TRANSPORT,
+            EXIT_CLIENT,
             "NO_CODE_PROVIDED",
             "No code provided and stdin is a terminal",
             Some("Pass code as an argument or pipe it via stdin."),
@@ -246,7 +246,7 @@ fn read_stdin_code() -> String {
         .read_to_string(&mut buf)
         .unwrap_or_else(|e| {
             exit_error(
-                EXIT_TRANSPORT,
+                EXIT_CLIENT,
                 "STDIN_READ_ERROR",
                 &format!("Failed to read code from stdin: {e}"),
                 None,
@@ -435,7 +435,7 @@ fn send_request(
                 );
             } else {
                 exit_error(
-                    EXIT_TRANSPORT,
+                    EXIT_CLIENT,
                     "TRANSPORT_ERROR",
                     &format!("{e:#}"),
                     Some("Check that the arf session is running and IPC is enabled."),

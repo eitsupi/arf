@@ -505,8 +505,10 @@ mod ipc_tests {
         // Read all PTY output (stdout and stderr are merged on the PTY master).
         let mut output = String::new();
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
-        // EIO on Linux signals the child has exited and the PTY is gone.
-        let _ = reader.read_to_string(&mut output);
+        // EIO (errno=5) is expected on Unix when the child exits and the PTY closes.
+        if let Err(e) = reader.read_to_string(&mut output) {
+            assert_eq!(e.raw_os_error(), Some(5), "unexpected PTY read error: {e}");
+        }
 
         let status = child.wait().expect("Failed to wait for child");
         assert_eq!(
