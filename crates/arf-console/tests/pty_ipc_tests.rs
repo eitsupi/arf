@@ -466,4 +466,81 @@ mod ipc_tests {
 
         terminal.quit().expect("Should quit cleanly");
     }
+
+    /// Test that `arf ipc eval` without a code argument exits with code 2
+    /// and emits a structured JSON error when stdin is a TTY.
+    ///
+    /// This test uses a PTY so that `is_terminal()` on stdin returns true,
+    /// which triggers the NO_CODE_PROVIDED error path.
+    #[test]
+    fn test_ipc_eval_no_code_tty_error() {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::Read;
+
+        let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("Failed to open PTY");
+
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_arf"));
+        cmd.args(["ipc", "eval"]);
+        cmd.env("ARF_IPC_SESSIONS_DIR", sessions_dir.path());
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .expect("Failed to spawn arf ipc eval");
+
+        // Drop slave so the child's stdin/stdout/stderr are connected to the PTY only.
+        // Don't write anything — stdin is a TTY, so NO_CODE_PROVIDED fires immediately.
+        drop(pair.slave);
+
+        // Read all PTY output (stdout and stderr are merged on the PTY master).
+        let mut output = String::new();
+        let mut reader = pair.master.try_clone_reader().expect("clone reader");
+        // EIO (errno=5) is expected on Unix when the child exits and the PTY closes.
+        if let Err(e) = reader.read_to_string(&mut output) {
+            assert_eq!(e.raw_os_error(), Some(5), "unexpected PTY read error: {e}");
+        }
+
+        let status = child.wait().expect("Failed to wait for child");
+        assert_eq!(
+            status.exit_code(),
+            2,
+            "should exit with code 2 (client-side failure): output={output}"
+        );
+
+        // Extract and parse the JSON error from the PTY output.
+        // PTY merges stdout+stderr; slice from first '{' to last '}' to handle
+        // any ANSI escape sequences or control characters before/after the JSON.
+        let json_start = output
+            .find('{')
+            .unwrap_or_else(|| panic!("no JSON object found in PTY output: {output}"));
+        let json_end = output
+            .rfind('}')
+            .unwrap_or_else(|| panic!("no closing '}}' found in PTY output: {output}"));
+        let json_str = &output[json_start..=json_end];
+        let json: serde_json::Value = serde_json::from_str(json_str)
+            .unwrap_or_else(|e| panic!("PTY output is not valid JSON: {e}\noutput: {output}"));
+        assert_eq!(
+            json["error"]["code"].as_str(),
+            Some("NO_CODE_PROVIDED"),
+            "error.code should be NO_CODE_PROVIDED: {json}"
+        );
+        assert!(
+            json["error"]["message"].as_str().is_some(),
+            "error.message should be present: {json}"
+        );
+        assert!(
+            json["error"]["hint"].as_str().is_some(),
+            "error.hint should be present: {json}"
+        );
+    }
 }

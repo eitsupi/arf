@@ -1035,8 +1035,8 @@ fn handle_ipc_command(action: &IpcAction) {
             pid,
             visible,
             timeout,
-        } => ipc::client::cmd_eval(code, *pid, *visible, *timeout),
-        IpcAction::Send { code, pid } => ipc::client::cmd_send(code, *pid),
+        } => ipc::client::cmd_eval(code.as_deref(), *pid, *visible, *timeout),
+        IpcAction::Send { code, pid } => ipc::client::cmd_send(code.as_deref(), *pid),
         IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
         IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
         IpcAction::History {
@@ -1361,8 +1361,17 @@ fn run_script(cli: &Cli) -> Result<()> {
     let code = if let Some(eval_code) = &cli.eval {
         eval_code.clone()
     } else if let Some(script_path) = cli.script_file() {
-        fs::read_to_string(script_path)
-            .with_context(|| format!("Failed to read script file: {}", script_path.display()))?
+        if script_path == std::path::Path::new("-") {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .context("Failed to read from stdin")?;
+            buf
+        } else {
+            fs::read_to_string(script_path)
+                .with_context(|| format!("Failed to read script file: {}", script_path.display()))?
+        }
     } else {
         // Should not happen - we checked script_mode earlier
         return Ok(());

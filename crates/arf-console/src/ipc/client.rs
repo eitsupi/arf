@@ -16,12 +16,14 @@ const DEFAULT_TRANSPORT_TIMEOUT: std::time::Duration = std::time::Duration::from
 // ── Exit codes ───────────────────────────────────────────────────────
 //
 // 0 = success
-// 2 = IPC transport error
+// 2 = client-side failure before IPC: transport error (socket/timeout)
+//     or missing/unreadable code input (NO_CODE_PROVIDED, STDIN_READ_ERROR)
 // 3 = session resolution error
 // 4 = JSON-RPC protocol error
 
-/// IPC transport error (socket connection failed, timeout, etc.).
-const EXIT_TRANSPORT: i32 = 2;
+/// Client-side failure before IPC: transport error (socket connection failed,
+/// timeout, etc.) or missing/unreadable code input (stdin is a TTY, read error).
+const EXIT_CLIENT: i32 = 2;
 /// Session resolution error (no session found, ambiguous PID, etc.).
 const EXIT_SESSION: i32 = 3;
 /// JSON-RPC protocol error (R_BUSY, INPUT_ALREADY_PENDING, etc.).
@@ -220,13 +222,61 @@ fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
     }
 }
 
+/// Exit with a structured JSON error if stdin is a TTY (instant, no I/O).
+/// Called before session resolution so TTY errors are reported immediately.
+fn require_stdin_not_tty() {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        exit_error(
+            EXIT_CLIENT,
+            "NO_CODE_PROVIDED",
+            "No code provided and stdin is a terminal",
+            Some("Pass code as an argument or pipe it via stdin."),
+            None,
+        );
+    }
+}
+
+/// Read all of stdin into a string, or exit with a structured JSON error on failure.
+/// Call `require_stdin_not_tty()` before session resolution to guard against TTY.
+fn read_stdin_code() -> String {
+    use std::io::Read;
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .unwrap_or_else(|e| {
+            exit_error(
+                EXIT_CLIENT,
+                "STDIN_READ_ERROR",
+                &format!("Failed to read code from stdin: {e}"),
+                None,
+                None,
+            );
+        });
+    buf
+}
+
 /// Evaluate R code in a running arf session.
 ///
 /// On success, prints the structured result as JSON to stdout.
 /// R evaluation errors are returned as part of the JSON result (exit 0)
 /// — they are a normal response, not an IPC failure.
-pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+/// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+/// The TTY check runs first (instant), then session is resolved, then stdin is drained,
+/// so a missing-session error is reported without consuming a long stdin stream.
+pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+    if code.is_none() {
+        require_stdin_not_tty();
+    }
     let session = resolve_session(pid);
+    let owned;
+    let code = match code {
+        Some(c) => c,
+        None => {
+            owned = read_stdin_code();
+            &owned
+        }
+    };
 
     let mut params = serde_json::json!({ "code": code, "visible": visible });
     if let Some(ms) = timeout_ms {
@@ -252,8 +302,23 @@ pub fn cmd_eval(code: &str, pid: Option<u32>, visible: bool, timeout_ms: Option<
 }
 
 /// Send code as user input to a running arf session.
-pub fn cmd_send(code: &str, pid: Option<u32>) {
+///
+/// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
+/// The TTY check runs first (instant), then session is resolved, then stdin is drained,
+/// so a missing-session error is reported without consuming a long stdin stream.
+pub fn cmd_send(code: Option<&str>, pid: Option<u32>) {
+    if code.is_none() {
+        require_stdin_not_tty();
+    }
     let session = resolve_session(pid);
+    let owned;
+    let code = match code {
+        Some(c) => c,
+        None => {
+            owned = read_stdin_code();
+            &owned
+        }
+    };
 
     let request = serde_json::json!({
         "jsonrpc": "2.0",
@@ -370,7 +435,7 @@ fn send_request(
                 );
             } else {
                 exit_error(
-                    EXIT_TRANSPORT,
+                    EXIT_CLIENT,
                     "TRANSPORT_ERROR",
                     &format!("{e:#}"),
                     Some("Check that the arf session is running and IPC is enabled."),

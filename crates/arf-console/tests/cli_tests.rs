@@ -5,7 +5,7 @@
 //! All tests use `std::process::Command` and work on all platforms.
 
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
 
 // ============================================================================
@@ -590,6 +590,143 @@ fn test_script_file_not_found() {
     assert!(
         stderr.contains("Failed to read") || stderr.contains("No such file"),
         "Should show file not found error: {}",
+        stderr
+    );
+}
+
+/// Test that `arf -f -` reads R code from stdin and executes it.
+#[test]
+fn test_script_file_stdin() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn arf");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"x <- 7\ny <- 8\nx + y\n")
+        .expect("Failed to write to stdin");
+
+    let output = child.wait_with_output().expect("Failed to wait for arf");
+
+    assert!(
+        output.status.success(),
+        "arf -f - should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[1] 15"),
+        "Script via stdin should output [1] 15: {}",
+        stdout
+    );
+}
+
+/// Test that `arf -f -` in reprex mode echoes source and prefixes output.
+#[test]
+fn test_script_file_stdin_reprex() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["--reprex", "-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn arf");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"1 + 1\n")
+        .expect("Failed to write to stdin");
+
+    let output = child.wait_with_output().expect("Failed to wait for arf");
+
+    assert!(
+        output.status.success(),
+        "arf --reprex -f - should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 + 1"),
+        "Reprex via stdin should echo source code: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("#> [1] 2"),
+        "Reprex via stdin should prefix output with #>: {}",
+        stdout
+    );
+}
+
+/// Test that `arf ipc eval` without a code argument reads from stdin.
+/// The command fails at IPC (no running session) not at argument parsing.
+#[test]
+fn test_ipc_eval_stdin_fallback() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+    // Piped stdin is sufficient to make is_terminal() return false; no data
+    // needs to be written since the process exits at session resolution first.
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["ipc", "eval"])
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("Failed to spawn arf");
+
+    // Should fail at IPC level (no running session), not with "no code provided"
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stderr.contains("NO_CODE_PROVIDED"),
+        "Should not complain about missing code when stdin is provided: {}",
+        stderr
+    );
+    // Confirm failure reached IPC execution (SESSION_NOT_FOUND), not argument parsing
+    assert!(
+        stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+        "Should fail at IPC level with SESSION_NOT_FOUND: stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+/// Test that `arf ipc send` without a code argument reads from stdin.
+#[test]
+fn test_ipc_send_stdin_fallback() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+    // Piped stdin is sufficient to make is_terminal() return false; no data
+    // needs to be written since the process exits at session resolution first.
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["ipc", "send"])
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("Failed to spawn arf");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stderr.contains("NO_CODE_PROVIDED"),
+        "Should not complain about missing code when stdin is provided: {}",
+        stderr
+    );
+    // Confirm failure reached IPC execution (SESSION_NOT_FOUND), not argument parsing
+    assert!(
+        stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+        "Should fail at IPC level with SESSION_NOT_FOUND: stdout={} stderr={}",
+        stdout,
         stderr
     );
 }

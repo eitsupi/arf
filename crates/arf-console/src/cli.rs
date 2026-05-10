@@ -252,7 +252,8 @@ Quick start:
 
 All commands output JSON to stdout (pretty-printed on terminal, compact \
 when piped). Errors are written to stderr as JSON. Exit codes: \
-0 = success, 2 = transport error, 3 = session error, 4 = protocol error.
+0 = success, 2 = client-side failure (transport error or missing/unreadable \
+code input), 3 = session error, 4 = protocol error.
 
 Session discovery:
   By default, sessions are discovered from the platform cache directory.
@@ -414,6 +415,9 @@ Examples:
   Evaluate an expression:
     $ arf ipc eval '1 + 1'
 
+  Pipe code via stdin:
+    $ echo '1 + 1' | arf ipc eval
+
   Run code with a 10-second timeout:
     $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
 
@@ -426,8 +430,8 @@ Examples:
   Extract the value with jq:
     $ arf ipc eval '1 + 1' | jq -r '.value'")]
     Eval {
-        /// R code to evaluate
-        code: String,
+        /// R code to evaluate (reads from stdin if omitted)
+        code: Option<String>,
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
@@ -450,11 +454,14 @@ Examples:
   Send code that appears in the session output:
     $ arf ipc send 'library(dplyr)'
 
+  Pipe code via stdin:
+    $ echo 'library(dplyr)' | arf ipc send
+
   Target a specific session:
     $ arf ipc send --pid 12345 'print(mtcars)'")]
     Send {
-        /// R code to send
-        code: String,
+        /// R code to send (reads from stdin if omitted)
+        code: Option<String>,
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,
