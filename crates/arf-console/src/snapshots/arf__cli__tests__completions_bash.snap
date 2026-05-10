@@ -1035,7 +1035,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__eval)
-            opts="-h --pid --visible --timeout --help <CODE>"
+            opts="-h --pid --visible --timeout --help [CODE]"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1217,7 +1217,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__send)
-            opts="-h --pid --help <CODE>"
+            opts="-h --pid --help [CODE]"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

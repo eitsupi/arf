@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `arf -f -`: read R script from stdin when `-` is passed as the file argument
+- `arf ipc eval` and `arf ipc send`: `code` argument is now optional; when omitted, code is read from stdin (exits with an error if stdin is a TTY)
+
 ## [0.3.3-alpha.2] - 2026-05-05
 
 ### Fixed
