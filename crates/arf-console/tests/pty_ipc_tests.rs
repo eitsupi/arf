@@ -466,4 +466,57 @@ mod ipc_tests {
 
         terminal.quit().expect("Should quit cleanly");
     }
+
+    /// Test that `arf ipc eval` without a code argument exits with code 2
+    /// and emits a structured JSON error when stdin is a TTY.
+    ///
+    /// This test uses a PTY so that `is_terminal()` on stdin returns true,
+    /// which triggers the NO_CODE_PROVIDED error path.
+    #[test]
+    fn test_ipc_eval_no_code_tty_error() {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::Read;
+
+        let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("Failed to open PTY");
+
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_arf"));
+        cmd.args(["ipc", "eval"]);
+        cmd.env("ARF_IPC_SESSIONS_DIR", sessions_dir.path());
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .expect("Failed to spawn arf ipc eval");
+
+        // Drop slave so the child's stdin/stdout/stderr are connected to the PTY only.
+        // Don't write anything — stdin is a TTY, so NO_CODE_PROVIDED fires immediately.
+        drop(pair.slave);
+
+        // Read all PTY output (stdout and stderr are merged on the PTY master).
+        let mut output = String::new();
+        let mut reader = pair.master.try_clone_reader().expect("clone reader");
+        // EIO on Linux signals the child has exited and the PTY is gone.
+        let _ = reader.read_to_string(&mut output);
+
+        let status = child.wait().expect("Failed to wait for child");
+        assert_eq!(
+            status.exit_code(),
+            2,
+            "should exit with code 2 (client-side failure): output={output}"
+        );
+        assert!(
+            output.contains("NO_CODE_PROVIDED"),
+            "stderr should contain NO_CODE_PROVIDED: {output}"
+        );
+    }
 }

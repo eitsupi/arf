@@ -16,11 +16,13 @@ const DEFAULT_TRANSPORT_TIMEOUT: std::time::Duration = std::time::Duration::from
 // ── Exit codes ───────────────────────────────────────────────────────
 //
 // 0 = success
-// 2 = IPC transport error
+// 2 = client-side failure before IPC: transport error (socket/timeout)
+//     or missing/unreadable code input (NO_CODE_PROVIDED, STDIN_READ_ERROR)
 // 3 = session resolution error
 // 4 = JSON-RPC protocol error
 
-/// IPC transport error (socket connection failed, timeout, etc.).
+/// Client-side failure before IPC: transport error (socket connection failed,
+/// timeout, etc.) or missing/unreadable code input (stdin is a TTY, read error).
 const EXIT_TRANSPORT: i32 = 2;
 /// Session resolution error (no session found, ambiguous PID, etc.).
 const EXIT_SESSION: i32 = 3;
