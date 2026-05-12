@@ -52,38 +52,58 @@
 
 ## Installation
 
-Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases). You can install them using one of the following methods:
+### Pre-built Binaries
 
-### Shell Installer (Linux/macOS)
+Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases).
+
+#### Shell Installer (Linux/macOS)
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/latest/download/arf-console-installer.sh | sh
 ```
 
-### winget (Windows)
+#### winget (Windows)
 
 ```sh
 winget install --id eitsupi.arf
 ```
 
-### Scoop (Windows)
+#### Scoop (Windows)
 
 ```sh
 scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
 scoop install r-bucket/arf
 ```
 
-### cargo-binstall
+#### cargo-binstall
 
 ```sh
 cargo binstall --git https://github.com/eitsupi/arf arf-console
 ```
 
-### Manual Download
+#### Manual Download
 
 Download the archive for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases) and extract the binary to a directory in your `PATH`.
 
-## Build from Source
+### Third-Party Packages
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/arf.svg)](https://repology.org/project/arf/versions)
+
+#### Homebrew (macOS/Linux)
+
+```sh
+brew install arf
+```
+
+#### AUR (Arch Linux/Manjaro)
+
+```sh
+yay -S arf-bin
+# or use paru
+paru -S arf-bin
+```
+
+### Build from Source
 
 ```sh
 cargo install --git https://github.com/eitsupi/arf.git
@@ -94,22 +114,6 @@ cargo install --git https://github.com/eitsupi/arf.git
 > ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030)).
 >
 > So installing from crates.io (`cargo install arf-console`) is **not recommended**.
-
-## Third-Party distributions
-
-### Homebrew (macOS/Linux)
-
-```sh
-brew install arf
-```
-
-### AUR (Arch Linux/Manjaro)
-
-```sh
-yay -S arf-bin
-# or use paru
-paru -S arf-bin
-```
 
 ## Quick Start
 
