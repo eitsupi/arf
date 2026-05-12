@@ -455,4 +455,20 @@ command_names = true
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
         assert!(config.experimental.shell_completion.command_names);
     }
+
+    #[test]
+    fn test_shell_semicolon_shortcut_default() {
+        let config = ExperimentalConfig::default();
+        assert!(!config.shell_semicolon_shortcut);
+    }
+
+    #[test]
+    fn test_parse_shell_semicolon_shortcut() {
+        let toml_str = r#"
+[experimental]
+shell_semicolon_shortcut = true
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(config.experimental.shell_semicolon_shortcut);
+    }
 }

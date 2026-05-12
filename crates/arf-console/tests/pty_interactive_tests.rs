@@ -226,6 +226,106 @@ fn test_pty_shell_mode_ctrl_c_exit() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Test `;` shortcut enters shell mode when `experimental.shell_semicolon_shortcut` is enabled.
+///
+/// Pressing `;` at an empty prompt should automatically insert `:shell` and
+/// submit it — no Enter required — switching to shell mode immediately.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_semicolon_shortcut() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental]
+shell_semicolon_shortcut = true
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Press ';' alone — the keybinding inserts ":shell" and submits without Enter
+    terminal.send(";").expect("Should send semicolon");
+    terminal
+        .expect("Shell mode enabled")
+        .expect("Should show shell mode message");
+    terminal
+        .expect("] $")
+        .expect("Should show shell mode prompt");
+
+    // Execute a shell command to verify shell mode is functional
+    terminal
+        .send_line("echo semicolon_test")
+        .expect("Should send shell command");
+    terminal
+        .expect("semicolon_test")
+        .expect("Should see shell output");
+
+    // Return to R mode
+    terminal.send_line(":r").expect("Should send :r");
+    terminal
+        .expect("Returned to R mode")
+        .expect("Should return to R mode");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test `;` inserts a literal semicolon when `experimental.shell_semicolon_shortcut` is enabled
+/// but the buffer is not empty.
+///
+/// The `;` shortcut must only fire when the prompt is empty; mid-expression
+/// semicolons must still be inserted as normal characters.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_semicolon_shortcut_nonempty_buffer() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental]
+shell_semicolon_shortcut = true
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Type something first so the buffer is not empty, then press ';'
+    terminal.send("1").expect("Should send 1");
+    terminal.send(";").expect("Should send semicolon");
+
+    // ';' should be inserted literally; submit "1;2" and verify R evaluates both statements
+    terminal.send_line("2").expect("Should send 2");
+    terminal
+        .expect("[1] 2")
+        .expect("Semicolon should not trigger shell mode; 1;2 should evaluate as R expression");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Test :help command opens interactive browser in alternate screen.
 ///
 /// This tests that:
