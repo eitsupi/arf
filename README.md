@@ -136,7 +136,9 @@ Press `:h` or `:help` to open the fuzzy help browser:
   ↑↓ navigate  Tab/Enter select  Esc exit
 ```
 
-### Meta Commands
+## Meta Commands
+
+arf extends R with `:` prefixed meta commands:
 
 | Command | Description |
 |---------|-------------|
@@ -266,25 +268,7 @@ frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # Braille dots
 color = "Cyan"              # Spinner color (default: Cyan)
 ```
 
-**Configuration options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `frames` | `""` (disabled) | Animation frames (each character is one frame). |
-| `color` | `"Cyan"` | Spinner color. Accepts standard ANSI color names: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, and their `Light` variants (e.g., `LightBlue`). |
-
-**Frame style examples:**
-
-```toml
-# Braille dots (recommended)
-frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-# ASCII spinner (works in all terminals)
-frames = "|/-\\"
-
-# Block spinner
-frames = "▖▘▝▗"
-```
+See [Spinner configuration](docs/configuration.md#spinner) for all options and frame style examples.
 
 ### Auto-completion while typing
 
@@ -327,13 +311,7 @@ delay = 2          # Keep last N failed commands for quick retry
 on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 ```
 
-**Configuration options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | `false` | Enable automatic removal of failed commands. |
-| `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
-| `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
+See [History forget configuration](docs/configuration.md#history-forget) for all options.
 
 ### History export/import
 
