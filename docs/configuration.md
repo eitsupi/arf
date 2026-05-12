@@ -712,7 +712,6 @@ color = "Cyan"
 **Frame style examples:**
 
 ```toml
-[experimental.prompt_spinner]
 # Braille dots (recommended)
 frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -721,6 +720,25 @@ frames = "|/-\\"
 
 # Block spinner
 frames = "▖▘▝▗"
+```
+
+### Fuzzy R Completion
+
+Use fuzzy matching for R code completions. When enabled, typing `sf::geo` can match `sf::st_geometry` and `library(dpl` can match `dplyr`. **Disabled by default.**
+
+```toml
+[experimental.r_completion]
+fuzzy = true
+```
+
+Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
+
+The `package_functions` option controls which function calls trigger package-name fuzzy completion (defaults to `["library", "require"]`). Add custom functions as needed:
+
+```toml
+[experimental.r_completion]
+fuzzy = true
+package_functions = ["library", "require", "box::use"]
 ```
 
 ### History Forget

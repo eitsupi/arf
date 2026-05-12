@@ -292,13 +292,7 @@ fuzzy = true
 
 Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
 
-The `package_functions` option controls which function calls trigger package-name fuzzy completion (defaults to `["library", "require"]`). Users can add custom functions like `"box::use"`:
-
-```toml
-[experimental.r_completion]
-fuzzy = true
-package_functions = ["library", "require", "box::use"]
-```
+See [Fuzzy R Completion configuration](docs/configuration.md#fuzzy-r-completion) for the `package_functions` option and other details.
 
 ### History forget
 
