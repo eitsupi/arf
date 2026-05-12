@@ -97,6 +97,12 @@ cargo install --git https://github.com/eitsupi/arf.git
 
 ## Third-Party distributions
 
+### Homebrew (macOS/Linux)
+
+```sh
+brew install arf
+```
+
 ### AUR (Arch Linux/Manjaro)
 
 ```sh
