@@ -160,6 +160,9 @@ arf extends R with `:` prefixed meta commands:
 | `:commands`, `:cmds` | Show available commands |
 | `:quit`, `:exit` | Exit arf |
 
+> [!NOTE]
+> **Experimental:** Enable the `experimental.shell_semicolon_shortcut` option to switch to shell mode by pressing `;` at an empty prompt — no `:shell` or Enter required (similar to Julia REPL behavior).
+
 ## Configuration
 
 arf uses a TOML configuration file located at:

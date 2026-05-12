@@ -145,6 +145,9 @@ color = "Cyan"             # Spinner color
 [experimental.prompt_duration]
 format = "{value} "        # Duration display format ({value} = time string)
 threshold_ms = 2000        # Show duration only for commands slower than this (ms)
+
+[experimental]
+shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
 ```
 
 ## Bracket Highlighting
@@ -759,6 +762,17 @@ on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 | `enabled` | `false` | Enable automatic removal of failed commands. |
 | `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
 | `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
+
+### Shell Semicolon Shortcut
+
+Pressing `;` at an empty R prompt instantly switches to shell mode — no `:shell` or Enter required. Similar to [Julia REPL](https://docs.julialang.org/en/v1/stdlib/REPL/#man-shell-mode) shell mode behavior. **Disabled by default.**
+
+```toml
+[experimental]
+shell_semicolon_shortcut = true
+```
+
+When the buffer is not empty, `;` inserts a semicolon as usual, so normal R expressions like `for (i in 1:10) { ... }` are unaffected.
 
 ## CLI Options Override
 
