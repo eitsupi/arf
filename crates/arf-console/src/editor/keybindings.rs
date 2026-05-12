@@ -154,6 +154,41 @@ pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
     keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(';'), event);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reedline::{EditCommand, KeyCode, KeyModifiers, ReedlineEvent};
+
+    fn shell_event() -> ReedlineEvent {
+        ReedlineEvent::Multiple(vec![
+            ReedlineEvent::Edit(vec![EditCommand::InsertString(":shell".to_string())]),
+            ReedlineEvent::Submit,
+        ])
+    }
+
+    #[test]
+    fn test_shell_semicolon_keybinding_none_modifier() {
+        let mut kb = reedline::Keybindings::new();
+        add_shell_semicolon_keybinding(&mut kb);
+        assert_eq!(
+            kb.find_binding(KeyModifiers::NONE, KeyCode::Char(';')),
+            Some(shell_event()),
+            "NONE+';' should map to the shell shortcut event"
+        );
+    }
+
+    #[test]
+    fn test_shell_semicolon_keybinding_shift_modifier() {
+        let mut kb = reedline::Keybindings::new();
+        add_shell_semicolon_keybinding(&mut kb);
+        assert_eq!(
+            kb.find_binding(KeyModifiers::SHIFT, KeyCode::Char(';')),
+            Some(shell_event()),
+            "SHIFT+';' should map to the same shell shortcut event for cross-layout support"
+        );
+    }
+}
+
 /// Add auto-match keybindings for brackets and quotes.
 ///
 /// When typing an opening bracket or quote, automatically inserts the closing
