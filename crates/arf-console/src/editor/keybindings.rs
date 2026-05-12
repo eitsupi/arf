@@ -1,8 +1,8 @@
 //! Keyboard shortcut configuration.
 
 use crate::editor::mode::{
-    ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef, create_auto_match_rules,
-    create_bracket_delete_rules, create_skip_over_rules,
+    BufferEmpty, ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef,
+    create_auto_match_rules, create_bracket_delete_rules, create_skip_over_rules,
 };
 use crokey::KeyCombination;
 use reedline::{EditCommand, EditMode, KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
@@ -66,11 +66,13 @@ pub fn add_common_keybindings(keybindings: &mut Keybindings) {
 /// - Auto-match only inserts closing brackets when cursor is at end of buffer
 /// - Auto-trigger completion when buffer reaches `completion_min_chars` characters
 /// - Tree-sitter based word navigation for Ctrl+Arrow (R token boundaries)
+/// - When `shell_semicolon_shortcut` is true, ';' at empty buffer triggers shell mode
 pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
     edit_mode: E,
     state: EditorStateRef,
     auto_match: bool,
     completion_min_chars: Option<usize>,
+    shell_semicolon_shortcut: bool,
 ) -> Box<dyn EditMode> {
     // Rule: when ':' produces InsertChar + Menu, check if cursor is at position 0
     // If not at position 0, replace with just InsertChar(':')
@@ -105,7 +107,35 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
         conditional = conditional.with_rules(create_auto_match_rules());
     }
 
+    // When the semicolon shortcut is enabled, ';' at an empty buffer fires
+    // ExecuteHostCommand(":shell"). When the buffer has content, fall back to
+    // inserting a literal semicolon so normal R expressions are unaffected.
+    if shell_semicolon_shortcut {
+        let semicolon_rule = ConditionalRule {
+            match_event: Box::new(
+                |event| matches!(event, ReedlineEvent::ExecuteHostCommand(cmd) if cmd == ":shell"),
+            ),
+            condition: Box::new(BufferEmpty),
+            fallback_event: ReedlineEvent::Edit(vec![EditCommand::InsertChar(';')]),
+        };
+        conditional = conditional.with_rule(semicolon_rule);
+    }
+
     Box::new(conditional)
+}
+
+/// Add the `;` → shell-mode keybinding.
+///
+/// Maps `;` to `ExecuteHostCommand(":shell")` so that pressing `;` at an empty
+/// prompt switches to shell mode immediately (no Enter required). A
+/// `ConditionalRule` added by `wrap_edit_mode_with_conditional_rules` converts
+/// the event back to `InsertChar(';')` when the buffer is not empty.
+pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Char(';'),
+        ReedlineEvent::ExecuteHostCommand(":shell".to_string()),
+    );
 }
 
 /// Add auto-match keybindings for brackets and quotes.

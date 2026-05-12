@@ -44,6 +44,16 @@ pub struct ExperimentalConfig {
     /// Shell mode completion configuration.
     #[serde(default)]
     pub shell_completion: ShellCompletionConfig,
+
+    /// Enable `;` as a shortcut to switch to shell mode.
+    ///
+    /// When enabled, pressing `;` at an empty R prompt instantly switches to
+    /// shell mode without requiring Enter — similar to Julia REPL behavior.
+    /// When the buffer is not empty, `;` inserts a semicolon as usual.
+    ///
+    /// Disabled by default.
+    #[serde(default)]
+    pub shell_semicolon_shortcut: bool,
 }
 
 /// Configuration for shell mode completion.
@@ -182,6 +192,15 @@ struct ExperimentalConfigSchema {
 
     /// Shell mode completion configuration.
     pub shell_completion: ShellCompletionConfig,
+
+    /// Enable `;` as a shortcut to switch to shell mode.
+    ///
+    /// When enabled, pressing `;` at an empty R prompt instantly switches to
+    /// shell mode without requiring Enter — similar to Julia REPL behavior.
+    /// When the buffer is not empty, `;` inserts a semicolon as usual.
+    ///
+    /// Disabled by default.
+    pub shell_semicolon_shortcut: bool,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color

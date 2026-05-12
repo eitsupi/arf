@@ -92,7 +92,8 @@ expression: schema
         },
         "shell_completion": {
           "command_names": false
-        }
+        },
+        "shell_semicolon_shortcut": false
       }
     },
     "history": {
@@ -1613,6 +1614,11 @@ expression: schema
           "default": {
             "command_names": false
           }
+        },
+        "shell_semicolon_shortcut": {
+          "description": "Enable `;` as a shortcut to switch to shell mode.\n\nWhen enabled, pressing `;` at an empty R prompt instantly switches to\nshell mode without requiring Enter — similar to Julia REPL behavior.\nWhen the buffer is not empty, `;` inserts a semicolon as usual.\n\nDisabled by default.",
+          "type": "boolean",
+          "default": false
         }
       }
     },

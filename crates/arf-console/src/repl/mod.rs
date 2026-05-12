@@ -37,7 +37,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::editor::keybindings::{
     add_auto_match_keybindings, add_common_keybindings, add_key_map_keybindings,
-    wrap_edit_mode_with_conditional_rules,
+    add_shell_semicolon_keybinding, wrap_edit_mode_with_conditional_rules,
 };
 use crate::editor::validator::RValidator;
 use banner::format_banner;
@@ -269,6 +269,9 @@ impl Repl {
                 if self.config.editor.auto_match {
                     add_auto_match_keybindings(&mut insert_keybindings);
                 }
+                if self.config.experimental.shell_semicolon_shortcut {
+                    add_shell_semicolon_keybinding(&mut insert_keybindings);
+                }
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
                 let vi = Vi::new(insert_keybindings, default_vi_normal_keybindings());
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
@@ -276,6 +279,7 @@ impl Repl {
                     editor_state.clone(),
                     self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
+                    self.config.experimental.shell_semicolon_shortcut,
                 ))
             }
             EditorMode::Emacs => {
@@ -284,6 +288,9 @@ impl Repl {
                 if self.config.editor.auto_match {
                     add_auto_match_keybindings(&mut keybindings);
                 }
+                if self.config.experimental.shell_semicolon_shortcut {
+                    add_shell_semicolon_keybinding(&mut keybindings);
+                }
                 add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
                 let emacs = Emacs::new(keybindings);
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
@@ -291,6 +298,7 @@ impl Repl {
                     editor_state.clone(),
                     self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
+                    self.config.experimental.shell_semicolon_shortcut,
                 ))
             }
         };
@@ -569,6 +577,9 @@ impl Repl {
                 if self.config.editor.auto_match {
                     add_auto_match_keybindings(&mut insert_keybindings);
                 }
+                if self.config.experimental.shell_semicolon_shortcut {
+                    add_shell_semicolon_keybinding(&mut insert_keybindings);
+                }
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
                 let vi = Vi::new(insert_keybindings, default_vi_normal_keybindings());
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
@@ -576,6 +587,7 @@ impl Repl {
                     editor_state.clone(),
                     self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
+                    self.config.experimental.shell_semicolon_shortcut,
                 ))
             }
             EditorMode::Emacs => {
@@ -584,6 +596,9 @@ impl Repl {
                 if self.config.editor.auto_match {
                     add_auto_match_keybindings(&mut keybindings);
                 }
+                if self.config.experimental.shell_semicolon_shortcut {
+                    add_shell_semicolon_keybinding(&mut keybindings);
+                }
                 add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
                 let emacs = Emacs::new(keybindings);
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
@@ -591,6 +606,7 @@ impl Repl {
                     editor_state.clone(),
                     self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
+                    self.config.experimental.shell_semicolon_shortcut,
                 ))
             }
         };
