@@ -107,14 +107,25 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
         conditional = conditional.with_rules(create_auto_match_rules());
     }
 
-    // When the semicolon shortcut is enabled, ';' at an empty buffer fires
-    // ExecuteHostCommand(":shell"). When the buffer has content, fall back to
-    // inserting a literal semicolon so normal R expressions are unaffected.
+    // When the semicolon shortcut is enabled, ';' at an empty buffer inserts
+    // ":shell" and submits immediately. When the buffer has content, fall back
+    // to inserting a literal semicolon so normal R expressions are unaffected.
     if shell_semicolon_shortcut {
         let semicolon_rule = ConditionalRule {
-            match_event: Box::new(
-                |event| matches!(event, ReedlineEvent::ExecuteHostCommand(cmd) if cmd == ":shell"),
-            ),
+            match_event: Box::new(|event| {
+                matches!(
+                    event,
+                    ReedlineEvent::Multiple(events)
+                    if events.len() == 2
+                        && matches!(
+                            &events[0],
+                            ReedlineEvent::Edit(cmds)
+                            if cmds.len() == 1
+                                && matches!(&cmds[0], EditCommand::InsertString(s) if s == ":shell")
+                        )
+                        && matches!(&events[1], ReedlineEvent::Submit)
+                )
+            }),
             condition: Box::new(BufferEmpty),
             fallback_event: ReedlineEvent::Edit(vec![EditCommand::InsertChar(';')]),
         };
@@ -126,15 +137,19 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
 
 /// Add the `;` → shell-mode keybinding.
 ///
-/// Maps `;` to `ExecuteHostCommand(":shell")` so that pressing `;` at an empty
-/// prompt switches to shell mode immediately (no Enter required). A
-/// `ConditionalRule` added by `wrap_edit_mode_with_conditional_rules` converts
-/// the event back to `InsertChar(';')` when the buffer is not empty.
+/// Maps `;` to `Multiple([InsertString(":shell"), Submit])` so that pressing
+/// `;` at an empty prompt inserts `:shell` and submits it immediately — no
+/// Enter required. A `ConditionalRule` added by
+/// `wrap_edit_mode_with_conditional_rules` falls back to `InsertChar(';')`
+/// when the buffer is not empty, preserving normal semicolon input.
 pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Char(';'),
-        ReedlineEvent::ExecuteHostCommand(":shell".to_string()),
+        ReedlineEvent::Multiple(vec![
+            ReedlineEvent::Edit(vec![EditCommand::InsertString(":shell".to_string())]),
+            ReedlineEvent::Submit,
+        ]),
     );
 }
 
