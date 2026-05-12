@@ -400,13 +400,13 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 
 ## Related Projects
 
-- [radian](https://github.com/randy3k/radian) — A 21st century R console written in Python.
+- [radian](https://github.com/randy3k/radian) — A 21st century R console written in Python. arf draws inspiration from radian's design philosophy.
 
 - [sircon](https://github.com/lrberge/sircon) — Simple R Console. A Windows-only R console with powerful autocomplete and a macro language for custom shortcuts. Some of sircon's advanced features are future goals for arf.
 
 ## Acknowledgements
 
-arf builds on the following projects:
+arf is built upon the broad Rust ecosystem and the remarkable efforts of those who have created open-source tools for R. In particular, we would like to highlight the following projects:
 
 - **[ark](https://github.com/posit-dev/ark)** — The `arf-libr` and `arf-harp` crates are derived from ark's `libr` and `harp` crates, which provide the foundation for embedding R in Rust applications. Windows initialization follows ark's pattern. [tree-sitter-r](https://github.com/r-lib/tree-sitter-r) powers syntax highlighting and code analysis.
 
