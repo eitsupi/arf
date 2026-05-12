@@ -21,31 +21,23 @@
 
 </div>
 
-## Highlights
-
-- **Single Binary, Zero Dependencies** — One small executable with no runtime dependencies. Just download and run.
-
-- **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) (R Installation Manager) support. Switch R versions with `--with-r-version` flag, or use the `:switch` meta command to change versions within a running session.
-
-- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly. Import your existing history from radian or R's `.Rhistory`.
-
-- **Syntax Highlighting** — Tree-sitter based highlighting for R code with customizable colors.
-
-- **Interactive Help Browser** — Fuzzy search through R documentation with `:help` or `:h`. Find any function across all installed packages instantly.
-
 ## Features
 
+- **Single Binary, Zero Dependencies** — One small executable with no runtime dependencies. Just download and run.
 - Cross-platform: Linux, macOS, and Windows
+- **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) support. Switch R versions with `--with-r-version` or the `:switch` meta command within a running session.
 - Vi and Emacs editing modes
 - Multiline editing with proper indentation
 - Auto-matching brackets and quotes (with smart skip-over)
 - Tab completion for R objects, functions, and file paths inside strings
+- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Import existing history from radian or R's `.Rhistory`.
 - Customizable keyboard shortcuts (`Alt+-` → ` <- `, `Alt+P` → ` |> `)
 - Command status indicator (shows error symbol when previous command failed)
+- **Interactive Help Browser** — Fuzzy search through R documentation with `:help` or `:h`. Find any function across all installed packages instantly.
+- Tree-sitter based syntax highlighting with customizable colors
 - Reprex mode with optional auto-formatting via [Air](https://github.com/posit-dev/air)
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
-- Syntax highlighting with customizable colors
 - SQLite-backed persistent history with import/export support
 - IPC server for AI agent and CI integration
 - Headless mode for non-interactive environments (CI, background jobs)
