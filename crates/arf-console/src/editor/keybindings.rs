@@ -143,14 +143,15 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
 /// `wrap_edit_mode_with_conditional_rules` falls back to `InsertChar(';')`
 /// when the buffer is not empty, preserving normal semicolon input.
 pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
-    keybindings.add_binding(
-        KeyModifiers::NONE,
-        KeyCode::Char(';'),
-        ReedlineEvent::Multiple(vec![
-            ReedlineEvent::Edit(vec![EditCommand::InsertString(":shell".to_string())]),
-            ReedlineEvent::Submit,
-        ]),
-    );
+    let event = ReedlineEvent::Multiple(vec![
+        ReedlineEvent::Edit(vec![EditCommand::InsertString(":shell".to_string())]),
+        ReedlineEvent::Submit,
+    ]);
+    // Bind both NONE and SHIFT: on some platforms/layouts crossterm includes
+    // SHIFT in the key event even when it is part of typing the character
+    // (same rationale as add_auto_match_keybindings).
+    keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(';'), event.clone());
+    keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(';'), event);
 }
 
 /// Add auto-match keybindings for brackets and quotes.
