@@ -10,7 +10,7 @@
 
 <br>
 
-**arf** is a modern, cross-platform R console written in Rust. It provides a rich interactive experience with fuzzy help search, intelligent history navigation, and syntax highlighting—all with fast startup times.
+**arf** is a cross-platform R console written in Rust.
 
 > [!WARNING]
 > arf is under active development. The configuration file format and history file format are not yet stable and may change without notice in future versions.
@@ -23,17 +23,17 @@
 
 ## Features
 
-- **Single Binary, Zero Dependencies** — One small executable with no runtime dependencies. Just download and run.
+- Single binary with no runtime dependencies
 - Cross-platform: Linux, macOS, and Windows
-- **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) support. Switch R versions with `--with-r-version` or the `:switch` meta command within a running session.
+- [rig](https://github.com/r-lib/rig) integration — switch R versions with `--with-r-version` or `:switch` within a session
 - Vi and Emacs editing modes
 - Multiline editing with proper indentation
 - Auto-matching brackets and quotes (with smart skip-over)
 - Tab completion for R objects, functions, and file paths inside strings
-- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Import existing history from radian or R's `.Rhistory`.
+- fzf-style history search with `Ctrl+R`; import from radian or `.Rhistory`
 - Customizable keyboard shortcuts (`Alt+-` → ` <- `, `Alt+P` → ` |> `)
 - Command status indicator (shows error symbol when previous command failed)
-- **Interactive Help Browser** — Fuzzy search through R documentation with `:help` or `:h`. Find any function across all installed packages instantly.
+- Fuzzy help browser with `:help` or `:h` — search across all installed packages
 - Tree-sitter based syntax highlighting with customizable colors
 - Reprex mode with optional auto-formatting via [Air](https://github.com/posit-dev/air)
 - Shell mode (`:shell` to enter, `:r` to return)
@@ -258,7 +258,7 @@ Features in this section are under development and may change or be removed in f
 
 ### Spinner
 
-Displays an animated spinner at the start of the line while R is evaluating code, providing visual feedback that the system is busy. **Disabled by default.**
+Displays an animated spinner at the start of the line while R is evaluating code. **Disabled by default.**
 
 To enable, set the `frames` option:
 
@@ -394,13 +394,6 @@ arf history import --from radian --hostname "radian-import"
 - Self-import is detected and rejected when importing from an arf database to the same target file.
 - **Important:** Exit arf before exporting to ensure the source databases are in a consistent state. The export itself uses atomic writes to prevent incomplete output files, but reading while arf is writing may capture inconsistent data.
 
-**Restore from backup:**
-
-```sh
-# Restore history from a unified export file
-arf history import --from arf --file ~/arf_backup.db
-```
-
 ## Known Issues
 
 ### Error detection uses `options(error = ...)`
@@ -413,13 +406,13 @@ arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rl
 
 ## Related Projects
 
-- [radian](https://github.com/randy3k/radian) — A 21st century R console written in Python. arf draws inspiration from radian's design philosophy.
+- [radian](https://github.com/randy3k/radian) — A 21st century R console written in Python.
 
 - [sircon](https://github.com/lrberge/sircon) — Simple R Console. A Windows-only R console with powerful autocomplete and a macro language for custom shortcuts. Some of sircon's advanced features are future goals for arf.
 
 ## Acknowledgements
 
-arf is built upon the broad Rust ecosystem and the remarkable efforts of those who have created open-source tools for R. In particular, we would like to highlight the following projects:
+arf builds on the following projects:
 
 - **[ark](https://github.com/posit-dev/ark)** — The `arf-libr` and `arf-harp` crates are derived from ark's `libr` and `harp` crates, which provide the foundation for embedding R in Rust applications. Windows initialization follows ark's pattern. [tree-sitter-r](https://github.com/r-lib/tree-sitter-r) powers syntax highlighting and code analysis.
 
