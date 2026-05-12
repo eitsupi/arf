@@ -254,7 +254,7 @@ See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ## Experimental Features
 
-Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` section.
+Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` table and its subtables (e.g. `[experimental.prompt_spinner]`).
 
 ### Spinner
 
