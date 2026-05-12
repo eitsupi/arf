@@ -696,6 +696,12 @@ Features in this section are under development and may change or be removed in f
 
 Displays an animated spinner at the start of the line while R is evaluating code. **Disabled by default** — set `frames` to enable.
 
+```toml
+[experimental.prompt_spinner]
+frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # Braille dots
+color = "Cyan"
+```
+
 **Configuration options:**
 
 | Option | Default | Description |
@@ -720,6 +726,13 @@ frames = "▖▘▝▗"
 ### History Forget
 
 Automatically removes commands that produced errors from history. Similar to fish's [sponge](https://github.com/meaningful-ooo/sponge) plugin.
+
+```toml
+[experimental.history_forget]
+enabled = true
+delay = 2          # Keep last N failed commands for quick retry
+on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
+```
 
 **Configuration options:**
 
