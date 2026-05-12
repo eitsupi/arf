@@ -688,6 +688,78 @@ arf history import --from r
 > [!NOTE]
 > Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
+## Experimental Features
+
+Features in this section are under development and may change or be removed in future versions.
+
+### Spinner
+
+Displays an animated spinner at the start of the line while R is evaluating code. **Disabled by default** — set `frames` to enable.
+
+```toml
+[experimental.prompt_spinner]
+frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # Braille dots
+color = "Cyan"
+```
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `frames` | `""` (disabled) | Animation frames (each character is one frame). |
+| `color` | `"Cyan"` | Spinner color. Accepts standard ANSI color names: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, and their `Light` variants (e.g., `LightBlue`). |
+
+**Frame style examples:**
+
+```toml
+# Braille dots (recommended)
+frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# ASCII spinner (works in all terminals)
+frames = "|/-\\"
+
+# Block spinner
+frames = "▖▘▝▗"
+```
+
+### Fuzzy R Completion
+
+Use fuzzy matching for R code completions. When enabled, typing `sf::geo` can match `sf::st_geometry` and `library(dpl` can match `dplyr`. **Disabled by default.**
+
+```toml
+[experimental.r_completion]
+fuzzy = true
+```
+
+Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
+
+The `package_functions` option controls which function calls trigger package-name fuzzy completion (defaults to `["library", "require"]`). Add custom functions as needed:
+
+```toml
+[experimental.r_completion]
+fuzzy = true
+package_functions = ["library", "require", "box::use"]
+```
+
+### History Forget
+
+Automatically removes commands that produced errors from history. Similar to fish's [sponge](https://github.com/meaningful-ooo/sponge) plugin.
+
+```toml
+[experimental.history_forget]
+enabled = true
+delay = 2          # Keep last N failed commands for quick retry
+on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
+```
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | `false` | Enable automatic removal of failed commands. |
+| `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
+| `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
+
 ## CLI Options Override
 
 Command-line options take precedence over config file settings:

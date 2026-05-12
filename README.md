@@ -10,7 +10,7 @@
 
 <br>
 
-**arf** is a modern, cross-platform R console written in Rust. It provides a rich interactive experience with fuzzy help search, intelligent history navigation, and syntax highlighting—all with fast startup times.
+**arf** is a cross-platform R console written in Rust.
 
 > [!WARNING]
 > arf is under active development. The configuration file format and history file format are not yet stable and may change without notice in future versions.
@@ -21,69 +21,81 @@
 
 </div>
 
-## Highlights
-
-- **Single Binary, Zero Dependencies** — One small executable with no runtime dependencies. Just download and run.
-
-- **rig Integration** — Seamless [rig](https://github.com/r-lib/rig) (R Installation Manager) support. Switch R versions with `--with-r-version` flag, or use the `:switch` meta command to change versions within a running session.
-
-- **Fuzzy History Search** — fzf-style history search with `Ctrl+R`. Type fragments to find past commands quickly. Import your existing history from radian or R's `.Rhistory`.
-
-- **Syntax Highlighting** — Tree-sitter based highlighting for R code with customizable colors.
-
-- **Interactive Help Browser** — Fuzzy search through R documentation with `:help` or `:h`. Find any function across all installed packages instantly.
-
 ## Features
 
+- Single binary with no runtime dependencies
 - Cross-platform: Linux, macOS, and Windows
+- [rig](https://github.com/r-lib/rig) integration — switch R versions with `--with-r-version` or `:switch` within a session
 - Vi and Emacs editing modes
 - Multiline editing with proper indentation
 - Auto-matching brackets and quotes (with smart skip-over)
 - Tab completion for R objects, functions, and file paths inside strings
+- fzf-style history search with `Ctrl+R`; import from radian or `.Rhistory`
 - Customizable keyboard shortcuts (`Alt+-` → ` <- `, `Alt+P` → ` |> `)
 - Command status indicator (shows error symbol when previous command failed)
+- Fuzzy help browser with `:help` or `:h` — search across all installed packages
+- Tree-sitter based syntax highlighting with customizable colors
 - Reprex mode with optional auto-formatting via [Air](https://github.com/posit-dev/air)
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
-- Syntax highlighting with customizable colors
 - SQLite-backed persistent history with import/export support
 - IPC server for AI agent and CI integration
 - Headless mode for non-interactive environments (CI, background jobs)
 
 ## Installation
 
-Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases). You can install them using one of the following methods:
+### Pre-built Binaries
 
-### Shell Installer (Linux/macOS)
+Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases).
+
+#### Shell Installer (Linux/macOS)
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/eitsupi/arf/releases/latest/download/arf-console-installer.sh | sh
 ```
 
-### winget (Windows)
+#### winget (Windows)
 
 ```sh
 winget install --id eitsupi.arf
 ```
 
-### Scoop (Windows)
+#### Scoop (Windows)
 
 ```sh
 scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
 scoop install r-bucket/arf
 ```
 
-### cargo-binstall
+#### cargo-binstall
 
 ```sh
 cargo binstall --git https://github.com/eitsupi/arf arf-console
 ```
 
-### Manual Download
+#### Manual Download
 
 Download the archive for your platform from [GitHub Releases](https://github.com/eitsupi/arf/releases) and extract the binary to a directory in your `PATH`.
 
-## Build from Source
+### Third-Party Packages
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/arf.svg)](https://repology.org/project/arf/versions)
+
+#### Homebrew (macOS/Linux)
+
+```sh
+brew install arf
+```
+
+#### AUR (Arch Linux/Manjaro)
+
+```sh
+yay -S arf-bin
+# or use paru
+paru -S arf-bin
+```
+
+### Build from Source
 
 ```sh
 cargo install --git https://github.com/eitsupi/arf.git
@@ -94,22 +106,6 @@ cargo install --git https://github.com/eitsupi/arf.git
 > ([crossterm#1030](https://github.com/crossterm-rs/crossterm/pull/1030)).
 >
 > So installing from crates.io (`cargo install arf-console`) is **not recommended**.
-
-## Third-Party distributions
-
-### Homebrew (macOS/Linux)
-
-```sh
-brew install arf
-```
-
-### AUR (Arch Linux/Manjaro)
-
-```sh
-yay -S arf-bin
-# or use paru
-paru -S arf-bin
-```
 
 ## Quick Start
 
@@ -140,7 +136,9 @@ Press `:h` or `:help` to open the fuzzy help browser:
   ↑↓ navigate  Tab/Enter select  Esc exit
 ```
 
-### Meta Commands
+## Meta Commands
+
+arf extends R with `:` prefixed meta commands:
 
 | Command | Description |
 |---------|-------------|
@@ -256,11 +254,11 @@ See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ## Experimental Features
 
-Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` section.
+Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` table and its subtables (e.g. `[experimental.prompt_spinner]`).
 
 ### Spinner
 
-Displays an animated spinner at the start of the line while R is evaluating code, providing visual feedback that the system is busy. **Disabled by default.**
+Displays an animated spinner at the start of the line while R is evaluating code. **Disabled by default.**
 
 To enable, set the `frames` option:
 
@@ -270,25 +268,7 @@ frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # Braille dots
 color = "Cyan"              # Spinner color (default: Cyan)
 ```
 
-**Configuration options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `frames` | `""` (disabled) | Animation frames (each character is one frame). |
-| `color` | `"Cyan"` | Spinner color. Accepts standard ANSI color names: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, and their `Light` variants (e.g., `LightBlue`). |
-
-**Frame style examples:**
-
-```toml
-# Braille dots (recommended)
-frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-# ASCII spinner (works in all terminals)
-frames = "|/-\\"
-
-# Block spinner
-frames = "▖▘▝▗"
-```
+See [Spinner configuration](docs/configuration.md#spinner) for all options and frame style examples.
 
 ### Auto-completion while typing
 
@@ -312,13 +292,7 @@ fuzzy = true
 
 Both `::` (exported names) and `:::` (internal names) are supported. Package exports are cached per-package with a 5-minute TTL for performance.
 
-The `package_functions` option controls which function calls trigger package-name fuzzy completion (defaults to `["library", "require"]`). Users can add custom functions like `"box::use"`:
-
-```toml
-[experimental.r_completion]
-fuzzy = true
-package_functions = ["library", "require", "box::use"]
-```
+See [Fuzzy R Completion configuration](docs/configuration.md#fuzzy-r-completion) for the `package_functions` option and other details.
 
 ### History forget
 
@@ -331,13 +305,7 @@ delay = 2          # Keep last N failed commands for quick retry
 on_exit_only = false  # Purge on each prompt (false) or only on exit (true)
 ```
 
-**Configuration options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | `false` | Enable automatic removal of failed commands. |
-| `delay` | `2` | Number of recent failed commands to keep accessible for retry. Older failed commands are purged. |
-| `on_exit_only` | `false` | If `true`, only purge when session ends. If `false`, purge on each prompt. |
+See [History forget configuration](docs/configuration.md#history-forget) for all options.
 
 ### History export/import
 
@@ -419,13 +387,6 @@ arf history import --from radian --hostname "radian-import"
 - By default, duplicate entries are skipped during import (matched by command text and timestamp). Use `--import-duplicates` to import all entries regardless.
 - Self-import is detected and rejected when importing from an arf database to the same target file.
 - **Important:** Exit arf before exporting to ensure the source databases are in a consistent state. The export itself uses atomic writes to prevent incomplete output files, but reading while arf is writing may capture inconsistent data.
-
-**Restore from backup:**
-
-```sh
-# Restore history from a unified export file
-arf history import --from arf --file ~/arf_backup.db
-```
 
 ## Known Issues
 
