@@ -154,7 +154,6 @@ pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
     keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(';'), event);
 }
 
-
 /// Add auto-match keybindings for brackets and quotes.
 ///
 /// When typing an opening bracket or quote, automatically inserts the closing
