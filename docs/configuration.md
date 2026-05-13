@@ -129,6 +129,9 @@ insert = "LightGreen"     # Color for vi insert mode indicator
 normal = "LightYellow"    # Color for vi normal mode indicator
 non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 
+[experimental]
+shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
+
 [experimental.history_forget]
 enabled = false            # Auto-remove failed commands from history
 delay = 2                  # Keep last N failed commands for retry
@@ -146,8 +149,6 @@ color = "Cyan"             # Spinner color
 format = "{value} "        # Duration display format ({value} = time string)
 threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 
-[experimental]
-shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
 ```
 
 ## Bracket Highlighting
