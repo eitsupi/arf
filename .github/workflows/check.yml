@@ -80,13 +80,13 @@ jobs:
       - name: Set up Air CLI
         uses: posit-dev/setup-air@cf390573ff4fe0f198f35df3a642b1409328d859 # v1
       - name: Install R
-        uses: r-lib/actions/setup-r@6f6e5bc62fba3a704f74e7ad7ef7676c5c6a2590 # v2
+        uses: r-lib/actions/setup-r@a51a8012b0aab7c32ef9d19bf54da93f3254335e # v2
         with:
           r-version: ${{ matrix.r-version }}
           use-public-rspm: true
           Ncpus: "2"
       - name: Install R packages for tests
-        uses: r-lib/actions/setup-r-dependencies@6f6e5bc62fba3a704f74e7ad7ef7676c5c6a2590 # v2
+        uses: r-lib/actions/setup-r-dependencies@a51a8012b0aab7c32ef9d19bf54da93f3254335e # v2
         with:
           working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
