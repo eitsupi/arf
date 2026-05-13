@@ -146,8 +146,7 @@ color = "Cyan"             # Spinner color
 format = "{value} "        # Duration display format ({value} = time string)
 threshold_ms = 2000        # Show duration only for commands slower than this (ms)
 
-[experimental]
-shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
+experimental.shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
 ```
 
 ## Bracket Highlighting

@@ -1,7 +1,7 @@
 //! Keyboard shortcut configuration.
 
 use crate::editor::mode::{
-    BufferEmpty, ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef,
+    BufferKnownEmpty, ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef,
     create_auto_match_rules, create_bracket_delete_rules, create_skip_over_rules,
 };
 use crokey::KeyCombination;
@@ -126,7 +126,7 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
                         && matches!(&events[1], ReedlineEvent::Submit)
                 )
             }),
-            condition: Box::new(BufferEmpty),
+            condition: Box::new(BufferKnownEmpty),
             fallback_event: ReedlineEvent::Edit(vec![EditCommand::InsertChar(';')]),
         };
         conditional = conditional.with_rule(semicolon_rule);

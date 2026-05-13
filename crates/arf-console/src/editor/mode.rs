@@ -396,6 +396,16 @@ impl KeyCondition for BufferEmpty {
     }
 }
 
+/// Condition: buffer is known to be empty (empty and not uncertain).
+#[derive(Debug, Clone, Copy)]
+pub struct BufferKnownEmpty;
+
+impl KeyCondition for BufferKnownEmpty {
+    fn check(&self, state: &EditorState) -> bool {
+        state.is_empty() && !state.uncertain
+    }
+}
+
 /// Condition: cursor is at the end of the buffer.
 ///
 /// This is useful for auto-match behavior where we only want to insert
