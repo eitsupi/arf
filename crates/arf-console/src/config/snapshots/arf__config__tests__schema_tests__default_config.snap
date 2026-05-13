@@ -94,6 +94,9 @@ insert = "LightGreen"
 normal = "LightYellow"
 non_vi = "Default"
 
+[experimental]
+shell_semicolon_shortcut = false
+
 [experimental.history_forget]
 enabled = false
 delay = 2

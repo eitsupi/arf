@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `;` shortcut to switch to shell mode at an empty R prompt (`experimental.shell_semicolon_shortcut`). One keypress — no `:shell` or Enter required. Similar to Julia REPL shell mode. When the buffer is not empty, `;` inserts a semicolon as usual. Disabled by default.
+
 ## [0.3.3] - 2026-05-10
 
 ### Added

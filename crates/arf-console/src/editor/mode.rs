@@ -396,6 +396,16 @@ impl KeyCondition for BufferEmpty {
     }
 }
 
+/// Condition: buffer is known to be empty (empty and not uncertain).
+#[derive(Debug, Clone, Copy)]
+pub struct BufferKnownEmpty;
+
+impl KeyCondition for BufferKnownEmpty {
+    fn check(&self, state: &EditorState) -> bool {
+        state.is_empty() && !state.uncertain
+    }
+}
+
 /// Condition: cursor is at the end of the buffer.
 ///
 /// This is useful for auto-match behavior where we only want to insert
@@ -1103,6 +1113,32 @@ mod tests {
 
         state.buffer_len = 1;
         assert!(!condition.check(&state));
+    }
+
+    #[test]
+    fn test_buffer_known_empty_condition() {
+        let condition = BufferKnownEmpty;
+
+        let mut state = EditorState::new();
+        state.buffer_len = 0;
+        state.uncertain = false;
+        assert!(
+            condition.check(&state),
+            "certain empty buffer should trigger semicolon shortcut condition"
+        );
+
+        state.uncertain = true;
+        assert!(
+            !condition.check(&state),
+            "uncertain empty buffer should NOT trigger semicolon shortcut condition"
+        );
+
+        state.buffer_len = 1;
+        state.uncertain = false;
+        assert!(
+            !condition.check(&state),
+            "non-empty buffer should not match"
+        );
     }
 
     #[test]
