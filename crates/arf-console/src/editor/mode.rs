@@ -1116,6 +1116,32 @@ mod tests {
     }
 
     #[test]
+    fn test_buffer_known_empty_condition() {
+        let condition = BufferKnownEmpty;
+
+        let mut state = EditorState::new();
+        state.buffer_len = 0;
+        state.uncertain = false;
+        assert!(
+            condition.check(&state),
+            "certain empty buffer should trigger semicolon shortcut condition"
+        );
+
+        state.uncertain = true;
+        assert!(
+            !condition.check(&state),
+            "uncertain empty buffer should NOT trigger semicolon shortcut condition"
+        );
+
+        state.buffer_len = 1;
+        state.uncertain = false;
+        assert!(
+            !condition.check(&state),
+            "non-empty buffer should not match"
+        );
+    }
+
+    #[test]
     fn test_cursor_at_end_condition() {
         let condition = CursorAtEnd;
 
