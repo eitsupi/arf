@@ -44,12 +44,12 @@ fn ld_library_path_is_set() -> bool {
     current.split(':').any(|p| p == lib_dir_str.as_ref())
 }
 
-/// Regression test for GitHub issue #194 / bd 3dxc:
+/// Regression test for GitHub issue #194:
 /// `base::solve` contains `%*%` in its Rd source. Without `deparse = TRUE`,
 /// `as.character()` emits unescaped `%` which rd-parser treats as a comment,
 /// losing closing braces and producing a parse error. With `deparse = TRUE`
 /// the `%` is escaped as `\%` and rd2qmd parses the page correctly.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_help_base_solve_returns_content() {
     if !ld_library_path_is_set() {
@@ -60,7 +60,7 @@ fn test_help_base_solve_returns_content() {
         return;
     }
 
-    with_r(|| {
+    let Some(()) = with_r(|| {
         let result = get_help_markdown("solve", Some("base"));
         match &result {
             Err(e) => panic!(r#"get_help_markdown("solve", Some("base")) failed: {e}"#),
@@ -79,5 +79,7 @@ fn test_help_base_solve_returns_content() {
                 );
             }
         }
-    });
+    }) else {
+        panic!("R initialization failed; cannot run test_help_base_solve_returns_content");
+    };
 }
