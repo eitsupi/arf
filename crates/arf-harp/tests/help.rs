@@ -63,7 +63,7 @@ fn test_help_base_solve_returns_content() {
     with_r(|| {
         let result = get_help_markdown("solve", Some("base"));
         match &result {
-            Err(e) => panic!("get_help_markdown(\"solve\", Some(\"base\")) failed: {e}"),
+            Err(e) => panic!(r#"get_help_markdown("solve", Some("base")) failed: {e}"#),
             Ok(md) => {
                 assert!(!md.is_empty(), "help markdown must not be empty");
                 // The title of the help page is "Solve a System of Equations"
