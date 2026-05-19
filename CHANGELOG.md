@@ -2,13 +2,16 @@
 
 ## [Unreleased]
 
+## [0.3.4-rc.1] - 2026-05-19
+
 ### Added
 
-- **Experimental:** `;` shortcut to switch to shell mode at an empty R prompt (`experimental.shell_semicolon_shortcut`). One keypress — no `:shell` or Enter required. Similar to Julia REPL shell mode. When the buffer is not empty, `;` inserts a semicolon as usual. Disabled by default.
+- **Experimental:** `;` shortcut to switch to shell mode at an empty R prompt (`experimental.shell_semicolon_shortcut`). One keypress — no `:shell` or Enter required. Similar to Julia REPL shell mode. When the buffer is not empty, `;` inserts a semicolon as usual. Disabled by default. (#192)
 
 ### Fixed
 
-- `:help` no longer fails to render documentation for functions whose Rd source contains `%` operators (e.g. `base::solve`). The root cause was passing `as.character(rd)` without `deparse = TRUE`, which left `%` unescaped and caused the Rd parser to treat the rest of the line as a comment, losing closing braces and producing a parse error (#194).
+- `:help` no longer fails to render documentation for functions whose Rd source contains `%` operators (e.g. `base::solve`). The root cause was passing `as.character(rd)` without `deparse = TRUE`, which left `%` unescaped and caused the Rd parser to treat the rest of the line as a comment, losing closing braces and producing a parse error (#198)
+- History menu replacement now works correctly inside auto-matched pairs (e.g. `(`, `[`, `"`): selecting a history entry no longer leaves the closing delimiter behind (#200)
 
 ## [0.3.3] - 2026-05-10
 
