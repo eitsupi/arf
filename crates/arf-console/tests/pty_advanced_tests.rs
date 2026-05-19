@@ -273,7 +273,7 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
 
     terminal
         .clear_buffer()
-        .expect("Should clear previous c() output before executing selection");
+        .expect("Should clear setup output before executing selection");
     terminal
         .send("\n")
         .expect("Should execute selected history item");
@@ -321,7 +321,7 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
 
     terminal
         .clear_buffer()
-        .expect("Should clear previous c() output before executing selection");
+        .expect("Should clear setup output before executing selection");
     terminal
         .send("\n")
         .expect("Should execute selected history item");

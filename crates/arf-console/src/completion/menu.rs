@@ -248,14 +248,6 @@ impl Menu for StateSyncHistoryMenu {
     }
 
     fn update_values(&mut self, editor: &mut Editor, completer: &mut dyn Completer) {
-        editor.edit_buffer(
-            |line_buffer| {
-                line_buffer.move_to_end();
-            },
-            UndoBehavior::MoveCursor,
-        );
-        self.sync_editor_state(editor);
-
         self.inner.update_values(editor, completer);
     }
 
