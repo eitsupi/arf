@@ -254,6 +254,7 @@ impl Menu for StateSyncHistoryMenu {
             },
             UndoBehavior::MoveCursor,
         );
+        self.sync_editor_state(editor);
 
         self.inner.update_values(editor, completer);
     }
