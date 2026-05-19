@@ -242,10 +242,10 @@ fn test_pty_history_menu_with_auto_match_pair() {
 /// Test that history selection replaces the whole auto-matched pair buffer.
 ///
 /// Scenario:
-/// 1. Execute `c()` to add it to history
+/// 1. Execute `length(c())` to add it to history
 /// 2. Type `c(`, which auto-match expands to `c()` with the cursor before `)`
-/// 3. Press Ctrl+R and select the `c()` history entry
-/// 4. Execute - should run `c()`, not `c())`
+/// 3. Press Ctrl+R and select the `length(c())` history entry
+/// 4. Execute - should run `length(c())`, not the pre-menu `c()` or a stale-suffix `length(c()))`
 #[test]
 #[cfg(unix)]
 fn test_pty_history_menu_with_auto_match_paren_pair() {
@@ -254,8 +254,12 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    terminal.send_line("c()").expect("Should send c()");
-    terminal.expect("NULL").expect("c() should output NULL");
+    terminal
+        .send_line("length(c())")
+        .expect("Should send length(c())");
+    terminal
+        .expect("[1] 0")
+        .expect("length(c()) should output 0");
     terminal.wait_for_prompt().expect("Should show prompt");
 
     terminal.send("c(").expect("Should type c(");
@@ -274,8 +278,8 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
         .send("\n")
         .expect("Should execute selected history item");
     terminal
-        .expect("NULL")
-        .expect("c() should execute without a trailing auto-matched paren");
+        .expect("[1] 0")
+        .expect("length(c()) should execute without a trailing auto-matched paren");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -283,11 +287,11 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
 /// Test that history search replaces the whole auto-matched pair created in search mode.
 ///
 /// Scenario:
-/// 1. Execute `c()` to add it to history
+/// 1. Execute `length(c())` to add it to history
 /// 2. Press Ctrl+R to open history search
 /// 3. Type `c(` in the search input, which auto-match expands to `c()` with the cursor before `)`
-/// 4. Select the `c()` history entry
-/// 5. Execute - should run `c()`, not `c())`
+/// 4. Select the `length(c())` history entry
+/// 5. Execute - should run `length(c())`, not the search buffer `c()` or a stale-suffix `length(c()))`
 #[test]
 #[cfg(unix)]
 fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
@@ -296,8 +300,12 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    terminal.send_line("c()").expect("Should send c()");
-    terminal.expect("NULL").expect("c() should output NULL");
+    terminal
+        .send_line("length(c())")
+        .expect("Should send length(c())");
+    terminal
+        .expect("[1] 0")
+        .expect("length(c()) should output 0");
     terminal.wait_for_prompt().expect("Should show prompt");
 
     terminal.send("\x12").expect("Should send Ctrl+R");
@@ -318,8 +326,8 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
         .send("\n")
         .expect("Should execute selected history item");
     terminal
-        .expect("NULL")
-        .expect("c() should execute without a trailing auto-matched paren");
+        .expect("[1] 0")
+        .expect("length(c()) should execute without a trailing auto-matched paren");
 
     terminal.quit().expect("Should quit cleanly");
 }
