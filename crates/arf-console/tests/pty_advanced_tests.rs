@@ -268,6 +268,53 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     terminal
+        .clear_buffer()
+        .expect("Should clear previous c() output before executing selection");
+    terminal
+        .send("\n")
+        .expect("Should execute selected history item");
+    terminal
+        .expect("NULL")
+        .expect("c() should execute without a trailing auto-matched paren");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test that history search replaces the whole auto-matched pair created in search mode.
+///
+/// Scenario:
+/// 1. Execute `c()` to add it to history
+/// 2. Press Ctrl+R to open history search
+/// 3. Type `c(` in the search input, which auto-match expands to `c()` with the cursor before `)`
+/// 4. Select the `c()` history entry
+/// 5. Execute - should run `c()`, not `c())`
+#[test]
+#[cfg(unix)]
+fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal.send_line("c()").expect("Should send c()");
+    terminal.expect("NULL").expect("c() should output NULL");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal.send("\x12").expect("Should send Ctrl+R");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    terminal
+        .send("c(")
+        .expect("Should type c( in history search mode");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    terminal.send("\n").expect("Should select history item");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    terminal
+        .clear_buffer()
+        .expect("Should clear previous c() output before executing selection");
+    terminal
         .send("\n")
         .expect("Should execute selected history item");
     terminal
