@@ -21,18 +21,18 @@ pub fn ensure_r_initialized() -> bool {
 
 /// Run a closure with the R runtime lock held.
 ///
-/// Returns `None` if R initialization failed, `Some(result)` otherwise.
-/// Uses poisoned-lock recovery so a panicking test does not block subsequent tests.
-pub fn with_r<F, T>(f: F) -> Option<T>
+/// Panics if R initialization failed. Uses poisoned-lock recovery so a
+/// panicking test does not block subsequent tests.
+pub fn with_r<F, T>(f: F) -> T
 where
     F: FnOnce() -> T,
 {
     if !ensure_r_initialized() {
-        return None;
+        panic!("R initialization failed; cannot run test");
     }
     let lock = R_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-    Some(f())
+    f()
 }
 
 /// Check that `LD_LIBRARY_PATH` includes the R library directory.

@@ -24,7 +24,7 @@ fn test_help_base_solve_returns_content() {
         return;
     }
 
-    let Some(()) = with_r(|| {
+    with_r(|| {
         let result = get_help_markdown("solve", Some("base"));
         match &result {
             Err(e) => panic!(r#"get_help_markdown("solve", Some("base")) failed: {e}"#),
@@ -43,7 +43,5 @@ fn test_help_base_solve_returns_content() {
                 );
             }
         }
-    }) else {
-        panic!("R initialization failed; cannot run test_help_base_solve_returns_content");
-    };
+    });
 }
