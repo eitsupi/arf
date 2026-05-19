@@ -3,9 +3,9 @@
 mod common;
 
 use arf_harp::{call_dot_first, call_dot_first_sys, eval_string};
-use common::with_r;
 #[cfg(not(windows))]
 use common::ld_library_path_is_set;
+use common::with_r;
 
 #[test]
 fn test_call_dot_first_noop_when_undefined() {
