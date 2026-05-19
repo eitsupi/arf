@@ -6,45 +6,10 @@
 //! - Variable lookups are visible
 //! - The `invisible()` function makes results invisible
 
+mod common;
+
 use arf_harp::eval_string_with_visibility;
-use once_cell::sync::OnceCell;
-use std::env;
-use std::sync::Mutex;
-
-/// Global lock to ensure R tests run serially (R is not thread-safe).
-static R_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
-
-/// Initialize R once for all tests.
-fn ensure_r_initialized() -> bool {
-    static R_INITIALIZED: OnceCell<bool> = OnceCell::new();
-
-    *R_INITIALIZED.get_or_init(|| {
-        // Initialize R
-        unsafe {
-            match arf_libr::initialize_r() {
-                Ok(()) => true,
-                Err(e) => {
-                    eprintln!("Failed to initialize R: {}", e);
-                    false
-                }
-            }
-        }
-    })
-}
-
-/// Run a test with R lock held.
-fn with_r<F, T>(f: F) -> Option<T>
-where
-    F: FnOnce() -> T,
-{
-    if !ensure_r_initialized() {
-        return None;
-    }
-
-    let lock = R_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = lock.lock().unwrap();
-    Some(f())
-}
+use common::{ld_library_path_is_set, with_r};
 
 #[test]
 fn test_simple_expression_is_visible() {
@@ -140,19 +105,6 @@ fn test_vector_creation_is_visible() {
         let result = eval_string_with_visibility("c(1, 2, 3)").expect("eval should succeed");
         assert!(result.visible, "Vector creation should be visible");
     });
-}
-
-/// Check if LD_LIBRARY_PATH includes the R library directory.
-fn ld_library_path_is_set() -> bool {
-    let Ok(lib_path) = arf_libr::find_r_library() else {
-        return false;
-    };
-    let Some(lib_dir) = lib_path.parent() else {
-        return false;
-    };
-    let lib_dir_str = lib_dir.to_string_lossy();
-    let current = env::var("LD_LIBRARY_PATH").unwrap_or_default();
-    current.split(':').any(|p| p == lib_dir_str.as_ref())
 }
 
 #[test]
