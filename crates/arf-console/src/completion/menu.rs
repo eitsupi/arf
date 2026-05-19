@@ -272,6 +272,15 @@ impl Menu for StateSyncHistoryMenu {
     fn replace_in_buffer(&self, editor: &mut Editor) {
         self.inner.replace_in_buffer(editor);
 
+        // History selection is configured to replace the whole buffer; discard any
+        // stale suffix left by reedline's suggestion span.
+        editor.edit_buffer(
+            |line_buffer| {
+                line_buffer.clear_to_end();
+            },
+            UndoBehavior::CreateUndoPoint,
+        );
+
         // Synchronize the shadow state with the actual buffer state.
         self.sync_editor_state(editor);
     }
