@@ -239,6 +239,44 @@ fn test_pty_history_menu_with_auto_match_pair() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Test that history selection replaces the whole auto-matched pair buffer.
+///
+/// Scenario:
+/// 1. Execute `c()` to add it to history
+/// 2. Type `c(`, which auto-match expands to `c()` with the cursor before `)`
+/// 3. Press Ctrl+R and select the `c()` history entry
+/// 4. Execute - should run `c()`, not `c())`
+#[test]
+#[cfg(unix)]
+fn test_pty_history_menu_with_auto_match_paren_pair() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal.send_line("c()").expect("Should send c()");
+    terminal.expect("NULL").expect("c() should output NULL");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal.send("c(").expect("Should type c(");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    terminal.send("\x12").expect("Should send Ctrl+R");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    terminal.send("\n").expect("Should select history item");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    terminal
+        .send("\n")
+        .expect("Should execute selected history item");
+    terminal
+        .expect("NULL")
+        .expect("c() should execute without a trailing auto-matched paren");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Regression test: backtick input should not crash.
 /// Sending a backtick (which becomes `` with auto-match) should produce an
 /// R error about zero-length variable name, not crash with RefCell double borrow.
