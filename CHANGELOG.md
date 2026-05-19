@@ -6,6 +6,10 @@
 
 - **Experimental:** `;` shortcut to switch to shell mode at an empty R prompt (`experimental.shell_semicolon_shortcut`). One keypress — no `:shell` or Enter required. Similar to Julia REPL shell mode. When the buffer is not empty, `;` inserts a semicolon as usual. Disabled by default.
 
+### Fixed
+
+- `:help` no longer fails to render documentation for functions whose Rd source contains `%` operators (e.g. `base::solve`). The root cause was passing `as.character(rd)` without `deparse = TRUE`, which left `%` unescaped and caused the Rd parser to treat the rest of the line as a comment, losing closing braces and producing a parse error (#194).
+
 ## [0.3.3] - 2026-05-10
 
 ### Added

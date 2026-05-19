@@ -396,7 +396,7 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     if (length(paths) == 0) return(NULL)
     file <- paths[1L]
     rd <- utils:::.getHelpFile(file)
-    paste0(as.character(rd), collapse = "")
+    paste0(as.character(rd, deparse = TRUE), collapse = "")
 }})"#,
             topic = escape_r_string(topic),
             pkg = escape_r_string(pkg)
@@ -409,7 +409,7 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     if (length(paths) == 0) return(NULL)
     file <- paths[1L]
     rd <- utils:::.getHelpFile(file)
-    paste0(as.character(rd), collapse = "")
+    paste0(as.character(rd, deparse = TRUE), collapse = "")
 }})"#,
             topic = escape_r_string(topic)
         )

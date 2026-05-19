@@ -36,7 +36,7 @@ tree-sitter = "0.24"
 tree-sitter-r = "1.2"
 
 # Rd to Markdown conversion
-rd2qmd-core = { version = "0.1", features = ["roxygen"] }
+rd2qmd-core = { git = "https://github.com/eitsupi/rd2qmd", rev = "a5db3392c2f36ea4a647615fb4a683264fdd4894", features = ["roxygen"] }
 
 # Markdown parsing
 pulldown-cmark = "0.13"
