@@ -264,6 +264,10 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
 
     terminal.send("c(").expect("Should type c(");
     std::thread::sleep(std::time::Duration::from_millis(200));
+    terminal
+        .current_line()
+        .assert_contains("c()")
+        .expect("Auto-match should insert the closing paren before history selection");
 
     terminal.send("\x12").expect("Should send Ctrl+R");
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -315,6 +319,10 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
         .send("c(")
         .expect("Should type c( in history search mode");
     std::thread::sleep(std::time::Duration::from_millis(300));
+    terminal
+        .current_line()
+        .assert_contains("c()")
+        .expect("Auto-match should insert the closing paren before history selection");
 
     terminal.send("\n").expect("Should select history item");
     std::thread::sleep(std::time::Duration::from_millis(300));
