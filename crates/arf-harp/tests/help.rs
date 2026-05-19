@@ -1,5 +1,9 @@
 //! Integration tests for R help rendering via rd2qmd.
 
+// All tests in this file are Linux-only. Gate the entire module to avoid
+// unused-import warnings on other platforms (e.g. Windows clippy -D warnings).
+#![cfg(target_os = "linux")]
+
 mod common;
 
 use arf_harp::get_help_markdown;
@@ -10,7 +14,6 @@ use common::{ld_library_path_is_set, with_r};
 /// `as.character()` emits unescaped `%` which rd-parser treats as a comment,
 /// losing closing braces and producing a parse error. With `deparse = TRUE`
 /// the `%` is escaped as `\%` and rd2qmd parses the page correctly.
-#[cfg(target_os = "linux")]
 #[test]
 fn test_help_base_solve_returns_content() {
     if !ld_library_path_is_set() {
