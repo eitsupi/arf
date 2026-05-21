@@ -84,7 +84,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arf-console"
-version = "0.3.4-rc.1"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.3.4-rc.1"
+version = "0.3.4"
 dependencies = [
  "arf-libr",
  "log",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.3.4-rc.1"
+version = "0.3.4"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -537,9 +537,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "embed-resource"
@@ -1412,9 +1412,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c3a14896dfa883796f1cb410461aef38810ea05f2b2c33c5aded3649095fdad"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
 dependencies = [
  "bitflags 2.11.1",
  "getopts",
@@ -1446,7 +1446,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r-vignette-to-md"
-version = "0.3.4-rc.1"
+version = "0.3.4"
 dependencies = [
  "htmd",
 ]
