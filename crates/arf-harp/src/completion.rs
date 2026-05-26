@@ -494,17 +494,25 @@ fn contains_namespace_operator(text: &str) -> bool {
     text.contains("::")
 }
 
-/// Check if `text` has more `(` than `)`, meaning the cursor is inside a function call.
+/// Check if the cursor is inside a function call by scanning backwards for an unmatched `(`.
+///
+/// Backwards scan correctly handles cases like `1) + str(aaa_` where a forward depth
+/// count would give 0 (balanced overall) even though the cursor is inside `str(`.
 fn has_unmatched_open_paren(text: &str) -> bool {
     let mut depth = 0i32;
-    for c in text.chars() {
+    for c in text.chars().rev() {
         match c {
-            '(' => depth += 1,
-            ')' => depth -= 1,
+            ')' => depth += 1,
+            '(' => {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+            }
             _ => {}
         }
     }
-    depth > 0
+    false
 }
 
 /// Get R's built-in completions using utils package functions.
@@ -1123,6 +1131,10 @@ mod tests {
         // Nested: cursor inside outer call, inner call already closed
         // e.g. "foo(x = bar()" → outer ( unmatched
         assert!(has_unmatched_open_paren("foo(x = bar()"));
+
+        // Unbalanced ) earlier in line: forward count would give 0 (false negative),
+        // backwards scan correctly finds the unmatched ( nearest the cursor.
+        assert!(has_unmatched_open_paren("1) + str(aaa_"));
 
         // Top-level: no open paren
         assert!(!has_unmatched_open_paren("aaa_bbb"));

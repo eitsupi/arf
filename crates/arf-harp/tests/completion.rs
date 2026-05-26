@@ -1,7 +1,5 @@
 //! Integration tests for R code completion.
 
-#![cfg(target_os = "linux")]
-
 mod common;
 
 use arf_harp::completion::get_completions;
@@ -34,8 +32,8 @@ fn test_completion_inside_function_call() {
 
         assert!(
             completions.iter().any(|c| c == "aaa_bbb"),
-            "Expected 'aaa_bbb' in completions for 'str(aaa_' at pos 8 with 50ms timeout, \
-             got: {:?}",
+            "Expected 'aaa_bbb' in completions for 'str(aaa_' at pos 8 \
+             (timeout_ms=1, bypassed inside function call), got: {:?}",
             completions
         );
     });
