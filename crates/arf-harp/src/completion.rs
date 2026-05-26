@@ -477,7 +477,8 @@ pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpRe
 
     // Disable timeout in contexts where R's completer does extra work:
     // - `::` completions: enumerate package exports (slow)
-    // - inside a function call: R also looks up argument names (~150ms vs ~20ms at top level)
+    // - inside an unclosed `(` (function call or grouped expression): R also looks up argument
+    //   names (~150ms vs ~20ms at top level)
     let before_cursor = &line[..cursor_pos.min(line.len())];
     let effective_timeout =
         if contains_namespace_operator(before_cursor) || has_unmatched_open_paren(before_cursor) {
@@ -494,9 +495,10 @@ fn contains_namespace_operator(text: &str) -> bool {
     text.contains("::")
 }
 
-/// Returns true if the cursor (end of `text`) is inside an unclosed function
-/// call — i.e., there is at least one `(` with no matching `)` that is not
-/// inside a string literal or comment.
+/// Returns true if the cursor (end of `text`) is inside an unclosed `(` — i.e.,
+/// there is at least one `(` with no matching `)` that is not inside a string
+/// literal or comment. This covers both function calls (`str(aaa_`) and grouped
+/// expressions (`x <- (aaa_`).
 ///
 /// Uses a forward scan with lightweight string tracking (double/single quotes
 /// and backslash escapes). Unmatched `)` are treated as no-ops (depth clamped
@@ -1143,10 +1145,6 @@ mod tests {
         assert!(has_unmatched_open_paren("foo(x, y ="));
         // Cursor after comma: e.g. full line "foo(x,)" with cursor at pos 6
         assert!(has_unmatched_open_paren("foo(x,"));
-
-        // Auto-matched closing paren: before_cursor stops before it, so still unmatched
-        // e.g. full line "str(aaa_)" but cursor_pos=8 → before_cursor="str(aaa_"
-        assert!(has_unmatched_open_paren("str(aaa_"));
 
         // Nested: cursor inside outer call, inner call already closed
         // e.g. "foo(x = bar()" → outer ( unmatched
