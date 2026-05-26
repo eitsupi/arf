@@ -475,14 +475,16 @@ pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpRe
         }
     }
 
-    // Determine effective timeout:
-    // - Disable timeout for package::func completions (they need full results and are worth waiting for)
-    // - This matches radian's behavior
-    let effective_timeout = if contains_namespace_operator(&line[..cursor_pos.min(line.len())]) {
-        0 // No timeout for :: completions
-    } else {
-        timeout_ms
-    };
+    // Disable timeout in contexts where R's completer does extra work:
+    // - `::` completions: enumerate package exports (slow)
+    // - inside a function call: R also looks up argument names (~150ms vs ~20ms at top level)
+    let before_cursor = &line[..cursor_pos.min(line.len())];
+    let effective_timeout =
+        if contains_namespace_operator(before_cursor) || has_unmatched_open_paren(before_cursor) {
+            0
+        } else {
+            timeout_ms
+        };
 
     get_r_builtin_completions(line, cursor_pos, effective_timeout)
 }
@@ -490,6 +492,19 @@ pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpRe
 /// Check if the text contains a namespace operator (:: or :::).
 fn contains_namespace_operator(text: &str) -> bool {
     text.contains("::")
+}
+
+/// Check if `text` has more `(` than `)`, meaning the cursor is inside a function call.
+fn has_unmatched_open_paren(text: &str) -> bool {
+    let mut depth = 0i32;
+    for c in text.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0
 }
 
 /// Get R's built-in completions using utils package functions.

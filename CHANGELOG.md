@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tab completion no longer times out inside function call arguments (e.g. `str(aaa_` + Tab). R's completer takes significantly longer when inside a function call because it also looks up argument names. The fix disables the completion timeout in that context, matching the existing behavior for `::` completions (#204)
+
 ## [0.3.4] - 2026-05-21
 
 ### Added
