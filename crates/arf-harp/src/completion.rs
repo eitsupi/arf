@@ -1106,4 +1106,28 @@ mod tests {
         assert_eq!(extract_identifier_before_cursor("123"), None);
         assert_eq!(extract_identifier_before_cursor("x <- "), None);
     }
+
+    #[test]
+    fn test_has_unmatched_open_paren() {
+        // Inside a function call (cursor before closing paren)
+        assert!(has_unmatched_open_paren("str(aaa_"));
+        assert!(has_unmatched_open_paren("foo(x ="));
+        assert!(has_unmatched_open_paren("foo(x, y ="));
+
+        // Auto-matched closing paren: before_cursor stops before it, so still unmatched
+        // e.g. full line "str(aaa_)" but cursor_pos=8 → before_cursor="str(aaa_"
+        assert!(has_unmatched_open_paren("str(aaa_"));
+
+        // Nested: cursor inside outer call, inner call already closed
+        // e.g. "foo(x = bar()" → outer ( unmatched
+        assert!(has_unmatched_open_paren("foo(x = bar()"));
+
+        // Top-level: no open paren
+        assert!(!has_unmatched_open_paren("aaa_bbb"));
+        assert!(!has_unmatched_open_paren(""));
+
+        // Balanced parens (cursor after closing paren)
+        assert!(!has_unmatched_open_paren("str(aaa_)"));
+        assert!(!has_unmatched_open_paren("foo(x = bar())"));
+    }
 }
