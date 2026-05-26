@@ -505,6 +505,7 @@ fn contains_namespace_operator(text: &str) -> bool {
 fn has_unmatched_open_paren(text: &str) -> bool {
     let mut in_double = false;
     let mut in_single = false;
+    let mut in_comment = false;
     let mut escaped = false;
     let mut depth = 0i32;
 
@@ -513,8 +514,15 @@ fn has_unmatched_open_paren(text: &str) -> bool {
             escaped = false;
             continue;
         }
+        // Comment runs to end of line only; resume scanning on the next line.
+        if in_comment {
+            if c == '\n' {
+                in_comment = false;
+            }
+            continue;
+        }
         match c {
-            '#' if !in_double && !in_single => break,
+            '#' if !in_double && !in_single => in_comment = true,
             '\\' if in_double || in_single => escaped = true,
             '"' if !in_single => in_double = !in_double,
             '\'' if !in_double => in_single = !in_single,
@@ -1161,7 +1169,14 @@ mod tests {
         assert!(has_unmatched_open_paren(r#"paste("(", x"#)); // cursor inside paste()
         assert!(has_unmatched_open_paren("paste('(', x")); // single-quoted string
 
-        // Paren in comment is ignored
+        // Paren in single-line comment is ignored
         assert!(!has_unmatched_open_paren("# str(aaa_"));
+
+        // Multiline: comment on first line must not swallow subsequent lines
+        assert!(has_unmatched_open_paren("# note (\nstr(aaa_"));
+        // Function call before comment, cursor on next line
+        assert!(has_unmatched_open_paren("foo( # comment\naaa_"));
+        // Comment-only first line, no function call after
+        assert!(!has_unmatched_open_paren("# note (\naaa_"));
     }
 }
