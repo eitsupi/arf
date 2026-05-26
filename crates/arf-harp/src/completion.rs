@@ -1113,6 +1113,8 @@ mod tests {
         assert!(has_unmatched_open_paren("str(aaa_"));
         assert!(has_unmatched_open_paren("foo(x ="));
         assert!(has_unmatched_open_paren("foo(x, y ="));
+        // Cursor after comma: e.g. full line "foo(x,)" with cursor at pos 6
+        assert!(has_unmatched_open_paren("foo(x,"));
 
         // Auto-matched closing paren: before_cursor stops before it, so still unmatched
         // e.g. full line "str(aaa_)" but cursor_pos=8 → before_cursor="str(aaa_"
