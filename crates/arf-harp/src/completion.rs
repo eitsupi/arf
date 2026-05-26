@@ -494,25 +494,37 @@ fn contains_namespace_operator(text: &str) -> bool {
     text.contains("::")
 }
 
-/// Check if the cursor is inside a function call by scanning backwards for an unmatched `(`.
+/// Returns true if the cursor (end of `text`) is inside an unclosed function
+/// call — i.e., there is at least one `(` with no matching `)` that is not
+/// inside a string literal or comment.
 ///
-/// Backwards scan correctly handles cases like `1) + str(aaa_` where a forward depth
-/// count would give 0 (balanced overall) even though the cursor is inside `str(`.
+/// Uses a forward scan with lightweight string tracking (double/single quotes
+/// and backslash escapes). Unmatched `)` are treated as no-ops (depth clamped
+/// at 0) so that expressions like `1) + str(aaa_` are correctly detected as
+/// being inside `str(`.
 fn has_unmatched_open_paren(text: &str) -> bool {
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut escaped = false;
     let mut depth = 0i32;
-    for c in text.chars().rev() {
+
+    for c in text.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match c {
-            ')' => depth += 1,
-            '(' => {
-                if depth == 0 {
-                    return true;
-                }
-                depth -= 1;
-            }
+            '#' if !in_double && !in_single => break,
+            '\\' if in_double || in_single => escaped = true,
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '(' if !in_double && !in_single => depth += 1,
+            ')' if !in_double && !in_single => depth = (depth - 1).max(0),
             _ => {}
         }
     }
-    false
+
+    depth > 0
 }
 
 /// Get R's built-in completions using utils package functions.
@@ -1132,8 +1144,7 @@ mod tests {
         // e.g. "foo(x = bar()" → outer ( unmatched
         assert!(has_unmatched_open_paren("foo(x = bar()"));
 
-        // Unbalanced ) earlier in line: forward count would give 0 (false negative),
-        // backwards scan correctly finds the unmatched ( nearest the cursor.
+        // Extra `)` earlier in line: depth is clamped at 0 so the `str(` is still found.
         assert!(has_unmatched_open_paren("1) + str(aaa_"));
 
         // Top-level: no open paren
@@ -1143,5 +1154,14 @@ mod tests {
         // Balanced parens (cursor after closing paren)
         assert!(!has_unmatched_open_paren("str(aaa_)"));
         assert!(!has_unmatched_open_paren("foo(x = bar())"));
+
+        // Parens inside string literals are ignored
+        assert!(!has_unmatched_open_paren(r#"x <- "("; aaa_"#));
+        assert!(!has_unmatched_open_paren(r#""("#));
+        assert!(has_unmatched_open_paren(r#"paste("(", x"#)); // cursor inside paste()
+        assert!(has_unmatched_open_paren("paste('(', x")); // single-quoted string
+
+        // Paren in comment is ignored
+        assert!(!has_unmatched_open_paren("# str(aaa_"));
     }
 }
