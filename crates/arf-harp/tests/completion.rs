@@ -26,14 +26,14 @@ fn test_completion_inside_function_call() {
     with_r(|| {
         eval_string_with_visibility("aaa_bbb <- 1").expect("assignment should succeed");
 
-        // timeout_ms=1 forces the timeout path on any platform, making this a genuine
-        // red test before the fix. The fix bypasses timeout when inside a function call.
+        // timeout_ms=1 would cause a timeout at top level, but inside a function call
+        // the effective timeout is raised to 1000ms so the completion succeeds.
         let completions = get_completions("str(aaa_", 8, 1).expect("should not error");
 
         assert!(
             completions.iter().any(|c| c == "aaa_bbb"),
             "Expected 'aaa_bbb' in completions for 'str(aaa_' at pos 8 \
-             (timeout_ms=1, bypassed inside function call), got: {:?}",
+             (timeout_ms=1, raised to 1000ms inside function call), got: {:?}",
             completions
         );
     });

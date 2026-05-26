@@ -475,14 +475,16 @@ pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpRe
         }
     }
 
-    // Disable timeout in contexts where R's completer does extra work:
+    // Raise timeout for contexts where R's completer does extra work:
     // - `::` completions: enumerate package exports (slow)
     // - inside an unclosed `(` (function call or grouped expression): R also looks up argument
     //   names (~150ms vs ~20ms at top level)
+    // Use a generous fixed cap (1000ms) rather than disabling entirely so that
+    // unusually slow environments still get a safety boundary.
     let before_cursor = &line[..cursor_pos.min(line.len())];
     let effective_timeout =
         if contains_namespace_operator(before_cursor) || has_unmatched_open_paren(before_cursor) {
-            0
+            1000
         } else {
             timeout_ms
         };
