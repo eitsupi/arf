@@ -273,6 +273,40 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Path of the PID file written by `--ipc-pid-file` in `--with-ipc` mode.
+///
+/// Stored as an absolute path string so that the `atexit` handler can remove
+/// it even if the process changes its working directory before exiting.  R's
+/// `q()` calls `exit()` without running Rust destructors, so cleanup of the
+/// PID file is registered here as an `atexit` handler rather than relying on
+/// the normal code path after `repl.run()`.
+static IPC_PID_FILE_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Register an `atexit` handler that removes the IPC PID file on process exit.
+///
+/// Called once after `write_pid_file` succeeds.  The normal cleanup path in
+/// `run()` (after `repl.run()`) is still attempted; the second `remove_file`
+/// call on an already-deleted file silently returns `NotFound`, which is fine.
+fn register_ipc_pid_file_atexit(path: &std::path::Path) {
+    // Convert to absolute path so the handler works regardless of cwd changes.
+    let abs = std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string();
+    let _ = IPC_PID_FILE_PATH.set(abs);
+
+    let ret = unsafe { libc::atexit(remove_ipc_pid_file_at_exit) };
+    if ret != 0 {
+        log::warn!("Failed to register IPC PID file cleanup with atexit");
+    }
+}
+
+extern "C" fn remove_ipc_pid_file_at_exit() {
+    if let Some(path) = IPC_PID_FILE_PATH.get() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn run() -> Result<()> {
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
@@ -523,11 +557,12 @@ fn run() -> Result<()> {
         match ipc::start_server(cli.ipc_bind.as_deref(), None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
-                if let Some(pid_path) = &cli.ipc_pid_file
-                    && let Err(e) = write_pid_file(pid_path)
-                {
-                    ipc::stop_server();
-                    return Err(e);
+                if let Some(pid_path) = &cli.ipc_pid_file {
+                    if let Err(e) = write_pid_file(pid_path) {
+                        ipc::stop_server();
+                        return Err(e);
+                    }
+                    register_ipc_pid_file_atexit(pid_path);
                 }
             }
             Err(e) => {
