@@ -672,13 +672,15 @@ pub fn ensure_ld_library_path() -> RResult<bool> {
     // SAFETY: We're about to exec, so modifying environment is safe
     unsafe { env::set_var("LD_LIBRARY_PATH", &new_path) };
 
-    // Re-execute the current process
-    let args: Vec<_> = env::args().collect();
+    // Re-execute the current process. Preserve OsString arguments so non-UTF-8
+    // paths (for example --ipc-pid-file) do not panic during re-exec.
+    let args: Vec<_> = env::args_os().skip(1).collect();
     let exe = env::current_exe().map_err(|e| RError::LibraryNotFound(e.to_string()))?;
 
     log::info!("Re-executing with LD_LIBRARY_PATH={}", new_path);
 
-    let err = exec::execvp(&exe, &args);
+    use std::os::unix::process::CommandExt;
+    let err = Command::new(&exe).args(args).exec();
     Err(RError::LibraryNotFound(format!(
         "Failed to re-exec: {}",
         err

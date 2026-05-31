@@ -273,6 +273,69 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+fn absolute_pid_file_path(path: &std::path::Path) -> std::path::PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Absolute path of the PID file written by `--ipc-pid-file`.
+///
+/// Stored as an absolute path so that the `atexit` handler can remove it even
+/// if the process changes its working directory before exiting.  R's
+/// `q()` calls `exit()` without running Rust destructors, so cleanup of the
+/// PID file is registered here as an `atexit` handler rather than relying on
+/// the normal code path after `repl.run()` / `run_headless()`.
+static IPC_PID_FILE_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Set to `true` by the normal cleanup path (REPL or headless) after it has
+/// removed the PID file, so the `atexit` handler does not race to delete a
+/// replacement file created by a subsequent process at the same path.
+static IPC_PID_FILE_CLEANUP_DONE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Register an `atexit` handler that removes the IPC PID file on process exit.
+///
+/// Called once after `write_pid_file` succeeds, for both `--with-ipc` (REPL)
+/// and `arf headless` modes.  The handler is a safety net for paths where R
+/// calls `exit()` directly (e.g. `q()` or EOF) and bypasses Rust cleanup code.
+fn register_ipc_pid_file_atexit(path: &std::path::Path) {
+    // Convert to absolute path so the handler works regardless of cwd changes.
+    let _ = IPC_PID_FILE_PATH.set(absolute_pid_file_path(path));
+
+    let ret = unsafe { libc::atexit(remove_ipc_pid_file_at_exit) };
+    if ret != 0 {
+        log::warn!("Failed to register IPC PID file cleanup with atexit");
+    }
+}
+
+extern "C" fn remove_ipc_pid_file_at_exit() {
+    // Skip if the normal cleanup path already removed the file to avoid
+    // unlinking a replacement file created by a subsequent process.
+    if IPC_PID_FILE_CLEANUP_DONE.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    if let Some(path) = IPC_PID_FILE_PATH.get() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn cleanup_ipc_pid_file(path: &std::path::Path) {
+    let cleanup_path = IPC_PID_FILE_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(|| absolute_pid_file_path(path));
+
+    if let Err(e) = std::fs::remove_file(&cleanup_path) {
+        log::debug!(
+            "Could not remove PID file {}: {}",
+            cleanup_path.display(),
+            e
+        );
+    }
+
+    // Disarm the atexit handler only after attempting the same absolute path.
+    IPC_PID_FILE_CLEANUP_DONE.store(true, std::sync::atomic::Ordering::Release);
+}
+
 fn run() -> Result<()> {
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
@@ -520,12 +583,20 @@ fn run() -> Result<()> {
     // fails, `clear_history_session_id()` is called to set it back to `null`.
     // In practice the window is negligibly short (milliseconds).
     if cli.with_ipc {
-        match ipc::start_server(None, None, session_id_raw) {
+        match ipc::start_server(cli.ipc_bind.as_deref(), None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
+                if let Some(pid_path) = &cli.ipc_pid_file {
+                    let pid_path = absolute_pid_file_path(pid_path);
+                    if let Err(e) = write_pid_file(&pid_path) {
+                        ipc::stop_server();
+                        return Err(e);
+                    }
+                    register_ipc_pid_file_atexit(&pid_path);
+                }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to start IPC server: {}", e);
+                anyhow::bail!("Failed to start IPC server: {}", e);
             }
         }
     }
@@ -543,6 +614,11 @@ fn run() -> Result<()> {
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).
     // Called before propagating repl errors to ensure socket/session cleanup.
     ipc::stop_server();
+
+    // Clean up PID file written by --ipc-pid-file.
+    if let Some(pid_path) = &cli.ipc_pid_file {
+        cleanup_ipc_pid_file(pid_path);
+    }
 
     repl_result
 }
@@ -779,17 +855,19 @@ fn run_headless(
     }
 
     // Write PID file if requested
-    if let Some(pid_path) = pid_file
-        && let Err(e) = write_pid_file(pid_path)
-    {
-        // Do not attempt to remove the PID file here: write_pid_file uses
-        // create_new and may have failed before creating it (e.g. AlreadyExists),
-        // so pid_path may refer to a pre-existing user-managed file.
+    if let Some(pid_path) = pid_file {
+        let pid_path = absolute_pid_file_path(pid_path);
+        if let Err(e) = write_pid_file(&pid_path) {
+            // Do not attempt to remove the PID file here: write_pid_file uses
+            // create_new and may have failed before creating it (e.g. AlreadyExists),
+            // so pid_path may refer to a pre-existing user-managed file.
 
-        // Stop IPC server to avoid leaving a stale socket/session behind.
-        ipc::stop_server();
+            // Stop IPC server to avoid leaving a stale socket/session behind.
+            ipc::stop_server();
 
-        return Err(e);
+            return Err(e);
+        }
+        register_ipc_pid_file_atexit(&pid_path);
     }
 
     // Set up signal handler for graceful shutdown.
@@ -849,11 +927,9 @@ fn run_headless(
     }
     ipc::stop_server();
 
-    // Clean up PID file
-    if let Some(pid_path) = pid_file
-        && let Err(e) = std::fs::remove_file(pid_path)
-    {
-        log::debug!("Could not remove PID file {}: {}", pid_path.display(), e);
+    // Clean up PID file.
+    if let Some(pid_path) = pid_file {
+        cleanup_ipc_pid_file(pid_path);
     }
 
     Ok(())

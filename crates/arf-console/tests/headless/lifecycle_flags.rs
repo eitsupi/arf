@@ -1,6 +1,25 @@
 use super::support::*;
 use std::time::Duration;
 
+fn r_quote_path(path: &std::path::Path) -> String {
+    let escaped = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', "\\'");
+    format!("'{escaped}'")
+}
+
+fn wait_for_pid_file(path: &std::path::Path) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("PID file should exist at: {}", path.display());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_headless_bind_custom_socket() {
@@ -8,8 +27,8 @@ fn test_headless_bind_custom_socket() {
     let sock_path = tmp.path().join("custom.sock");
     let sock_str = sock_path.display().to_string();
 
-    let process = HeadlessProcess::spawn_with_args(&["--bind", &sock_str])
-        .expect("Failed to spawn headless with --bind");
+    let process = HeadlessProcess::spawn_with_args(&["--ipc-bind", &sock_str])
+        .expect("Failed to spawn headless with --ipc-bind");
 
     // The custom socket file should exist
     assert!(
@@ -36,15 +55,15 @@ fn test_headless_bind_custom_socket() {
     );
 }
 
-/// Test that --pid-file writes the PID and is cleaned up on shutdown.
+/// Test that --ipc-pid-file writes the PID and is cleaned up on shutdown.
 #[test]
 fn test_headless_pid_file() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     let pid_path = tmp.path().join("arf.pid");
     let pid_str = pid_path.display().to_string();
 
-    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
-        .expect("Failed to spawn headless with --pid-file");
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
 
     // PID file is written right after the IPC server starts. Poll until the
     // file exists AND has non-empty content to avoid reading between create
@@ -82,6 +101,106 @@ fn test_headless_pid_file() {
     assert!(
         !pid_path.exists(),
         "PID file should be removed after shutdown"
+    );
+}
+
+/// Test that a relative --ipc-pid-file is cleaned up after R changes cwd.
+#[test]
+fn test_headless_relative_pid_file_cleanup_after_setwd() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let new_cwd = tmp.path().join("new-cwd");
+    std::fs::create_dir(&new_cwd).expect("create cwd target");
+    let pid_path = tmp.path().join("arf.pid");
+
+    let mut process =
+        HeadlessProcess::spawn_with_args_in_dir(&["--ipc-pid-file", "arf.pid"], tmp.path())
+            .expect("Failed to spawn headless with relative --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    let code = format!("setwd({}); invisible(NULL)", r_quote_path(&new_cwd));
+    let result = process.ipc_eval(&code).expect("setwd eval should run");
+    assert!(
+        result.success,
+        "setwd eval should succeed: {}",
+        result.stderr
+    );
+
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(result.success, "shutdown should succeed");
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
+
+    assert!(
+        !pid_path.exists(),
+        "relative PID file should be removed from original cwd"
+    );
+}
+
+/// Test that --ipc-pid-file is cleaned up when IPC-evaluated q() exits R.
+#[test]
+fn test_headless_pid_file_cleanup_after_ipc_q() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_path = tmp.path().join("arf.pid");
+    let pid_str = pid_path.display().to_string();
+
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    // q() may terminate the server before the IPC client receives a full
+    // response, so the process exit and PID file cleanup are the assertions.
+    let _ = process.ipc_eval_with_timeout(r#"q(save = "no")"#, 1000);
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after q()");
+
+    assert!(!pid_path.exists(), "PID file should be removed after q()");
+}
+
+/// Test that non-UTF-8 --ipc-pid-file paths are cleaned up without lossy conversion.
+///
+/// macOS filesystems used by CI reject this invalid UTF-8 filename, so this
+/// Unix-only regression test is limited to platforms that permit arbitrary
+/// non-NUL filename bytes.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn test_headless_non_utf8_pid_file_cleanup() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_name = OsString::from_vec(b"arf-\xFF.pid".to_vec());
+    let pid_path = tmp.path().join(pid_name);
+    let pid_arg = pid_path.as_os_str().to_string_lossy().into_owned();
+
+    assert!(
+        pid_arg.contains(char::REPLACEMENT_CHARACTER),
+        "test path should exercise lossy display conversion"
+    );
+
+    let mut process = HeadlessProcess::spawn_with_os_args(&[
+        std::ffi::OsStr::new("--ipc-pid-file"),
+        pid_path.as_os_str(),
+    ])
+    .expect("Failed to spawn headless with non-UTF-8 --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(result.success, "shutdown should succeed");
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
+
+    assert!(
+        !pid_path.exists(),
+        "non-UTF-8 PID file should be removed without lossy path conversion"
     );
 }
 
@@ -160,8 +279,8 @@ fn assert_signal_graceful_shutdown(signal: nix::sys::signal::Signal) {
     let pid_path = tmp.path().join("arf.pid");
     let pid_str = pid_path.display().to_string();
 
-    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
-        .expect("Failed to spawn headless with --pid-file");
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
 
     // Wait for "Headless mode ready" on stderr, which is printed after the
     // signal handler has been installed. This avoids a race where the signal
@@ -247,10 +366,10 @@ fn test_headless_ctrlc_shutdown() {
     let pid_str = pid_path.display().to_string();
 
     let mut process = HeadlessProcess::spawn_with_creation_flags(
-        &["--pid-file", &pid_str],
+        &["--ipc-pid-file", &pid_str],
         CREATE_NEW_PROCESS_GROUP,
     )
-    .expect("Failed to spawn headless with --pid-file");
+    .expect("Failed to spawn headless with --ipc-pid-file");
 
     // Wait for "Headless mode ready" on stderr (signal handler is installed by then)
     let start = std::time::Instant::now();

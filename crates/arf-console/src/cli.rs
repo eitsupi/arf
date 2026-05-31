@@ -177,6 +177,21 @@ pub struct Cli {
     #[arg(long = "with-ipc")]
     pub with_ipc: bool,
 
+    /// Bind IPC socket to a specific path instead of the default (requires --with-ipc)
+    ///
+    /// Unix: filesystem path (e.g. /tmp/my-arf.sock)
+    /// Windows: named pipe path (e.g. \\.\pipe\my-arf)
+    #[arg(long = "ipc-bind", requires = "with_ipc", value_hint = ValueHint::FilePath)]
+    pub ipc_bind: Option<String>,
+
+    /// Write server PID to a file on startup (requires --with-ipc)
+    ///
+    /// The file is removed when the REPL exits. Startup fails if the file
+    /// cannot be written, so the editor is guaranteed to own the session or
+    /// get an error — there is no silent fallback.
+    #[arg(long = "ipc-pid-file", requires = "with_ipc", value_hint = ValueHint::FilePath)]
+    pub ipc_pid_file: Option<PathBuf>,
+
     /// Disable auto-matching of brackets and quotes (for testing)
     #[arg(long = "no-auto-match", hide = true)]
     pub no_auto_match: bool,
@@ -281,10 +296,10 @@ Examples:
     $ arf headless --json | jq -r .socket_path
 
   Run with logging to a file:
-    $ arf headless --log-file arf.log --pid-file arf.pid
+    $ arf headless --log-file arf.log --ipc-pid-file arf.pid
 
   Use a custom socket path:
-    $ arf headless --bind /tmp/my-arf.sock --pid-file arf.pid
+    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
     $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
 
   Shut down a headless session:
@@ -311,11 +326,11 @@ Examples:
         // NOTE: FilePath is not ideal on Windows (named pipes aren't filesystem
         // paths), but using cfg_attr to vary the hint per platform would cause
         // shell completion snapshots to differ across machines.
-        #[arg(long, value_hint = ValueHint::FilePath)]
+        #[arg(long = "ipc-bind", value_hint = ValueHint::FilePath)]
         bind: Option<String>,
 
         /// Write server PID to a file (removed on shutdown)
-        #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
+        #[arg(long = "ipc-pid-file", value_hint = ValueHint::FilePath)]
         pid_file: Option<PathBuf>,
 
         /// Suppress status messages on stderr (IPC path, ready, shutdown)

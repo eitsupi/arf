@@ -8,7 +8,9 @@
 //! stderr for the "IPC server listening on:" message, then uses
 //! `arf ipc eval` / `arf ipc send` CLI commands to interact with R.
 
+use std::ffi::OsStr;
 use std::io::BufRead;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -115,17 +117,37 @@ impl HeadlessProcess {
 
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     pub(crate) fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], None)
+        Self::spawn_inner(&[], extra_args, &[], None, None)
+    }
+
+    /// Spawn `arf headless` with OS-string arguments.
+    #[cfg(unix)]
+    pub(crate) fn spawn_with_os_args(extra_args: &[&OsStr]) -> Result<Self, String> {
+        Self::spawn_inner_os(&[], extra_args, &[], None, None)
+    }
+
+    /// Spawn `arf headless` in a specific working directory.
+    pub(crate) fn spawn_with_args_in_dir(
+        extra_args: &[&str],
+        current_dir: &Path,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(&[], extra_args, &[], Some(current_dir), None)
     }
 
     /// Spawn `arf headless` with global flags placed before the subcommand.
     pub(crate) fn spawn_with_pre_args(pre_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(pre_args, &[], &[], None)
+        Self::spawn_inner(pre_args, &[], &[], None, None)
     }
 
     /// Spawn with a custom sessions directory (sets `ARF_IPC_SESSIONS_DIR`).
     pub(crate) fn spawn_with_sessions_dir(sessions_dir: &str) -> Result<Self, String> {
-        Self::spawn_inner(&[], &[], &[("ARF_IPC_SESSIONS_DIR", sessions_dir)], None)
+        Self::spawn_inner(
+            &[],
+            &[],
+            &[("ARF_IPC_SESSIONS_DIR", sessions_dir)],
+            None,
+            None,
+        )
     }
 
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
@@ -134,13 +156,31 @@ impl HeadlessProcess {
         extra_args: &[&str],
         flags: u32,
     ) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], Some(flags))
+        Self::spawn_inner(&[], extra_args, &[], None, Some(flags))
     }
 
     fn spawn_inner(
         pre_subcommand_args: &[&str],
         extra_args: &[&str],
         env_overrides: &[(&str, &str)],
+        current_dir: Option<&Path>,
+        #[allow(unused)] creation_flags: Option<u32>,
+    ) -> Result<Self, String> {
+        let extra_args: Vec<&OsStr> = extra_args.iter().map(OsStr::new).collect();
+        Self::spawn_inner_os(
+            pre_subcommand_args,
+            &extra_args,
+            env_overrides,
+            current_dir,
+            creation_flags,
+        )
+    }
+
+    fn spawn_inner_os(
+        pre_subcommand_args: &[&str],
+        extra_args: &[&OsStr],
+        env_overrides: &[(&str, &str)],
+        current_dir: Option<&Path>,
         #[allow(unused)] creation_flags: Option<u32>,
     ) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -148,9 +188,11 @@ impl HeadlessProcess {
         // When --log-file is used, stderr is redirected to the file, so the
         // pipe is disconnected. In these cases, fall back to polling for readiness
         // instead of monitoring stderr for the "IPC server listening" message.
-        let poll_for_readiness = extra_args.contains(&"--quiet")
-            || extra_args.contains(&"--json")
-            || extra_args.contains(&"--log-file");
+        let poll_for_readiness = extra_args.iter().any(|arg| *arg == OsStr::new("--quiet"))
+            || extra_args.iter().any(|arg| *arg == OsStr::new("--json"))
+            || extra_args
+                .iter()
+                .any(|arg| *arg == OsStr::new("--log-file"));
 
         let mut cmd = Command::new(bin_path);
         for arg in pre_subcommand_args {
@@ -162,6 +204,9 @@ impl HeadlessProcess {
         }
         for (key, value) in env_overrides {
             cmd.env(key, value);
+        }
+        if let Some(current_dir) = current_dir {
+            cmd.current_dir(current_dir);
         }
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());

@@ -180,7 +180,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -307,6 +307,36 @@ _arf() {
                     ;;
                 --arch)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ipc-bind)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                --ipc-pid-file)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
                     return 0
                     ;;
                 --history-dir)
@@ -466,7 +496,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__headless)
-            opts="-c -h --config --with-r-version --r-home --bind --pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --history-dir --no-history --min-nsize --min-vsize --help"
+            opts="-c -h --config --with-r-version --r-home --ipc-bind --ipc-pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --history-dir --no-history --min-nsize --min-vsize --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -513,7 +543,7 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --bind)
+                --ipc-bind)
                     local oldifs
                     if [ -n "${IFS+x}" ]; then
                         oldifs="$IFS"
@@ -528,7 +558,7 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --pid-file)
+                --ipc-pid-file)
                     local oldifs
                     if [ -n "${IFS+x}" ]; then
                         oldifs="$IFS"

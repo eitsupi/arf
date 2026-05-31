@@ -35,8 +35,8 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | Option | Description |
 |--------|-------------|
 | `--json` | Print session info as JSON to stdout when ready (implies `--quiet`) |
-| `--bind <PATH>` | Custom socket path (Unix) or named pipe path (Windows) |
-| `--pid-file <PATH>` | Write PID to file (removed on shutdown) |
+| `--ipc-bind <PATH>` | Custom socket path (Unix) or named pipe path (Windows) |
+| `--ipc-pid-file <PATH>` | Write PID to file (removed on shutdown) |
 | `--log-file <PATH>` | Redirect log output to file instead of stderr |
 | `--history-dir <PATH>` | Override history database directory |
 | `--no-history` | Disable command history |
@@ -414,14 +414,18 @@ The IPC server listens on a named pipe:
 
 ### Custom Bind Path
 
-Use `--bind` to specify a custom socket/pipe path:
+Use `--ipc-bind` to specify a custom socket/pipe path. This works for both
+headless and interactive REPL (`--with-ipc`) modes:
 
 ```sh
-# Unix
-arf headless --bind /tmp/my-arf.sock
+# Headless — Unix
+arf headless --ipc-bind /tmp/my-arf.sock
 
-# Windows
-arf headless --bind \\.\pipe\my-arf
+# Headless — Windows
+arf headless --ipc-bind \\.\pipe\my-arf
+
+# Interactive REPL — Unix (editor launches arf and knows the socket path upfront)
+arf --with-ipc --ipc-bind /tmp/my-arf.sock
 ```
 
 > [!NOTE]
