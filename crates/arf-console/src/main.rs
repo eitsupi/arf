@@ -520,12 +520,15 @@ fn run() -> Result<()> {
     // fails, `clear_history_session_id()` is called to set it back to `null`.
     // In practice the window is negligibly short (milliseconds).
     if cli.with_ipc {
-        match ipc::start_server(None, None, session_id_raw) {
+        match ipc::start_server(cli.ipc_bind.as_deref(), None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
+                if let Some(pid_path) = &cli.ipc_pid_file {
+                    write_pid_file(pid_path)?;
+                }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to start IPC server: {}", e);
+                anyhow::bail!("Failed to start IPC server: {}", e);
             }
         }
     }
@@ -543,6 +546,13 @@ fn run() -> Result<()> {
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).
     // Called before propagating repl errors to ensure socket/session cleanup.
     ipc::stop_server();
+
+    // Clean up PID file written by --ipc-pid-file
+    if let Some(pid_path) = &cli.ipc_pid_file
+        && let Err(e) = std::fs::remove_file(pid_path)
+    {
+        log::debug!("Could not remove PID file {}: {}", pid_path.display(), e);
+    }
 
     repl_result
 }

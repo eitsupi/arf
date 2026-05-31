@@ -25,7 +25,7 @@ struct ServerState {
     /// cleaned up automatically when the server is dropped).
     #[cfg_attr(windows, allow(dead_code))]
     socket_path: String,
-    /// Whether the socket directory was auto-created (not a custom `--bind`
+    /// Whether the socket directory was auto-created (not a custom `--ipc-bind`
     /// path).  Only auto-created directories are cleaned up on shutdown.
     #[cfg_attr(windows, allow(dead_code))]
     auto_created_dir: bool,
@@ -65,7 +65,7 @@ pub fn start_server(
         })?,
     };
 
-    // Remove stale socket file if it exists. When a custom --bind path is
+    // Remove stale socket file if it exists. When a custom --ipc-bind path is
     // used, only remove the path if it is actually a Unix socket to avoid
     // accidentally deleting unrelated files. For sockets, attempt a connect
     // to distinguish stale from active: if connect succeeds, another process
@@ -241,7 +241,7 @@ pub fn stop_server() {
         state.cancel_token.cancel();
 
         // Remove the socket pathname to prevent new clients from connecting
-        // during shutdown.  For auto-created directories (not custom --bind),
+        // during shutdown.  For auto-created directories (not custom --ipc-bind),
         // also remove the parent directory if it is now empty.
         #[cfg(unix)]
         {
@@ -421,12 +421,12 @@ async fn run_server(
         Ok(l) => {
             // Restrict socket permissions so only the owner can connect.
             // The default PID-based path lives under a 0700 sessions dir,
-            // but custom --bind paths inherit the parent dir's umask.
+            // but custom --ipc-bind paths inherit the parent dir's umask.
             // Use fd-based fchmod to avoid TOCTOU symlink race.
             //
             // NOTE: There is a brief race window between bind() and fchmod()
             // where the socket exists with umask-inherited permissions. For
-            // custom --bind paths in shared directories, operators should
+            // custom --ipc-bind paths in shared directories, operators should
             // ensure the parent directory is restricted (e.g. 0700).
             {
                 use std::os::unix::io::AsRawFd;

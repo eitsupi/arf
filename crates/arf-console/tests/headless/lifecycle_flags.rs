@@ -8,8 +8,8 @@ fn test_headless_bind_custom_socket() {
     let sock_path = tmp.path().join("custom.sock");
     let sock_str = sock_path.display().to_string();
 
-    let process = HeadlessProcess::spawn_with_args(&["--bind", &sock_str])
-        .expect("Failed to spawn headless with --bind");
+    let process = HeadlessProcess::spawn_with_args(&["--ipc-bind", &sock_str])
+        .expect("Failed to spawn headless with --ipc-bind");
 
     // The custom socket file should exist
     assert!(
@@ -36,15 +36,15 @@ fn test_headless_bind_custom_socket() {
     );
 }
 
-/// Test that --pid-file writes the PID and is cleaned up on shutdown.
+/// Test that --ipc-pid-file writes the PID and is cleaned up on shutdown.
 #[test]
 fn test_headless_pid_file() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     let pid_path = tmp.path().join("arf.pid");
     let pid_str = pid_path.display().to_string();
 
-    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
-        .expect("Failed to spawn headless with --pid-file");
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
 
     // PID file is written right after the IPC server starts. Poll until the
     // file exists AND has non-empty content to avoid reading between create
@@ -160,8 +160,8 @@ fn assert_signal_graceful_shutdown(signal: nix::sys::signal::Signal) {
     let pid_path = tmp.path().join("arf.pid");
     let pid_str = pid_path.display().to_string();
 
-    let mut process = HeadlessProcess::spawn_with_args(&["--pid-file", &pid_str])
-        .expect("Failed to spawn headless with --pid-file");
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
 
     // Wait for "Headless mode ready" on stderr, which is printed after the
     // signal handler has been installed. This avoids a race where the signal
@@ -247,10 +247,10 @@ fn test_headless_ctrlc_shutdown() {
     let pid_str = pid_path.display().to_string();
 
     let mut process = HeadlessProcess::spawn_with_creation_flags(
-        &["--pid-file", &pid_str],
+        &["--ipc-pid-file", &pid_str],
         CREATE_NEW_PROCESS_GROUP,
     )
-    .expect("Failed to spawn headless with --pid-file");
+    .expect("Failed to spawn headless with --ipc-pid-file");
 
     // Wait for "Headless mode ready" on stderr (signal handler is installed by then)
     let start = std::time::Instant::now();

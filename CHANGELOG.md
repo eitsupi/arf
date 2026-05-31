@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `--ipc-bind` and `--ipc-pid-file` options for `--with-ipc` mode, enabling editors and external tools to set a deterministic socket path and track the session PID without parsing `arf ipc list`. Startup fails if the PID file cannot be written, so the caller is guaranteed to own the session or receive an error.
+
+### Changed
+
+- **Experimental/Breaking:** `arf headless --bind` renamed to `--ipc-bind`, and `--pid-file` renamed to `--ipc-pid-file`, for consistency with the equivalent new options on `--with-ipc`
+
 ### Fixed
 
 - Tab completion no longer times out inside function call arguments (e.g. `str(aaa_` + Tab). R's completer takes significantly longer when inside a function call because it also looks up argument names. The fix raises the completion timeout floor to 1000ms in that context (and for `::` completions), giving sufficient headroom while retaining a safety boundary against hung completions (#204)

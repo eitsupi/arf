@@ -87,6 +87,16 @@ Options:
           
           Starts the IPC server alongside the interactive REPL, allowing external tools to call `arf ipc eval`, `arf ipc send`, etc. For headless (no REPL) usage, see `arf headless` instead.
 
+      --ipc-bind <IPC_BIND>
+          Bind IPC socket to a specific path instead of the default (requires --with-ipc)
+          
+          Unix: filesystem path (e.g. /tmp/my-arf.sock) Windows: named pipe path (e.g. \\.\pipe\my-arf)
+
+      --ipc-pid-file <IPC_PID_FILE>
+          Write server PID to a file on startup (requires --with-ipc)
+          
+          The file is removed when the REPL exits. Startup fails if the file cannot be written, so the editor is guaranteed to own the session or get an error — there is no silent fallback.
+
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
           
