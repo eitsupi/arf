@@ -2,13 +2,15 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-31
+
 ### Added
 
-- **Experimental:** `--ipc-bind` and `--ipc-pid-file` options for `--with-ipc` mode, enabling editors and external tools to set a deterministic socket path and track the session PID without parsing `arf ipc list`. Startup fails if the PID file cannot be written, so the caller is guaranteed to own the session or receive an error.
+- **Experimental:** `--ipc-bind` and `--ipc-pid-file` options for `--with-ipc` mode, enabling editors and external tools to set a deterministic socket path and track the session PID without parsing `arf ipc list`. Startup fails if the PID file cannot be written, so the caller is guaranteed to own the session or receive an error (#207).
 
 ### Changed
 
-- **Experimental/Breaking:** `arf headless --bind` renamed to `--ipc-bind`, and `--pid-file` renamed to `--ipc-pid-file`, for consistency with the equivalent new options on `--with-ipc`
+- **Experimental/Breaking:** `arf headless --bind` renamed to `--ipc-bind`, and `--pid-file` renamed to `--ipc-pid-file`, for consistency with the equivalent new options on `--with-ipc` (#207).
 
 ### Fixed
 
