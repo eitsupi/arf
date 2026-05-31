@@ -467,6 +467,123 @@ mod ipc_tests {
         terminal.quit().expect("Should quit cleanly");
     }
 
+    /// Test that --with-ipc --ipc-bind honours the custom socket path.
+    ///
+    /// The session must be reachable directly at the specified path without
+    /// going through session discovery.
+    #[test]
+    fn test_with_ipc_bind_custom_socket() {
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let sock_path = tmp.path().join("custom.sock");
+        let sock_str = sock_path.display().to_string();
+
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--ipc-bind", &sock_str])
+                .expect("Failed to spawn arf with --with-ipc --ipc-bind");
+
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+
+        // Socket must exist at the custom path (no discovery needed)
+        assert!(
+            sock_path.exists(),
+            "custom socket should exist at: {sock_str}"
+        );
+
+        // IPC must work via the custom socket path directly
+        let response = send_ipc_request(
+            &sock_str,
+            "evaluate",
+            serde_json::json!({ "code": "1 + 1" }),
+        )
+        .expect("IPC request via custom socket should succeed");
+
+        let result = response.get("result").expect("should have result");
+        assert_eq!(
+            result.get("value").and_then(|v| v.as_str()),
+            Some("[1] 2"),
+            "should return correct result: {result:?}"
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that --with-ipc --ipc-pid-file writes the PID on startup and
+    /// removes the file when the REPL exits.
+    #[test]
+    fn test_with_ipc_pid_file_lifecycle() {
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let pid_path = tmp.path().join("arf.pid");
+        let pid_str = pid_path.display().to_string();
+
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
+                .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
+
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+
+        // PID file must be written before the first prompt
+        assert!(
+            pid_path.exists(),
+            "PID file should exist after startup: {pid_str}"
+        );
+
+        let pid_content = std::fs::read_to_string(&pid_path).expect("should read PID file");
+        let expected_pid = terminal
+            .process_id()
+            .expect("should have process ID")
+            .to_string();
+        assert_eq!(
+            pid_content.trim(),
+            expected_pid,
+            "PID file should contain the process PID"
+        );
+
+        // Exit via q() and wait for the process to terminate
+        terminal.send_line("q()").expect("send q()");
+        terminal
+            .wait_for_exit(Duration::from_secs(10))
+            .expect("Process should exit after q()");
+
+        // PID file must be removed on exit (via atexit handler)
+        assert!(
+            !pid_path.exists(),
+            "PID file should be removed after exit: {pid_str}"
+        );
+    }
+
+    /// Test that --with-ipc --ipc-pid-file works with Ctrl+D exit.
+    #[test]
+    fn test_with_ipc_pid_file_ctrld_cleanup() {
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let pid_path = tmp.path().join("arf.pid");
+        let pid_str = pid_path.display().to_string();
+
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
+                .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
+
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+
+        assert!(pid_path.exists(), "PID file should exist: {pid_str}");
+
+        // Exit via Ctrl+D
+        terminal.send_eof().expect("send Ctrl+D");
+        terminal
+            .wait_for_exit(Duration::from_secs(10))
+            .expect("Process should exit after Ctrl+D");
+
+        assert!(
+            !pid_path.exists(),
+            "PID file should be removed after Ctrl+D exit: {pid_str}"
+        );
+    }
+
     /// Test that `arf ipc eval` without a code argument exits with code 2
     /// and emits a structured JSON error when stdin is a TTY.
     ///

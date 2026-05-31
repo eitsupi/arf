@@ -414,14 +414,18 @@ The IPC server listens on a named pipe:
 
 ### Custom Bind Path
 
-Use `--ipc-bind` to specify a custom socket/pipe path:
+Use `--ipc-bind` to specify a custom socket/pipe path. This works for both
+headless and interactive REPL (`--with-ipc`) modes:
 
 ```sh
-# Unix
+# Headless — Unix
 arf headless --ipc-bind /tmp/my-arf.sock
 
-# Windows
+# Headless — Windows
 arf headless --ipc-bind \\.\pipe\my-arf
+
+# Interactive REPL — Unix (editor launches arf and knows the socket path upfront)
+arf --with-ipc --ipc-bind /tmp/my-arf.sock
 ```
 
 > [!NOTE]

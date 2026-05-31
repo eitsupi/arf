@@ -473,6 +473,22 @@ impl Terminal {
         self.child.process_id()
     }
 
+    /// Wait for the child process to exit (detected via PTY EOF).
+    pub fn wait_for_exit(&self, timeout: Duration) -> Result<(), String> {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            let running = self.state.lock().map_err(|e| e.to_string())?.running;
+            if !running {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err(format!(
+            "Process did not exit within {}s",
+            timeout.as_secs()
+        ))
+    }
+
     /// Get current cursor position as (row, col), both 0-indexed.
     pub fn cursor_position(&self) -> Result<(u16, u16), String> {
         let state = self.state.lock().map_err(|e| e.to_string())?;
