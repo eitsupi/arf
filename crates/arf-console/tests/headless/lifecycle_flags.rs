@@ -163,7 +163,11 @@ fn test_headless_pid_file_cleanup_after_ipc_q() {
 }
 
 /// Test that non-UTF-8 --ipc-pid-file paths are cleaned up without lossy conversion.
-#[cfg(unix)]
+///
+/// macOS filesystems used by CI reject this invalid UTF-8 filename, so this
+/// Unix-only regression test is limited to platforms that permit arbitrary
+/// non-NUL filename bytes.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn test_headless_non_utf8_pid_file_cleanup() {
     use std::ffi::OsString;
