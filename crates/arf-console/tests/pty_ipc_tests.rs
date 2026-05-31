@@ -477,9 +477,8 @@ mod ipc_tests {
         let sock_path = tmp.path().join("custom.sock");
         let sock_str = sock_path.display().to_string();
 
-        let mut terminal =
-            Terminal::spawn_with_args(&["--with-ipc", "--ipc-bind", &sock_str])
-                .expect("Failed to spawn arf with --with-ipc --ipc-bind");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-bind", &sock_str])
+            .expect("Failed to spawn arf with --with-ipc --ipc-bind");
 
         terminal
             .wait_for_prompt()
@@ -517,9 +516,8 @@ mod ipc_tests {
         let pid_path = tmp.path().join("arf.pid");
         let pid_str = pid_path.display().to_string();
 
-        let mut terminal =
-            Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
-                .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
+            .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
 
         terminal
             .wait_for_prompt()
@@ -562,9 +560,8 @@ mod ipc_tests {
         let pid_path = tmp.path().join("arf.pid");
         let pid_str = pid_path.display().to_string();
 
-        let mut terminal =
-            Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
-                .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
+            .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
 
         terminal
             .wait_for_prompt()
