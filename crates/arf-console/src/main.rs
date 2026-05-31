@@ -279,12 +279,12 @@ fn absolute_pid_file_path(path: &std::path::Path) -> std::path::PathBuf {
 
 /// Absolute path of the PID file written by `--ipc-pid-file`.
 ///
-/// Stored as an absolute path string so that the `atexit` handler can remove
-/// it even if the process changes its working directory before exiting.  R's
+/// Stored as an absolute path so that the `atexit` handler can remove it even
+/// if the process changes its working directory before exiting.  R's
 /// `q()` calls `exit()` without running Rust destructors, so cleanup of the
 /// PID file is registered here as an `atexit` handler rather than relying on
 /// the normal code path after `repl.run()` / `run_headless()`.
-static IPC_PID_FILE_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static IPC_PID_FILE_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Set to `true` by the normal cleanup path (REPL or headless) after it has
 /// removed the PID file, so the `atexit` handler does not race to delete a
@@ -299,8 +299,7 @@ static IPC_PID_FILE_CLEANUP_DONE: std::sync::atomic::AtomicBool =
 /// calls `exit()` directly (e.g. `q()` or EOF) and bypasses Rust cleanup code.
 fn register_ipc_pid_file_atexit(path: &std::path::Path) {
     // Convert to absolute path so the handler works regardless of cwd changes.
-    let abs = absolute_pid_file_path(path).display().to_string();
-    let _ = IPC_PID_FILE_PATH.set(abs);
+    let _ = IPC_PID_FILE_PATH.set(absolute_pid_file_path(path));
 
     let ret = unsafe { libc::atexit(remove_ipc_pid_file_at_exit) };
     if ret != 0 {
@@ -322,7 +321,7 @@ extern "C" fn remove_ipc_pid_file_at_exit() {
 fn cleanup_ipc_pid_file(path: &std::path::Path) {
     let cleanup_path = IPC_PID_FILE_PATH
         .get()
-        .map(std::path::PathBuf::from)
+        .cloned()
         .unwrap_or_else(|| absolute_pid_file_path(path));
 
     if let Err(e) = std::fs::remove_file(&cleanup_path) {

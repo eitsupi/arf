@@ -162,6 +162,44 @@ fn test_headless_pid_file_cleanup_after_ipc_q() {
     assert!(!pid_path.exists(), "PID file should be removed after q()");
 }
 
+/// Test that non-UTF-8 --ipc-pid-file paths are cleaned up without lossy conversion.
+#[cfg(unix)]
+#[test]
+fn test_headless_non_utf8_pid_file_cleanup() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_name = OsString::from_vec(b"arf-\xFF.pid".to_vec());
+    let pid_path = tmp.path().join(pid_name);
+    let pid_arg = pid_path.as_os_str().to_string_lossy().into_owned();
+
+    assert!(
+        pid_arg.contains(char::REPLACEMENT_CHARACTER),
+        "test path should exercise lossy display conversion"
+    );
+
+    let mut process = HeadlessProcess::spawn_with_os_args(&[
+        std::ffi::OsStr::new("--ipc-pid-file"),
+        pid_path.as_os_str(),
+    ])
+    .expect("Failed to spawn headless with non-UTF-8 --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(result.success, "shutdown should succeed");
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
+
+    assert!(
+        !pid_path.exists(),
+        "non-UTF-8 PID file should be removed without lossy path conversion"
+    );
+}
+
 /// Test that --quiet suppresses status messages on stderr.
 #[test]
 fn test_headless_quiet_mode() {
