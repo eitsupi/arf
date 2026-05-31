@@ -523,8 +523,11 @@ fn run() -> Result<()> {
         match ipc::start_server(cli.ipc_bind.as_deref(), None, session_id_raw) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
-                if let Some(pid_path) = &cli.ipc_pid_file {
-                    write_pid_file(pid_path)?;
+                if let Some(pid_path) = &cli.ipc_pid_file
+                    && let Err(e) = write_pid_file(pid_path)
+                {
+                    ipc::stop_server();
+                    return Err(e);
                 }
             }
             Err(e) => {
