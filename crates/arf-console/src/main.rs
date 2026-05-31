@@ -273,6 +273,10 @@ fn write_pid_file(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+fn absolute_pid_file_path(path: &std::path::Path) -> std::path::PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Absolute path of the PID file written by `--ipc-pid-file`.
 ///
 /// Stored as an absolute path string so that the `atexit` handler can remove
@@ -295,10 +299,7 @@ static IPC_PID_FILE_CLEANUP_DONE: std::sync::atomic::AtomicBool =
 /// calls `exit()` directly (e.g. `q()` or EOF) and bypasses Rust cleanup code.
 fn register_ipc_pid_file_atexit(path: &std::path::Path) {
     // Convert to absolute path so the handler works regardless of cwd changes.
-    let abs = std::path::absolute(path)
-        .unwrap_or_else(|_| path.to_path_buf())
-        .display()
-        .to_string();
+    let abs = absolute_pid_file_path(path).display().to_string();
     let _ = IPC_PID_FILE_PATH.set(abs);
 
     let ret = unsafe { libc::atexit(remove_ipc_pid_file_at_exit) };
@@ -316,6 +317,24 @@ extern "C" fn remove_ipc_pid_file_at_exit() {
     if let Some(path) = IPC_PID_FILE_PATH.get() {
         let _ = std::fs::remove_file(path);
     }
+}
+
+fn cleanup_ipc_pid_file(path: &std::path::Path) {
+    let cleanup_path = IPC_PID_FILE_PATH
+        .get()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| absolute_pid_file_path(path));
+
+    if let Err(e) = std::fs::remove_file(&cleanup_path) {
+        log::debug!(
+            "Could not remove PID file {}: {}",
+            cleanup_path.display(),
+            e
+        );
+    }
+
+    // Disarm the atexit handler only after attempting the same absolute path.
+    IPC_PID_FILE_CLEANUP_DONE.store(true, std::sync::atomic::Ordering::Release);
 }
 
 fn run() -> Result<()> {
@@ -569,11 +588,12 @@ fn run() -> Result<()> {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
                 if let Some(pid_path) = &cli.ipc_pid_file {
-                    if let Err(e) = write_pid_file(pid_path) {
+                    let pid_path = absolute_pid_file_path(pid_path);
+                    if let Err(e) = write_pid_file(&pid_path) {
                         ipc::stop_server();
                         return Err(e);
                     }
-                    register_ipc_pid_file_atexit(pid_path);
+                    register_ipc_pid_file_atexit(&pid_path);
                 }
             }
             Err(e) => {
@@ -597,13 +617,8 @@ fn run() -> Result<()> {
     ipc::stop_server();
 
     // Clean up PID file written by --ipc-pid-file.
-    // Disarm the atexit handler first to prevent it from racing against a
-    // replacement file created by a subsequent process at the same path.
     if let Some(pid_path) = &cli.ipc_pid_file {
-        IPC_PID_FILE_CLEANUP_DONE.store(true, std::sync::atomic::Ordering::Release);
-        if let Err(e) = std::fs::remove_file(pid_path) {
-            log::debug!("Could not remove PID file {}: {}", pid_path.display(), e);
-        }
+        cleanup_ipc_pid_file(pid_path);
     }
 
     repl_result
@@ -842,7 +857,8 @@ fn run_headless(
 
     // Write PID file if requested
     if let Some(pid_path) = pid_file {
-        if let Err(e) = write_pid_file(pid_path) {
+        let pid_path = absolute_pid_file_path(pid_path);
+        if let Err(e) = write_pid_file(&pid_path) {
             // Do not attempt to remove the PID file here: write_pid_file uses
             // create_new and may have failed before creating it (e.g. AlreadyExists),
             // so pid_path may refer to a pre-existing user-managed file.
@@ -852,7 +868,7 @@ fn run_headless(
 
             return Err(e);
         }
-        register_ipc_pid_file_atexit(pid_path);
+        register_ipc_pid_file_atexit(&pid_path);
     }
 
     // Set up signal handler for graceful shutdown.
@@ -913,13 +929,8 @@ fn run_headless(
     ipc::stop_server();
 
     // Clean up PID file.
-    // Disarm the atexit handler first to prevent it from racing against a
-    // replacement file created by a subsequent process at the same path.
     if let Some(pid_path) = pid_file {
-        IPC_PID_FILE_CLEANUP_DONE.store(true, std::sync::atomic::Ordering::Release);
-        if let Err(e) = std::fs::remove_file(pid_path) {
-            log::debug!("Could not remove PID file {}: {}", pid_path.display(), e);
-        }
+        cleanup_ipc_pid_file(pid_path);
     }
 
     Ok(())

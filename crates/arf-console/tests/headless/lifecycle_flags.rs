@@ -1,6 +1,25 @@
 use super::support::*;
 use std::time::Duration;
 
+fn r_quote_path(path: &std::path::Path) -> String {
+    let escaped = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', "\\'");
+    format!("'{escaped}'")
+}
+
+fn wait_for_pid_file(path: &std::path::Path) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("PID file should exist at: {}", path.display());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_headless_bind_custom_socket() {
@@ -83,6 +102,64 @@ fn test_headless_pid_file() {
         !pid_path.exists(),
         "PID file should be removed after shutdown"
     );
+}
+
+/// Test that a relative --ipc-pid-file is cleaned up after R changes cwd.
+#[test]
+fn test_headless_relative_pid_file_cleanup_after_setwd() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let new_cwd = tmp.path().join("new-cwd");
+    std::fs::create_dir(&new_cwd).expect("create cwd target");
+    let pid_path = tmp.path().join("arf.pid");
+
+    let mut process =
+        HeadlessProcess::spawn_with_args_in_dir(&["--ipc-pid-file", "arf.pid"], tmp.path())
+            .expect("Failed to spawn headless with relative --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    let code = format!("setwd({}); invisible(NULL)", r_quote_path(&new_cwd));
+    let result = process.ipc_eval(&code).expect("setwd eval should run");
+    assert!(
+        result.success,
+        "setwd eval should succeed: {}",
+        result.stderr
+    );
+
+    let result = process.ipc_shutdown().expect("shutdown should run");
+    assert!(result.success, "shutdown should succeed");
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after shutdown");
+
+    assert!(
+        !pid_path.exists(),
+        "relative PID file should be removed from original cwd"
+    );
+}
+
+/// Test that --ipc-pid-file is cleaned up when IPC-evaluated q() exits R.
+#[test]
+fn test_headless_pid_file_cleanup_after_ipc_q() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let pid_path = tmp.path().join("arf.pid");
+    let pid_str = pid_path.display().to_string();
+
+    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
+        .expect("Failed to spawn headless with --ipc-pid-file");
+
+    wait_for_pid_file(&pid_path);
+
+    // q() may terminate the server before the IPC client receives a full
+    // response, so the process exit and PID file cleanup are the assertions.
+    let _ = process.ipc_eval_with_timeout(r#"q(save = "no")"#, 1000);
+
+    process
+        .wait_for_exit(Duration::from_secs(10))
+        .expect("headless process should exit after q()");
+
+    assert!(!pid_path.exists(), "PID file should be removed after q()");
 }
 
 /// Test that --quiet suppresses status messages on stderr.

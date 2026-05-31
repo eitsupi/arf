@@ -9,6 +9,7 @@
 //! `arf ipc eval` / `arf ipc send` CLI commands to interact with R.
 
 use std::io::BufRead;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -115,17 +116,31 @@ impl HeadlessProcess {
 
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     pub(crate) fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], None)
+        Self::spawn_inner(&[], extra_args, &[], None, None)
+    }
+
+    /// Spawn `arf headless` in a specific working directory.
+    pub(crate) fn spawn_with_args_in_dir(
+        extra_args: &[&str],
+        current_dir: &Path,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(&[], extra_args, &[], Some(current_dir), None)
     }
 
     /// Spawn `arf headless` with global flags placed before the subcommand.
     pub(crate) fn spawn_with_pre_args(pre_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(pre_args, &[], &[], None)
+        Self::spawn_inner(pre_args, &[], &[], None, None)
     }
 
     /// Spawn with a custom sessions directory (sets `ARF_IPC_SESSIONS_DIR`).
     pub(crate) fn spawn_with_sessions_dir(sessions_dir: &str) -> Result<Self, String> {
-        Self::spawn_inner(&[], &[], &[("ARF_IPC_SESSIONS_DIR", sessions_dir)], None)
+        Self::spawn_inner(
+            &[],
+            &[],
+            &[("ARF_IPC_SESSIONS_DIR", sessions_dir)],
+            None,
+            None,
+        )
     }
 
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
@@ -134,13 +149,14 @@ impl HeadlessProcess {
         extra_args: &[&str],
         flags: u32,
     ) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], Some(flags))
+        Self::spawn_inner(&[], extra_args, &[], None, Some(flags))
     }
 
     fn spawn_inner(
         pre_subcommand_args: &[&str],
         extra_args: &[&str],
         env_overrides: &[(&str, &str)],
+        current_dir: Option<&Path>,
         #[allow(unused)] creation_flags: Option<u32>,
     ) -> Result<Self, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");
@@ -162,6 +178,9 @@ impl HeadlessProcess {
         }
         for (key, value) in env_overrides {
             cmd.env(key, value);
+        }
+        if let Some(current_dir) = current_dir {
+            cmd.current_dir(current_dir);
         }
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
