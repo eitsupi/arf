@@ -19,3 +19,12 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+
+  - package-ecosystem: cargo
+    directory: /
+    commit-message:
+      prefix: "chore: "
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
