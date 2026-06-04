@@ -514,6 +514,21 @@ fn run() -> Result<()> {
         config.startup.mode.autoformat = false;
     }
 
+    // Enable bracketed paste mode and disable echo early, so that any code
+    // sent by vscode-R (or other editors) immediately after terminal creation
+    // is not echoed as raw escape sequences. Without this, the first
+    // Ctrl+Enter send (which vscode-R wraps in \033[200~...\033[201~ markers
+    // when "r.bracketedPaste": true is set) arrives before the REPL has
+    // initialised bracketed paste handling, causing the markers to appear
+    // literally as "^[[200~ls()^[[201~" in the terminal.
+    // See https://github.com/eitsupi/arf/issues/213
+    let _ = crossterm::terminal::enable_raw_mode();
+    let _ = std::io::Write::write_all(
+        &mut std::io::stdout(),
+        b"\x1b[?2004h",
+    );
+    let _ = std::io::stdout().flush();
+
     // Set up R based on r_source config (with optional CLI override)
     let r_source_status = setup_r(
         &config.startup.r_source,
