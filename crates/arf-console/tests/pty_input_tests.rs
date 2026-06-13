@@ -285,11 +285,12 @@ fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
         "bracketed paste end was echoed before first prompt; output:\n{output:?}"
     );
 
+    terminal.clear_buffer().expect("Should clear buffer");
     terminal
         .send_line("x")
         .expect("Should send variable inspection");
     terminal
-        .clear_and_expect("[1] 42")
+        .expect("[1] 42")
         .expect("Queued input should execute once REPL is ready");
 
     terminal.quit().expect("Should quit cleanly");
