@@ -790,15 +790,22 @@ fn test_pty_shell_abbreviations_do_not_expand_in_r_mode() {
 /// Test fish-style abbreviation expansion triggered by Space in shell mode.
 ///
 /// Abbreviations expand on both Space and Enter. This test exercises the Space
-/// path: type the abbreviation, pause to let reedline process the characters as
-/// a separate event batch, then press Space to trigger expansion, and finally
-/// press Enter to submit the expanded command.
+/// path: type the abbreviation, wait for the terminal to echo the typed word
+/// (which guarantees reedline has processed it as a separate event batch), then
+/// press Space to trigger expansion, wait for the expanded buffer repaint, and
+/// finally press Enter to submit the expanded command.
 ///
-/// The pause is necessary because reedline fuses consecutive `Edit` events
-/// that arrive in the same read batch into one compound event, and the space
-/// expansion check only fires when `InsertChar(' ')` is the first command in
-/// the event. A brief sleep ensures the abbreviation characters are processed
-/// before the space arrives, so the space appears in its own batch.
+/// Synchronizing on observable terminal state (rather than a fixed sleep) keeps
+/// the test reliable under CI load: each `expect` blocks until the expected
+/// string appears in the PTY output, ensuring the right ordering without
+/// depending on timing assumptions.
+///
+/// Background: reedline fuses consecutive `Edit` events that arrive in the same
+/// read batch into one compound event. The space-expansion check only fires when
+/// `InsertChar(' ')` is the first command in the fused event. By waiting for the
+/// abbreviation echo before sending Space we guarantee they land in separate
+/// batches, so the space check sees exactly `InsertChar(' ')` and triggers
+/// expansion.
 #[test]
 #[cfg(unix)]
 fn test_pty_shell_abbreviations_expand_on_space_in_shell_mode() {
@@ -831,29 +838,37 @@ fn test_pty_shell_abbreviations_expand_on_space_in_shell_mode() {
         .expect("] $")
         .expect("Should show shell mode prompt");
 
-    // Type the abbreviation characters
+    // Type the abbreviation and wait for the terminal to echo it back.
+    // This guarantees reedline has processed `abbr_sp` as its own event batch
+    // before the Space arrives, so they don't get fused into one compound event.
     terminal.send("abbr_sp").expect("Should type abbreviation");
+    terminal
+        .expect("abbr_sp")
+        .expect("Terminal should echo the typed abbreviation");
 
-    // Wait for reedline's poll interval (33 ms) to elapse so the typed
-    // characters are processed as their own event batch before the space
-    // arrives. Without this pause they would be fused with the space into
-    // one compound Edit event, causing the space-expansion check to miss.
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // Send Space — this lands in a separate event batch, so reedline sees
-    // InsertChar(' ') as the first (and only) command and triggers expansion.
+    // Send Space — now in a separate event batch, reedline sees InsertChar(' ')
+    // as the sole command and fires abbreviation expansion.
     terminal
         .send(" ")
         .expect("Should press Space to trigger expansion");
 
-    // Small pause for the expansion repaint before sending Enter
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Wait for the reedline repaint that shows the expanded buffer content.
+    // This also ensures expansion has completed before we send Enter.
+    terminal
+        .expect("echo space_expanded")
+        .expect("Buffer repaint should show expanded text after Space");
 
-    // Press Enter to submit the now-expanded command
+    // Clear accumulated output so the final expect only matches the shell's
+    // command output (not the `space_expanded` substring already in the repaint).
+    terminal
+        .clear_buffer()
+        .expect("Should clear accumulated output before checking shell output");
+
+    // Press Enter to submit the now-expanded command and verify it executes
     terminal.send_line("").expect("Should press Enter");
     terminal
         .expect("space_expanded")
-        .expect("Abbreviation should expand to 'echo space_expanded' on Space and execute");
+        .expect("Shell should execute 'echo space_expanded' and produce this output");
 
     terminal.quit().expect("Should quit cleanly");
 }
