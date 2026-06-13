@@ -256,7 +256,7 @@ fn test_pty_bracketed_paste() {
 fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
     let temp_dir = tempfile::tempdir().expect("Should create temp dir");
     let rprofile_path = temp_dir.path().join(".Rprofile");
-    std::fs::write(&rprofile_path, "Sys.sleep(1)\n").expect("Should write R profile");
+    std::fs::write(&rprofile_path, "Sys.sleep(2)\n").expect("Should write R profile");
     let rprofile = rprofile_path
         .to_str()
         .expect("R profile path should be valid UTF-8");
@@ -265,13 +265,13 @@ fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
         Terminal::spawn_with_args_and_env(&["--no-auto-match"], &[("R_PROFILE_USER", rprofile)])
             .expect("Failed to spawn arf");
 
-    // Sleep long enough that ConsoleModeGuard::install() (the first thing main()
-    // does) has certainly run, while staying well inside the 1-second Sys.sleep()
-    // in the R profile.  There is no synchronisation signal from the child
-    // process, so this window is inherently timing-dependent; the window is tiny
-    // in practice because guard installation completes in the first few
-    // instructions of main().
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    // Sleep long enough that ConsoleModeGuard::install() — which runs early in
+    // main() before R is initialized, and therefore before .Rprofile is sourced —
+    // has certainly run, while staying well inside the 2-second Sys.sleep() in
+    // the R profile.  There is no synchronisation signal from the child process,
+    // so this window is inherently timing-dependent; 500ms provides comfortable
+    // headroom on loaded CI machines.
+    std::thread::sleep(std::time::Duration::from_millis(500));
 
     terminal
         .send("\x1b[200~x <- 42\x1b[201~\r")
