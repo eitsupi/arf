@@ -196,11 +196,13 @@ mod imp {
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let Some(mode) = original.take() else {
+        let Some(mode) = original.as_ref() else {
             return;
         };
 
-        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &mode) } != 0 {
+        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, mode) } == 0 {
+            *original = None;
+        } else {
             log::warn!(
                 "Failed to restore terminal input mode: {}",
                 std::io::Error::last_os_error()
