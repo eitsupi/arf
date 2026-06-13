@@ -132,6 +132,10 @@ non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 [experimental]
 shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
 
+[experimental.shell_abbreviations]
+# Fish-style abbreviations for shell mode (expanded on Space/Enter)
+# "gc" = "git commit"
+
 [experimental.history_forget]
 enabled = false            # Auto-remove failed commands from history
 delay = 2                  # Keep last N failed commands for retry
@@ -774,6 +778,21 @@ shell_semicolon_shortcut = true
 ```
 
 When the buffer is not empty, `;` inserts a semicolon as usual, so normal R expressions like `for (i in 1:10) { ... }` are unaffected.
+
+### Shell Abbreviations
+
+Fish-style abbreviations for the shell editor. When you type an abbreviation and press Space or Enter, it is automatically expanded to the full text. Only applies to shell mode — the R editor is unaffected.
+
+**Disabled by default** (empty map).
+
+```toml
+[experimental.shell_abbreviations]
+"gc" = "git commit"
+"gp" = "git push"
+"gs" = "git status"
+```
+
+Abbreviations are matched against the word immediately to the left of the cursor at the moment you press Space or Enter. The expansion replaces the abbreviation in place.
 
 ## CLI Options Override
 
