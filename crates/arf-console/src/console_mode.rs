@@ -99,6 +99,7 @@ mod imp {
 
         let mode = ORIGINAL_INPUT_MODE.load(Ordering::Acquire);
         if unsafe { SetConsoleMode(handle, mode) } == 0 {
+            HAS_ORIGINAL_INPUT_MODE.store(true, Ordering::Release);
             log::warn!("Failed to restore original console input mode");
         }
     }
