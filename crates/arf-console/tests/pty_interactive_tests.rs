@@ -740,20 +740,16 @@ fn test_pty_shell_abbreviations_expand_in_shell_mode() {
     // Press Enter — reedline expands the abbreviation and submits the expanded command
     terminal.send_line("").expect("Should press Enter");
 
-    // Wait for the reedline repaint showing the expanded buffer
+    // Search for "\r\nabbr_expanded" to match only the shell output line.
+    //
+    // The raw PTY buffer contains both the reedline repaint ("echo abbr_expanded"
+    // preceded by ANSI escape codes) and the shell output ("abbr_expanded\r\n").
+    // The shell output line is preceded by "\r\n" (the submission newline), while
+    // the repaint text is preceded by escape codes and "echo ". This makes "\r\n"
+    // a reliable anchor that uniquely identifies the command output.
     terminal
-        .expect("echo abbr_expanded")
-        .expect("Buffer repaint should show expanded text after Enter");
-
-    // Clear accumulated output so the final assertion only matches shell output
-    terminal
-        .clear_buffer()
-        .expect("Should clear accumulated output before checking shell output");
-
-    // The shell executes "echo abbr_expanded" and produces this output
-    terminal
-        .expect("abbr_expanded")
-        .expect("Shell should execute 'echo abbr_expanded' and produce this output");
+        .expect("\r\nabbr_expanded")
+        .expect("Shell should execute 'echo abbr_expanded' and produce output on its own line");
 
     terminal.quit().expect("Should quit cleanly");
 }
