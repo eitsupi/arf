@@ -109,11 +109,10 @@ mod imp {
 
         #[test]
         fn echo_input_is_cleared() {
-            assert_eq!(0, ENABLE_ECHO_INPUT & !ENABLE_ECHO_INPUT);
-            assert_eq!(
-                0,
-                (ENABLE_ECHO_INPUT | 0x100) & !ENABLE_ECHO_INPUT & ENABLE_ECHO_INPUT
-            );
+            let mode_with_echo = ENABLE_ECHO_INPUT | 0x100;
+            let new_mode = mode_with_echo & !ENABLE_ECHO_INPUT;
+            assert_eq!(0, new_mode & ENABLE_ECHO_INPUT, "echo bit must be cleared");
+            assert_ne!(0, new_mode & 0x100, "other bits must be preserved");
         }
     }
 }
