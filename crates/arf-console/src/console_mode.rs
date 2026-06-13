@@ -221,4 +221,4 @@ mod imp {
     }
 }
 
-pub(crate) use imp::ConsoleModeGuard;
+pub(crate) use imp::{ConsoleModeGuard, restore_original_input_mode};

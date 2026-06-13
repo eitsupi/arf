@@ -26,6 +26,8 @@ pub use types::{Rstart, SaType, UImode};
 // sys
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
+#[cfg(unix)]
+pub use sys::ensure_ld_library_path_with_pre_exec;
 pub use sys::{
     clear_r_interrupt_pending, clear_write_console_callback, command_had_error,
     ensure_ld_library_path, find_r_library, finish_ipc_capture, flush_reprex_buffer, get_r_home,

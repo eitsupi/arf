@@ -649,6 +649,14 @@ fn decode_windows_native(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
 /// Ok(false) if no re-exec needed.
 #[cfg(unix)]
 pub fn ensure_ld_library_path() -> RResult<bool> {
+    ensure_ld_library_path_with_pre_exec(|| {})
+}
+
+#[cfg(unix)]
+pub fn ensure_ld_library_path_with_pre_exec<F>(pre_exec: F) -> RResult<bool>
+where
+    F: FnOnce(),
+{
     let lib_path = find_r_library()?;
     let Some(lib_dir) = lib_path.parent() else {
         return Ok(false);
@@ -678,6 +686,8 @@ pub fn ensure_ld_library_path() -> RResult<bool> {
     let exe = env::current_exe().map_err(|e| RError::LibraryNotFound(e.to_string()))?;
 
     log::info!("Re-executing with LD_LIBRARY_PATH={}", new_path);
+
+    pre_exec();
 
     use std::os::unix::process::CommandExt;
     let err = Command::new(&exe).args(args).exec();
