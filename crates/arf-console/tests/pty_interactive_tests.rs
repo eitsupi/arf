@@ -729,13 +729,31 @@ fn test_pty_shell_abbreviations_expand_in_shell_mode() {
         .expect("] $")
         .expect("Should show shell mode prompt");
 
-    // Type the abbreviation and press Enter — expansion fires before submission
+    // Type the abbreviation and wait for the terminal to echo it back
     terminal
-        .send_line("abbr_test")
-        .expect("Should send abbreviation");
+        .send("abbr_test")
+        .expect("Should type abbreviation");
+    terminal
+        .expect("abbr_test")
+        .expect("Terminal should echo the typed abbreviation");
+
+    // Press Enter — reedline expands the abbreviation and submits the expanded command
+    terminal.send_line("").expect("Should press Enter");
+
+    // Wait for the reedline repaint showing the expanded buffer
+    terminal
+        .expect("echo abbr_expanded")
+        .expect("Buffer repaint should show expanded text after Enter");
+
+    // Clear accumulated output so the final assertion only matches shell output
+    terminal
+        .clear_buffer()
+        .expect("Should clear accumulated output before checking shell output");
+
+    // The shell executes "echo abbr_expanded" and produces this output
     terminal
         .expect("abbr_expanded")
-        .expect("Abbreviation should expand to 'echo abbr_expanded' and execute");
+        .expect("Shell should execute 'echo abbr_expanded' and produce this output");
 
     terminal.quit().expect("Should quit cleanly");
 }
