@@ -690,3 +690,199 @@ fn test_pty_history_browser() {
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Test fish-style abbreviation expansion in shell mode.
+///
+/// An abbreviation defined via `experimental.shell_abbreviations` should
+/// expand automatically when Enter is pressed at the end of the matching word.
+/// The expanded text is then executed as a shell command, producing the
+/// expected output.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_expand_in_shell_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_test" = "echo abbr_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Enter shell mode
+    terminal.send_line(":shell").expect("Should send :shell");
+    terminal
+        .expect("] $")
+        .expect("Should show shell mode prompt");
+
+    // Type the abbreviation and wait for the terminal to echo it back
+    terminal
+        .send("abbr_test")
+        .expect("Should type abbreviation");
+    terminal
+        .expect("abbr_test")
+        .expect("Terminal should echo the typed abbreviation");
+
+    // Press Enter — reedline expands the abbreviation and submits the expanded command
+    terminal.send_line("").expect("Should press Enter");
+
+    // Search for "abbr_expanded\r\n" to match only the shell output line.
+    //
+    // The raw PTY buffer contains both the reedline repaint ("echo abbr_expanded"
+    // followed by ANSI cursor escape codes) and the shell output ("abbr_expanded\r\n").
+    // In the repaint, "abbr_expanded" is followed by \x1b7 (save-cursor escape),
+    // while in the shell output it is followed by \r\n. The trailing \r\n therefore
+    // uniquely identifies the command output line and avoids matching the repaint.
+    terminal
+        .expect("abbr_expanded\r\n")
+        .expect("Shell should execute 'echo abbr_expanded' and produce output on its own line");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test that shell abbreviations do NOT expand in the R editor.
+///
+/// `experimental.shell_abbreviations` applies only to the shell editor.
+/// Typing an abbreviation in the R prompt must not trigger expansion; the
+/// word is evaluated as a regular R expression instead.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_do_not_expand_in_r_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_test" = "echo abbr_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Type the abbreviation word at the R prompt and press Enter
+    terminal
+        .send_line("abbr_test")
+        .expect("Should send abbreviation word at R prompt");
+
+    // R should evaluate `abbr_test` as an R expression and produce an object-not-found
+    // error — this string can only come from R's evaluator, not from local echo.
+    // If abbreviation expansion were active, R would never see `abbr_test` as an
+    // identifier: the buffer would contain "echo abbr_expanded" instead.
+    terminal.expect("not found").expect(
+        "R should produce object-not-found error, proving no abbreviation expansion occurred",
+    );
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test fish-style abbreviation expansion triggered by Space in shell mode.
+///
+/// Abbreviations expand on both Space and Enter. This test exercises the Space
+/// path: type the abbreviation, wait for the terminal to echo the typed word
+/// (which guarantees reedline has processed it as a separate event batch), then
+/// press Space to trigger expansion, wait for the expanded buffer repaint, and
+/// finally press Enter to submit the expanded command.
+///
+/// Synchronizing on observable terminal state (rather than a fixed sleep) keeps
+/// the test reliable under CI load: each `expect` blocks until the expected
+/// string appears in the PTY output, ensuring the right ordering without
+/// depending on timing assumptions.
+///
+/// Background: reedline fuses consecutive `Edit` events that arrive in the same
+/// read batch into one compound event. The space-expansion check only fires when
+/// `InsertChar(' ')` is the first command in the fused event. By waiting for the
+/// abbreviation echo before sending Space we guarantee they land in separate
+/// batches, so the space check sees exactly `InsertChar(' ')` and triggers
+/// expansion.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_expand_on_space_in_shell_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_sp" = "echo space_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Enter shell mode
+    terminal.send_line(":shell").expect("Should send :shell");
+    terminal
+        .expect("] $")
+        .expect("Should show shell mode prompt");
+
+    // Type the abbreviation and wait for the terminal to echo it back.
+    // This guarantees reedline has processed `abbr_sp` as its own event batch
+    // before the Space arrives, so they don't get fused into one compound event.
+    terminal.send("abbr_sp").expect("Should type abbreviation");
+    terminal
+        .expect("abbr_sp")
+        .expect("Terminal should echo the typed abbreviation");
+
+    // Send Space — now in a separate event batch, reedline sees InsertChar(' ')
+    // as the sole command and fires abbreviation expansion.
+    terminal
+        .send(" ")
+        .expect("Should press Space to trigger expansion");
+
+    // Wait for the reedline repaint that shows the expanded buffer content.
+    // This also ensures expansion has completed before we send Enter.
+    terminal
+        .expect("echo space_expanded")
+        .expect("Buffer repaint should show expanded text after Space");
+
+    // Clear accumulated output so the final expect only matches the shell's
+    // command output (not the `space_expanded` substring already in the repaint).
+    terminal
+        .clear_buffer()
+        .expect("Should clear accumulated output before checking shell output");
+
+    // Press Enter to submit the now-expanded command and verify it executes
+    terminal.send_line("").expect("Should press Enter");
+    terminal
+        .expect("space_expanded")
+        .expect("Shell should execute 'echo space_expanded' and produce this output");
+
+    terminal.quit().expect("Should quit cleanly");
+}

@@ -32,6 +32,7 @@ use reedline::{
     default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU16, Ordering};
 
@@ -806,6 +807,17 @@ impl Repl {
             let hinter =
                 DefaultHinter::default().with_style(Style::new().italic().fg(Color::DarkGray));
             shell_editor = shell_editor.with_hinter(Box::new(hinter));
+        }
+
+        if !self.config.experimental.shell_abbreviations.is_empty() {
+            let abbrs: HashMap<String, String> = self
+                .config
+                .experimental
+                .shell_abbreviations
+                .clone()
+                .into_iter()
+                .collect();
+            shell_editor = shell_editor.with_abbreviations(abbrs);
         }
 
         // Set up idle callback to process R events during input waiting.

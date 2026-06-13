@@ -86,6 +86,7 @@
             "require"
           ]
         },
+        "shell_abbreviations": {},
         "shell_completion": {
           "command_names": false
         },
@@ -1603,6 +1604,14 @@
               "require"
             ]
           }
+        },
+        "shell_abbreviations": {
+          "description": "Fish-style abbreviations for shell mode.\n\nAbbreviations are expanded automatically when you press Space or Enter.\nOnly applies to the shell editor (not the R editor).\n\nFormat: `\"abbreviation\" = \"expansion\"`\nExample: `\"gc\" = \"git commit\"`",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
         },
         "shell_completion": {
           "description": "Shell mode completion configuration.",
