@@ -460,6 +460,9 @@ fn run() -> Result<()> {
     // Disable terminal input echo before startup work can receive extension
     // input, and restore the original mode on exit. R's quit() may bypass Rust
     // destructors, so the guard also registers an atexit fallback.
+    #[cfg(unix)]
+    let mut _console_mode_guard = console_mode::ConsoleModeGuard::install();
+    #[cfg(not(unix))]
     let _console_mode_guard = console_mode::ConsoleModeGuard::install();
 
     // Ensure XDG directories exist
@@ -524,12 +527,18 @@ fn run() -> Result<()> {
 
     // Ensure LD_LIBRARY_PATH includes R library directory.
     // This may re-exec the current process if the path needs updating.
+    // On Unix, the pre-exec hook restores the terminal mode before exec so the
+    // replacement process starts with the original mode. If exec fails (rare),
+    // re-install the guard to re-disable echo for the rest of startup.
     #[cfg(unix)]
-    let ensure_ld_library_path_result =
-        arf_libr::ensure_ld_library_path_with_pre_exec(console_mode::restore_original_input_mode);
+    if let Err(e) =
+        arf_libr::ensure_ld_library_path_with_pre_exec(console_mode::restore_original_input_mode)
+    {
+        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+        _console_mode_guard = console_mode::ConsoleModeGuard::install();
+    }
     #[cfg(not(unix))]
-    let ensure_ld_library_path_result = arf_libr::ensure_ld_library_path();
-    if let Err(e) = ensure_ld_library_path_result {
+    if let Err(e) = arf_libr::ensure_ld_library_path() {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
 

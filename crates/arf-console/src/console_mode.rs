@@ -88,7 +88,7 @@ mod imp {
     }
 
     pub(crate) fn restore_original_input_mode() {
-        if !HAS_ORIGINAL_INPUT_MODE.load(Ordering::Acquire) {
+        if !HAS_ORIGINAL_INPUT_MODE.swap(false, Ordering::AcqRel) {
             return;
         }
 
@@ -191,16 +191,16 @@ mod imp {
     }
 
     pub(crate) fn restore_original_input_mode() {
-        let original = match ORIGINAL_TERMIOS.lock() {
+        let mut original = match ORIGINAL_TERMIOS.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let Some(mode) = original.as_ref() else {
+        let Some(mode) = original.take() else {
             return;
         };
 
-        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, mode) } != 0 {
+        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &mode) } != 0 {
             log::warn!(
                 "Failed to restore terminal input mode: {}",
                 std::io::Error::last_os_error()
@@ -221,4 +221,6 @@ mod imp {
     }
 }
 
-pub(crate) use imp::{ConsoleModeGuard, restore_original_input_mode};
+pub(crate) use imp::ConsoleModeGuard;
+#[cfg(unix)]
+pub(crate) use imp::restore_original_input_mode;
