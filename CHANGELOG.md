@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** Fish-style abbreviations for shell mode (`experimental.shell_abbreviations`). Abbreviations are expanded automatically when you press Space or Enter. Only applies to the shell editor, not the R editor. Example: `"gc" = "git commit"`.
+
 ## [0.4.0] - 2026-05-31
 
 ### Added

@@ -3,6 +3,7 @@
 use nu_ansi_term::Color;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Experimental features configuration.
 ///
@@ -54,6 +55,16 @@ pub struct ExperimentalConfig {
     /// Disabled by default.
     #[serde(default)]
     pub shell_semicolon_shortcut: bool,
+
+    /// Fish-style abbreviations for shell mode.
+    ///
+    /// Abbreviations are expanded automatically when you press Space or Enter.
+    /// Only applies to the shell editor (not the R editor).
+    ///
+    /// Format: `"abbreviation" = "expansion"`
+    /// Example: `"gc" = "git commit"`
+    #[serde(default)]
+    pub shell_abbreviations: BTreeMap<String, String>,
 }
 
 /// Configuration for shell mode completion.
@@ -201,6 +212,15 @@ struct ExperimentalConfigSchema {
     ///
     /// Disabled by default.
     pub shell_semicolon_shortcut: bool,
+
+    /// Fish-style abbreviations for shell mode.
+    ///
+    /// Abbreviations are expanded automatically when you press Space or Enter.
+    /// Only applies to the shell editor (not the R editor).
+    ///
+    /// Format: `"abbreviation" = "expansion"`
+    /// Example: `"gc" = "git commit"`
+    pub shell_abbreviations: BTreeMap<String, String>,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color

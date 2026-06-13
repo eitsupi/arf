@@ -119,3 +119,5 @@ package_functions = [
 
 [experimental.shell_completion]
 command_names = false
+
+[experimental.shell_abbreviations]
