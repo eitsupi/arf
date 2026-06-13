@@ -106,13 +106,18 @@ mod imp {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use windows_sys::Win32::System::Console::ENABLE_LINE_INPUT;
 
         #[test]
         fn echo_input_is_cleared() {
-            let mode_with_echo = ENABLE_ECHO_INPUT | 0x100;
+            let mode_with_echo = ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
             let new_mode = mode_with_echo & !ENABLE_ECHO_INPUT;
             assert_eq!(0, new_mode & ENABLE_ECHO_INPUT, "echo bit must be cleared");
-            assert_ne!(0, new_mode & 0x100, "other bits must be preserved");
+            assert_ne!(
+                0,
+                new_mode & ENABLE_LINE_INPUT,
+                "other bits must be preserved"
+            );
         }
     }
 }
