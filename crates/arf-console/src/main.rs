@@ -535,6 +535,10 @@ fn run() -> Result<()> {
         arf_libr::ensure_ld_library_path_with_pre_exec(console_mode::restore_original_input_mode)
     {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+        // Drop old guard before calling install(): assignment evaluates the RHS
+        // first (capturing and disabling echo), then drops the old guard, which
+        // would call restore and re-enable echo. Explicit drop avoids that.
+        drop(_console_mode_guard);
         _console_mode_guard = console_mode::ConsoleModeGuard::install();
     }
     #[cfg(not(unix))]
