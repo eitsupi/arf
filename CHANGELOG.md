@@ -6,6 +6,10 @@
 
 - **Experimental:** Fish-style abbreviations for shell mode (`experimental.shell_abbreviations`). Abbreviations are expanded automatically when you press Space or Enter. Only applies to the shell editor, not the R editor. Example: `"gc" = "git commit"`.
 
+### Fixed
+
+- Bracketed paste sequences sent before the first R prompt (e.g. by the vscode-R extension with `r.bracketedPaste: true`) are no longer visibly echoed to the terminal. The fix disables terminal input echo early in the startup sequence, before reedline's first `read_line()` call, and restores the original terminal mode on exit.
+
 ## [0.4.0] - 2026-05-31
 
 ### Added

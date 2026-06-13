@@ -246,6 +246,62 @@ fn test_pty_bracketed_paste() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Regression test for vscode-R sending bracketed paste before the first prompt.
+///
+/// vscode-R wraps code in bracketed-paste delimiters itself and VS Code then
+/// sends the payload as terminal input. If this arrives before reedline enters
+/// raw mode, the terminal driver can echo the escape sequence visibly.
+#[test]
+#[cfg(unix)]
+fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
+    let temp_dir = tempfile::tempdir().expect("Should create temp dir");
+    let rprofile_path = temp_dir.path().join(".Rprofile");
+    std::fs::write(&rprofile_path, "Sys.sleep(2)\n").expect("Should write R profile");
+    let rprofile = rprofile_path
+        .to_str()
+        .expect("R profile path should be valid UTF-8");
+
+    let mut terminal =
+        Terminal::spawn_with_args_and_env(&["--no-auto-match"], &[("R_PROFILE_USER", rprofile)])
+            .expect("Failed to spawn arf");
+
+    // Sleep long enough that ConsoleModeGuard::install() — which runs early in
+    // main() before R is initialized, and therefore before .Rprofile is sourced —
+    // has certainly run, while staying well inside the 2-second Sys.sleep() in
+    // the R profile.  There is no synchronisation signal from the child process,
+    // so this window is inherently timing-dependent; 500ms provides comfortable
+    // headroom on loaded CI machines.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    terminal
+        .send("\x1b[200~x <- 42\x1b[201~\r")
+        .expect("Should send bracketed paste before the first prompt");
+
+    terminal
+        .wait_for_prompt()
+        .expect("Should eventually show prompt");
+
+    let output = terminal.get_output().expect("Should get terminal output");
+    assert!(
+        !output.contains("\x1b[200~") && !output.contains("^[[200~"),
+        "bracketed paste start was echoed before first prompt; output:\n{output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[201~") && !output.contains("^[[201~"),
+        "bracketed paste end was echoed before first prompt; output:\n{output:?}"
+    );
+
+    terminal.clear_buffer().expect("Should clear buffer");
+    terminal
+        .send_line("x")
+        .expect("Should send variable inspection");
+    terminal
+        .expect("[1] 42")
+        .expect("Queued input should execute once REPL is ready");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Test bracketed paste mode with very long strings.
 ///
 /// This is a regression test for handling very long strings that may exceed

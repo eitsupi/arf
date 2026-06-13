@@ -100,8 +100,23 @@ impl Terminal {
         Self::spawn_with_size(args, DEFAULT_ROWS, DEFAULT_COLS)
     }
 
+    /// Spawn arf with additional arguments and environment variables.
+    pub fn spawn_with_args_and_env(args: &[&str], envs: &[(&str, &str)]) -> Result<Self, String> {
+        Self::spawn_with_size_and_env(args, envs, DEFAULT_ROWS, DEFAULT_COLS)
+    }
+
     /// Spawn arf with additional arguments and a custom terminal size.
     pub fn spawn_with_size(args: &[&str], rows: u16, cols: u16) -> Result<Self, String> {
+        Self::spawn_with_size_and_env(args, &[], rows, cols)
+    }
+
+    /// Spawn arf with additional arguments, environment variables, and a custom terminal size.
+    pub fn spawn_with_size_and_env(
+        args: &[&str],
+        envs: &[(&str, &str)],
+        rows: u16,
+        cols: u16,
+    ) -> Result<Self, String> {
         assert!(rows > 0 && cols > 0, "PTY size must be non-zero");
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
@@ -125,6 +140,9 @@ impl Terminal {
         }
         for arg in args {
             cmd.arg(*arg);
+        }
+        for (key, value) in envs {
+            cmd.env(key, value);
         }
 
         // Spawn the process
