@@ -246,6 +246,45 @@ fn test_pty_bracketed_paste() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Regression test for vscode-R sending bracketed paste before the first prompt.
+///
+/// vscode-R wraps code in bracketed-paste delimiters itself and VS Code then
+/// sends the payload as terminal input. If this arrives before reedline enters
+/// raw mode, the terminal driver can echo the escape sequence visibly.
+#[test]
+#[cfg(unix)]
+fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
+
+    terminal
+        .send("\x1b[200~x <- 42\x1b[201~\r")
+        .expect("Should send bracketed paste immediately after spawn");
+
+    terminal
+        .wait_for_prompt()
+        .expect("Should eventually show prompt");
+
+    let output = terminal.get_output().expect("Should get terminal output");
+    assert!(
+        !output.contains("\x1b[200~") && !output.contains("^[[200~"),
+        "bracketed paste start was echoed before first prompt; output:\n{output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[201~") && !output.contains("^[[201~"),
+        "bracketed paste end was echoed before first prompt; output:\n{output:?}"
+    );
+
+    terminal
+        .send_line("x")
+        .expect("Should send variable inspection");
+    terminal
+        .clear_and_expect("[1] 42")
+        .expect("Queued input should execute once REPL is ready");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Test bracketed paste mode with very long strings.
 ///
 /// This is a regression test for handling very long strings that may exceed
