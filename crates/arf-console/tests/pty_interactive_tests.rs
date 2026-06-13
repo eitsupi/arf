@@ -690,3 +690,97 @@ fn test_pty_history_browser() {
 
     terminal.quit().expect("Should quit cleanly");
 }
+
+/// Test fish-style abbreviation expansion in shell mode.
+///
+/// An abbreviation defined via `experimental.shell_abbreviations` should
+/// expand automatically when Enter is pressed at the end of the matching word.
+/// The expanded text is then executed as a shell command, producing the
+/// expected output.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_expand_in_shell_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_test" = "echo abbr_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Enter shell mode
+    terminal.send_line(":shell").expect("Should send :shell");
+    terminal
+        .expect("] $")
+        .expect("Should show shell mode prompt");
+
+    // Type the abbreviation and press Enter — expansion fires before submission
+    terminal
+        .send_line("abbr_test")
+        .expect("Should send abbreviation");
+    terminal
+        .expect("abbr_expanded")
+        .expect("Abbreviation should expand to 'echo abbr_expanded' and execute");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test that shell abbreviations do NOT expand in the R editor.
+///
+/// `experimental.shell_abbreviations` applies only to the shell editor.
+/// Typing an abbreviation in the R prompt must not trigger expansion; the
+/// word is evaluated as a regular R expression instead.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_do_not_expand_in_r_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_test" = "echo abbr_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Type the abbreviation word at the R prompt and press Enter
+    terminal
+        .send_line("abbr_test")
+        .expect("Should send abbreviation word at R prompt");
+
+    // R should evaluate `abbr_test` as an R expression (object not found),
+    // NOT expand it to "echo abbr_expanded"
+    terminal
+        .expect("abbr_test")
+        .expect("R should echo back the identifier name in the error, not expand it");
+
+    terminal.quit().expect("Should quit cleanly");
+}
