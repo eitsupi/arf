@@ -776,11 +776,84 @@ fn test_pty_shell_abbreviations_do_not_expand_in_r_mode() {
         .send_line("abbr_test")
         .expect("Should send abbreviation word at R prompt");
 
-    // R should evaluate `abbr_test` as an R expression (object not found),
-    // NOT expand it to "echo abbr_expanded"
+    // R should evaluate `abbr_test` as an R expression and produce an object-not-found
+    // error — this string can only come from R's evaluator, not from local echo.
+    // If abbreviation expansion were active, R would never see `abbr_test` as an
+    // identifier: the buffer would contain "echo abbr_expanded" instead.
+    terminal.expect("not found").expect(
+        "R should produce object-not-found error, proving no abbreviation expansion occurred",
+    );
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Test fish-style abbreviation expansion triggered by Space in shell mode.
+///
+/// Abbreviations expand on both Space and Enter. This test exercises the Space
+/// path: type the abbreviation, pause to let reedline process the characters as
+/// a separate event batch, then press Space to trigger expansion, and finally
+/// press Enter to submit the expanded command.
+///
+/// The pause is necessary because reedline fuses consecutive `Edit` events
+/// that arrive in the same read batch into one compound event, and the space
+/// expansion check only fires when `InsertChar(' ')` is the first command in
+/// the event. A brief sleep ensures the abbreviation characters are processed
+/// before the space arrives, so the space appears in its own batch.
+#[test]
+#[cfg(unix)]
+fn test_pty_shell_abbreviations_expand_on_space_in_shell_mode() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    writeln!(
+        config_file,
+        r#"
+[experimental.shell_abbreviations]
+"abbr_sp" = "echo space_expanded"
+"#
+    )
+    .expect("Failed to write config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--config",
+        config_file.path().to_str().unwrap(),
+        "--no-auto-match",
+        "--no-completion",
+    ])
+    .expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    // Enter shell mode
+    terminal.send_line(":shell").expect("Should send :shell");
     terminal
-        .expect("abbr_test")
-        .expect("R should echo back the identifier name in the error, not expand it");
+        .expect("] $")
+        .expect("Should show shell mode prompt");
+
+    // Type the abbreviation characters
+    terminal.send("abbr_sp").expect("Should type abbreviation");
+
+    // Wait for reedline's poll interval (33 ms) to elapse so the typed
+    // characters are processed as their own event batch before the space
+    // arrives. Without this pause they would be fused with the space into
+    // one compound Edit event, causing the space-expansion check to miss.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Send Space — this lands in a separate event batch, so reedline sees
+    // InsertChar(' ') as the first (and only) command and triggers expansion.
+    terminal
+        .send(" ")
+        .expect("Should press Space to trigger expansion");
+
+    // Small pause for the expansion repaint before sending Enter
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Press Enter to submit the now-expanded command
+    terminal.send_line("").expect("Should press Enter");
+    terminal
+        .expect("space_expanded")
+        .expect("Abbreviation should expand to 'echo space_expanded' on Space and execute");
 
     terminal.quit().expect("Should quit cleanly");
 }
