@@ -254,12 +254,22 @@ fn test_pty_bracketed_paste() {
 #[test]
 #[cfg(unix)]
 fn test_pty_bracketed_paste_before_first_prompt_not_echoed() {
+    let temp_dir = tempfile::tempdir().expect("Should create temp dir");
+    let rprofile_path = temp_dir.path().join(".Rprofile");
+    std::fs::write(&rprofile_path, "Sys.sleep(1)\n").expect("Should write R profile");
+    let rprofile = rprofile_path
+        .to_str()
+        .expect("R profile path should be valid UTF-8");
+
     let mut terminal =
-        Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
+        Terminal::spawn_with_args_and_env(&["--no-auto-match"], &[("R_PROFILE_USER", rprofile)])
+            .expect("Failed to spawn arf");
+
+    std::thread::sleep(std::time::Duration::from_millis(200));
 
     terminal
         .send("\x1b[200~x <- 42\x1b[201~\r")
-        .expect("Should send bracketed paste immediately after spawn");
+        .expect("Should send bracketed paste before the first prompt");
 
     terminal
         .wait_for_prompt()
