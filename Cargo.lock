@@ -1575,9 +1575,9 @@ dependencies = [
 
 [[package]]
 name = "rd-parser"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2a93ab20c73e7b2edf35e161545972d88a128d8f6c487c69d7644c369985fe4"
+checksum = "4b7501e3cf45bd0b865452a615ff1fd1a8dec4ea64cbcdf08e99f16d678fa32d"
 dependencies = [
  "serde",
  "serde_json",
@@ -1586,9 +1586,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "181e817c8f05452ddaa927f88308e76049ac0ed54b939f4848acbfbfd6efb686"
+checksum = "40c41a610e9703358825d50aca3e67eab2a6bd27a529a57720465b1fcf23b277"
 dependencies = [
  "rd-parser",
  "rd2qmd-mdast",
@@ -1600,9 +1600,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94567db64175107f205190c3e49d878c8be085b675de24900772be6d9fd8dc79"
+checksum = "767ad0400de39d8f73d07229c2472fa20f76c578fac2bda5d4a03a55c2e999a6"
 dependencies = [
  "serde",
 ]
