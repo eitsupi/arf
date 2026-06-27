@@ -499,18 +499,19 @@ mod tests {
         let home_profile = tmp.path().join(".Rprofile");
         std::fs::write(&home_profile, "").unwrap();
 
+        let home_var = if cfg!(windows) { "R_USER" } else { "HOME" };
         let prev_user = std::env::var("R_PROFILE_USER").ok();
-        let prev_home = std::env::var("HOME").ok();
+        let prev_home = std::env::var(home_var).ok();
         unsafe { std::env::set_var("R_PROFILE_USER", "") };
-        unsafe { std::env::set_var("HOME", tmp.path()) };
+        unsafe { std::env::set_var(home_var, tmp.path()) };
         let result = find_user_r_profile();
         match prev_user {
             Some(v) => unsafe { std::env::set_var("R_PROFILE_USER", v) },
             None => unsafe { std::env::remove_var("R_PROFILE_USER") },
         }
         match prev_home {
-            Some(v) => unsafe { std::env::set_var("HOME", v) },
-            None => unsafe { std::env::remove_var("HOME") },
+            Some(v) => unsafe { std::env::set_var(home_var, v) },
+            None => unsafe { std::env::remove_var(home_var) },
         }
 
         assert_eq!(result, Some(home_profile));
