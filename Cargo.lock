@@ -147,6 +147,7 @@ dependencies = [
  "once_cell",
  "r-vignette-to-md",
  "rd2qmd-core",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

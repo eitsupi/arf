@@ -470,6 +470,53 @@ fn r_user_home() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_find_site_r_profile_empty_r_profile_falls_through() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let etc_dir = tmp.path().join("etc");
+        std::fs::create_dir_all(&etc_dir).unwrap();
+        let site_profile = etc_dir.join("Rprofile.site");
+        std::fs::write(&site_profile, "").unwrap();
+
+        let prev = std::env::var("R_PROFILE").ok();
+        unsafe { std::env::set_var("R_PROFILE", "") };
+        let result = find_site_r_profile(tmp.path());
+        match prev {
+            Some(v) => unsafe { std::env::set_var("R_PROFILE", v) },
+            None => unsafe { std::env::remove_var("R_PROFILE") },
+        }
+
+        assert_eq!(result, Some(site_profile));
+    }
+
+    #[test]
+    fn test_find_user_r_profile_empty_r_profile_user_falls_through() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home_profile = tmp.path().join(".Rprofile");
+        std::fs::write(&home_profile, "").unwrap();
+
+        let home_var = if cfg!(windows) { "R_USER" } else { "HOME" };
+        let prev_user = std::env::var("R_PROFILE_USER").ok();
+        let prev_home = std::env::var(home_var).ok();
+        unsafe { std::env::set_var("R_PROFILE_USER", "") };
+        unsafe { std::env::set_var(home_var, tmp.path()) };
+        let result = find_user_r_profile();
+        match prev_user {
+            Some(v) => unsafe { std::env::set_var("R_PROFILE_USER", v) },
+            None => unsafe { std::env::remove_var("R_PROFILE_USER") },
+        }
+        match prev_home {
+            Some(v) => unsafe { std::env::set_var(home_var, v) },
+            None => unsafe { std::env::remove_var(home_var) },
+        }
+
+        assert_eq!(result, Some(home_profile));
+    }
+
     #[test]
     fn test_should_ignore_site_r_profile() {
         // Should ignore with --no-site-file
