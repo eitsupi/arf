@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `.Rprofile` is now loaded correctly after `:restart!` when `R_PROFILE_USER` is set to an empty string in the environment. An empty value is now treated as unset, matching R's own behavior. This restores profile loading in environments where a parent process resets `R_PROFILE_USER` to `""` after the initial startup.
+
 ## [0.4.1] - 2026-06-13
 
 ### Added
