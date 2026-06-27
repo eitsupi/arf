@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 description = "High-level R abstractions for safe R object manipulation"
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [dependencies]
 arf-libr.workspace = true
 r-vignette-to-md.workspace = true
