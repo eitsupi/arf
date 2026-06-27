@@ -385,12 +385,16 @@ unsafe extern "C" fn call_callback(payload: *mut std::ffi::c_void) {
 fn find_site_r_profile(r_home: &Path) -> Option<PathBuf> {
     // 1. Try R_PROFILE environment variable
     if let Ok(path_str) = std::env::var("R_PROFILE") {
-        let path = PathBuf::from(&path_str);
-        if path.exists() {
-            return Some(path);
+        if path_str.is_empty() {
+            // Empty string is treated as unset, matching R's own behavior.
+        } else {
+            let path = PathBuf::from(&path_str);
+            if path.exists() {
+                return Some(path);
+            }
+            log::warn!("`R_PROFILE` detected but '{path_str}' does not exist");
+            return None;
         }
-        log::warn!("`R_PROFILE` detected but '{path_str}' does not exist");
-        return None;
     }
 
     // 2. Try arch-specific Rprofile.site (typically Windows: etc/x86/Rprofile.site)
@@ -416,12 +420,16 @@ fn find_site_r_profile(r_home: &Path) -> Option<PathBuf> {
 fn find_user_r_profile() -> Option<PathBuf> {
     // 1. Try R_PROFILE_USER environment variable
     if let Ok(path_str) = std::env::var("R_PROFILE_USER") {
-        let path = PathBuf::from(&path_str);
-        if path.exists() {
-            return Some(path);
+        if path_str.is_empty() {
+            // Empty string is treated as unset, matching R's own behavior.
+        } else {
+            let path = PathBuf::from(&path_str);
+            if path.exists() {
+                return Some(path);
+            }
+            log::warn!("`R_PROFILE_USER` detected but '{path_str}' does not exist");
+            return None;
         }
-        log::warn!("`R_PROFILE_USER` detected but '{path_str}' does not exist");
-        return None;
     }
 
     // 2. Try current directory .Rprofile
