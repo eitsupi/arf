@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Support R installations on RHEL and AlmaLinux by checking `/usr/lib64/R/lib/libR.so` and using lazy symbol resolution when loading libR.
+
 ## [0.4.2] - 2026-06-27
 
 ### Fixed

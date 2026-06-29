@@ -187,10 +187,10 @@ impl RLibrary {
             #[cfg(unix)]
             let library = {
                 use libloading::os::unix::Library as UnixLibrary;
-                // RTLD_NOW = 0x2, RTLD_GLOBAL = 0x100
-                const RTLD_NOW: libc::c_int = 0x2;
+                // RTLD_LAZY = 0x1, RTLD_GLOBAL = 0x100
+                const RTLD_LAZY: libc::c_int = 0x1;
                 const RTLD_GLOBAL: libc::c_int = 0x100;
-                let unix_lib = UnixLibrary::open(Some(library_path), RTLD_NOW | RTLD_GLOBAL)
+                let unix_lib = UnixLibrary::open(Some(library_path), RTLD_LAZY | RTLD_GLOBAL)
                     .map_err(|e| RError::LibraryNotFound(e.to_string()))?;
                 Library::from(unix_lib)
             };
