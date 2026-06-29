@@ -72,7 +72,7 @@ pub fn evaluate_with_capture(code: &str, visible: bool) -> EvaluateResult {
     // Start capturing via WriteConsoleEx callback
     arf_libr::start_ipc_capture(visible);
 
-    let eval_result = arf_harp::eval_string(&capture_code);
+    let eval_result = arf_harp::eval_string_in_base(&capture_code);
 
     // Stop capturing and collect stdout/stderr
     let (stdout, stderr) = arf_libr::finish_ipc_capture();

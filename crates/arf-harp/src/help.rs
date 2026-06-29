@@ -80,10 +80,28 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         // hsearch_db() returns a list with $Base containing the help index
         // We extract the relevant columns: Package, Topic, Title, Type
         let code = r#"
-            tryCatch({
-                db <- utils::hsearch_db()
-                base <- db$Base
-                if (is.null(base)) {
+            local({
+                tryCatch({
+                    db <- utils::hsearch_db()
+                    base_entries <- db$Base
+                    if (is.null(base_entries)) {
+                        data.frame(
+                            Package = character(0),
+                            Topic = character(0),
+                            Title = character(0),
+                            Type = character(0),
+                            stringsAsFactors = FALSE
+                        )
+                    } else {
+                        data.frame(
+                            Package = base_entries$Package,
+                            Topic = base_entries$Topic,
+                            Title = base_entries$Title,
+                            Type = base_entries$Type,
+                            stringsAsFactors = FALSE
+                        )
+                    }
+                }, error = function(e) {
                     data.frame(
                         Package = character(0),
                         Topic = character(0),
@@ -91,23 +109,7 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
                         Type = character(0),
                         stringsAsFactors = FALSE
                     )
-                } else {
-                    data.frame(
-                        Package = base$Package,
-                        Topic = base$Topic,
-                        Title = base$Title,
-                        Type = base$Type,
-                        stringsAsFactors = FALSE
-                    )
-                }
-            }, error = function(e) {
-                data.frame(
-                    Package = character(0),
-                    Topic = character(0),
-                    Title = character(0),
-                    Type = character(0),
-                    stringsAsFactors = FALSE
-                )
+                })
             })
         "#;
 
@@ -137,11 +139,11 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
@@ -156,8 +158,6 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
 
         let result = protect.protect(payload.result.unwrap());
 
-        // Extract data from the data.frame
-        // A data.frame in R is a list of columns
         extract_help_topics(result)
     }
 }
@@ -261,11 +261,11 @@ unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
