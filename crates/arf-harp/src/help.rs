@@ -80,7 +80,7 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         // hsearch_db() returns a list with $Base containing the help index
         // We extract the relevant columns: Package, Topic, Title, Type
         let code = r#"
-            local({
+            base::local({
                 tryCatch({
                     db <- utils::hsearch_db()
                     base <- db$Base
