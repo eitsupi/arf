@@ -80,10 +80,28 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         // hsearch_db() returns a list with $Base containing the help index
         // We extract the relevant columns: Package, Topic, Title, Type
         let code = r#"
-            tryCatch({
-                db <- utils::hsearch_db()
-                base <- db$Base
-                if (is.null(base)) {
+            local({
+                tryCatch({
+                    db <- utils::hsearch_db()
+                    base <- db$Base
+                    if (is.null(base)) {
+                        data.frame(
+                            Package = character(0),
+                            Topic = character(0),
+                            Title = character(0),
+                            Type = character(0),
+                            stringsAsFactors = FALSE
+                        )
+                    } else {
+                        data.frame(
+                            Package = base$Package,
+                            Topic = base$Topic,
+                            Title = base$Title,
+                            Type = base$Type,
+                            stringsAsFactors = FALSE
+                        )
+                    }
+                }, error = function(e) {
                     data.frame(
                         Package = character(0),
                         Topic = character(0),
@@ -91,23 +109,7 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
                         Type = character(0),
                         stringsAsFactors = FALSE
                     )
-                } else {
-                    data.frame(
-                        Package = base$Package,
-                        Topic = base$Topic,
-                        Title = base$Title,
-                        Type = base$Type,
-                        stringsAsFactors = FALSE
-                    )
-                }
-            }, error = function(e) {
-                data.frame(
-                    Package = character(0),
-                    Topic = character(0),
-                    Title = character(0),
-                    Type = character(0),
-                    stringsAsFactors = FALSE
-                )
+                })
             })
         "#;
 
