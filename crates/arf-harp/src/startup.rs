@@ -58,7 +58,7 @@ pub fn override_platform_gui() {
         if (locked) lockBinding(".Platform", e)
     })"##;
 
-    match crate::eval_string(code) {
+    match crate::eval_string_in_base(code) {
         Ok(_) => log::info!(r#"[WINDOWS] .Platform$GUI set to "arf-console""#),
         Err(err) => log::error!("[WINDOWS] Failed to override .Platform$GUI: {err}"),
     }

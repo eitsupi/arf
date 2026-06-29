@@ -332,11 +332,11 @@ fn fetch_installed_packages() -> HarpResult<Vec<String>> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
@@ -417,11 +417,11 @@ pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<St
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
@@ -621,12 +621,12 @@ fn get_r_builtin_completions(
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         // Evaluate using R_ToplevelExec for safe error handling
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
@@ -693,11 +693,11 @@ pub fn get_token(line: &str, cursor_pos: usize) -> HarpResult<String> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 

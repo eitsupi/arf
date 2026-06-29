@@ -84,10 +84,26 @@ impl RObject {
 /// Parse and evaluate an R expression string, printing visible results.
 pub fn eval_string(code: &str) -> HarpResult<RObject> {
     let lib = r_library()?;
+    let eval_env = unsafe { *lib.r_globalenv };
+    eval_string_in_env(code, eval_env)
+}
+
+/// Parse and evaluate an R expression string in `R_BaseEnv`, printing visible results.
+///
+/// Evaluating in the base environment prevents user bindings in `.GlobalEnv` from
+/// masking base functions. Use this for all internal infrastructure code that should
+/// not be affected by the user's workspace.
+pub fn eval_string_in_base(code: &str) -> HarpResult<RObject> {
+    let lib = r_library()?;
+    let eval_env = unsafe { *lib.r_baseenv };
+    eval_string_in_env(code, eval_env)
+}
+
+fn eval_string_in_env(code: &str, eval_env: SEXP) -> HarpResult<RObject> {
+    let lib = r_library()?;
     let mut protect = RProtect::new();
 
     unsafe {
-        // Create R string from code
         let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
             expected: "valid UTF-8".to_string(),
             actual: "string with null byte".to_string(),
@@ -135,18 +151,12 @@ pub fn eval_string(code: &str) -> HarpResult<RObject> {
             }
         }
 
-        // Get the number of expressions
         let n_expr = (lib.rf_length)(parsed);
-        let global_env = *lib.r_globalenv;
-
         let mut last_result = r_nil_value()?;
 
-        // Evaluate each expression and print visible results
         for i in 0..n_expr as isize {
             let expr = (lib.vector_elt)(parsed, i);
-
-            // Use withVisible() to evaluate and get visibility information
-            let with_visible_result = eval_with_visible(expr, global_env, &mut protect)?;
+            let with_visible_result = eval_with_visible(expr, eval_env, &mut protect)?;
 
             if let Some((value, visible)) = with_visible_result {
                 last_result = value;

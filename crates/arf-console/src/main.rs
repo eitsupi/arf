@@ -1032,7 +1032,7 @@ local({
 })
 "#;
 
-    arf_harp::eval_string(code)
+    arf_harp::eval_string_in_base(code)
         .context("Failed to configure headless R options (pager, browser, graphics device)")?;
     log::info!("Headless R options configured (pager, browser, graphics device)");
     Ok(())

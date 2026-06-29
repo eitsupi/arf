@@ -139,11 +139,11 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
@@ -158,8 +158,6 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
 
         let result = protect.protect(payload.result.unwrap());
 
-        // Extract data from the data.frame
-        // A data.frame in R is a list of columns
         extract_help_topics(result)
     }
 }
@@ -263,11 +261,11 @@ unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
         }
 
         let expr = (lib.vector_elt)(parsed, 0);
-        let global_env = *lib.r_globalenv;
+        let base_env = *lib.r_baseenv;
 
         let mut payload = EvalPayload {
             expr,
-            env: global_env,
+            env: base_env,
             result: None,
         };
 
