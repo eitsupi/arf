@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "arf-console"
-version = "0.4.2"
+version = "0.4.3-rc.1"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.4.2"
+version = "0.4.3-rc.1"
 dependencies = [
  "arf-libr",
  "log",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.4.2"
+version = "0.4.3-rc.1"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -1502,7 +1502,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r-vignette-to-md"
-version = "0.4.2"
+version = "0.4.3-rc.1"
 dependencies = [
  "htmd",
 ]

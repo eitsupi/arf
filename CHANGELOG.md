@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [0.4.3-rc.1] - 2026-06-30
+
 ### Fixed
 
-- Support R installations on RHEL and AlmaLinux by checking `/usr/lib64/R/lib/libR.so` and using lazy symbol resolution when loading libR.
-- Fixed `.Rprofile` not being loaded after `:restart!` on macOS/Linux when `R_PROFILE_USER` is set to an empty string in the environment. The fix from #226 applied only to Windows; this extends the same behaviour to Unix where R handles profile loading internally.
+- The help browser (`:help`), tab completion, and object inspection no longer silently overwrite user variables in `.GlobalEnv` (e.g. variables named `db` or `base` were at risk) (#233).
+- Support R installations on RHEL and AlmaLinux by checking `/usr/lib64/R/lib/libR.so` and using lazy symbol resolution when loading libR (#232).
+- Fixed `.Rprofile` not being loaded after `:restart!` on macOS/Linux when `R_PROFILE_USER` is set to an empty string in the environment. The fix from #226 applied only to Windows; this extends the same behaviour to Unix where R handles profile loading internally (#234).
 
 ## [0.4.2] - 2026-06-27
 
