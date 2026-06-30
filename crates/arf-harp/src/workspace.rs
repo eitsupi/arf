@@ -29,8 +29,11 @@ pub struct EnvEntry {
 
 /// Snapshot the current .GlobalEnv bindings.
 ///
+/// When `all_names` is false (default), names starting with `.` are excluded,
+/// matching R's default `ls()` behavior.
+///
 /// Must be called from the R main thread.
-pub fn workspace_snapshot() -> HarpResult<Vec<EnvEntry>> {
+pub fn workspace_snapshot(all_names: bool) -> HarpResult<Vec<EnvEntry>> {
     let lib = r_library()?;
     let nil = r_nil_value()?;
     let unbound = r_unbound_value()?;
@@ -41,8 +44,9 @@ pub fn workspace_snapshot() -> HarpResult<Vec<EnvEntry>> {
     unsafe {
         let global_env = *lib.r_globalenv;
 
-        // R_lsInternal3(env, all_names=TRUE, sorted=TRUE) — returns a STRSXP
-        let names_vec = protect.protect((lib.r_lsinternal3)(global_env, R_TRUE, R_TRUE));
+        // R_lsInternal3(env, all_names, sorted=TRUE) — returns a STRSXP
+        let all = if all_names { R_TRUE } else { R_FALSE };
+        let names_vec = protect.protect((lib.r_lsinternal3)(global_env, all, R_TRUE));
 
         let n = (lib.rf_length)(names_vec) as isize;
         let mut entries = Vec::with_capacity(n as usize);

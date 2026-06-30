@@ -21,7 +21,7 @@ const MIN_SIZE: MinimumSize = MinimumSize { cols: 60, rows: 8 };
 const CLASS_WIDTH: usize = 18;
 const TYPE_WIDTH: usize = 12;
 const SIZE_WIDTH: usize = 8;
-/// Extra columns beyond name: class + type + size + marker + separators
+/// Columns beyond name: class + type + size + marker + separators + cursor
 const FIXED_COLS: usize = CLASS_WIDTH + 1 + TYPE_WIDTH + 1 + SIZE_WIDTH + 1 + 2 + 2;
 const NAME_MIN: usize = 15;
 
@@ -39,6 +39,8 @@ struct ObjectsBrowser {
     scroll_offset: usize,
     filter_text: String,
     filter_active: bool,
+    /// When true, dot-prefixed names are included (like ls(all.names=TRUE)).
+    show_hidden: bool,
     feedback: Option<String>,
 }
 
@@ -52,12 +54,13 @@ impl ObjectsBrowser {
             scroll_offset: 0,
             filter_text: String::new(),
             filter_active: false,
+            show_hidden: false,
             feedback: None,
         }
     }
 
-    fn refresh(&mut self) {
-        match workspace_snapshot() {
+    fn reload(&mut self) {
+        match workspace_snapshot(self.show_hidden) {
             Ok(entries) => {
                 self.entries = entries;
                 self.update_filter();
@@ -85,7 +88,6 @@ impl ObjectsBrowser {
                 .map(|(i, _)| i)
                 .collect();
         }
-        // Clamp cursor to valid range
         if self.filtered.is_empty() {
             self.cursor = 0;
             self.scroll_offset = 0;
@@ -172,10 +174,12 @@ impl ObjectsBrowser {
         )?;
 
         // ── Header ──────────────────────────────────────────────────────────
+        let hidden_marker = if self.show_hidden { " [all]" } else { "" };
         let header = format!(
-            "─ Objects [{}/{}] ─",
+            "─ Objects [{}/{}]{} ─",
             self.filtered.len(),
-            self.entries.len()
+            self.entries.len(),
+            hidden_marker,
         );
         let padded = format!("{:─<width$}", header, width = width);
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
@@ -185,7 +189,6 @@ impl ObjectsBrowser {
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
         if self.filter_active {
             print!("\r  Filter: {}_", self.filter_text);
-            // pad to width
             let used = 11 + display_width(&self.filter_text);
             print!("{}", " ".repeat(width.saturating_sub(used)));
             println!();
@@ -229,10 +232,9 @@ impl ObjectsBrowser {
                 let class = truncate_to_width(&entry.class_label, CLASS_WIDTH);
                 let typ = truncate_to_width(&entry.type_label, TYPE_WIDTH);
                 let size_str = format_size(entry.size);
-
                 let marker = if entry.has_children { " >" } else { "  " };
-
                 let cursor_mark = if is_current { ">" } else { " " };
+
                 let content = format!(
                     "{} {} │ {} │ {} │ {}{}",
                     cursor_mark,
@@ -261,11 +263,10 @@ impl ObjectsBrowser {
         let footer_text = if let Some(msg) = &self.feedback {
             format!("─ {} ─", msg)
         } else {
-            "─ ↑↓/jk navigate │ / filter │ r refresh │ q exit ─".to_string()
+            "─ ↑↓/jk navigate │ / filter │ a toggle hidden │ r refresh │ q exit ─".to_string()
         };
         let padded_footer = format!("{:─<width$}", footer_text, width = width);
         print!("\r{}", padded_footer.dark_grey());
-        stdout.flush()?;
         queue!(stdout, EndSynchronizedUpdate)?;
         stdout.flush()?;
 
@@ -278,8 +279,6 @@ impl ObjectsBrowser {
         loop {
             let (_, rows) = terminal::size().unwrap_or((80, 24));
             let visible = Self::visible_rows(rows);
-            let (cols, _) = terminal::size().unwrap_or((80, 24));
-            let _ = Self::name_width(cols);
 
             if needs_redraw {
                 self.render(stdout)?;
@@ -350,8 +349,12 @@ impl ObjectsBrowser {
                                 (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                                     self.move_to_bottom(visible);
                                 }
+                                (KeyCode::Char('a'), KeyModifiers::NONE) => {
+                                    self.show_hidden = !self.show_hidden;
+                                    self.reload();
+                                }
                                 (KeyCode::Char('r'), KeyModifiers::NONE) => {
-                                    self.refresh();
+                                    self.reload();
                                 }
                                 _ => {
                                     needs_redraw = false;
@@ -397,7 +400,8 @@ fn format_size(size: Option<i64>) -> String {
 
 /// Run the objects browser, displaying .GlobalEnv contents.
 pub fn run_objects_browser() -> io::Result<ObjectsBrowserResult> {
-    let entries = workspace_snapshot().unwrap_or_default();
+    // Default: hide dot-prefixed names (matches R's ls() default)
+    let entries = workspace_snapshot(false).unwrap_or_default();
     let browser = ObjectsBrowser::new(entries);
     with_alternate_screen(|| {
         let mut stdout = io::stdout();
