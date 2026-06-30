@@ -15,7 +15,8 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 /// Minimum terminal size for the objects browser.
-const MIN_SIZE: MinimumSize = MinimumSize { cols: 60, rows: 8 };
+/// Must be at least FIXED_COLS + NAME_MIN = 51 + 15 = 66.
+const MIN_SIZE: MinimumSize = MinimumSize { cols: 66, rows: 8 };
 
 /// Fixed column widths (name is dynamic).
 const CLASS_WIDTH: usize = 18;
@@ -269,7 +270,12 @@ impl ObjectsBrowser {
             "─ ↑↓/jk navigate │ / filter │ a toggle hidden │ r refresh │ q exit ─".to_string()
         };
         let footer_display = truncate_to_width(&footer_text, width);
-        let padded_footer = format!("{:─<width$}", footer_display, width = width);
+        let used = display_width(&footer_display);
+        let padded_footer = format!(
+            "{}{}",
+            footer_display,
+            "─".repeat(width.saturating_sub(used))
+        );
         print!("\r{}", padded_footer.dark_grey());
         queue!(stdout, EndSynchronizedUpdate)?;
         stdout.flush()?;
