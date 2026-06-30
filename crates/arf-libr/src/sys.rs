@@ -19,6 +19,7 @@ static R_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut())
 const R_LIB_PATHS: &[&str] = &[
     "/opt/R/current/lib/R/lib/libR.so",
     "/usr/lib/R/lib/libR.so",
+    "/usr/lib64/R/lib/libR.so",
     "/usr/local/lib/R/lib/libR.so",
 ];
 
