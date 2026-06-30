@@ -21,8 +21,8 @@ const MIN_SIZE: MinimumSize = MinimumSize { cols: 60, rows: 8 };
 const CLASS_WIDTH: usize = 18;
 const TYPE_WIDTH: usize = 12;
 const SIZE_WIDTH: usize = 8;
-/// Columns beyond name: class + type + size + marker + separators + cursor
-const FIXED_COLS: usize = CLASS_WIDTH + 1 + TYPE_WIDTH + 1 + SIZE_WIDTH + 1 + 2 + 2;
+/// Columns beyond name: cursor(1) + space(1) + " │ "(3)×3 + class + type + size + marker(2)
+const FIXED_COLS: usize = 2 + 3 + CLASS_WIDTH + 3 + TYPE_WIDTH + 3 + SIZE_WIDTH + 2;
 const NAME_MIN: usize = 15;
 
 /// Result of running the objects browser.
@@ -82,8 +82,8 @@ impl ObjectsBrowser {
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| {
-                    fuzzy_match(&e.name, query).is_some()
-                        || fuzzy_match(&e.class_label, query).is_some()
+                    fuzzy_match(query, &e.name).is_some()
+                        || fuzzy_match(query, &e.class_label).is_some()
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -93,6 +93,9 @@ impl ObjectsBrowser {
             self.scroll_offset = 0;
         } else {
             self.cursor = self.cursor.min(self.filtered.len() - 1);
+            // Also clamp scroll_offset so the cursor stays in the visible window.
+            // We don't know visible_rows here, so just ensure offset <= cursor.
+            self.scroll_offset = self.scroll_offset.min(self.cursor);
         }
     }
 
@@ -265,7 +268,8 @@ impl ObjectsBrowser {
         } else {
             "─ ↑↓/jk navigate │ / filter │ a toggle hidden │ r refresh │ q exit ─".to_string()
         };
-        let padded_footer = format!("{:─<width$}", footer_text, width = width);
+        let footer_display = truncate_to_width(&footer_text, width);
+        let padded_footer = format!("{:─<width$}", footer_display, width = width);
         print!("\r{}", padded_footer.dark_grey());
         queue!(stdout, EndSynchronizedUpdate)?;
         stdout.flush()?;

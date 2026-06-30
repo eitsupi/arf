@@ -117,8 +117,8 @@ pub fn workspace_snapshot(all_names: bool) -> HarpResult<Vec<EnvEntry>> {
             // value is rooted through global_env; no alloc between here and string read.
             let class_sexp = (lib.rf_getattrib)(value, class_sym);
             let explicit_class: Option<String> = if class_sexp != nil {
-                // class attribute must be a STRSXP (16)
-                if (lib.rf_typeof)(class_sexp) as u32 == 16 {
+                // class attribute must be a non-empty STRSXP (16)
+                if (lib.rf_typeof)(class_sexp) as u32 == 16 && (lib.rf_xlength)(class_sexp) > 0 {
                     let cc = (lib.r_charsxp)((lib.string_elt)(class_sexp, 0));
                     if cc.is_null() {
                         None
