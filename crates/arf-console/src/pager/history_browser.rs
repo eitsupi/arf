@@ -225,10 +225,10 @@ impl HistoryBrowser {
                 .enumerate()
                 .filter_map(|(idx, entry)| {
                     // Apply meta command filter
-                    if let Some(want_meta) = self.filter.meta {
-                        if entry.is_meta != want_meta {
-                            return None;
-                        }
+                    if let Some(want_meta) = self.filter.meta
+                        && entry.is_meta != want_meta
+                    {
+                        return None;
                     }
 
                     // Apply hostname filter
