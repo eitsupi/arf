@@ -33,6 +33,8 @@ pub enum MetaCommandResult {
     ShowHistoryBrowser { path: PathBuf, mode: HistoryDbMode },
     /// Display history schema (caller runs pager)
     ShowHistorySchema,
+    /// Open the objects browser (caller runs pager)
+    ShowObjectsBrowser,
 }
 
 /// Process a meta command (starting with `:`) and return the result.
@@ -268,9 +270,11 @@ pub fn process_meta_command(
             }
             Some(MetaCommandResult::Handled)
         }
+        "objects" | "objs" => Some(MetaCommandResult::ShowObjectsBrowser),
         "commands" | "cmds" => {
             arf_println!("Available commands:");
             println!("#   :help          - Search R help");
+            println!("#   :objects       - Browse .GlobalEnv objects");
             println!("#   :info          - Show session information");
             println!("#   :shell         - Enter shell mode (input goes to system shell)");
             println!("#   :r             - Return to R mode (from shell mode)");

@@ -1718,7 +1718,7 @@ local({
     .arf_error_state <- new.env(parent = emptyenv())
     .arf_error_state$had_error <- FALSE
 
-    # Store it in global environment for persistence
+    # Store in globalenv with dot prefix so ls() hides it by default
     assign(".arf_error_state", .arf_error_state, envir = globalenv())
 
     # Store the user's previous error handler (if any) so we can chain to it
@@ -1745,9 +1745,6 @@ local({
 
 /// Check if the R error state indicates an error occurred.
 ///
-/// This reads `.arf_error_state$had_error` from the global environment.
-/// The globalCallingHandlers error handler sets this to TRUE when an error occurs.
-///
 /// # Safety
 /// R must be initialized and the global error handler must be set up
 /// before this function returns meaningful results.
@@ -1763,14 +1760,13 @@ fn check_r_error_state() -> bool {
     };
 
     unsafe {
-        // Look up .arf_error_state in global environment using Rf_findVar
         let arf_error_state_sym = {
             let name = std::ffi::CString::new(".arf_error_state").unwrap();
             (lib.rf_install)(name.as_ptr())
         };
 
         let global_env = *lib.r_globalenv;
-        let state_env = (lib.rf_findvar)(arf_error_state_sym, global_env);
+        let state_env = (lib.rf_findvarinframe)(global_env, arf_error_state_sym);
 
         // Check if the environment exists
         if state_env.is_null() || state_env == *lib.r_unboundvalue {
@@ -1819,14 +1815,13 @@ fn reset_r_error_state() {
     };
 
     unsafe {
-        // Look up .arf_error_state in global environment
         let arf_error_state_sym = {
             let name = std::ffi::CString::new(".arf_error_state").unwrap();
             (lib.rf_install)(name.as_ptr())
         };
 
         let global_env = *lib.r_globalenv;
-        let state_env = (lib.rf_findvar)(arf_error_state_sym, global_env);
+        let state_env = (lib.rf_findvarinframe)(global_env, arf_error_state_sym);
 
         // If the environment doesn't exist, nothing to reset
         if state_env.is_null() || state_env == *lib.r_unboundvalue {
