@@ -131,6 +131,22 @@ pub struct RLibrary {
     #[cfg(windows)]
     pub ga_initapp: Option<unsafe extern "C" fn(c_int, *mut *mut c_char) -> c_int>,
 
+    // Workspace snapshot functions
+    // Rf_findVarInFrame(rho, sym) — look up sym in env rho only (no parent search)
+    pub rf_findvarinframe: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    // R_existsVarInFrame(rho, sym) — check existence without fetching
+    pub r_existsvarinframe: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
+    // R_BindingIsActive(sym, rho) — NOTE: sym first, env second
+    pub r_bindingisactive: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
+    // R_lsInternal3(env, all_names, sorted) — list binding names
+    pub r_lsinternal3: unsafe extern "C" fn(SEXP, Rboolean, Rboolean) -> SEXP,
+    // Rf_getAttrib(x, sym) — get attribute
+    pub rf_getattrib: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    // R_ClassSymbol — the "class" attribute symbol (global pointer)
+    pub r_classsymbol: *mut SEXP,
+    // Rf_isS4(x) — check if object is S4
+    pub rf_iss4: unsafe extern "C" fn(SEXP) -> Rboolean,
+
     // R state variables
     pub r_interactive: *mut c_int,
     pub r_signalhandlers: *mut c_int,
@@ -341,6 +357,15 @@ impl RLibrary {
             load_symbol!(rf_findvar, b"Rf_findVar\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
             load_symbol!(rf_scalarlogical, b"Rf_ScalarLogical\0");
+
+            // Load workspace snapshot functions
+            load_symbol!(rf_findvarinframe, b"Rf_findVarInFrame\0");
+            load_symbol!(r_existsvarinframe, b"R_existsVarInFrame\0");
+            load_symbol!(r_bindingisactive, b"R_BindingIsActive\0");
+            load_symbol!(r_lsinternal3, b"R_lsInternal3\0");
+            load_symbol!(rf_getattrib, b"Rf_getAttrib\0");
+            load_ptr!(r_classsymbol, b"R_ClassSymbol\0", SEXP);
+            load_symbol!(rf_iss4, b"Rf_isS4\0");
 
             // Load stack limit pointer
             load_ptr!(r_cstacklimit, b"R_CStackLimit\0", usize);
@@ -587,6 +612,13 @@ impl RLibrary {
                 rf_definevar,
                 rf_scalarlogical,
                 r_cstacklimit,
+                rf_findvarinframe,
+                r_existsvarinframe,
+                r_bindingisactive,
+                r_lsinternal3,
+                rf_getattrib,
+                r_classsymbol,
+                rf_iss4,
                 #[cfg(unix)]
                 ptr_r_readconsole,
                 #[cfg(unix)]
@@ -660,4 +692,16 @@ pub fn r_nil_value() -> RResult<SEXP> {
 pub fn r_global_env() -> RResult<SEXP> {
     let lib = r_library()?;
     unsafe { Ok(*lib.r_globalenv) }
+}
+
+/// Get R_UnboundValue.
+pub fn r_unbound_value() -> RResult<SEXP> {
+    let lib = r_library()?;
+    unsafe { Ok(*lib.r_unboundvalue) }
+}
+
+/// Get R_ClassSymbol.
+pub fn r_class_symbol() -> RResult<SEXP> {
+    let lib = r_library()?;
+    unsafe { Ok(*lib.r_classsymbol) }
 }

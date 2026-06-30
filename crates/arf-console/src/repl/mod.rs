@@ -1327,6 +1327,12 @@ fn handle_meta_command_result(
             }
             MetaAction::Continue
         }
+        MetaCommandResult::ShowObjectsBrowser => {
+            if let Err(e) = with_ipc_alternate_guard(crate::pager::run_objects_browser) {
+                arf_println!("Error: {}", e);
+            }
+            MetaAction::Continue
+        }
     }
 }
 

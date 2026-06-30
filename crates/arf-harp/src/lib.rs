@@ -9,6 +9,7 @@ pub mod help;
 mod object;
 mod protect;
 pub mod startup;
+pub mod workspace;
 
 pub use error::*;
 pub use help::*;
@@ -20,3 +21,4 @@ pub use startup::{
     call_dot_first, call_dot_first_sys, should_ignore_site_r_profile, should_ignore_user_r_profile,
     source_site_r_profile, source_user_r_profile,
 };
+pub use workspace::{EnvEntry, workspace_snapshot};
