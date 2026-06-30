@@ -12,6 +12,7 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
+use crate::history::HistoryExtraInfo;
 use chrono::TimeZone;
 use crossterm::{
     ExecutableCommand, cursor,
@@ -78,6 +79,9 @@ struct HistoryFilter {
     cwd_prefix: Option<String>,
     /// Exit status filter (from `exit:N`).
     exit_status: Option<i64>,
+    /// Meta command filter (from `meta:no` or `meta:only`).
+    /// None = show all, Some(false) = exclude meta, Some(true) = show only meta.
+    meta: Option<bool>,
     /// Command pattern for fuzzy search (remaining text after prefix filters).
     command_pattern: String,
 }
@@ -104,6 +108,10 @@ impl HistoryFilter {
                 } else {
                     remaining_parts.push(part);
                 }
+            } else if part == "meta:no" {
+                filter.meta = Some(false);
+            } else if part == "meta:only" {
+                filter.meta = Some(true);
             } else {
                 remaining_parts.push(part);
             }
@@ -120,6 +128,7 @@ impl HistoryFilter {
         self.hostname = parsed.hostname;
         self.cwd_prefix = parsed.cwd_prefix;
         self.exit_status = parsed.exit_status;
+        self.meta = parsed.meta;
         self.command_pattern = parsed.command_pattern;
     }
 }
@@ -128,6 +137,8 @@ impl HistoryFilter {
 struct BrowsableHistoryItem {
     /// The actual history item.
     item: HistoryItem,
+    /// Whether this entry was saved as a meta command (`:cd`, `:help`, etc.).
+    is_meta: bool,
     /// Whether this item is selected for deletion.
     selected: bool,
 }
@@ -164,11 +175,12 @@ struct HistoryBrowser {
 
 impl HistoryBrowser {
     /// Create a new history browser.
-    fn new(entries: Vec<HistoryItem>, db_mode: HistoryDbMode, db_path: PathBuf) -> Self {
+    fn new(entries: Vec<(HistoryItem, bool)>, db_mode: HistoryDbMode, db_path: PathBuf) -> Self {
         let browsable: Vec<BrowsableHistoryItem> = entries
             .into_iter()
-            .map(|item| BrowsableHistoryItem {
+            .map(|(item, is_meta)| BrowsableHistoryItem {
                 item,
+                is_meta,
                 selected: false,
             })
             .collect();
@@ -197,6 +209,7 @@ impl HistoryBrowser {
             && self.filter.hostname.is_none()
             && self.filter.cwd_prefix.is_none()
             && self.filter.exit_status.is_none()
+            && self.filter.meta.is_none()
         {
             // No filter - show all entries
             self.filtered = self
@@ -211,6 +224,13 @@ impl HistoryBrowser {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, entry)| {
+                    // Apply meta command filter
+                    if let Some(want_meta) = self.filter.meta {
+                        if entry.is_meta != want_meta {
+                            return None;
+                        }
+                    }
+
                     // Apply hostname filter
                     if let Some(ref hostname) = self.filter.hostname {
                         if let Some(ref item_host) = entry.item.hostname {
@@ -948,7 +968,8 @@ impl HistoryBrowser {
 
         // Footer line 1: filter syntax help
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
-        let syntax_help = "  Filter: host:<name> cwd:<path> exit:<N> <text>  (space = AND)";
+        let syntax_help =
+            "  Filter: host:<name> cwd:<path> exit:<N> meta:no meta:only <text>  (space = AND)";
         println!("\r{}", pad_to_width(syntax_help, width).dark_grey());
 
         // Footer line 2: keybindings or feedback message
@@ -981,16 +1002,15 @@ impl HistoryBrowser {
 /// Using read-only mode avoids WAL (Write-Ahead Logging) conflicts with the
 /// main REPL's history connection. This prevents "database disk image is malformed"
 /// errors when browsing history while the REPL is actively using the database.
-fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
+fn load_history(db_path: &Path) -> io::Result<Vec<(HistoryItem, bool)>> {
     // Open in read-only mode to avoid WAL conflicts
     let db = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(io::Error::other)?;
 
     let mut stmt = db
         .prepare(
-            "SELECT id, command_line, start_timestamp, hostname, cwd, duration_ms, exit_status
+            "SELECT id, command_line, start_timestamp, hostname, cwd, duration_ms, exit_status, more_info
              FROM history
-             WHERE (more_info IS NULL OR json_extract(more_info, '$.meta_command') IS NOT 1)
              ORDER BY id DESC
              LIMIT ?",
         )
@@ -998,22 +1018,31 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
 
     let items = stmt
         .query_map([MAX_ENTRIES], |row| {
-            Ok(HistoryItem {
-                id: Some(HistoryItemId::new(row.get(0)?)),
-                command_line: row.get(1)?,
-                start_timestamp: row
-                    .get::<_, Option<i64>>(2)?
-                    .and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single()),
-                session_id: None,
-                hostname: row.get(3)?,
-                cwd: row.get(4)?,
-                duration: row
-                    .get::<_, Option<i64>>(5)?
-                    .and_then(|ms| u64::try_from(ms).ok())
-                    .map(std::time::Duration::from_millis),
-                exit_status: row.get(6)?,
-                more_info: None,
-            })
+            let more_info_json: Option<String> = row.get(7)?;
+            let is_meta = more_info_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<HistoryExtraInfo>(s).ok())
+                .map(|e| e.meta_command)
+                .unwrap_or(false);
+            Ok((
+                HistoryItem {
+                    id: Some(HistoryItemId::new(row.get(0)?)),
+                    command_line: row.get(1)?,
+                    start_timestamp: row
+                        .get::<_, Option<i64>>(2)?
+                        .and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single()),
+                    session_id: None,
+                    hostname: row.get(3)?,
+                    cwd: row.get(4)?,
+                    duration: row
+                        .get::<_, Option<i64>>(5)?
+                        .and_then(|ms| u64::try_from(ms).ok())
+                        .map(std::time::Duration::from_millis),
+                    exit_status: row.get(6)?,
+                    more_info: None,
+                },
+                is_meta,
+            ))
         })
         .map_err(io::Error::other)?
         .collect::<Result<Vec<_>, _>>()
@@ -1075,6 +1104,7 @@ pub fn run_history_browser(
     }
 
     let mut browser = HistoryBrowser::new(entries, mode, db_path.to_path_buf());
+
     browser.run()
 }
 
@@ -1265,12 +1295,12 @@ mod tests {
         let items = load_history(&db_path).unwrap();
         assert_eq!(items.len(), 3);
         // Descending order by id
-        assert_eq!(items[0].command_line, "third_cmd");
-        assert_eq!(items[1].command_line, "second_cmd");
-        assert_eq!(items[2].command_line, "first_cmd");
+        assert_eq!(items[0].0.command_line, "third_cmd");
+        assert_eq!(items[1].0.command_line, "second_cmd");
+        assert_eq!(items[2].0.command_line, "first_cmd");
         // Hostname preserved
-        assert_eq!(items[1].hostname.as_deref(), Some("host2"));
-        assert!(items[0].hostname.is_none());
+        assert_eq!(items[1].0.hostname.as_deref(), Some("host2"));
+        assert!(items[0].0.hostname.is_none());
     }
 
     #[test]
@@ -1281,11 +1311,10 @@ mod tests {
     }
 
     #[test]
-    fn test_load_history_excludes_meta_commands() {
+    fn test_load_history_is_meta_flag() {
         let (_dir, db_path) =
             create_test_db(&[("print(1)", None), (":help", None), ("summary(df)", None)]);
 
-        // Manually set more_info for the meta command entry
         let db = Connection::open(&db_path).unwrap();
         db.execute(
             "UPDATE history SET more_info = '{\"meta_command\":true}' WHERE command_line = ':help'",
@@ -1294,16 +1323,82 @@ mod tests {
         .unwrap();
 
         let items = load_history(&db_path).unwrap();
-        assert_eq!(items.len(), 2);
-        assert!(items.iter().all(|i| i.command_line != ":help"));
+        // All 3 entries are loaded (no SQL-level exclusion)
+        assert_eq!(items.len(), 3);
+        // The :help entry has is_meta = true
+        let meta_entry = items
+            .iter()
+            .find(|(h, _)| h.command_line == ":help")
+            .unwrap();
+        assert!(meta_entry.1);
+        // Other entries have is_meta = false
+        let normal_entry = items
+            .iter()
+            .find(|(h, _)| h.command_line == "print(1)")
+            .unwrap();
+        assert!(!normal_entry.1);
     }
 
     #[test]
-    fn test_load_history_includes_old_entries_without_more_info() {
+    fn test_load_history_old_entries_without_more_info_not_meta() {
         let (_dir, db_path) = create_test_db(&[("old_cmd", None), (":cd /tmp", None)]);
-        // Neither entry has more_info set — both should be included
+        // Neither entry has more_info set — both should load with is_meta = false
         let items = load_history(&db_path).unwrap();
         assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|(_, is_meta)| !is_meta));
+    }
+
+    #[test]
+    fn test_update_filter_meta_no_excludes_meta_commands() {
+        let (_dir, db_path) =
+            create_test_db(&[("print(1)", None), (":help", None), ("summary(df)", None)]);
+
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "UPDATE history SET more_info = '{\"meta_command\":true}' WHERE command_line = ':help'",
+            [],
+        )
+        .unwrap();
+
+        let entries = load_history(&db_path).unwrap();
+        let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+
+        // Apply meta:no filter
+        browser.filter = HistoryFilter::parse("meta:no");
+        browser.update_filter();
+
+        assert_eq!(browser.filtered.len(), 2);
+        assert!(
+            browser
+                .filtered
+                .iter()
+                .all(|&(idx, _)| browser.entries[idx].item.command_line != ":help")
+        );
+    }
+
+    #[test]
+    fn test_update_filter_meta_only_shows_only_meta() {
+        let (_dir, db_path) =
+            create_test_db(&[("print(1)", None), (":help", None), ("summary(df)", None)]);
+
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "UPDATE history SET more_info = '{\"meta_command\":true}' WHERE command_line = ':help'",
+            [],
+        )
+        .unwrap();
+
+        let entries = load_history(&db_path).unwrap();
+        let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+
+        browser.filter = HistoryFilter::parse("meta:only");
+        browser.update_filter();
+
+        assert_eq!(browser.filtered.len(), 1);
+        assert_eq!(
+            browser.entries[browser.filtered[0].0].item.command_line,
+            ":help"
+        );
     }
 
     #[test]
@@ -1330,7 +1425,7 @@ mod tests {
         // Verify database state
         let remaining = load_history(&db_path).unwrap();
         assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].command_line, "cmd_b");
+        assert_eq!(remaining[0].0.command_line, "cmd_b");
     }
 
     #[test]
