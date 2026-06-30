@@ -760,6 +760,34 @@ fn test_eval_sources_user_rprofile() {
     );
 }
 
+/// Test that an empty `R_PROFILE_USER` falls back to the working-directory
+/// `.Rprofile` on Unix.
+#[cfg(unix)]
+#[test]
+fn test_eval_empty_r_profile_user_sources_default_rprofile() {
+    let working_dir = tempfile::tempdir().expect("Failed to create working directory");
+    let rprofile_path = working_dir.path().join(".Rprofile");
+    std::fs::write(&rprofile_path, "cat('ARF_RPROFILE_MARKER\\n')\n")
+        .expect("Failed to write .Rprofile");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .current_dir(working_dir.path())
+        .env("R_PROFILE_USER", "")
+        .args(["-e", "1"])
+        .output()
+        .expect("Failed to run arf -e");
+
+    assert!(output.status.success(), "arf -e should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("ARF_RPROFILE_MARKER") || stderr.contains("ARF_RPROFILE_MARKER"),
+        "default .Rprofile should be sourced when R_PROFILE_USER is empty. \
+         stdout={stdout}, stderr={stderr}"
+    );
+}
+
 /// Test that `arf --vanilla -e` does NOT source the user's `.Rprofile`.
 ///
 /// `--vanilla` implies `--no-init-file`, which must suppress .Rprofile

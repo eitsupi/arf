@@ -786,6 +786,8 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
 /// Unix-specific R initialization.
 #[cfg(unix)]
 unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
+    normalize_empty_r_profile_user();
+
     unsafe {
         // Set R_running_as_main_program before initialization (like ark does)
         if !lib.r_running_as_main_program.is_null() {
@@ -849,6 +851,20 @@ unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -
     }
 
     Ok(())
+}
+
+/// Unset an empty `R_PROFILE_USER` so R uses its normal user-profile search.
+///
+/// Some R terminal integrations set `R_PROFILE_USER` to a wrapper script on
+/// startup, then reset it to `""` after the script runs. An exec-based restart
+/// inherits that value, and R treats it as an explicit instruction to skip user
+/// profiles instead of falling back to `.Rprofile`.
+#[cfg(unix)]
+fn normalize_empty_r_profile_user() {
+    if env::var("R_PROFILE_USER").as_deref() == Ok("") {
+        // SAFETY: R initialization is single-threaded.
+        unsafe { env::remove_var("R_PROFILE_USER") };
+    }
 }
 
 /// Enable virtual terminal processing on Windows.
