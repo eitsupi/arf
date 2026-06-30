@@ -1718,22 +1718,22 @@ local({
     .arf_error_state <- new.env(parent = emptyenv())
     .arf_error_state$had_error <- FALSE
 
-    # Store in baseenv so it does not appear in the user's workspace (ls()/objects())
-    assign(".arf_error_state", .arf_error_state, envir = baseenv())
+    # Store in globalenv with dot prefix so ls() hides it by default
+    assign(".arf_error_state", .arf_error_state, envir = globalenv())
 
     # Store the user's previous error handler (if any) so we can chain to it
     prev_handler <- getOption("error")
-    assign(".arf_prev_error_handler", prev_handler, envir = baseenv())
+    assign(".arf_prev_error_handler", prev_handler, envir = globalenv())
 
     # Set up our error handler using options(error = ...)
     # This is called at the END of R's error handling, just before returning to prompt
     options(error = function() {
         # Mark that an error occurred
-        env <- get(".arf_error_state", envir = baseenv())
+        env <- get(".arf_error_state", envir = globalenv())
         env$had_error <- TRUE
 
         # Chain to the previous handler if it exists
-        prev <- get(".arf_prev_error_handler", envir = baseenv())
+        prev <- get(".arf_prev_error_handler", envir = globalenv())
         if (!is.null(prev)) {
             if (is.function(prev)) prev() else eval(prev, envir = globalenv())
         }
@@ -1744,9 +1744,6 @@ local({
 "#;
 
 /// Check if the R error state indicates an error occurred.
-///
-/// This reads `.arf_error_state$had_error` from the base environment.
-/// The globalCallingHandlers error handler sets this to TRUE when an error occurs.
 ///
 /// # Safety
 /// R must be initialized and the global error handler must be set up
@@ -1763,14 +1760,13 @@ fn check_r_error_state() -> bool {
     };
 
     unsafe {
-        // Look up .arf_error_state in baseenv (not globalenv — keeps it out of the user workspace)
         let arf_error_state_sym = {
             let name = std::ffi::CString::new(".arf_error_state").unwrap();
             (lib.rf_install)(name.as_ptr())
         };
 
-        let base_env = *lib.r_baseenv;
-        let state_env = (lib.rf_findvarinframe)(base_env, arf_error_state_sym);
+        let global_env = *lib.r_globalenv;
+        let state_env = (lib.rf_findvarinframe)(global_env, arf_error_state_sym);
 
         // Check if the environment exists
         if state_env.is_null() || state_env == *lib.r_unboundvalue {
@@ -1819,14 +1815,13 @@ fn reset_r_error_state() {
     };
 
     unsafe {
-        // Look up .arf_error_state in baseenv (not globalenv — keeps it out of the user workspace)
         let arf_error_state_sym = {
             let name = std::ffi::CString::new(".arf_error_state").unwrap();
             (lib.rf_install)(name.as_ptr())
         };
 
-        let base_env = *lib.r_baseenv;
-        let state_env = (lib.rf_findvarinframe)(base_env, arf_error_state_sym);
+        let global_env = *lib.r_globalenv;
+        let state_env = (lib.rf_findvarinframe)(global_env, arf_error_state_sym);
 
         // If the environment doesn't exist, nothing to reset
         if state_env.is_null() || state_env == *lib.r_unboundvalue {
