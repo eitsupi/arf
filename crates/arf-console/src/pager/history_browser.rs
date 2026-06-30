@@ -990,6 +990,7 @@ fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
         .prepare(
             "SELECT id, command_line, start_timestamp, hostname, cwd, duration_ms, exit_status
              FROM history
+             WHERE (more_info IS NULL OR json_extract(more_info, '$.meta_command') IS NOT 1)
              ORDER BY id DESC
              LIMIT ?",
         )
@@ -1277,6 +1278,32 @@ mod tests {
         let (_dir, db_path) = create_test_db(&[]);
         let items = load_history(&db_path).unwrap();
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_load_history_excludes_meta_commands() {
+        let (_dir, db_path) =
+            create_test_db(&[("print(1)", None), (":help", None), ("summary(df)", None)]);
+
+        // Manually set more_info for the meta command entry
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "UPDATE history SET more_info = '{\"meta_command\":true}' WHERE command_line = ':help'",
+            [],
+        )
+        .unwrap();
+
+        let items = load_history(&db_path).unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|i| i.command_line != ":help"));
+    }
+
+    #[test]
+    fn test_load_history_includes_old_entries_without_more_info() {
+        let (_dir, db_path) = create_test_db(&[("old_cmd", None), (":cd /tmp", None)]);
+        // Neither entry has more_info set — both should be included
+        let items = load_history(&db_path).unwrap();
+        assert_eq!(items.len(), 2);
     }
 
     #[test]
