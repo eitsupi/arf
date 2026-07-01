@@ -32,7 +32,7 @@ serde_json = "1.0"
 toml = "1.1"
 
 # Tree-sitter parsing
-tree-sitter = "0.24"
+tree-sitter = "0.26"
 tree-sitter-r = "1.2"
 
 # Rd to Markdown conversion
