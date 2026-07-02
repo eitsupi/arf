@@ -566,7 +566,12 @@ More text after.
             .unwrap();
 
         assert!(
-            !qmd.contains("asciicast") && !qmd.contains("colored"),
+            !qmd.contains("asciicast")
+                && !qmd.contains("colored")
+                && !qmd.contains("<div")
+                && !qmd.contains("<span")
+                && !qmd.contains("</div>")
+                && !qmd.contains("</span>"),
             "expected entire \\if{{html}} block (tags and text) to be stripped, got: {qmd}"
         );
         assert!(qmd.contains("Some details."));
