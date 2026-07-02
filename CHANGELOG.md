@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The help browser (`:help`) no longer leaks raw HTML tags (e.g. `<div class="asciicast">`, `<span style="...">`) from `\if{html}{\out{...}}` blocks in Rd documentation, which made some help pages (e.g. `pak::FAQ`) unreadable. Fixed by upgrading `rd2qmd-core` to 0.3.0, which now skips `\if{html}` content when converting for terminal display.
+
 ## [0.4.3-rc.1] - 2026-06-30
 
 ### Fixed
