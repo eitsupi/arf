@@ -543,4 +543,33 @@ mod tests {
         assert_eq!(escape_r_string(r#"he"llo"#), r#"he\"llo"#);
         assert_eq!(escape_r_string("he\\llo"), "he\\\\llo");
     }
+
+    #[test]
+    fn test_rd_conversion_strips_if_html_content() {
+        // Regression test: `\if{html}{\out{...}}` blocks (e.g. asciicast
+        // recordings) must not leak raw HTML into terminal help output.
+        let rd_content = r#"
+\name{hello}
+\title{Hello World}
+\description{A simple function.}
+\details{
+Some details.
+\if{html}{\out{<div class="asciicast"><span style="color: red;">colored</span></div>}}
+More text after.
+}
+"#;
+
+        let qmd = rd2qmd_core::RdConverter::new(rd_content)
+            .quarto_code_blocks(false)
+            .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
+            .convert()
+            .unwrap();
+
+        assert!(
+            !qmd.contains("<div") && !qmd.contains("<span"),
+            "expected \\if{{html}} content to be stripped, got: {qmd}"
+        );
+        assert!(qmd.contains("Some details."));
+        assert!(qmd.contains("More text after."));
+    }
 }
