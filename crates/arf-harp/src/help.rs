@@ -548,6 +548,9 @@ mod tests {
     fn test_rd_conversion_strips_if_html_content() {
         // Regression test: `\if{html}{\out{...}}` blocks (e.g. asciicast
         // recordings) must not leak raw HTML into terminal help output.
+        // Snapshotting the full output (rather than asserting individual
+        // substrings) ensures any leaked tag, attribute, or inner text
+        // shows up as a diff.
         let rd_content = r#"
 \name{hello}
 \title{Hello World}
@@ -565,16 +568,6 @@ More text after.
             .convert()
             .unwrap();
 
-        assert!(
-            !qmd.contains("asciicast")
-                && !qmd.contains("colored")
-                && !qmd.contains("<div")
-                && !qmd.contains("<span")
-                && !qmd.contains("</div>")
-                && !qmd.contains("</span>"),
-            "expected entire \\if{{html}} block (tags and text) to be stripped, got: {qmd}"
-        );
-        assert!(qmd.contains("Some details."));
-        assert!(qmd.contains("More text after."));
+        insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
     }
 }
