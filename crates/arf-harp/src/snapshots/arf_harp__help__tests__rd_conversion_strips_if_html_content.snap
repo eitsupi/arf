@@ -1,0 +1,13 @@
+---
+source: crates/arf-harp/src/help.rs
+expression: qmd
+---
+# Hello World
+
+## Description
+
+A simple function.
+
+## Details
+
+ Some details.  More text after.

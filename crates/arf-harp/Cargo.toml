@@ -8,6 +8,7 @@ description = "High-level R abstractions for safe R object manipulation"
 
 [dev-dependencies]
 tempfile.workspace = true
+insta.workspace = true
 
 [dependencies]
 arf-libr.workspace = true

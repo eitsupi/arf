@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable.
+
 ## [0.4.3-rc.1] - 2026-06-30
 
 ### Fixed
