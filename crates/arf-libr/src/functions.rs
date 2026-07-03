@@ -136,10 +136,14 @@ pub struct RLibrary {
     pub r_signalhandlers: *mut c_int,
     pub r_running_as_main_program: *mut c_int,
 
-    // Interrupt pending flag
-    // Unix: R_interrupts_pending (c_int), Windows: UserBreak (Rboolean, c_int-sized)
-    #[cfg(unix)]
+    // Interrupt pending flag (R_interrupts_pending, c_int).
+    // On Unix this is what R's own SIGINT handler would set. On Windows the
+    // front-end break flag is UserBreak (below), but R_interrupts_pending is
+    // still where onintr() defers an interrupt that arrives while
+    // R_interrupts_suspended is set, so it must be clearable on both platforms.
     pub r_interrupts_pending: *mut c_int,
+    // Windows front-end break flag (UserBreak, Rboolean, c_int-sized).
+    // R_ProcessEvents consumes it and calls onintr().
     #[cfg(windows)]
     pub user_break: *mut c_int,
 
@@ -547,6 +551,13 @@ impl RLibrary {
                 .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(windows)]
+            let r_interrupts_pending: *mut c_int = library
+                .get::<usize>(b"R_interrupts_pending\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
             let r_interrupts_suspended: *mut c_int = library
                 .get::<usize>(b"R_interrupts_suspended\0")
                 .ok()
@@ -649,7 +660,6 @@ impl RLibrary {
                 r_interactive,
                 r_signalhandlers,
                 r_running_as_main_program,
-                #[cfg(unix)]
                 r_interrupts_pending,
                 #[cfg(windows)]
                 user_break,

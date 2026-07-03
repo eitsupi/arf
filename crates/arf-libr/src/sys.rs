@@ -14,6 +14,16 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 /// - Windows: points to `UserBreak` (Rboolean, c_int-sized)
 static R_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut());
 
+/// Windows only: pointer to `R_interrupts_pending`, set during R initialization.
+///
+/// The Windows front-end break flag is `UserBreak` (stored in
+/// [`R_INTERRUPT_FLAG`]), but when an interrupt arrives while
+/// `R_interrupts_suspended` is set, `onintr()` defers it into
+/// `R_interrupts_pending` — a different variable. Clearing a stale interrupt
+/// on Windows therefore has to reset both.
+#[cfg(windows)]
+static R_DEFERRED_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut());
+
 /// True while `r_read_console` is waiting for console input.
 ///
 /// The Ctrl+C handler consults this to drop interrupts that arrive while no
@@ -35,8 +45,12 @@ static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
 ///
 /// Unlike R's `END_SUSPEND_INTERRUPTS`, the drop deliberately does NOT call
 /// `Rf_onintr()` for an interrupt that arrived while suspended: firing it
-/// would longjmp through the Rust caller. The still-pending flag is dropped
-/// by the next entry clear instead (interrupts make no sense at the prompt).
+/// would longjmp through the Rust caller. Instead, the drop clears the
+/// deferred pending flag while still suspended and only then restores the
+/// previous suspension state, so a deferred interrupt can neither fire here
+/// nor leak into the next R evaluation (interrupts make no sense at the
+/// prompt). On Windows this matters doubly: onintr() defers into
+/// `R_interrupts_pending`, which is a different variable from `UserBreak`.
 ///
 /// `R_interrupts_suspended` is not part of R's documented API (see the
 /// comment on `RLibrary::r_interrupts_suspended`); when the symbol is
@@ -66,6 +80,11 @@ impl SuspendRInterruptsGuard {
 
 impl Drop for SuspendRInterruptsGuard {
     fn drop(&mut self) {
+        // Drop any interrupt deferred while suspended, before lifting the
+        // suspension: after this point no R code runs that could convert or
+        // defer flags, so the clear cannot race with R itself.
+        clear_r_interrupt_pending();
+
         if !self.ptr.is_null() {
             // SAFETY: see SuspendRInterruptsGuard::new.
             unsafe {
@@ -1027,6 +1046,12 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         // Store the interrupt flag pointer for use by the Ctrl+C handler
         if !lib.user_break.is_null() {
             R_INTERRUPT_FLAG.store(lib.user_break, Ordering::Release);
+        }
+
+        // Store the deferred interrupt flag pointer so stale interrupts
+        // deferred under R_interrupts_suspended can be cleared too
+        if !lib.r_interrupts_pending.is_null() {
+            R_DEFERRED_INTERRUPT_FLAG.store(lib.r_interrupts_pending, Ordering::Release);
         }
 
         // Step 1: Call cmdlineoptions with empty args (ark pattern)
@@ -2336,11 +2361,25 @@ pub fn is_r_awaiting_console_input() -> bool {
 /// Called at the start of every `ReadConsole` invocation (including nested
 /// prompts such as `readline()`, `browser()`, etc.) to prevent stale
 /// interrupt flags from triggering on the next evaluation.
+///
+/// On Windows this clears both `UserBreak` (the front-end break flag) and
+/// `R_interrupts_pending` (where `onintr()` defers an interrupt that arrives
+/// while `R_interrupts_suspended` is set). On Unix they are the same flag.
 pub fn clear_r_interrupt_pending() {
     let ptr = R_INTERRUPT_FLAG.load(Ordering::Acquire);
     if !ptr.is_null() {
         unsafe {
             std::ptr::write_volatile(ptr, 0);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let ptr = R_DEFERRED_INTERRUPT_FLAG.load(Ordering::Acquire);
+        if !ptr.is_null() {
+            unsafe {
+                std::ptr::write_volatile(ptr, 0);
+            }
         }
     }
 }
