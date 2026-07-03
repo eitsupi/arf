@@ -60,9 +60,11 @@ static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
 /// observed `R_AWAITING_CONSOLE_INPUT == false` just before the transition
 /// can still write the interrupt flag after the drop's clear, leaving a
 /// stale flag that interrupts the start of the next evaluation once. This
-/// is benign (no longjmp through Rust frames — the crash class is gone) and
-/// requires a handler preempted inside a several-instruction window plus
-/// input submitted within one idle tick. Fully eliminating it would mean
+/// is benign as long as suspension is active (no longjmp through Rust
+/// frames; on builds where the symbol is unavailable the no-op guard leaves
+/// the narrowed crash race described above) and requires a handler preempted
+/// inside a several-instruction window plus input submitted within one idle
+/// tick. Fully eliminating it would mean
 /// blocking SIGINT on all threads and receiving it via sigwait on a
 /// dedicated thread that shares a mutex with the ReadConsole transitions —
 /// a redesign that is not worth it for a benign one-off; see the task
