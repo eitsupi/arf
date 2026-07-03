@@ -551,6 +551,15 @@ fn run() -> Result<()> {
     let r_args_refs: Vec<&str> = r_args.iter().map(|s| s.as_str()).collect();
     log::debug!("R args: {:?}", r_args);
 
+    // Install the Ctrl+C handler before R initialization: startup profiles
+    // run inside setup_Rmainloop, and with R_SignalHandlers = 0 a SIGINT
+    // during a slow .Rprofile would otherwise hit the default action and
+    // kill the process. The handler is a no-op until the interrupt flag
+    // pointer is resolved, which happens early in initialization, before
+    // profiles are evaluated (see install_r_interrupt_handler).
+    #[cfg(unix)]
+    repl::install_r_interrupt_handler();
+
     // Initialize R with CLI-specified flags
     log::info!("Initializing R...");
     #[allow(unused_variables)]
@@ -568,6 +577,31 @@ fn run() -> Result<()> {
             }
         }
     };
+
+    // If the interrupt flag could not be resolved, the handler installed
+    // above can never forward interrupts and would swallow Ctrl+C forever;
+    // fall back to the default disposition (terminate the process).
+    #[cfg(unix)]
+    if !arf_libr::is_r_interrupt_flag_available() {
+        log::warn!(
+            "R interrupt flag not available; restoring default Ctrl+C behavior \
+             (terminates the process)."
+        );
+        repl::restore_default_sigint_handler();
+    }
+
+    // Windows: install the Ctrl+C handler now, before profiles are sourced
+    // below, so a SIGINT during a slow .Rprofile interrupts it instead of
+    // killing the process (STATUS_CONTROL_C_EXIT).
+    #[cfg(windows)]
+    if arf_libr::is_r_interrupt_flag_available() {
+        repl::install_r_interrupt_handler();
+    } else {
+        log::warn!(
+            "R interrupt flag not available; skipping Ctrl+C handler installation. \
+             Default console handler will terminate the process on Ctrl+C."
+        );
+    }
 
     // Source R profile files after R initialization (Windows only)
     // On Windows, R's built-in profile loading is disabled during initialization

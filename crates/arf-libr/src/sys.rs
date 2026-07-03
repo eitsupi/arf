@@ -7,7 +7,7 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 /// Pointer to R's interrupt pending flag, set during R initialization.
 /// - Unix: points to `R_interrupts_pending` (c_int)
@@ -24,14 +24,19 @@ static R_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut())
 #[cfg(windows)]
 static R_DEFERRED_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut());
 
-/// True while `r_read_console` is waiting for console input.
+/// Number of active `r_read_console` calls waiting for console input.
 ///
 /// The Ctrl+C handler consults this to drop interrupts that arrive while no
 /// R computation is running: if R's interrupt flag were set at that time,
 /// the event polling done from the input-waiting loops (reedline idle
 /// callback, pagers) could observe it and run `onintr()`, which longjmps to
 /// R's top level straight through the Rust frames of those loops.
-static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
+///
+/// A counter rather than a flag because ReadConsole can nest: R code run
+/// from the event polling of an outer read (e.g. a handler calling
+/// `readline()`) enters `r_read_console` again, and the inner guard's drop
+/// must not unmark the still-active outer read.
+static R_AWAITING_CONSOLE_INPUT: AtomicUsize = AtomicUsize::new(0);
 
 /// RAII guard that sets `R_interrupts_suspended = TRUE` and restores the
 /// previous value on drop.
@@ -114,14 +119,14 @@ struct AwaitConsoleInputGuard;
 
 impl AwaitConsoleInputGuard {
     fn new() -> Self {
-        R_AWAITING_CONSOLE_INPUT.store(true, Ordering::Release);
+        R_AWAITING_CONSOLE_INPUT.fetch_add(1, Ordering::AcqRel);
         Self
     }
 }
 
 impl Drop for AwaitConsoleInputGuard {
     fn drop(&mut self) {
-        R_AWAITING_CONSOLE_INPUT.store(false, Ordering::Release);
+        R_AWAITING_CONSOLE_INPUT.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -2373,7 +2378,7 @@ pub fn is_r_interrupt_flag_available() -> bool {
 /// it to drop interrupts that arrive while no R computation is running; see
 /// [`R_AWAITING_CONSOLE_INPUT`] for why setting the flag then is unsafe.
 pub fn is_r_awaiting_console_input() -> bool {
-    R_AWAITING_CONSOLE_INPUT.load(Ordering::Acquire)
+    R_AWAITING_CONSOLE_INPUT.load(Ordering::Acquire) > 0
 }
 
 /// Clear R's interrupt pending flag.
