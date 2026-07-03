@@ -7,12 +7,38 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 /// Pointer to R's interrupt pending flag, set during R initialization.
 /// - Unix: points to `R_interrupts_pending` (c_int)
 /// - Windows: points to `UserBreak` (Rboolean, c_int-sized)
 static R_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut());
+
+/// True while `r_read_console` is waiting for console input.
+///
+/// The Ctrl+C handler consults this to drop interrupts that arrive while no
+/// R computation is running: if R's interrupt flag were set at that time,
+/// the event polling done from the input-waiting loops (reedline idle
+/// callback, pagers) could observe it and run `onintr()`, which longjmps to
+/// R's top level straight through the Rust frames of those loops.
+static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard that marks [`R_AWAITING_CONSOLE_INPUT`] for the duration of a
+/// `r_read_console` call, covering every return path.
+struct AwaitConsoleInputGuard;
+
+impl AwaitConsoleInputGuard {
+    fn new() -> Self {
+        R_AWAITING_CONSOLE_INPUT.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for AwaitConsoleInputGuard {
+    fn drop(&mut self) {
+        R_AWAITING_CONSOLE_INPUT.store(false, Ordering::Release);
+    }
+}
 
 /// Default R library paths by platform.
 #[cfg(target_os = "linux")]
@@ -1495,6 +1521,11 @@ unsafe extern "C" fn r_read_console(
     // This prevents stale Ctrl+C signals from interrupting the next input read.
     clear_r_interrupt_pending();
 
+    // Mark that R is waiting for console input until this call returns, so
+    // the Ctrl+C handler drops interrupts instead of setting R's flag while
+    // Rust input loops are pumping R events (see R_AWAITING_CONSOLE_INPUT).
+    let _await_input_guard = AwaitConsoleInputGuard::new();
+
     // Safety net: if a previous password read (via rpassword) was interrupted
     // by longjmp (SIGINT), the terminal settings snapshot stored in
     // PENDING_TERMIOS_RESTORE may still need to be reapplied. Recover here at
@@ -2227,6 +2258,15 @@ pub fn set_r_interrupt_pending() {
 /// When this returns `false`, [`set_r_interrupt_pending`] is a no-op.
 pub fn is_r_interrupt_flag_available() -> bool {
     !R_INTERRUPT_FLAG.load(Ordering::Acquire).is_null()
+}
+
+/// Returns whether R is currently inside `ReadConsole` waiting for input.
+///
+/// This is async-signal-safe (a single atomic load). The Ctrl+C handler uses
+/// it to drop interrupts that arrive while no R computation is running; see
+/// [`R_AWAITING_CONSOLE_INPUT`] for why setting the flag then is unsafe.
+pub fn is_r_awaiting_console_input() -> bool {
+    R_AWAITING_CONSOLE_INPUT.load(Ordering::Acquire)
 }
 
 /// Clear R's interrupt pending flag.
