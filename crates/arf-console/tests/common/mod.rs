@@ -35,7 +35,7 @@
 //! - `assert_equal("exact")` - Assert line equals exact string
 #![cfg(unix)]
 
-use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, ExitStatus, PtySize, native_pty_system};
 use regex::Regex;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -492,12 +492,25 @@ impl Terminal {
     }
 
     /// Wait for the child process to exit (detected via PTY EOF).
-    pub fn wait_for_exit(&self, timeout: Duration) -> Result<(), String> {
+    pub fn wait_for_exit(&mut self, timeout: Duration) -> Result<(), String> {
+        self.wait_for_exit_status(timeout).map(|_| ())
+    }
+
+    /// Wait for the child process to exit (detected via PTY EOF) and return
+    /// its exit status, including the terminating signal on Unix if any.
+    ///
+    /// PTY EOF means the process closed its file descriptors, which on exit
+    /// happens at (or after) the point the kernel makes it reapable, so the
+    /// `waitpid` behind `Child::wait` returns without blocking in practice.
+    pub fn wait_for_exit_status(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
         let start = Instant::now();
         while start.elapsed() < timeout {
             let running = self.state.lock().map_err(|e| e.to_string())?.running;
             if !running {
-                return Ok(());
+                return self
+                    .child
+                    .wait()
+                    .map_err(|e| format!("Failed to reap child process: {}", e));
             }
             thread::sleep(Duration::from_millis(100));
         }
