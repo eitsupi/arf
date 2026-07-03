@@ -795,8 +795,12 @@ unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -
         }
 
         // Disable R's signal handlers before initialization.
-        // R's mainloop reinstalls its own SIGINT handler later;
-        // on Windows we install a separate Ctrl+C handler in the REPL.
+        // With R_SignalHandlers = 0, setup_Rmainloop skips init_signal_handlers()
+        // entirely: no SIGINT handler, but also no SIGSEGV/SIGILL/SIGBUS crash
+        // handlers or SIGUSR1/SIGUSR2 save-and-quit handlers, which are
+        // undesirable for an embedded frontend. The REPL installs its own
+        // Ctrl+C handler (see repl/mod.rs) that sets R_interrupts_pending,
+        // replicating R's standard handleInterrupt behavior.
         if !lib.r_signalhandlers.is_null() {
             *lib.r_signalhandlers = 0;
         }
@@ -2101,6 +2105,13 @@ pub fn process_r_events() {
         Err(_) => return,
     };
 
+    // Drop any pending interrupt before calling into R's event machinery.
+    // See peek_r_event() for the rationale: an interrupt observed here
+    // (by R_ProcessEvents on Windows or R_checkActivity/R_runHandlers on
+    // Unix) would longjmp through the Rust frames of the input-waiting
+    // loop that called us.
+    clear_r_interrupt_pending();
+
     unsafe {
         // Call R_ProcessEvents - this is the main event processing function
         (lib.r_processevents)();
@@ -2134,6 +2145,15 @@ pub fn peek_r_event() -> bool {
         Ok(lib) => lib,
         Err(_) => return false,
     };
+
+    // Drop any pending interrupt before calling into R's event machinery.
+    // This function is only called from Rust input-waiting loops (reedline
+    // idle callback, headless loop), where there is no R computation to
+    // interrupt. If the flag were left set, R_checkActivity would call
+    // onintr(), which longjmps to R's top level straight through the Rust
+    // frames of the waiting loop (undefined behavior; in practice it leaks
+    // a RefCell borrow and the session exits on the next ReadConsole).
+    clear_r_interrupt_pending();
 
     unsafe {
         #[cfg(windows)]

@@ -5,6 +5,7 @@
 ### Fixed
 
 - The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable.
+- On macOS/Linux, Ctrl+C (SIGINT) during R evaluation no longer risks silently terminating the session. The addresses of R's state variables (`R_Interactive`, `R_SignalHandlers`, `R_running_as_main_program`, `R_interrupts_pending`) were silently failing to resolve on Unix, so R's signal handlers were never disabled as intended and arf itself installed no SIGINT handler. The lookups are fixed and a Ctrl+C handler is now installed on all platforms (previously Windows-only) that requests an R interrupt instead of letting the default action kill the process. A SIGINT delivered while waiting at the prompt is now dropped instead of being carried over or crossing Rust frames via R's `onintr` longjmp.
 
 ## [0.4.3-rc.1] - 2026-06-30
 

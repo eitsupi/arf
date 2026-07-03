@@ -467,26 +467,38 @@ impl RLibrary {
             };
 
             // Load R state variables (as raw pointers - these are global ints, not pointers)
-            // We need to get the address of these symbols, not their values
+            // We need to get the address of these symbols, not their values.
+            // library.get::<T>() requires size_of::<T>() to be pointer-sized
+            // (Symbol<T> transmutes the symbol address into T), so get::<c_int>
+            // always fails with IncompatibleSize on 64-bit targets. Use a
+            // pointer-sized type and try_as_raw_ptr() to get the symbol address.
             #[cfg(unix)]
             let r_interactive: *mut c_int = library
-                .get::<c_int>(b"R_Interactive\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_Interactive\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_signalhandlers: *mut c_int = library
-                .get::<c_int>(b"R_SignalHandlers\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_SignalHandlers\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_running_as_main_program: *mut c_int = library
-                .get::<c_int>(b"R_running_as_main_program\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_running_as_main_program\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_interrupts_pending: *mut c_int = library
-                .get::<c_int>(b"R_interrupts_pending\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_interrupts_pending\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
 
             // On Windows, library.get::<T>() requires size_of::<T>() == size_of::<FARPROC>()
