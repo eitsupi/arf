@@ -55,6 +55,18 @@ static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
 /// `R_interrupts_suspended` is not part of R's documented API (see the
 /// comment on `RLibrary::r_interrupts_suspended`); when the symbol is
 /// unavailable the guard is a no-op, reverting to the narrowed-race behavior.
+///
+/// Known residual (accepted): a SIGINT handler on another thread that
+/// observed `R_AWAITING_CONSOLE_INPUT == false` just before the transition
+/// can still write the interrupt flag after the drop's clear, leaving a
+/// stale flag that interrupts the start of the next evaluation once. This
+/// is benign (no longjmp through Rust frames — the crash class is gone) and
+/// requires a handler preempted inside a several-instruction window plus
+/// input submitted within one idle tick. Fully eliminating it would mean
+/// blocking SIGINT on all threads and receiving it via sigwait on a
+/// dedicated thread that shares a mutex with the ReadConsole transitions —
+/// a redesign that is not worth it for a benign one-off; see the task
+/// tracker for the design sketch if it ever becomes necessary.
 struct SuspendRInterruptsGuard {
     ptr: *mut c_int,
     old: c_int,
