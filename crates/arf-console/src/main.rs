@@ -578,14 +578,18 @@ fn run() -> Result<()> {
         }
     };
 
-    // If the interrupt flag could not be resolved, the handler installed
-    // above can never forward interrupts and would swallow Ctrl+C forever;
-    // fall back to the default disposition (terminate the process).
+    // If R initialization failed or the interrupt flag could not be
+    // resolved, the handler installed above can never forward interrupts to
+    // anything that consumes them and would swallow Ctrl+C forever; fall
+    // back to the default disposition (terminate the process). The
+    // r_initialized check matters even when the flag resolved: the flag
+    // pointer is stored early in initialization, so a later failure would
+    // otherwise leave the forwarding handler active with R disabled.
     #[cfg(unix)]
-    if !arf_libr::is_r_interrupt_flag_available() {
+    if !r_initialized || !arf_libr::is_r_interrupt_flag_available() {
         log::warn!(
-            "R interrupt flag not available; restoring default Ctrl+C behavior \
-             (terminates the process)."
+            "R initialization failed or interrupt flag not available; restoring \
+             default Ctrl+C behavior (terminates the process)."
         );
         repl::restore_default_sigint_handler();
     }
