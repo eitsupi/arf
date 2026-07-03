@@ -5,6 +5,7 @@
 ### Fixed
 
 - The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable.
+- On macOS/Linux, Ctrl+C (SIGINT) delivered during R evaluation could terminate the session instead of cancelling the running computation. Ctrl+C now interrupts the evaluation and returns to the prompt, as on Windows.
 
 ## [0.4.3-rc.1] - 2026-06-30
 

@@ -136,12 +136,23 @@ pub struct RLibrary {
     pub r_signalhandlers: *mut c_int,
     pub r_running_as_main_program: *mut c_int,
 
-    // Interrupt pending flag
-    // Unix: R_interrupts_pending (c_int), Windows: UserBreak (Rboolean, c_int-sized)
-    #[cfg(unix)]
+    // Interrupt pending flag (R_interrupts_pending, c_int).
+    // On Unix this is what R's own SIGINT handler would set. On Windows the
+    // front-end break flag is UserBreak (below), but R_interrupts_pending is
+    // still where onintr() defers an interrupt that arrives while
+    // R_interrupts_suspended is set, so it must be clearable on both platforms.
     pub r_interrupts_pending: *mut c_int,
+    // Windows front-end break flag (UserBreak, Rboolean, c_int-sized).
+    // R_ProcessEvents consumes it and calls onintr().
     #[cfg(windows)]
     pub user_break: *mut c_int,
+
+    // Interrupt suspension flag (R_interrupts_suspended, Rboolean, c_int-sized).
+    // Not part of R's documented API, but exposed by the installed header
+    // R_ext/GraphicsDevice.h (BEGIN_SUSPEND_INTERRUPTS) for third-party use
+    // and relied on by ark and reticulate. May be null if the symbol is
+    // ever removed; callers must handle that by skipping suspension.
+    pub r_interrupts_suspended: *mut c_int,
 
     // Windows CharacterMode global (used to switch from RGui to LinkDLL after init)
     #[cfg(windows)]
@@ -467,26 +478,45 @@ impl RLibrary {
             };
 
             // Load R state variables (as raw pointers - these are global ints, not pointers)
-            // We need to get the address of these symbols, not their values
+            // We need to get the address of these symbols, not their values.
+            // library.get::<T>() requires size_of::<T>() to be pointer-sized
+            // (Symbol<T> transmutes the symbol address into T), so get::<c_int>
+            // always fails with IncompatibleSize on 64-bit targets. Use a
+            // pointer-sized type and try_as_raw_ptr() to get the symbol address.
             #[cfg(unix)]
             let r_interactive: *mut c_int = library
-                .get::<c_int>(b"R_Interactive\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_Interactive\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_signalhandlers: *mut c_int = library
-                .get::<c_int>(b"R_SignalHandlers\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_SignalHandlers\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_running_as_main_program: *mut c_int = library
-                .get::<c_int>(b"R_running_as_main_program\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_running_as_main_program\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
             #[cfg(unix)]
             let r_interrupts_pending: *mut c_int = library
-                .get::<c_int>(b"R_interrupts_pending\0")
-                .map(|s| s.into_raw().into_raw() as *mut c_int)
+                .get::<usize>(b"R_interrupts_pending\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(unix)]
+            let r_interrupts_suspended: *mut c_int = library
+                .get::<usize>(b"R_interrupts_suspended\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
 
             // On Windows, library.get::<T>() requires size_of::<T>() == size_of::<FARPROC>()
@@ -516,6 +546,20 @@ impl RLibrary {
             #[cfg(windows)]
             let user_break: *mut c_int = library
                 .get::<usize>(b"UserBreak\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
+            let r_interrupts_pending: *mut c_int = library
+                .get::<usize>(b"R_interrupts_pending\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
+            let r_interrupts_suspended: *mut c_int = library
+                .get::<usize>(b"R_interrupts_suspended\0")
                 .ok()
                 .and_then(|s| s.try_as_raw_ptr())
                 .map(|p| p as *mut c_int)
@@ -616,10 +660,10 @@ impl RLibrary {
                 r_interactive,
                 r_signalhandlers,
                 r_running_as_main_program,
-                #[cfg(unix)]
                 r_interrupts_pending,
                 #[cfg(windows)]
                 user_break,
+                r_interrupts_suspended,
                 #[cfg(windows)]
                 character_mode,
                 r_processevents,
