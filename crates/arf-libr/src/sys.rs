@@ -1612,11 +1612,6 @@ unsafe extern "C" fn r_read_console(
     // This prevents stale Ctrl+C signals from interrupting the next input read.
     clear_r_interrupt_pending();
 
-    // Mark that R is waiting for console input until this call returns, so
-    // the Ctrl+C handler drops interrupts instead of setting R's flag while
-    // Rust input loops are pumping R events (see R_AWAITING_CONSOLE_INPUT).
-    let _await_input_guard = AwaitConsoleInputGuard::new();
-
     // Safety net: if a previous password read (via rpassword) was interrupted
     // by longjmp (SIGINT), the terminal settings snapshot stored in
     // PENDING_TERMIOS_RESTORE may still need to be reapplied. Recover here at
@@ -1625,6 +1620,12 @@ unsafe extern "C" fn r_read_console(
     recover_pending_termios();
 
     // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
+    // This runs before the input-wait guard on purpose: no Rust loop pumps R
+    // events during the blocking tty read, so the longjmp hazard the guard
+    // prevents does not exist here, and dropping SIGINT would make Ctrl+C at
+    // a password prompt entirely inert. With the flag allowed through,
+    // SA_RESTART resumes the read and the pending interrupt cancels the
+    // requesting operation as soon as the read returns.
     #[cfg(unix)]
     if !prompt.is_null() {
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
@@ -1633,6 +1634,11 @@ unsafe extern "C" fn r_read_console(
             return unsafe { read_password_from_tty(real_prompt, buf, buflen) };
         }
     }
+
+    // Mark that R is waiting for console input until this call returns, so
+    // the Ctrl+C handler drops interrupts instead of setting R's flag while
+    // Rust input loops are pumping R events (see R_AWAITING_CONSOLE_INPUT).
+    let _await_input_guard = AwaitConsoleInputGuard::new();
 
     // In reprex mode, print a blank line between expressions for readability
     // Only print for main prompts (not continuation prompts like "+")
