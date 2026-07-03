@@ -23,6 +23,58 @@ static R_INTERRUPT_FLAG: AtomicPtr<c_int> = AtomicPtr::new(std::ptr::null_mut())
 /// R's top level straight through the Rust frames of those loops.
 static R_AWAITING_CONSOLE_INPUT: AtomicBool = AtomicBool::new(false);
 
+/// RAII guard that sets `R_interrupts_suspended = TRUE` and restores the
+/// previous value on drop.
+///
+/// While suspended, R's `onintr()` defers the interrupt (it re-sets
+/// `R_interrupts_pending` and returns) instead of longjmping to R's top
+/// level. This makes it safe to call R's event machinery from Rust
+/// input-waiting loops even if a SIGINT handler on another thread sets the
+/// interrupt flag at any point during the call — closing the race that the
+/// [`R_AWAITING_CONSOLE_INPUT`] gate and the entry clears only narrow.
+///
+/// Unlike R's `END_SUSPEND_INTERRUPTS`, the drop deliberately does NOT call
+/// `Rf_onintr()` for an interrupt that arrived while suspended: firing it
+/// would longjmp through the Rust caller. The still-pending flag is dropped
+/// by the next entry clear instead (interrupts make no sense at the prompt).
+///
+/// `R_interrupts_suspended` is not part of R's documented API (see the
+/// comment on `RLibrary::r_interrupts_suspended`); when the symbol is
+/// unavailable the guard is a no-op, reverting to the narrowed-race behavior.
+struct SuspendRInterruptsGuard {
+    ptr: *mut c_int,
+    old: c_int,
+}
+
+impl SuspendRInterruptsGuard {
+    fn new(ptr: *mut c_int) -> Self {
+        let old = if ptr.is_null() {
+            0
+        } else {
+            // SAFETY: ptr points to R's global variable, valid for the
+            // process lifetime. Volatile access matches how the SIGINT
+            // handler touches R globals.
+            unsafe {
+                let old = std::ptr::read_volatile(ptr);
+                std::ptr::write_volatile(ptr, 1);
+                old
+            }
+        };
+        Self { ptr, old }
+    }
+}
+
+impl Drop for SuspendRInterruptsGuard {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // SAFETY: see SuspendRInterruptsGuard::new.
+            unsafe {
+                std::ptr::write_volatile(self.ptr, self.old);
+            }
+        }
+    }
+}
+
 /// RAII guard that marks [`R_AWAITING_CONSOLE_INPUT`] for the duration of a
 /// `r_read_console` call, covering every return path.
 struct AwaitConsoleInputGuard;
@@ -2143,6 +2195,11 @@ pub fn process_r_events() {
     // loop that called us.
     clear_r_interrupt_pending();
 
+    // Suspend interrupts for the duration of the call so that a flag set
+    // concurrently (by a SIGINT handler running on another thread) cannot
+    // trigger that longjmp either. See SuspendRInterruptsGuard.
+    let _suspend_guard = SuspendRInterruptsGuard::new(lib.r_interrupts_suspended);
+
     unsafe {
         // Call R_ProcessEvents - this is the main event processing function
         (lib.r_processevents)();
@@ -2185,6 +2242,11 @@ pub fn peek_r_event() -> bool {
     // frames of the waiting loop (undefined behavior; in practice it leaks
     // a RefCell borrow and the session exits on the next ReadConsole).
     clear_r_interrupt_pending();
+
+    // Suspend interrupts for the duration of the call so that a flag set
+    // concurrently (by a SIGINT handler running on another thread) cannot
+    // trigger that longjmp either. See SuspendRInterruptsGuard.
+    let _suspend_guard = SuspendRInterruptsGuard::new(lib.r_interrupts_suspended);
 
     unsafe {
         #[cfg(windows)]

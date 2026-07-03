@@ -143,6 +143,13 @@ pub struct RLibrary {
     #[cfg(windows)]
     pub user_break: *mut c_int,
 
+    // Interrupt suspension flag (R_interrupts_suspended, Rboolean, c_int-sized).
+    // Not part of R's documented API, but exposed by the installed header
+    // R_ext/GraphicsDevice.h (BEGIN_SUSPEND_INTERRUPTS) for third-party use
+    // and relied on by ark and reticulate. May be null if the symbol is
+    // ever removed; callers must handle that by skipping suspension.
+    pub r_interrupts_suspended: *mut c_int,
+
     // Windows CharacterMode global (used to switch from RGui to LinkDLL after init)
     #[cfg(windows)]
     pub character_mode: *mut c_int,
@@ -500,6 +507,13 @@ impl RLibrary {
                 .and_then(|s| s.try_as_raw_ptr())
                 .map(|p| p as *mut c_int)
                 .unwrap_or(std::ptr::null_mut());
+            #[cfg(unix)]
+            let r_interrupts_suspended: *mut c_int = library
+                .get::<usize>(b"R_interrupts_suspended\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
 
             // On Windows, library.get::<T>() requires size_of::<T>() == size_of::<FARPROC>()
             // (pointer-sized). Using c_int (4 bytes) fails the size check on 64-bit Windows.
@@ -528,6 +542,13 @@ impl RLibrary {
             #[cfg(windows)]
             let user_break: *mut c_int = library
                 .get::<usize>(b"UserBreak\0")
+                .ok()
+                .and_then(|s| s.try_as_raw_ptr())
+                .map(|p| p as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+            #[cfg(windows)]
+            let r_interrupts_suspended: *mut c_int = library
+                .get::<usize>(b"R_interrupts_suspended\0")
                 .ok()
                 .and_then(|s| s.try_as_raw_ptr())
                 .map(|p| p as *mut c_int)
@@ -632,6 +653,7 @@ impl RLibrary {
                 r_interrupts_pending,
                 #[cfg(windows)]
                 user_break,
+                r_interrupts_suspended,
                 #[cfg(windows)]
                 character_mode,
                 r_processevents,
