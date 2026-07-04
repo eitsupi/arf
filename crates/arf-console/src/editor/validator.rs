@@ -100,12 +100,17 @@ impl RValidator {
     /// With tree-sitter-r 1.3.0, an unclosed raw string like `r"(hello` no
     /// longer parses with a MISSING close, or with an ERROR that extends to
     /// the end of input. Instead the parser gives up right after the open
-    /// delimiter, producing an `ERROR` node that contains only the
-    /// `string_open` token (e.g. `r"(`), and re-tokenizes whatever follows
-    /// as ordinary R tokens (e.g. `hello` becomes a sibling `identifier`).
-    /// Since that trailing content sits next to the `ERROR` node rather than
-    /// inside it, `check_incomplete`'s "ERROR reaches end of content" rule
-    /// (above) never sees it. This function detects that specific pattern.
+    /// delimiter and emits an `ERROR` node whose *first* child is the
+    /// `string_open` token (e.g. `r"(`); everything after that gets
+    /// re-tokenized as ordinary R tokens (e.g. `hello` becomes a sibling
+    /// `identifier`), and in some cases additional tokens end up as further
+    /// children of the same `ERROR` node (e.g. a second `string_open` from a
+    /// stray quote on a later line). Since the misparsed trailing content
+    /// doesn't extend the `ERROR` node's own byte range to the end of input,
+    /// `check_incomplete`'s "ERROR reaches end of content" rule (above) never
+    /// sees it. This function detects the pattern directly: an `ERROR` node
+    /// that *starts* with a raw string's open token, regardless of what
+    /// other children (if any) follow it.
     ///
     /// TODO: This is a workaround for a tree-sitter-r parsing issue.
     /// When tree-sitter-r is fixed to properly recognize incomplete raw strings,
@@ -118,8 +123,9 @@ impl RValidator {
         self.contains_unclosed_raw_string_open(&mut cursor, source)
     }
 
-    /// Recursively search for an `ERROR` node whose first child is the
-    /// `string_open` of a raw string (i.e. its text starts with `r` or `R`).
+    /// Recursively search for an `ERROR` node whose first child (regardless
+    /// of what other children it may also have) is the `string_open` of a
+    /// raw string (i.e. its text starts with `r` or `R`).
     fn contains_unclosed_raw_string_open(
         &self,
         cursor: &mut tree_sitter::TreeCursor,
