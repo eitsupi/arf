@@ -35,7 +35,7 @@
 //! - `assert_equal("exact")` - Assert line equals exact string
 #![cfg(unix)]
 
-use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, ExitStatus, PtySize, native_pty_system};
 use regex::Regex;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -492,19 +492,35 @@ impl Terminal {
     }
 
     /// Wait for the child process to exit (detected via PTY EOF).
-    pub fn wait_for_exit(&self, timeout: Duration) -> Result<(), String> {
+    pub fn wait_for_exit(&mut self, timeout: Duration) -> Result<(), String> {
+        self.wait_for_exit_status(timeout).map(|_| ())
+    }
+
+    /// Wait for the child process to exit and return its exit status,
+    /// including the terminating signal on Unix if any.
+    ///
+    /// Polls `Child::try_wait` directly rather than relying on the PTY
+    /// `running` flag: that flag can also flip on a read error, and PTY EOF
+    /// can be observed before the process is actually reapable, so a
+    /// blocking `wait()` gated on it could hang past the timeout.
+    pub fn wait_for_exit_status(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
         let start = Instant::now();
-        while start.elapsed() < timeout {
-            let running = self.state.lock().map_err(|e| e.to_string())?.running;
-            if !running {
-                return Ok(());
+        loop {
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .map_err(|e| format!("Failed to check child process status: {}", e))?
+            {
+                return Ok(status);
+            }
+            if start.elapsed() >= timeout {
+                return Err(format!(
+                    "Process did not exit within {}s",
+                    timeout.as_secs()
+                ));
             }
             thread::sleep(Duration::from_millis(100));
         }
-        Err(format!(
-            "Process did not exit within {}s",
-            timeout.as_secs()
-        ))
     }
 
     /// Get current cursor position as (row, col), both 0-indexed.
