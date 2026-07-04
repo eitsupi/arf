@@ -6,6 +6,7 @@
 
 - The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable.
 - On macOS/Linux, Ctrl+C (SIGINT) delivered during R evaluation could terminate the session instead of cancelling the running computation. Ctrl+C now interrupts the evaluation and returns to the prompt, as on Windows.
+- Updated to tree-sitter-r 1.3.0 and adjusted the input validator so unclosed raw strings (e.g. `r"(...`) are still correctly detected as incomplete input rather than being sent to R prematurely.
 
 ## [0.4.3-rc.1] - 2026-06-30
 
