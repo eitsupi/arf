@@ -95,70 +95,62 @@ impl RValidator {
         false
     }
 
-    /// Detect misparsed raw strings.
+    /// Detect unclosed raw strings.
     ///
-    /// Tree-sitter may parse incomplete raw strings like `r"(\n"` as:
-    ///   (program (identifier) (string ...))
-    /// where `r` is an identifier and `"(\n"` is a regular string.
-    ///
-    /// This function detects this pattern:
-    /// 1. First child is identifier "r" or "R"
-    /// 2. Second child is a string that starts with a raw string delimiter
-    ///
-    /// Raw string delimiters in R: `(`, `[`, `{`, or `-` followed by one of these
+    /// With tree-sitter-r 1.3.0, an unclosed raw string like `r"(hello` no
+    /// longer parses with a MISSING close, or with an ERROR that extends to
+    /// the end of input. Instead the parser gives up right after the open
+    /// delimiter and emits an `ERROR` node whose *first* child is the
+    /// `string_open` token (e.g. `r"(`); everything after that gets
+    /// re-tokenized as ordinary R tokens (e.g. `hello` becomes a sibling
+    /// `identifier`), and in some cases additional tokens end up as further
+    /// children of the same `ERROR` node (e.g. a second `string_open` from a
+    /// stray quote on a later line). Since the misparsed trailing content
+    /// doesn't extend the `ERROR` node's own byte range to the end of input,
+    /// `check_incomplete`'s "ERROR reaches end of content" rule (above) never
+    /// sees it. This function detects the pattern directly: an `ERROR` node
+    /// that *starts* with a raw string's open token, regardless of what
+    /// other children (if any) follow it.
     ///
     /// TODO: This is a workaround for a tree-sitter-r parsing issue.
     /// When tree-sitter-r is fixed to properly recognize incomplete raw strings,
     /// this function can be removed. See: https://github.com/r-lib/tree-sitter-r
-    fn is_misparsed_raw_string(&self, root: &tree_sitter::Node, source: &[u8]) -> bool {
-        // Need at least 2 children
-        if root.child_count() < 2 {
+    fn is_unclosed_raw_string(&self, root: &tree_sitter::Node, source: &[u8]) -> bool {
+        if !root.has_error() {
             return false;
         }
+        let mut cursor = root.walk();
+        self.contains_unclosed_raw_string_open(&mut cursor, source)
+    }
 
-        let first = match root.child(0) {
-            Some(n) => n,
-            None => return false,
-        };
-        let second = match root.child(1) {
-            Some(n) => n,
-            None => return false,
-        };
+    /// Recursively search for an `ERROR` node whose first child (regardless
+    /// of what other children it may also have) is the `string_open` of a
+    /// raw string (i.e. its text starts with `r` or `R`).
+    fn contains_unclosed_raw_string_open(
+        &self,
+        cursor: &mut tree_sitter::TreeCursor,
+        source: &[u8],
+    ) -> bool {
+        let node = cursor.node();
 
-        // First child must be identifier "r" or "R"
-        if first.kind() != "identifier" {
-            return false;
-        }
-        let id_text = &source[first.start_byte()..first.end_byte()];
-        if id_text != b"r" && id_text != b"R" {
-            return false;
-        }
-
-        // Second child must be a string
-        if second.kind() != "string" {
-            return false;
-        }
-
-        // Get the string content (after the opening quote)
-        let string_start = second.start_byte();
-        if string_start + 1 >= source.len() {
-            return false;
-        }
-
-        // Check if string starts with quote followed by raw string delimiter
-        // The string node starts with ", so check the char after "
-        let after_quote = source.get(string_start + 1).copied();
-        let is_raw_delimiter = matches!(
-            after_quote,
-            Some(b'(') | Some(b'[') | Some(b'{') | Some(b'-')
-        );
-
-        if is_raw_delimiter {
-            // This looks like a misparsed raw string
-            // Check if the raw string is properly closed
-            // A complete raw string would be parsed as a single (string) node, not (identifier)(string)
-            // So if we got here, it's incomplete
+        if node.kind() == "ERROR"
+            && let Some(first) = node.child(0)
+            && first.kind() == "string_open"
+            && matches!(source.get(first.start_byte()), Some(b'r') | Some(b'R'))
+        {
             return true;
+        }
+
+        if cursor.goto_first_child() {
+            loop {
+                if self.contains_unclosed_raw_string_open(cursor, source) {
+                    return true;
+                }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+            cursor.goto_parent();
         }
 
         false
@@ -239,10 +231,10 @@ impl Validator for RValidator {
             root.to_sexp()
         ));
 
-        // Check for incomplete raw strings that tree-sitter misparses
-        if self.is_misparsed_raw_string(&root, source) {
+        // Check for unclosed raw strings that tree-sitter can't otherwise flag
+        if self.is_unclosed_raw_string(&root, source) {
             debug_log(&format!(
-                "[Validator] {:?} -> Incomplete (misparsed raw string)",
+                "[Validator] {:?} -> Incomplete (unclosed raw string)",
                 escaped
             ));
             return ValidationResult::Incomplete;
@@ -426,7 +418,15 @@ mod tests {
         ));
 
         // Raw strings with quotes inside (reported issue)
-        // r"( on first line, then quotes on second line - all should be incomplete
+        // r"( on first line, then quotes on second line - all should be incomplete.
+        // Note: the "one quote" and "text + quote" cases below happen to produce
+        // an ERROR node that already extends to the end of input, so they'd pass
+        // even without contains_unclosed_raw_string_open's multi-child support;
+        // only the "two quotes" case (ERROR ends mid-input, followed by a separate
+        // sibling `string` node) is discriminating on its own. Kept all three since
+        // this area is easy to regress and cheap to keep covered; see the
+        // `foo(r"(...)` case below for a test that specifically requires
+        // multi-child ERROR matching.
         assert!(is_incomplete(
             validator.validate(concat!(r#"r"("#, "\n", r#"""#))
         )); // one quote
@@ -437,6 +437,19 @@ mod tests {
             validator.validate(concat!(r#"r"("#, "\nhello", r#"""#))
         )); // text + quote
 
+        // Nested inside a call whose parens DO close (last `)` is consumed as
+        // the call's own close, no MISSING anywhere), with a comma-separated
+        // argument after the unclosed raw string. The ERROR node here has 3
+        // children (string_open, identifier, string_open) and ends well before
+        // the end of input, so this is only caught because
+        // contains_unclosed_raw_string_open checks the ERROR's first child
+        // regardless of how many children follow it.
+        assert!(is_incomplete(validator.validate(concat!(
+            r#"foo(r"("#,
+            "\nhello",
+            r#"", 1)"#
+        ))));
+
         // Complete: r"( followed by )" closes it
         assert!(is_complete(
             validator.validate(concat!(r#"r"("#, "\n", r#")""#))
@@ -444,6 +457,46 @@ mod tests {
         assert!(is_complete(
             validator.validate(concat!(r#"r"(""#, "\n", r#")""#))
         ));
+
+        // Uppercase R and single-quoted variants
+        assert!(is_incomplete(validator.validate(r#"R"(hello"#)));
+        assert!(is_incomplete(validator.validate("r'(hello")));
+        assert!(is_incomplete(validator.validate("R'[hello")));
+
+        // Bracket/brace delimiter variants
+        assert!(is_incomplete(validator.validate(r#"r"[hello"#)));
+        assert!(is_incomplete(validator.validate(r#"r"{hello"#)));
+
+        // Unclosed raw string nested inside an otherwise-*closed* call/brace.
+        // The outer construct has no MISSING node here (the trailing `)`/`}`
+        // is consumed as its own close), so these only come out Incomplete
+        // because `contains_unclosed_raw_string_open` finds the nested
+        // `ERROR(string_open)` — unlike a nested-but-also-unclosed variant,
+        // which would pass via the generic MISSING/ERROR-at-end check alone.
+        assert!(is_incomplete(validator.validate(r#"foo(r"(hello)"#)));
+        assert!(is_incomplete(validator.validate(concat!(
+            "{ ",
+            r#"r"(hello"#,
+            " }"
+        ))));
+
+        // A genuine syntax error earlier in the input, with an unclosed raw
+        // string trailing after it, should still be treated the same as any
+        // other unclosed-paren input (Incomplete) rather than newly regressing
+        // to Complete because of the raw-string workaround.
+        assert!(is_incomplete(validator.validate(r#"fn(a b, r"(hello"#)));
+
+        // Raw-string-like text that is actually just content of an ordinary
+        // unclosed double-quoted string must not be misdetected here; it's
+        // still correctly caught as Incomplete by the generic MISSING-close check.
+        assert!(is_incomplete(validator.validate("\"foo r'(bar")));
+
+        // Malformed non-raw forms (missing quote/delimiter) are not raw
+        // strings at all and must not spuriously match this workaround;
+        // they're still Incomplete for unrelated reasons (unclosed bracket/string).
+        assert!(is_incomplete(validator.validate("r[foo")));
+        assert!(is_incomplete(validator.validate("r{foo")));
+        assert!(is_incomplete(validator.validate(r#"r"---foo"#)));
     }
 
     #[test]
