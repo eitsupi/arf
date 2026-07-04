@@ -437,14 +437,18 @@ mod tests {
         assert!(is_incomplete(validator.validate(r#"r"[hello"#)));
         assert!(is_incomplete(validator.validate(r#"r"{hello"#)));
 
-        // Unclosed raw string nested inside an unclosed call/brace/paren
-        assert!(is_incomplete(validator.validate(r#"foo(r"(hello"#)));
-        assert!(is_incomplete(
-            validator.validate(concat!("{ ", r#"r"(hello"#))
-        ));
-        assert!(is_incomplete(
-            validator.validate(concat!("(", r#"r"(hello"#))
-        ));
+        // Unclosed raw string nested inside an otherwise-*closed* call/brace.
+        // The outer construct has no MISSING node here (the trailing `)`/`}`
+        // is consumed as its own close), so these only come out Incomplete
+        // because `contains_unclosed_raw_string_open` finds the nested
+        // `ERROR(string_open)` — unlike a nested-but-also-unclosed variant,
+        // which would pass via the generic MISSING/ERROR-at-end check alone.
+        assert!(is_incomplete(validator.validate(r#"foo(r"(hello)"#)));
+        assert!(is_incomplete(validator.validate(concat!(
+            "{ ",
+            r#"r"(hello"#,
+            " }"
+        ))));
 
         // A genuine syntax error earlier in the input, with an unclosed raw
         // string trailing after it, should still be treated the same as any
