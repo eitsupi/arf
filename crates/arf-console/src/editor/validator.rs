@@ -418,7 +418,15 @@ mod tests {
         ));
 
         // Raw strings with quotes inside (reported issue)
-        // r"( on first line, then quotes on second line - all should be incomplete
+        // r"( on first line, then quotes on second line - all should be incomplete.
+        // Note: the "one quote" and "text + quote" cases below happen to produce
+        // an ERROR node that already extends to the end of input, so they'd pass
+        // even without contains_unclosed_raw_string_open's multi-child support;
+        // only the "two quotes" case (ERROR ends mid-input, followed by a separate
+        // sibling `string` node) is discriminating on its own. Kept all three since
+        // this area is easy to regress and cheap to keep covered; see the
+        // `foo(r"(...)` case below for a test that specifically requires
+        // multi-child ERROR matching.
         assert!(is_incomplete(
             validator.validate(concat!(r#"r"("#, "\n", r#"""#))
         )); // one quote
@@ -428,6 +436,19 @@ mod tests {
         assert!(is_incomplete(
             validator.validate(concat!(r#"r"("#, "\nhello", r#"""#))
         )); // text + quote
+
+        // Nested inside a call whose parens DO close (last `)` is consumed as
+        // the call's own close, no MISSING anywhere), with a comma-separated
+        // argument after the unclosed raw string. The ERROR node here has 3
+        // children (string_open, identifier, string_open) and ends well before
+        // the end of input, so this is only caught because
+        // contains_unclosed_raw_string_open checks the ERROR's first child
+        // regardless of how many children follow it.
+        assert!(is_incomplete(validator.validate(concat!(
+            r#"foo(r"("#,
+            "\nhello",
+            r#"", 1)"#
+        ))));
 
         // Complete: r"( followed by )" closes it
         assert!(is_complete(
