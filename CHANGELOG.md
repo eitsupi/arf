@@ -2,19 +2,16 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable.
-- On macOS/Linux, Ctrl+C (SIGINT) delivered during R evaluation could terminate the session instead of cancelling the running computation. Ctrl+C now interrupts the evaluation and returns to the prompt, as on Windows.
-- Updated to tree-sitter-r 1.3.0 and adjusted the input validator so unclosed raw strings (e.g. `r"(...`) are still correctly detected as incomplete input rather than being sent to R prematurely.
-
-## [0.4.3-rc.1] - 2026-06-30
+## [0.4.3] - 2026-07-04
 
 ### Fixed
 
 - The help browser (`:help`), tab completion, and object inspection no longer silently overwrite user variables in `.GlobalEnv` (e.g. variables named `db` or `base` were at risk) (#233).
 - Support R installations on RHEL and AlmaLinux by checking `/usr/lib64/R/lib/libR.so` and using lazy symbol resolution when loading libR (#232).
 - Fixed `.Rprofile` not being loaded after `:restart!` on macOS/Linux when `R_PROFILE_USER` is set to an empty string in the environment. The fix from #226 applied only to Windows; this extends the same behaviour to Unix where R handles profile loading internally (#234).
+- The help browser (`:help`) no longer leaks raw HTML tags from some Rd documentation, which made pages like `pak::FAQ` unreadable (#244).
+- On macOS/Linux, Ctrl+C (SIGINT) delivered during R evaluation could terminate the session instead of cancelling the running computation. Ctrl+C now interrupts the evaluation and returns to the prompt, as on Windows (#245).
+- Updated to tree-sitter-r 1.3.0 and adjusted the input validator so unclosed raw strings (e.g. `r"(...`) are still correctly detected as incomplete input rather than being sent to R prematurely (#247).
 
 ## [0.4.2] - 2026-06-27
 
