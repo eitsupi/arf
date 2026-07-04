@@ -496,28 +496,31 @@ impl Terminal {
         self.wait_for_exit_status(timeout).map(|_| ())
     }
 
-    /// Wait for the child process to exit (detected via PTY EOF) and return
-    /// its exit status, including the terminating signal on Unix if any.
+    /// Wait for the child process to exit and return its exit status,
+    /// including the terminating signal on Unix if any.
     ///
-    /// PTY EOF means the process closed its file descriptors, which on exit
-    /// happens at (or after) the point the kernel makes it reapable, so the
-    /// `waitpid` behind `Child::wait` returns without blocking in practice.
+    /// Polls `Child::try_wait` directly rather than relying on the PTY
+    /// `running` flag: that flag can also flip on a read error, and PTY EOF
+    /// can be observed before the process is actually reapable, so a
+    /// blocking `wait()` gated on it could hang past the timeout.
     pub fn wait_for_exit_status(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
         let start = Instant::now();
-        while start.elapsed() < timeout {
-            let running = self.state.lock().map_err(|e| e.to_string())?.running;
-            if !running {
-                return self
-                    .child
-                    .wait()
-                    .map_err(|e| format!("Failed to reap child process: {}", e));
+        loop {
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .map_err(|e| format!("Failed to check child process status: {}", e))?
+            {
+                return Ok(status);
+            }
+            if start.elapsed() >= timeout {
+                return Err(format!(
+                    "Process did not exit within {}s",
+                    timeout.as_secs()
+                ));
             }
             thread::sleep(Duration::from_millis(100));
         }
-        Err(format!(
-            "Process did not exit within {}s",
-            timeout.as_secs()
-        ))
     }
 
     /// Get current cursor position as (row, col), both 0-indexed.

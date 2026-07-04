@@ -206,9 +206,13 @@ fn test_pty_sigterm_terminates_session() {
     let status = terminal
         .wait_for_exit_status(std::time::Duration::from_secs(5))
         .expect("SIGTERM should terminate the session");
-    assert!(
-        status.signal().is_some(),
-        "Process should have been terminated by a signal (default SIGTERM disposition), \
+    // `strsignal(SIGTERM)` on glibc/Linux is "Terminated"; a bare
+    // `signal().is_some()` check would also pass if SIGTERM handling somehow
+    // crashed the process with a different signal instead of terminating it.
+    assert_eq!(
+        status.signal(),
+        Some("Terminated"),
+        "Process should have been terminated by SIGTERM's default disposition, \
          got exit status: {status}"
     );
 
