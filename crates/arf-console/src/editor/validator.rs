@@ -105,12 +105,15 @@ impl RValidator {
     /// as ordinary R tokens (e.g. `hello` becomes a sibling `identifier`).
     /// Since that trailing content sits next to the `ERROR` node rather than
     /// inside it, `check_incomplete`'s "ERROR reaches end of content" rule
-    /// below never sees it. This function detects that specific pattern.
+    /// (above) never sees it. This function detects that specific pattern.
     ///
     /// TODO: This is a workaround for a tree-sitter-r parsing issue.
     /// When tree-sitter-r is fixed to properly recognize incomplete raw strings,
     /// this function can be removed. See: https://github.com/r-lib/tree-sitter-r
-    fn is_misparsed_raw_string(&self, root: &tree_sitter::Node, source: &[u8]) -> bool {
+    fn is_unclosed_raw_string(&self, root: &tree_sitter::Node, source: &[u8]) -> bool {
+        if !root.has_error() {
+            return false;
+        }
         let mut cursor = root.walk();
         self.contains_unclosed_raw_string_open(&mut cursor, source)
     }
@@ -222,10 +225,10 @@ impl Validator for RValidator {
             root.to_sexp()
         ));
 
-        // Check for incomplete raw strings that tree-sitter misparses
-        if self.is_misparsed_raw_string(&root, source) {
+        // Check for unclosed raw strings that tree-sitter can't otherwise flag
+        if self.is_unclosed_raw_string(&root, source) {
             debug_log(&format!(
-                "[Validator] {:?} -> Incomplete (misparsed raw string)",
+                "[Validator] {:?} -> Incomplete (unclosed raw string)",
                 escaped
             ));
             return ValidationResult::Incomplete;
