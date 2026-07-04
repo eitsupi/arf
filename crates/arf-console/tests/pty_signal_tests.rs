@@ -206,12 +206,21 @@ fn test_pty_sigterm_terminates_session() {
     let status = terminal
         .wait_for_exit_status(std::time::Duration::from_secs(5))
         .expect("SIGTERM should terminate the session");
-    // `strsignal(SIGTERM)` on glibc/Linux is "Terminated"; a bare
-    // `signal().is_some()` check would also pass if SIGTERM handling somehow
-    // crashed the process with a different signal instead of terminating it.
+    // `portable_pty::ExitStatus` only exposes the `strsignal()`-derived name,
+    // not the raw signal number, so look up this process's own description
+    // for SIGTERM rather than hardcoding one: `strsignal` output depends on
+    // the OS and locale, and this test runs on both Linux and macOS CI. A
+    // bare `signal().is_some()` check would also pass if SIGTERM handling
+    // somehow crashed the process with a different signal instead of
+    // terminating it, so compare against the specific signal name.
+    let expected_signal_name = unsafe {
+        std::ffi::CStr::from_ptr(libc::strsignal(libc::SIGTERM))
+            .to_string_lossy()
+            .into_owned()
+    };
     assert_eq!(
         status.signal(),
-        Some("Terminated"),
+        Some(expected_signal_name.as_str()),
         "Process should have been terminated by SIGTERM's default disposition, \
          got exit status: {status}"
     );
