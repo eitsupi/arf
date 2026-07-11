@@ -5,9 +5,29 @@
 
 use crate::fuzzy::fuzzy_match;
 use reedline::{
-    History, HistoryItem, HistoryItemId, HistorySessionId, Result, SearchFilter, SearchQuery,
-    SqliteBackedHistory,
+    History, HistoryItem, HistoryItemExtraInfo, HistoryItemId, HistorySessionId,
+    IgnoreAllExtraInfo, Result, SearchFilter, SearchQuery, SqliteBackedHistory,
 };
+
+use super::storage::HistoryExtraInfo;
+
+/// Convert a `HistoryItem<A>` to `HistoryItem<B>` by replacing the `more_info` field.
+fn with_extra<A: HistoryItemExtraInfo, B: HistoryItemExtraInfo>(
+    h: HistoryItem<A>,
+    more_info: Option<B>,
+) -> HistoryItem<B> {
+    HistoryItem {
+        id: h.id,
+        start_timestamp: h.start_timestamp,
+        command_line: h.command_line,
+        session_id: h.session_id,
+        hostname: h.hostname,
+        cwd: h.cwd,
+        duration: h.duration,
+        exit_status: h.exit_status,
+        more_info,
+    }
+}
 
 /// A wrapper around `SqliteBackedHistory` that provides fuzzy search capabilities.
 ///
@@ -95,9 +115,6 @@ impl FuzzyHistory {
 
 impl History for FuzzyHistory {
     fn save(&mut self, mut h: HistoryItem) -> Result<HistoryItem> {
-        // TODO: Once reedline's History trait accepts HistoryItem<HistoryExtraInfo>,
-        // populate h.more_info with metadata (meta_command flag, reprex output, etc.).
-        // Populate metadata if not already set
         if h.start_timestamp.is_none() {
             h.start_timestamp = Some(chrono::Utc::now());
         }
@@ -109,7 +126,16 @@ impl History for FuzzyHistory {
         if h.hostname.is_none() {
             h.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
         }
-        self.inner.save(h)
+        let is_meta = h.command_line.trim().starts_with(':');
+        let typed = with_extra(
+            h,
+            Some(HistoryExtraInfo {
+                meta_command: is_meta,
+                ..Default::default()
+            }),
+        );
+        let result = self.inner.save_with_extra(typed)?;
+        Ok(with_extra(result, None::<IgnoreAllExtraInfo>))
     }
 
     fn load(&self, id: HistoryItemId) -> Result<HistoryItem> {
