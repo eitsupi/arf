@@ -525,7 +525,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -634,7 +634,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1207,7 +1207,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "serde",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1576,9 +1576,9 @@ dependencies = [
 
 [[package]]
 name = "rd-parser"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d84eca374ec208e9a5981ae18ff0d1c716a5d220f8709e345f4c739dcfe6ca9e"
+checksum = "81b705ed0b3199c27c81b47ecf5ff8144d806393d8a5c80db99dd7edbc4d5e48"
 dependencies = [
  "serde",
  "serde_json",
@@ -1587,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "788502351754ac38e83fc4b1919a2702b6785e53bbd5bc3a7cac5a5cd7c6a7e9"
+checksum = "569098a511f4cc975237d36671b20b999a6c34947ae068a05d5a63f119561d79"
 dependencies = [
  "rd-parser",
  "rd2qmd-mdast",
@@ -1601,9 +1601,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62004656e50ca93c433fdaa93c3cd62abfc71ad952d02dce355eda406f1c3898"
+checksum = "af1d91e60217cc16473f361da56d707a61833f115f876c9d1236ba9c02d5175b"
 dependencies = [
  "serde",
 ]
@@ -1753,7 +1753,7 @@ dependencies = [
  "errno 0.3.14",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2122,7 +2122,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
