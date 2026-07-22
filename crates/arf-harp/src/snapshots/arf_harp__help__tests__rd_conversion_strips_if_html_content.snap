@@ -1,5 +1,6 @@
 ---
 source: crates/arf-harp/src/help.rs
+assertion_line: 574
 expression: qmd
 ---
 # Hello World
@@ -10,4 +11,4 @@ A simple function.
 
 ## Details
 
- Some details.  More text after.
+Some details.  More text after.

@@ -424,16 +424,19 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
         })?
     };
 
-    rd2qmd_core::RdConverter::new(&rd_content)
-        .quarto_code_blocks(false)
-        .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
-        .convert()
-        .map_err(|e| {
-            HarpError::RError(arf_libr::RError::EvalError(format!(
-                "Failed to convert Rd to Markdown: {}",
-                e
-            )))
-        })
+    let parsed = rd_source::parse(rd_content.as_bytes()).map_err(|e| {
+        HarpError::RError(arf_libr::RError::EvalError(format!(
+            "Failed to parse Rd for Markdown conversion: {}",
+            e
+        )))
+    })?;
+    let mut options = rd2qmd_core::RdConvertOptions::default();
+    options.code.quarto_code_blocks = false;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    Ok(rd2qmd_core::convert_rd_document(
+        parsed.document(),
+        &options,
+    ))
 }
 
 /// Sentinel value returned by R when a vignette is in PDF format.
@@ -562,11 +565,11 @@ More text after.
 }
 "#;
 
-        let qmd = rd2qmd_core::RdConverter::new(rd_content)
-            .quarto_code_blocks(false)
-            .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
-            .convert()
-            .unwrap();
+        let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
+        let mut options = rd2qmd_core::RdConvertOptions::default();
+        options.code.quarto_code_blocks = false;
+        options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+        let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
     }
