@@ -616,6 +616,10 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
+    if r_initialized && let Err(e) = arf_harp::lib_paths::populate_lib_paths() {
+        log::warn!("Could not cache R library paths: {}", e);
+    }
+
     let session_id = create_session_id(&config);
     let session_id_raw = session_id.map(i64::from);
 

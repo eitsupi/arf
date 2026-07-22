@@ -8,6 +8,30 @@ use common::ld_library_path_is_set;
 use common::with_r;
 
 #[test]
+fn test_lib_paths_read_is_safe_before_population() {
+    let _ = arf_harp::lib_paths::lib_paths();
+}
+
+#[test]
+fn test_lib_paths_population_returns_existing_paths() {
+    with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        let paths = arf_harp::lib_paths::lib_paths();
+
+        assert!(
+            !paths.is_empty(),
+            "R should report at least one library path"
+        );
+        for path in paths {
+            assert!(
+                std::path::Path::new(&path).is_dir(),
+                "R library path should be an existing directory: {path}"
+            );
+        }
+    });
+}
+
+#[test]
 fn test_call_dot_first_noop_when_undefined() {
     // .First is not defined after plain R initialization — call must return
     // false (skipped) and must not panic or error.
