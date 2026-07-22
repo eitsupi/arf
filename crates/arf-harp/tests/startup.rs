@@ -2,7 +2,7 @@
 
 mod common;
 
-use arf_harp::{call_dot_first, call_dot_first_sys, eval_string};
+use arf_harp::{call_dot_first, call_dot_first_sys, eval_string, eval_string_in_base};
 #[cfg(not(windows))]
 use common::ld_library_path_is_set;
 use common::with_r;
@@ -29,6 +29,59 @@ fn test_lib_paths_population_returns_existing_paths() {
             );
         }
     });
+}
+
+#[test]
+fn test_lib_paths_re_evaluates_after_r_lib_paths_changes() {
+    with_r(|| {
+        let baseline = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
+        let temp_dir = tempfile::tempdir().expect("temporary directory should be created");
+        let new_path = temp_dir.path().to_string_lossy().into_owned();
+        let _restore = LibPathsRestore {
+            paths: baseline.clone(),
+        };
+
+        assert!(!baseline.iter().any(|path| path == &new_path));
+        eval_string_in_base(&format!(
+            "invisible(.libPaths(c(\"{}\", .libPaths())))",
+            escape_r_string(&new_path)
+        ))
+        .expect(".libPaths() should accept the extra directory");
+
+        let paths = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
+        assert!(
+            paths
+                .iter()
+                .any(|path| std::path::Path::new(path) == temp_dir.path()),
+            "updated R library paths should include the extra directory: {new_path}"
+        );
+    });
+}
+
+struct LibPathsRestore {
+    paths: Vec<String>,
+}
+
+impl Drop for LibPathsRestore {
+    fn drop(&mut self) {
+        let paths = self
+            .paths
+            .iter()
+            .map(|path| format!("\"{}\"", escape_r_string(path)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if let Err(error) = eval_string_in_base(&format!("invisible(.libPaths(c({paths})))")) {
+            eprintln!("Failed to restore R library paths: {error}");
+        }
+    }
+}
+
+fn escape_r_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 #[test]
