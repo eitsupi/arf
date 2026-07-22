@@ -1,7 +1,7 @@
 //! R help system integration.
 //!
 //! This module provides access to installed package help indexes by reading
-//! each package's `Meta/hsearch.rds` file directly.
+//! each package's help metadata files directly.
 //!
 //! # Acknowledgment
 //!
@@ -58,10 +58,10 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
     data.result = Some(result);
 }
 
-/// Get R help topics from the help database.
+/// Get help, vignette, and demo topics from installed package metadata.
 ///
-/// This function reads each installed package's help-search index. It returns
-/// help-page entries from the `Base` matrix.
+/// This function reads each installed package's help-search, vignette, and
+/// demo indexes.
 ///
 /// # Returns
 ///
@@ -73,7 +73,7 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 ///
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
     let mut topics = Vec::new();
-    for (_, package_dir) in installed_package_dirs(&lib_paths()?) {
+    for (package, package_dir) in installed_package_dirs(&lib_paths()?) {
         let Ok(db) = PackageHelpDb::open(&package_dir) else {
             continue;
         };
@@ -81,8 +81,79 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
             continue;
         };
         topics.extend(extract_help_topics(&index));
+
+        if let Ok(Some(index)) = db.vignettes() {
+            topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.clone(),
+                topic: vignette_topic(entry),
+                title: entry.title.clone(),
+                entry_type: "vignette".to_string(),
+            }));
+        }
+
+        if let Ok(Some(index)) = db.demos() {
+            topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.clone(),
+                topic: entry.name.clone(),
+                title: entry.title.clone(),
+                entry_type: "demo".to_string(),
+            }));
+        }
     }
     Ok(topics)
+}
+
+// Mirror R's vignette-topic resolution from the index's filename fields.
+fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
+    let (filename, from_file) = if !entry.r.is_empty() {
+        (&entry.r, false)
+    } else if !entry.pdf.is_empty() {
+        (&entry.pdf, false)
+    } else {
+        (&entry.file, true)
+    };
+    let filename = if from_file {
+        filename.rsplit(['/', '\\']).next().unwrap_or(filename)
+    } else {
+        filename
+    };
+    filename
+        .rsplit_once('.')
+        .map_or_else(|| filename.to_owned(), |(stem, _)| stem.to_owned())
+}
+
+#[cfg(test)]
+mod vignette_tests {
+    use super::vignette_topic;
+    use rd_helpdb::VignetteEntry;
+
+    fn entry(file: &str, pdf: &str, r: &str) -> VignetteEntry {
+        VignetteEntry {
+            file: file.to_owned(),
+            title: String::new(),
+            pdf: pdf.to_owned(),
+            r: r.to_owned(),
+            depends: Vec::new(),
+            keywords: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn resolves_vignette_topic_from_r_pdf_or_file() {
+        assert_eq!(
+            vignette_topic(&entry("ignored.Rmd", "ignored.pdf", "guide.R")),
+            "guide"
+        );
+        assert_eq!(
+            vignette_topic(&entry("ignored.Rmd", "guide.pdf", "")),
+            "guide"
+        );
+        assert_eq!(
+            vignette_topic(&entry("vignettes/guide.Rmd", "", "")),
+            "guide"
+        );
+        assert_eq!(vignette_topic(&entry("guide", "", "")), "guide");
+    }
 }
 
 fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {

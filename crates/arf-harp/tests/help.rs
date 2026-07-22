@@ -101,6 +101,30 @@ fn test_help_topics_reads_installed_indexes() {
             topics.iter().any(|topic| topic.package == "utils"),
             "expected at least one help topic from utils"
         );
-        assert!(topics.iter().all(|topic| topic.entry_type == "help"));
+        assert!(
+            topics
+                .iter()
+                .filter(|topic| topic.package == "utils")
+                .all(|topic| topic.entry_type == "help"),
+            "utils entries should be help topics"
+        );
+        assert!(
+            topics.iter().any(|topic| {
+                topic.package == "glue"
+                    && topic.entry_type == "vignette"
+                    && !topic.topic.is_empty()
+                    && !topic.title.is_empty()
+            }),
+            "expected a titled vignette topic from glue"
+        );
+        assert!(
+            topics.iter().any(|topic| {
+                topic.package == "stats"
+                    && topic.entry_type == "demo"
+                    && !topic.topic.is_empty()
+                    && !topic.title.is_empty()
+            }),
+            "expected a titled demo topic from stats"
+        );
     });
 }

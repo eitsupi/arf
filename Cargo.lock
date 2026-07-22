@@ -1652,8 +1652,7 @@ dependencies = [
 [[package]]
 name = "rd-helpdb"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8da08438d0f2ffe0c92b1351daeda1d522e94c82d27a72f9d862b93b302b964d"
+source = "git+https://github.com/eitsupi/r-documentation-rs?rev=632e7c35f640814785238ca87ff8bf70b5a2f0cd#632e7c35f640814785238ca87ff8bf70b5a2f0cd"
 dependencies = [
  "flate2",
  "rd-rds",
@@ -1663,8 +1662,7 @@ dependencies = [
 [[package]]
 name = "rd-rds"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70676edbdb13de887c362cda3a14c79f0289f4c2d6bf586200bf0e4fd093da15"
+source = "git+https://github.com/eitsupi/r-documentation-rs?rev=632e7c35f640814785238ca87ff8bf70b5a2f0cd#632e7c35f640814785238ca87ff8bf70b5a2f0cd"
 dependencies = [
  "bzip2",
  "flate2",

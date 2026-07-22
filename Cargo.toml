@@ -100,6 +100,8 @@ vt100 = "0.16"
 # https://github.com/crossterm-rs/crossterm/pull/1030
 [patch.crates-io]
 crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "03bb4f26610a5904b8e875fcb610d16bf7d00814" }
+rd-helpdb = { git = "https://github.com/eitsupi/r-documentation-rs", rev = "632e7c35f640814785238ca87ff8bf70b5a2f0cd" }
+rd-rds = { git = "https://github.com/eitsupi/r-documentation-rs", rev = "632e7c35f640814785238ca87ff8bf70b5a2f0cd" }
 
 # The profile that 'dist' will build with
 [profile.dist]
