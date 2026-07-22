@@ -3,6 +3,7 @@
 mod common;
 
 use arf_harp::completion::get_completions;
+use arf_harp::completion::get_installed_packages;
 use arf_harp::eval_string_with_visibility;
 use common::{ld_library_path_is_set, with_r};
 
@@ -59,6 +60,29 @@ fn test_completion_at_top_level_within_timeout() {
             completions.iter().any(|c| c == "aaa_bbb"),
             "Expected 'aaa_bbb' in completions for 'aaa_' at pos 4, got: {:?}",
             completions
+        );
+    });
+}
+
+#[test]
+fn test_installed_packages_include_base_packages() {
+    if !ld_library_path_is_set() {
+        eprintln!(
+            "Skipping test_installed_packages_include_base_packages: LD_LIBRARY_PATH not set."
+        );
+        return;
+    }
+
+    with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        let packages = get_installed_packages().expect("package scan should not error");
+        assert!(
+            packages.iter().any(|package| package == "base"),
+            "installed package scan should include base, got: {packages:?}"
+        );
+        assert!(
+            packages.iter().any(|package| package == "utils"),
+            "installed package scan should include utils, got: {packages:?}"
         );
     });
 }
