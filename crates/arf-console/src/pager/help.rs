@@ -247,7 +247,7 @@ demo("{name}", package = "{pkg}")"#,
                                         _ => {
                                             // "help" and any other types
                                             match get_package_help_markdown(
-                                                &topic.lookup_key,
+                                                &topic.topic,
                                                 &topic.package,
                                             ) {
                                                 Ok(text) => {
@@ -684,14 +684,12 @@ mod tests {
             HelpTopic {
                 package: "base".to_string(),
                 topic: "print".to_string(),
-                lookup_key: "print".to_string(),
                 title: "Print Values".to_string(),
                 entry_type: "help".to_string(),
             },
             HelpTopic {
                 package: "dplyr".to_string(),
                 topic: "mutate".to_string(),
-                lookup_key: "mutate".to_string(),
                 title: "Create, modify, and delete columns".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -711,7 +709,6 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
-            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -726,7 +723,6 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
-            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];

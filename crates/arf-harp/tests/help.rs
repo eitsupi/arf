@@ -55,15 +55,14 @@ fn test_help_package_alias_and_exact_key() {
     }
 
     with_r(|| {
-        for topic in ["[.data.frame", "Extract.data.frame"] {
-            let result = get_package_help_markdown(topic, "base");
-            match result {
-                Ok(markdown) => assert!(!markdown.is_empty(), "help for {topic} was empty"),
-                Err(error) => {
-                    panic!("get_package_help_markdown({topic:?}, \"base\") failed: {error}")
-                }
-            }
-        }
+        let alias = get_package_help_markdown("[.data.frame", "base")
+            .expect("help lookup by alias should succeed");
+        let exact_key = get_package_help_markdown("Extract.data.frame", "base")
+            .expect("help lookup by exact key should succeed");
+
+        assert!(!alias.is_empty(), "help for alias was empty");
+        assert!(!exact_key.is_empty(), "help for exact key was empty");
+        assert_eq!(alias, exact_key);
     });
 }
 

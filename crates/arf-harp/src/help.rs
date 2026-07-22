@@ -27,8 +27,6 @@ pub struct HelpTopic {
     pub package: String,
     /// Topic name (the alias used to access the help).
     pub topic: String,
-    /// Exact topic key used by the package's compiled help database.
-    pub lookup_key: String,
     /// Title/description of the help topic.
     pub title: String,
     /// Type of help entry (e.g., "help", "vignette", "demo").
@@ -103,12 +101,10 @@ fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {
         .filter_map(|row| {
             let package = row.get("Package").and_then(|value| value)?;
             let topic = row.get("Topic").and_then(|value| value)?;
-            let lookup_key = row.get("Name").and_then(|value| value)?;
             let title = row.get("Title").flatten().unwrap_or("");
             Some(HelpTopic {
                 package: package.to_owned(),
                 topic: topic.to_owned(),
-                lookup_key: lookup_key.to_owned(),
                 title: title.to_owned(),
                 entry_type: "help".to_string(),
             })
@@ -298,8 +294,7 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
 ///
 /// `topic` is treated as an alias-or-exact-key input, with alias resolution
 /// taking priority. This suits callers using display `Topic` values from
-/// `Meta/hsearch.rds`; callers with the `Name` value can pass it directly to
-/// avoid the alias lookup.
+/// `Meta/hsearch.rds`.
 pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
     let package_dir = installed_package_dirs(&lib_paths()?)
         .into_iter()
@@ -521,7 +516,6 @@ mod tests {
         let topic = HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
-            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         };
