@@ -27,6 +27,8 @@ pub struct HelpTopic {
     pub package: String,
     /// Topic name (the alias used to access the help).
     pub topic: String,
+    /// Exact topic key used by the package's compiled help database.
+    pub lookup_key: String,
     /// Title/description of the help topic.
     pub title: String,
     /// Type of help entry (e.g., "help", "vignette", "demo").
@@ -101,10 +103,12 @@ fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {
         .filter_map(|row| {
             let package = row.get("Package").and_then(|value| value)?;
             let topic = row.get("Topic").and_then(|value| value)?;
+            let lookup_key = row.get("Name").and_then(|value| value)?;
             let title = row.get("Title").flatten().unwrap_or("");
             Some(HelpTopic {
                 package: package.to_owned(),
                 topic: topic.to_owned(),
+                lookup_key: lookup_key.to_owned(),
                 title: title.to_owned(),
                 entry_type: "help".to_string(),
             })
@@ -268,9 +272,9 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 
 /// Get help content as Markdown for a specific topic.
 ///
-/// This retrieves the raw Rd source from R's help system and converts it
-/// to Markdown using `rd2qmd-core`. The resulting Markdown can be rendered
-/// by a terminal-based Markdown renderer.
+/// When `package` is known, this reads the installed package's compiled help
+/// database directly. Without a package, it retains the R-evaluation-based
+/// resolution needed for attached-package and search-path semantics.
 ///
 /// # Arguments
 ///
@@ -281,22 +285,68 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 ///
 /// The help content as a Markdown string, or an error if the topic is not found.
 pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<String> {
-    let code = if let Some(pkg) = package {
-        format!(
-            r#"local({{
-    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    rd <- utils:::.getHelpFile(file)
-    paste0(as.character(rd, deparse = TRUE), collapse = "")
-}})"#,
-            topic = escape_r_string(topic),
-            pkg = escape_r_string(pkg)
-        )
-    } else {
-        format!(
-            r#"local({{
+    match package {
+        Some(package) => get_package_help_markdown(topic, package),
+        None => get_help_markdown_via_r(topic),
+    }
+}
+
+/// Get package help as Markdown without evaluating R.
+///
+/// The package directory is selected from the startup-cached library paths,
+/// populated once by [`crate::lib_paths::populate_lib_paths`]. Later
+/// `.libPaths()` mutations in the R session are not reflected here.
+///
+/// `topic` is treated as an alias-or-exact-key input, with alias resolution
+/// taking priority. This suits callers using display `Topic` values from
+/// `Meta/hsearch.rds`; callers with the `Name` value can pass it directly to
+/// avoid the alias lookup.
+pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
+    let package_dir = installed_package_dirs(&lib_paths())
+        .into_iter()
+        .find(|(name, _)| name == package)
+        .map(|(_, path)| path)
+        .ok_or_else(|| HarpError::PackageNotFound {
+            package: package.to_string(),
+        })?;
+    let db = PackageHelpDb::open(&package_dir).map_err(|source| HarpError::HelpDatabase {
+        package: package.to_string(),
+        topic: topic.to_string(),
+        key: topic.to_string(),
+        source,
+    })?;
+    let resolved = db
+        .resolve_alias(topic)
+        .map_err(|source| HarpError::HelpDatabase {
+            package: package.to_string(),
+            topic: topic.to_string(),
+            key: topic.to_string(),
+            source,
+        })?;
+    let key = resolved.unwrap_or(topic).to_string();
+    let robj = db
+        .raw_topic(&key)
+        .map_err(|source| HarpError::HelpDatabase {
+            package: package.to_string(),
+            topic: topic.to_string(),
+            key: key.clone(),
+            source,
+        })?;
+    let doc = rd_ast::lower_r_object(&robj).map_err(|source| HarpError::HelpLowering {
+        package: package.to_string(),
+        topic: topic.to_string(),
+        key: key.clone(),
+        source: Box::new(source),
+    })?;
+    let mut options = rd2qmd_core::RdConvertOptions::default();
+    options.code.quarto_code_blocks = false;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    Ok(rd2qmd_core::convert_rd_document(&doc, &options))
+}
+
+fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
+    let code = format!(
+        r#"local({{
     x <- utils::help("{topic}", help_type = "text")
     paths <- as.character(x)
     if (length(paths) == 0) return(NULL)
@@ -304,9 +354,8 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     rd <- utils:::.getHelpFile(file)
     paste0(as.character(rd, deparse = TRUE), collapse = "")
 }})"#,
-            topic = escape_r_string(topic)
-        )
-    };
+        topic = escape_r_string(topic)
+    );
 
     let rd_content = unsafe {
         eval_r_to_string(&code)?.ok_or_else(|| {
@@ -473,6 +522,7 @@ mod tests {
         let topic = HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         };

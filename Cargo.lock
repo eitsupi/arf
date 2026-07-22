@@ -153,6 +153,7 @@ dependencies = [
  "log",
  "once_cell",
  "r-vignette-to-md",
+ "rd-ast",
  "rd-helpdb",
  "rd-rds",
  "rd-source",
@@ -1644,6 +1645,7 @@ version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aaa5a549cda19d85723d7f7e2f4713224daa6b6aada7f9d0359a7006bdb0daaa"
 dependencies = [
+ "rd-rds",
  "serde",
 ]
 

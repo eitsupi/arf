@@ -6,7 +6,7 @@
 
 mod common;
 
-use arf_harp::{get_help_markdown, get_help_topics};
+use arf_harp::{get_help_markdown, get_help_topics, get_package_help_markdown};
 use common::{ld_library_path_is_set, with_r};
 
 /// Regression test for GitHub issue #194:
@@ -25,6 +25,7 @@ fn test_help_base_solve_returns_content() {
     }
 
     with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         let result = get_help_markdown("solve", Some("base"));
         match &result {
             Err(e) => panic!(r#"get_help_markdown("solve", Some("base")) failed: {e}"#),
@@ -43,6 +44,49 @@ fn test_help_base_solve_returns_content() {
                 );
             }
         }
+    });
+}
+
+#[test]
+fn test_help_package_alias_and_exact_key() {
+    if !ld_library_path_is_set() {
+        eprintln!("Skipping test_help_package_alias_and_exact_key: LD_LIBRARY_PATH not set.");
+        return;
+    }
+
+    with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        for topic in ["[.data.frame", "Extract.data.frame"] {
+            let result = get_package_help_markdown(topic, "base");
+            match result {
+                Ok(markdown) => assert!(!markdown.is_empty(), "help for {topic} was empty"),
+                Err(error) => {
+                    panic!("get_package_help_markdown({topic:?}, \"base\") failed: {error}")
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn test_help_package_and_topic_not_found() {
+    if !ld_library_path_is_set() {
+        eprintln!("Skipping test_help_package_and_topic_not_found: LD_LIBRARY_PATH not set.");
+        return;
+    }
+
+    with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        let package_error =
+            get_package_help_markdown("solve", "definitely_not_an_installed_package")
+                .expect_err("unknown package should fail");
+        assert!(package_error.to_string().contains("not found"));
+
+        let topic_error = get_package_help_markdown("definitely_not_a_help_topic", "base")
+            .expect_err("unknown topic should fail");
+        let message = topic_error.to_string();
+        assert!(message.contains("definitely_not_a_help_topic"));
+        assert!(message.contains("base"));
     });
 }
 

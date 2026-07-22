@@ -20,7 +20,7 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use arf_harp::help::{HelpTopic, get_help_markdown, get_help_topics, get_vignette_text};
+use arf_harp::help::{HelpTopic, get_help_topics, get_package_help_markdown, get_vignette_text};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -246,9 +246,9 @@ demo("{name}", package = "{pkg}")"#,
                                         }
                                         _ => {
                                             // "help" and any other types
-                                            match get_help_markdown(
-                                                &topic.topic,
-                                                Some(&topic.package),
+                                            match get_package_help_markdown(
+                                                &topic.lookup_key,
+                                                &topic.package,
                                             ) {
                                                 Ok(text) => {
                                                     if let Err(e) =
@@ -684,12 +684,14 @@ mod tests {
             HelpTopic {
                 package: "base".to_string(),
                 topic: "print".to_string(),
+                lookup_key: "print".to_string(),
                 title: "Print Values".to_string(),
                 entry_type: "help".to_string(),
             },
             HelpTopic {
                 package: "dplyr".to_string(),
                 topic: "mutate".to_string(),
+                lookup_key: "mutate".to_string(),
                 title: "Create, modify, and delete columns".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -709,6 +711,7 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -723,6 +726,7 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            lookup_key: "print".to_string(),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];

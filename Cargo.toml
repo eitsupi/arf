@@ -40,6 +40,7 @@ rd2qmd-core = "0.5.0-alpha.1"
 rd-source = "=0.0.1"
 rd-helpdb = "=0.0.1"
 rd-rds = "=0.0.1"
+rd-ast = { version = "=0.0.1", features = ["serde"] }
 
 # Markdown parsing
 pulldown-cmark = "0.13"

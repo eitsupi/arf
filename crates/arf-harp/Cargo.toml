@@ -17,6 +17,7 @@ rd2qmd-core.workspace = true
 rd-source.workspace = true
 rd-helpdb.workspace = true
 rd-rds.workspace = true
+rd-ast = { workspace = true, features = ["rds"] }
 log.workspace = true
 thiserror.workspace = true
 once_cell.workspace = true
