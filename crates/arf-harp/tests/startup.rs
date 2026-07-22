@@ -9,14 +9,14 @@ use common::with_r;
 
 #[test]
 fn test_lib_paths_read_is_safe_before_population() {
-    let _ = arf_harp::lib_paths::lib_paths();
+    let _ = arf_harp::lib_paths::cached_lib_paths();
 }
 
 #[test]
 fn test_lib_paths_population_returns_existing_paths() {
     with_r(|| {
         arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
-        let paths = arf_harp::lib_paths::lib_paths();
+        let paths = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
 
         assert!(
             !paths.is_empty(),

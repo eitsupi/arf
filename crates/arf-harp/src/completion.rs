@@ -47,6 +47,7 @@ impl Drop for SuppressStderrGuard {
 /// Cache for installed packages.
 struct PackageCache {
     packages: Vec<String>,
+    paths: Vec<String>,
     last_updated: Option<Instant>,
 }
 
@@ -54,8 +55,16 @@ impl PackageCache {
     const fn new() -> Self {
         PackageCache {
             packages: Vec::new(),
+            paths: Vec::new(),
             last_updated: None,
         }
+    }
+
+    fn is_fresh_for(&self, paths: &[String]) -> bool {
+        self.paths == paths
+            && self
+                .last_updated
+                .is_some_and(|last_updated| last_updated.elapsed() < CACHE_DURATION)
     }
 }
 
@@ -249,15 +258,11 @@ fn extract_identifier_before_cursor(before_cursor: &str) -> Option<String> {
 
 /// Get the list of installed packages with caching.
 pub fn get_installed_packages() -> HarpResult<Vec<String>> {
-    let paths = lib_paths();
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
+    let paths = lib_paths()?;
 
     // Check cache first
     if let Ok(cache) = PACKAGE_CACHE.lock()
-        && let Some(last_updated) = cache.last_updated
-        && last_updated.elapsed() < CACHE_DURATION
+        && cache.is_fresh_for(&paths)
     {
         return Ok(cache.packages.clone());
     }
@@ -267,6 +272,7 @@ pub fn get_installed_packages() -> HarpResult<Vec<String>> {
     // Update cache
     if let Ok(mut cache) = PACKAGE_CACHE.lock() {
         cache.packages = packages.clone();
+        cache.paths = paths;
         cache.last_updated = Some(Instant::now());
     }
 
@@ -875,6 +881,21 @@ unsafe fn extract_logical_vector(sexp: SEXP, expected_len: usize) -> HarpResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_cache_requires_matching_library_paths() {
+        let mut cache = PackageCache {
+            packages: vec!["old-package".to_string()],
+            paths: vec!["/old/library".to_string()],
+            last_updated: Some(Instant::now()),
+        };
+        assert!(cache.is_fresh_for(&["/old/library".to_string()]));
+        assert!(!cache.is_fresh_for(&["/new/library".to_string()]));
+        assert!(!cache.is_fresh_for(&["/old/library".to_string(), "/second".to_string()]));
+
+        cache.last_updated = Some(Instant::now() - CACHE_DURATION);
+        assert!(!cache.is_fresh_for(&["/old/library".to_string()]));
+    }
 
     #[test]
     fn test_scan_installed_packages() {

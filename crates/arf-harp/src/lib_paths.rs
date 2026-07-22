@@ -1,54 +1,72 @@
 //! Shared cache of R's library search paths.
 
 use crate::error::{HarpError, HarpResult};
-use crate::eval_string;
+use crate::eval_string_in_base;
 use arf_libr::{SexpType, r_library};
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 struct LibPathsCache {
     paths: Vec<String>,
-    populated: bool,
+    last_success: Option<Instant>,
 }
 
 impl LibPathsCache {
     const fn new() -> Self {
         Self {
             paths: Vec::new(),
-            populated: false,
+            last_success: None,
         }
+    }
+
+    fn is_fresh(&self) -> bool {
+        self.last_success
+            .is_some_and(|last_success| last_success.elapsed() < CACHE_DURATION)
+    }
+
+    fn apply_refresh(&mut self, result: HarpResult<Vec<String>>) -> HarpResult<()> {
+        let paths = result?;
+        self.paths = paths;
+        self.last_success = Some(Instant::now());
+        Ok(())
     }
 }
 
 static LIB_PATHS_CACHE: Mutex<LibPathsCache> = Mutex::new(LibPathsCache::new());
 
-/// Evaluate R's `.libPaths()` once and store the resulting paths.
+const CACHE_DURATION: Duration = Duration::from_secs(300);
+
+/// Refreshes the cached library paths if the cache is stale or empty.
+///
+/// A failed refresh leaves both the previous paths and `last_success` intact,
+/// so the next call retries instead of treating the failed attempt as fresh.
 pub fn populate_lib_paths() -> HarpResult<()> {
     let mut cache = LIB_PATHS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if cache.populated {
+    if cache.is_fresh() {
         return Ok(());
     }
 
-    cache.populated = true;
-    let result = eval_string("tryCatch(invisible(.libPaths()), error = function(e) character(0))");
-    match result {
-        Ok(result) => {
-            cache.paths = extract_paths(&result)?;
-            Ok(())
-        }
-        Err(error) => Err(error),
-    }
+    let result = eval_string_in_base("invisible(.libPaths())")?;
+    let paths = extract_paths(&result)?;
+    cache.apply_refresh(Ok(paths))
 }
 
-/// Return the cached R library paths, or an empty vector before population or
-/// after a failed population attempt.
-pub fn lib_paths() -> Vec<String> {
+/// Returns the current library paths, refreshing the cache when necessary.
+pub fn lib_paths() -> HarpResult<Vec<String>> {
+    populate_lib_paths()?;
+    Ok(cached_lib_paths())
+}
+
+/// Returns the cached library paths without evaluating R.
+pub fn cached_lib_paths() -> Vec<String> {
     LIB_PATHS_CACHE
         .lock()
-        .map(|cache| cache.paths.clone())
-        .unwrap_or_default()
+        .unwrap_or_else(|e| e.into_inner())
+        .paths
+        .clone()
 }
 
 /// Find installed package directories in library-path order.
@@ -105,4 +123,36 @@ fn extract_paths(result: &crate::RObject) -> HarpResult<Vec<String>> {
     }
 
     Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_refresh_state_preserves_good_data_on_failure() {
+        let mut cache = LibPathsCache {
+            paths: vec!["/old/library".to_string()],
+            last_success: Some(Instant::now()),
+        };
+
+        assert!(cache.is_fresh());
+        let last_success = cache.last_success;
+        let error = HarpError::TypeMismatch {
+            expected: "character vector".to_string(),
+            actual: "numeric vector".to_string(),
+        };
+        assert!(cache.apply_refresh(Err(error)).is_err());
+        assert_eq!(cache.paths, ["/old/library"]);
+        assert_eq!(cache.last_success, last_success);
+        assert!(cache.is_fresh());
+
+        cache.last_success = Some(Instant::now() - CACHE_DURATION);
+        assert!(!cache.is_fresh());
+        cache
+            .apply_refresh(Ok(vec!["/new/library".to_string()]))
+            .unwrap();
+        assert_eq!(cache.paths, ["/new/library"]);
+        assert!(cache.is_fresh());
+    }
 }

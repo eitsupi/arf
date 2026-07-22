@@ -74,7 +74,6 @@ fn test_installed_packages_include_base_packages() {
     }
 
     with_r(|| {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         let packages = get_installed_packages().expect("package scan should not error");
         assert!(
             packages.iter().any(|package| package == "base"),

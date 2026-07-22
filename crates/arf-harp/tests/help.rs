@@ -55,7 +55,6 @@ fn test_help_package_alias_and_exact_key() {
     }
 
     with_r(|| {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         for topic in ["[.data.frame", "Extract.data.frame"] {
             let result = get_package_help_markdown(topic, "base");
             match result {
@@ -98,7 +97,6 @@ fn test_help_topics_reads_installed_indexes() {
     }
 
     with_r(|| {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         let topics = get_help_topics().expect("help indexes should be readable");
         assert!(
             topics.iter().any(|topic| topic.package == "utils"),

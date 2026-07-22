@@ -75,7 +75,7 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 ///
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
     let mut topics = Vec::new();
-    for (_, package_dir) in installed_package_dirs(&lib_paths()) {
+    for (_, package_dir) in installed_package_dirs(&lib_paths()?) {
         let Ok(db) = PackageHelpDb::open(&package_dir) else {
             continue;
         };
@@ -291,18 +291,17 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     }
 }
 
-/// Get package help as Markdown without evaluating R.
+/// Get package help as Markdown without evaluating R for the help database.
 ///
 /// The package directory is selected from the startup-cached library paths,
-/// populated once by [`crate::lib_paths::populate_lib_paths`]. Later
-/// `.libPaths()` mutations in the R session are not reflected here.
+/// refreshed as needed by [`crate::lib_paths::lib_paths`].
 ///
 /// `topic` is treated as an alias-or-exact-key input, with alias resolution
 /// taking priority. This suits callers using display `Topic` values from
 /// `Meta/hsearch.rds`; callers with the `Name` value can pass it directly to
 /// avoid the alias lookup.
 pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
-    let package_dir = installed_package_dirs(&lib_paths())
+    let package_dir = installed_package_dirs(&lib_paths()?)
         .into_iter()
         .find(|(name, _)| name == package)
         .map(|(_, path)| path)
