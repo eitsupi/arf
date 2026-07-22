@@ -30,9 +30,10 @@ static LIB_PATHS_CACHE: Mutex<LibPathsCache> = Mutex::new(LibPathsCache::new());
 ///
 /// A failed refresh leaves the previous paths intact.
 pub fn populate_lib_paths() -> HarpResult<()> {
-    let mut cache = LIB_PATHS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let result = eval_string_in_base("invisible(.libPaths())")?;
     let paths = extract_paths(&result)?;
+
+    let mut cache = LIB_PATHS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cache.apply_refresh(Ok(paths))
 }
 
@@ -70,13 +71,34 @@ pub(crate) fn installed_package_dirs(paths: &[String]) -> Vec<(String, PathBuf)>
 
         for name in names {
             let package_dir = Path::new(lib_path).join(&name);
-            if package_dir.join("Meta").join("package.rds").exists() && seen.insert(name.clone()) {
+            if is_installed_package_dir(&package_dir) && seen.insert(name.clone()) {
                 packages.push((name, package_dir));
             }
         }
     }
 
     packages
+}
+
+fn is_installed_package_dir(dir: &Path) -> bool {
+    dir.join("Meta").join("package.rds").exists()
+}
+
+/// Find one installed package directory without enumerating library contents.
+pub(crate) fn installed_package_dir(paths: &[String], package: &str) -> Option<PathBuf> {
+    if package.is_empty()
+        || package == "."
+        || package == ".."
+        || package.contains('/')
+        || package.contains('\\')
+    {
+        return None;
+    }
+
+    paths
+        .iter()
+        .map(|lib_path| Path::new(lib_path).join(package))
+        .find(|dir| is_installed_package_dir(dir))
 }
 
 fn extract_paths(result: &crate::RObject) -> HarpResult<Vec<String>> {
@@ -127,5 +149,27 @@ mod tests {
             .apply_refresh(Ok(vec!["/new/library".to_string()]))
             .unwrap();
         assert_eq!(cache.paths, ["/new/library"]);
+    }
+
+    #[test]
+    fn single_package_lookup_checks_paths_in_order_and_rejects_traversal() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory should be created");
+        let first = temp_dir.path().join("first");
+        let second = temp_dir.path().join("second");
+        std::fs::create_dir_all(first.join("pkg/Meta")).unwrap();
+        std::fs::write(first.join("pkg/Meta/package.rds"), []).unwrap();
+        std::fs::create_dir_all(second.join("pkg/Meta")).unwrap();
+        std::fs::write(second.join("pkg/Meta/package.rds"), []).unwrap();
+
+        let paths = vec![
+            first.to_string_lossy().into_owned(),
+            second.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(
+            installed_package_dir(&paths, "pkg"),
+            Some(first.join("pkg"))
+        );
+        assert_eq!(installed_package_dir(&paths, "../pkg"), None);
+        assert_eq!(installed_package_dir(&paths, r"pkg\nested"), None);
     }
 }

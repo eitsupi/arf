@@ -60,11 +60,9 @@ impl PackageCache {
         }
     }
 
-    fn is_fresh_for(&self, paths: &[String]) -> bool {
-        self.paths == paths
-            && self
-                .last_updated
-                .is_some_and(|last_updated| last_updated.elapsed() < CACHE_DURATION)
+    fn is_fresh(&self) -> bool {
+        self.last_updated
+            .is_some_and(|last_updated| last_updated.elapsed() < CACHE_DURATION)
     }
 }
 
@@ -257,24 +255,28 @@ fn extract_identifier_before_cursor(before_cursor: &str) -> Option<String> {
 }
 
 /// Get the list of installed packages with caching.
+///
+/// The cache is checked before refreshing R's library paths, so completion
+/// avoids R evaluation while the five-minute cache is fresh. Consequently,
+/// package and library-path changes may remain undetected for up to five
+/// minutes on this completion path.
 pub fn get_installed_packages() -> HarpResult<Vec<String>> {
-    let paths = lib_paths()?;
-
-    // Check cache first
-    if let Ok(cache) = PACKAGE_CACHE.lock()
-        && cache.is_fresh_for(&paths)
-    {
+    let cache = PACKAGE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.is_fresh() {
         return Ok(cache.packages.clone());
     }
+    drop(cache);
 
+    let paths = lib_paths()?;
+
+    // Once the TTL has elapsed, always rescan, even if the library paths are unchanged.
     let packages = scan_installed_packages(&paths);
 
     // Update cache
-    if let Ok(mut cache) = PACKAGE_CACHE.lock() {
-        cache.packages = packages.clone();
-        cache.paths = paths;
-        cache.last_updated = Some(Instant::now());
-    }
+    let mut cache = PACKAGE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.packages = packages.clone();
+    cache.paths = paths;
+    cache.last_updated = Some(Instant::now());
 
     Ok(packages)
 }
@@ -883,18 +885,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn package_cache_requires_matching_library_paths() {
+    fn package_cache_freshness_is_time_based() {
         let mut cache = PackageCache {
             packages: vec!["old-package".to_string()],
             paths: vec!["/old/library".to_string()],
             last_updated: Some(Instant::now()),
         };
-        assert!(cache.is_fresh_for(&["/old/library".to_string()]));
-        assert!(!cache.is_fresh_for(&["/new/library".to_string()]));
-        assert!(!cache.is_fresh_for(&["/old/library".to_string(), "/second".to_string()]));
+        assert!(cache.is_fresh());
 
         cache.last_updated = Some(Instant::now() - CACHE_DURATION);
-        assert!(!cache.is_fresh_for(&["/old/library".to_string()]));
+        assert!(!cache.is_fresh());
     }
 
     #[test]

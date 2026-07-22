@@ -13,7 +13,7 @@
 //! felp's `fuzzyhelp()` implementation.
 
 use crate::error::{HarpError, HarpResult};
-use crate::lib_paths::{installed_package_dirs, lib_paths};
+use crate::lib_paths::{installed_package_dir, installed_package_dirs, lib_paths};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use rd_helpdb::PackageHelpDb;
@@ -366,13 +366,11 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
 /// taking priority. This suits callers using display `Topic` values from
 /// `Meta/hsearch.rds`.
 pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
-    let package_dir = installed_package_dirs(&lib_paths()?)
-        .into_iter()
-        .find(|(name, _)| name == package)
-        .map(|(_, path)| path)
-        .ok_or_else(|| HarpError::PackageNotFound {
+    let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
+        HarpError::PackageNotFound {
             package: package.to_string(),
-        })?;
+        }
+    })?;
     let db = PackageHelpDb::open(&package_dir).map_err(|source| HarpError::HelpDatabase {
         package: package.to_string(),
         topic: topic.to_string(),
