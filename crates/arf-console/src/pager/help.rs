@@ -1,6 +1,7 @@
 //! Interactive fuzzy help search for R documentation.
 //!
-//! This module provides a terminal-based fuzzy search interface for R help topics.
+//! This module provides a terminal-based fuzzy search interface for R help topics
+//! loaded from installed packages' `Meta/hsearch.rds` files.
 //!
 //! # Acknowledgment
 //!
@@ -8,8 +9,8 @@
 //! - Repository: <https://github.com/atusy/felp>
 //! - CRAN: <https://cran.r-project.org/package=felp>
 //!
-//! The concept of fuzzy help search and the use of `utils::hsearch_db()` for
-//! retrieving the help database were learned from felp's `fuzzyhelp()` function.
+//! The concept of fuzzy help search was learned from felp's `fuzzyhelp()` function;
+//! help indexes are read directly from installed packages here.
 
 use super::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,

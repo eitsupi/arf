@@ -16,12 +16,10 @@
 //! tilde expansion (`~`).
 
 use crate::error::{HarpError, HarpResult};
-use crate::lib_paths::lib_paths;
+use crate::lib_paths::{installed_package_dirs, lib_paths};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value, restore_stderr, suppress_stderr};
-use std::collections::HashSet;
 use std::ffi::CString;
-use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -302,33 +300,10 @@ fn get_namespace_completions(partial: &str) -> HarpResult<Vec<String>> {
 
 /// Find package directories by checking their metadata marker files.
 fn scan_installed_packages(paths: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut packages = Vec::new();
-
-    for lib_path in paths {
-        let Ok(entries) = Path::new(lib_path).read_dir() else {
-            continue;
-        };
-
-        let mut names = entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| !name.starts_with('.'))
-            .collect::<Vec<_>>();
-        names.sort_unstable();
-
-        for name in names {
-            let marker = Path::new(lib_path)
-                .join(&name)
-                .join("Meta")
-                .join("package.rds");
-            if marker.exists() && seen.insert(name.clone()) {
-                packages.push(name);
-            }
-        }
-    }
-
-    packages
+    installed_package_dirs(paths)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// Get the names from a package's namespace.

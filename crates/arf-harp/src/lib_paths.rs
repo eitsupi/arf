@@ -3,7 +3,9 @@
 use crate::error::{HarpError, HarpResult};
 use crate::eval_string;
 use arf_libr::{SexpType, r_library};
+use std::collections::HashSet;
 use std::ffi::CStr;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 struct LibPathsCache {
@@ -47,6 +49,34 @@ pub fn lib_paths() -> Vec<String> {
         .lock()
         .map(|cache| cache.paths.clone())
         .unwrap_or_default()
+}
+
+/// Find installed package directories in library-path order.
+pub(crate) fn installed_package_dirs(paths: &[String]) -> Vec<(String, PathBuf)> {
+    let mut seen = HashSet::new();
+    let mut packages = Vec::new();
+
+    for lib_path in paths {
+        let Ok(entries) = Path::new(lib_path).read_dir() else {
+            continue;
+        };
+
+        let mut names = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| !name.starts_with('.'))
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+
+        for name in names {
+            let package_dir = Path::new(lib_path).join(&name);
+            if package_dir.join("Meta").join("package.rds").exists() && seen.insert(name.clone()) {
+                packages.push((name, package_dir));
+            }
+        }
+    }
+
+    packages
 }
 
 fn extract_paths(result: &crate::RObject) -> HarpResult<Vec<String>> {

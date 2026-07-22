@@ -6,7 +6,7 @@
 
 mod common;
 
-use arf_harp::get_help_markdown;
+use arf_harp::{get_help_markdown, get_help_topics};
 use common::{ld_library_path_is_set, with_r};
 
 /// Regression test for GitHub issue #194:
@@ -43,5 +43,23 @@ fn test_help_base_solve_returns_content() {
                 );
             }
         }
+    });
+}
+
+#[test]
+fn test_help_topics_reads_installed_indexes() {
+    if !ld_library_path_is_set() {
+        eprintln!("Skipping test_help_topics_reads_installed_indexes: LD_LIBRARY_PATH not set.");
+        return;
+    }
+
+    with_r(|| {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        let topics = get_help_topics().expect("help indexes should be readable");
+        assert!(
+            topics.iter().any(|topic| topic.package == "utils"),
+            "expected at least one help topic from utils"
+        );
+        assert!(topics.iter().all(|topic| topic.entry_type == "help"));
     });
 }
