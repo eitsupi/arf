@@ -47,7 +47,6 @@ impl Drop for SuppressStderrGuard {
 /// Cache for installed packages.
 struct PackageCache {
     packages: Vec<String>,
-    paths: Vec<String>,
     last_updated: Option<Instant>,
 }
 
@@ -55,7 +54,6 @@ impl PackageCache {
     const fn new() -> Self {
         PackageCache {
             packages: Vec::new(),
-            paths: Vec::new(),
             last_updated: None,
         }
     }
@@ -275,7 +273,6 @@ pub fn get_installed_packages() -> HarpResult<Vec<String>> {
     // Update cache
     let mut cache = PACKAGE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cache.packages = packages.clone();
-    cache.paths = paths;
     cache.last_updated = Some(Instant::now());
 
     Ok(packages)
@@ -888,7 +885,6 @@ mod tests {
     fn package_cache_freshness_is_time_based() {
         let mut cache = PackageCache {
             packages: vec!["old-package".to_string()],
-            paths: vec!["/old/library".to_string()],
             last_updated: Some(Instant::now()),
         };
         assert!(cache.is_fresh());

@@ -5,7 +5,7 @@ use crate::eval_string_in_base;
 use arf_libr::{SexpType, r_library};
 use std::collections::HashSet;
 use std::ffi::CStr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 struct LibPathsCache {
@@ -86,12 +86,11 @@ fn is_installed_package_dir(dir: &Path) -> bool {
 
 /// Find one installed package directory without enumerating library contents.
 pub(crate) fn installed_package_dir(paths: &[String], package: &str) -> Option<PathBuf> {
-    if package.is_empty()
-        || package == "."
-        || package == ".."
-        || package.contains('/')
-        || package.contains('\\')
-    {
+    let mut components = Path::new(package).components();
+    if !matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    ) {
         return None;
     }
 
@@ -171,5 +170,11 @@ mod tests {
         );
         assert_eq!(installed_package_dir(&paths, "../pkg"), None);
         assert_eq!(installed_package_dir(&paths, r"pkg\nested"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn single_package_lookup_rejects_drive_relative_paths() {
+        assert_eq!(installed_package_dir(&[], "C:pkg"), None);
     }
 }
