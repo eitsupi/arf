@@ -377,7 +377,7 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
         package: package.to_string(),
         topic: topic.to_string(),
         key: topic.to_string(),
-        source,
+        source: Box::new(source),
     })?;
     let resolved = db
         .resolve_alias(topic)
@@ -385,7 +385,7 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
             package: package.to_string(),
             topic: topic.to_string(),
             key: topic.to_string(),
-            source,
+            source: Box::new(source),
         })?;
     let key = resolved.unwrap_or(topic).to_string();
     let robj = db
@@ -394,7 +394,7 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
             package: package.to_string(),
             topic: topic.to_string(),
             key: key.clone(),
-            source,
+            source: Box::new(source),
         })?;
     let doc = rd_ast::lower_r_object(&robj).map_err(|source| HarpError::HelpLowering {
         package: package.to_string(),

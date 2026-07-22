@@ -34,7 +34,7 @@ pub enum HarpError {
         topic: String,
         key: String,
         #[source]
-        source: rd_helpdb::Error,
+        source: Box<rd_helpdb::Error>,
     },
 
     /// A decoded help record could not be lowered to an Rd document.

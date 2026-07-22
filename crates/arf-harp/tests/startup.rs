@@ -49,10 +49,14 @@ fn test_lib_paths_re_evaluates_after_r_lib_paths_changes() {
         .expect(".libPaths() should accept the extra directory");
 
         let paths = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
+        let expected =
+            std::fs::canonicalize(temp_dir.path()).expect("temp dir should canonicalize");
         assert!(
-            paths
-                .iter()
-                .any(|path| std::path::Path::new(path) == temp_dir.path()),
+            paths.iter().any(|path| {
+                std::fs::canonicalize(path)
+                    .map(|canonical| canonical == expected)
+                    .unwrap_or(false)
+            }),
             "updated R library paths should include the extra directory: {new_path}"
         );
     });
