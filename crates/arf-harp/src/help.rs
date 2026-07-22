@@ -77,10 +77,9 @@ pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
         let Ok(db) = PackageHelpDb::open(&package_dir) else {
             continue;
         };
-        let Ok(index) = db.search_index() else {
-            continue;
-        };
-        topics.extend(extract_help_topics(&index));
+        if let Ok(index) = db.search_index() {
+            topics.extend(extract_help_topics(&index));
+        }
 
         if let Ok(Some(index)) = db.vignettes() {
             topics.extend(index.entries().map(|entry| HelpTopic {
