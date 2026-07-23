@@ -213,22 +213,16 @@ impl HistoryBrowser {
                 .filter_map(|(idx, entry)| {
                     // Apply hostname filter
                     if let Some(ref hostname) = self.filter.hostname {
-                        if let Some(ref item_host) = entry.item.hostname {
-                            if !item_host.contains(hostname) {
-                                return None;
-                            }
-                        } else {
+                        let item_host = entry.item.hostname.as_deref()?;
+                        if !item_host.contains(hostname) {
                             return None;
                         }
                     }
 
                     // Apply cwd prefix filter
                     if let Some(ref cwd_prefix) = self.filter.cwd_prefix {
-                        if let Some(ref item_cwd) = entry.item.cwd {
-                            if !item_cwd.starts_with(cwd_prefix) {
-                                return None;
-                            }
-                        } else {
+                        let item_cwd = entry.item.cwd.as_deref()?;
+                        if !item_cwd.starts_with(cwd_prefix) {
                             return None;
                         }
                     }
