@@ -52,10 +52,9 @@ fn parse_namespace_token(line: &str, cursor_pos: usize) -> Option<NamespaceToken
     // Check for `:::` or `::`
     let (triple_colon, before_colons) = if let Some(rest) = before_partial.strip_suffix(":::") {
         (true, rest)
-    } else if let Some(rest) = before_partial.strip_suffix("::") {
-        (false, rest)
     } else {
-        return None;
+        let rest = before_partial.strip_suffix("::")?;
+        (false, rest)
     };
 
     // Extract package name (identifier chars before the colons)
