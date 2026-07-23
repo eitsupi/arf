@@ -6,6 +6,7 @@
 pub mod completion;
 mod error;
 pub mod help;
+pub mod lib_paths;
 mod object;
 mod protect;
 pub mod startup;

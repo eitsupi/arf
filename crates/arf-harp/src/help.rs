@@ -1,6 +1,7 @@
 //! R help system integration.
 //!
-//! This module provides access to R's help database using `utils::hsearch_db()`.
+//! This module provides access to installed package help indexes by reading
+//! each package's help metadata files directly.
 //!
 //! # Acknowledgment
 //!
@@ -8,12 +9,15 @@
 //! - Repository: <https://github.com/atusy/felp>
 //! - CRAN: <https://cran.r-project.org/package=felp>
 //!
-//! The approach of using `utils::hsearch_db()` to retrieve the help database
-//! was learned from felp's `fuzzyhelp()` implementation.
+//! The concept of searching the installed help database was learned from
+//! felp's `fuzzyhelp()` implementation.
 
 use crate::error::{HarpError, HarpResult};
+use crate::lib_paths::{installed_package_dir, installed_package_dirs, lib_paths};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
+use rd_helpdb::PackageHelpDb;
+use rd_rds::{RObject, RValue, package::PackagesMatrix};
 use std::ffi::CString;
 
 /// A help topic from R's help database.
@@ -54,10 +58,10 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
     data.result = Some(result);
 }
 
-/// Get R help topics from the help database.
+/// Get help, vignette, and demo topics from installed package metadata.
 ///
-/// This function calls `utils::hsearch_db()` to retrieve all available help topics
-/// from installed packages. The result includes help pages, vignettes, and demos.
+/// This function reads each installed package's help-search, vignette, and
+/// demo indexes.
 ///
 /// # Returns
 ///
@@ -67,156 +71,115 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 ///
 /// Returns an error if R evaluation fails or if the help database is unavailable.
 ///
-/// # Implementation Notes
-///
-/// This is inspired by the felp package's approach of using `hsearch_db()$Base`
-/// to get the help database in a structured format.
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
-    let lib = r_library()?;
-    let mut protect = RProtect::new();
-
-    unsafe {
-        // R code to get help database
-        // hsearch_db() returns a list with $Base containing the help index
-        // We extract the relevant columns: Package, Topic, Title, Type
-        let code = r#"
-            local({
-                tryCatch({
-                    db <- utils::hsearch_db()
-                    base_entries <- db$Base
-                    if (is.null(base_entries)) {
-                        data.frame(
-                            Package = character(0),
-                            Topic = character(0),
-                            Title = character(0),
-                            Type = character(0),
-                            stringsAsFactors = FALSE
-                        )
-                    } else {
-                        data.frame(
-                            Package = base_entries$Package,
-                            Topic = base_entries$Topic,
-                            Title = base_entries$Title,
-                            Type = base_entries$Type,
-                            stringsAsFactors = FALSE
-                        )
-                    }
-                }, error = function(e) {
-                    data.frame(
-                        Package = character(0),
-                        Topic = character(0),
-                        Title = character(0),
-                        Type = character(0),
-                        stringsAsFactors = FALSE
-                    )
-                })
-            })
-        "#;
-
-        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
-            expected: "valid UTF-8".to_string(),
-            actual: "string with null byte".to_string(),
-        })?;
-
-        let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
-
-        // Parse the code
-        let mut status = ParseStatus::Null;
-        let parsed = protect.protect((lib.r_parsevector)(
-            code_sexp,
-            -1,
-            &mut status,
-            r_nil_value()?,
-        ));
-
-        if status != ParseStatus::Ok {
-            return Ok(vec![]);
-        }
-
-        let n_expr = (lib.rf_length)(parsed);
-        if n_expr == 0 {
-            return Ok(vec![]);
-        }
-
-        let expr = (lib.vector_elt)(parsed, 0);
-        let base_env = *lib.r_baseenv;
-
-        let mut payload = EvalPayload {
-            expr,
-            env: base_env,
-            result: None,
+    let mut topics = Vec::new();
+    for (package, package_dir) in installed_package_dirs(&lib_paths()?) {
+        let Ok(db) = PackageHelpDb::open(&package_dir) else {
+            continue;
         };
+        if let Ok(index) = db.search_index() {
+            topics.extend(extract_help_topics(&index));
+        }
 
-        let success = (lib.r_toplevelexec)(
-            Some(eval_callback),
-            &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
+        if let Ok(Some(index)) = db.vignettes() {
+            topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.clone(),
+                topic: vignette_topic(entry),
+                title: entry.title.clone(),
+                entry_type: "vignette".to_string(),
+            }));
+        }
+
+        if let Ok(Some(index)) = db.demos() {
+            topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.clone(),
+                topic: entry.name.clone(),
+                title: entry.title.clone(),
+                entry_type: "demo".to_string(),
+            }));
+        }
+    }
+    Ok(topics)
+}
+
+// Mirror R's vignette-topic resolution from the index's filename fields.
+fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
+    let (filename, from_file) = if !entry.r.is_empty() {
+        (&entry.r, false)
+    } else if !entry.pdf.is_empty() {
+        (&entry.pdf, false)
+    } else {
+        (&entry.file, true)
+    };
+    let filename = if from_file {
+        filename.rsplit(['/', '\\']).next().unwrap_or(filename)
+    } else {
+        filename
+    };
+    filename
+        .rsplit_once('.')
+        .map_or_else(|| filename.to_owned(), |(stem, _)| stem.to_owned())
+}
+
+#[cfg(test)]
+mod vignette_tests {
+    use super::vignette_topic;
+    use rd_helpdb::VignetteEntry;
+
+    fn entry(file: &str, pdf: &str, r: &str) -> VignetteEntry {
+        VignetteEntry {
+            file: file.to_owned(),
+            title: String::new(),
+            pdf: pdf.to_owned(),
+            r: r.to_owned(),
+            depends: Vec::new(),
+            keywords: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn resolves_vignette_topic_from_r_pdf_or_file() {
+        assert_eq!(
+            vignette_topic(&entry("ignored.Rmd", "ignored.pdf", "guide.R")),
+            "guide"
         );
-
-        if success == 0 || payload.result.is_none() {
-            return Ok(vec![]);
-        }
-
-        let result = protect.protect(payload.result.unwrap());
-
-        extract_help_topics(result)
+        assert_eq!(
+            vignette_topic(&entry("ignored.Rmd", "guide.pdf", "")),
+            "guide"
+        );
+        assert_eq!(
+            vignette_topic(&entry("vignettes/guide.Rmd", "", "")),
+            "guide"
+        );
+        assert_eq!(vignette_topic(&entry("guide", "", "")), "guide");
     }
 }
 
-/// Extract help topics from R data.frame SEXP.
-unsafe fn extract_help_topics(df: SEXP) -> HarpResult<Vec<HelpTopic>> {
-    let lib = r_library()?;
+fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {
+    let RValue::List(items) = index.value() else {
+        return Vec::new();
+    };
+    let Some(base) = items.first() else {
+        return Vec::new();
+    };
+    let Ok(matrix) = PackagesMatrix::from_object(base) else {
+        return Vec::new();
+    };
 
-    unsafe {
-        // Get the number of rows (length of first column)
-        let n_cols = (lib.rf_length)(df);
-        if n_cols < 4 {
-            return Ok(vec![]);
-        }
-
-        // Get columns by index (0=Package, 1=Topic, 2=Title, 3=Type)
-        let packages = (lib.vector_elt)(df, 0);
-        let topics = (lib.vector_elt)(df, 1);
-        let titles = (lib.vector_elt)(df, 2);
-        let types = (lib.vector_elt)(df, 3);
-
-        let n_rows = (lib.rf_length)(packages) as isize;
-        let mut result = Vec::with_capacity(n_rows as usize);
-
-        for i in 0..n_rows {
-            let package = extract_string_at(packages, i)?;
-            let topic = extract_string_at(topics, i)?;
-            let title = extract_string_at(titles, i)?;
-            let entry_type = extract_string_at(types, i)?;
-
-            result.push(HelpTopic {
-                package,
-                topic,
-                title,
-                entry_type,
-            });
-        }
-
-        Ok(result)
-    }
-}
-
-/// Extract a string from a character vector at a given index.
-unsafe fn extract_string_at(sexp: SEXP, index: isize) -> HarpResult<String> {
-    let lib = r_library()?;
-
-    unsafe {
-        let elt = (lib.string_elt)(sexp, index);
-        let cstr = (lib.r_charsxp)(elt);
-
-        if cstr.is_null() {
-            return Ok(String::new());
-        }
-
-        match std::ffi::CStr::from_ptr(cstr).to_str() {
-            Ok(s) => Ok(s.to_string()),
-            Err(_) => Ok(String::new()),
-        }
-    }
+    matrix
+        .rows()
+        .filter_map(|row| {
+            let package = row.get("Package").and_then(|value| value)?;
+            let topic = row.get("Topic").and_then(|value| value)?;
+            let title = row.get("Title").flatten().unwrap_or("");
+            Some(HelpTopic {
+                package: package.to_owned(),
+                topic: topic.to_owned(),
+                title: title.to_owned(),
+                entry_type: "help".to_string(),
+            })
+        })
+        .collect()
 }
 
 /// Evaluate R code and return the result as an optional String.
@@ -375,9 +338,9 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 
 /// Get help content as Markdown for a specific topic.
 ///
-/// This retrieves the raw Rd source from R's help system and converts it
-/// to Markdown using `rd2qmd-core`. The resulting Markdown can be rendered
-/// by a terminal-based Markdown renderer.
+/// When `package` is known, this reads the installed package's compiled help
+/// database directly. Without a package, it retains the R-evaluation-based
+/// resolution needed for attached-package and search-path semantics.
 ///
 /// # Arguments
 ///
@@ -388,22 +351,64 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 ///
 /// The help content as a Markdown string, or an error if the topic is not found.
 pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<String> {
-    let code = if let Some(pkg) = package {
-        format!(
-            r#"local({{
-    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    rd <- utils:::.getHelpFile(file)
-    paste0(as.character(rd, deparse = TRUE), collapse = "")
-}})"#,
-            topic = escape_r_string(topic),
-            pkg = escape_r_string(pkg)
-        )
-    } else {
-        format!(
-            r#"local({{
+    match package {
+        Some(package) => get_package_help_markdown(topic, package),
+        None => get_help_markdown_via_r(topic),
+    }
+}
+
+/// Get package help as Markdown without evaluating R for the help database.
+///
+/// The package directory is selected from the startup-cached library paths,
+/// refreshed as needed by [`crate::lib_paths::lib_paths`].
+///
+/// `topic` is treated as an alias-or-exact-key input, with alias resolution
+/// taking priority. This suits callers using display `Topic` values from
+/// `Meta/hsearch.rds`.
+pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
+    let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
+        HarpError::PackageNotFound {
+            package: package.to_string(),
+        }
+    })?;
+    let db = PackageHelpDb::open(&package_dir).map_err(|source| HarpError::HelpDatabase {
+        package: package.to_string(),
+        topic: topic.to_string(),
+        key: topic.to_string(),
+        source: Box::new(source),
+    })?;
+    let resolved = db
+        .resolve_alias(topic)
+        .map_err(|source| HarpError::HelpDatabase {
+            package: package.to_string(),
+            topic: topic.to_string(),
+            key: topic.to_string(),
+            source: Box::new(source),
+        })?;
+    let key = resolved.unwrap_or(topic).to_string();
+    let robj = db
+        .raw_topic(&key)
+        .map_err(|source| HarpError::HelpDatabase {
+            package: package.to_string(),
+            topic: topic.to_string(),
+            key: key.clone(),
+            source: Box::new(source),
+        })?;
+    let doc = rd_ast::lower_r_object(&robj).map_err(|source| HarpError::HelpLowering {
+        package: package.to_string(),
+        topic: topic.to_string(),
+        key: key.clone(),
+        source: Box::new(source),
+    })?;
+    let mut options = rd2qmd_core::RdConvertOptions::default();
+    options.code.quarto_code_blocks = false;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    Ok(rd2qmd_core::convert_rd_document(&doc, &options))
+}
+
+fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
+    let code = format!(
+        r#"local({{
     x <- utils::help("{topic}", help_type = "text")
     paths <- as.character(x)
     if (length(paths) == 0) return(NULL)
@@ -411,9 +416,8 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     rd <- utils:::.getHelpFile(file)
     paste0(as.character(rd, deparse = TRUE), collapse = "")
 }})"#,
-            topic = escape_r_string(topic)
-        )
-    };
+        topic = escape_r_string(topic)
+    );
 
     let rd_content = unsafe {
         eval_r_to_string(&code)?.ok_or_else(|| {
@@ -424,16 +428,19 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
         })?
     };
 
-    rd2qmd_core::RdConverter::new(&rd_content)
-        .quarto_code_blocks(false)
-        .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
-        .convert()
-        .map_err(|e| {
-            HarpError::RError(arf_libr::RError::EvalError(format!(
-                "Failed to convert Rd to Markdown: {}",
-                e
-            )))
-        })
+    let parsed = rd_source::parse(rd_content.as_bytes()).map_err(|e| {
+        HarpError::RError(arf_libr::RError::EvalError(format!(
+            "Failed to parse Rd for Markdown conversion: {}",
+            e
+        )))
+    })?;
+    let mut options = rd2qmd_core::RdConvertOptions::default();
+    options.code.quarto_code_blocks = false;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    Ok(rd2qmd_core::convert_rd_document(
+        parsed.document(),
+        &options,
+    ))
 }
 
 /// Sentinel value returned by R when a vignette is in PDF format.
@@ -525,6 +532,53 @@ fn escape_r_string(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn matrix(values: Vec<rd_rds::RStr>, rows: i32, columns: &[&str]) -> RObject {
+        let dimnames = vec![
+            RObject::from_parts(
+                RValue::Character(vec![rd_rds::RStr::Na; rows as usize]),
+                rd_rds::Attributes::default(),
+            ),
+            RObject::from_parts(
+                RValue::Character(columns.iter().map(|_| rd_rds::RStr::Na).collect()),
+                rd_rds::Attributes::default(),
+            ),
+        ];
+        RObject::from_parts(
+            RValue::Character(values),
+            rd_rds::Attributes::new(vec![
+                rd_rds::Attribute::new(
+                    rd_rds::Symbol::new("dim"),
+                    RObject::from_parts(
+                        RValue::Integer(vec![Some(rows), Some(columns.len() as i32)]),
+                        rd_rds::Attributes::default(),
+                    ),
+                ),
+                rd_rds::Attribute::new(
+                    rd_rds::Symbol::new("dimnames"),
+                    RObject::from_parts(RValue::List(dimnames), rd_rds::Attributes::default()),
+                ),
+            ]),
+        )
+    }
+
+    #[test]
+    fn malformed_and_na_help_indexes_are_skipped() {
+        let columns = [
+            "Package", "LibPath", "ID", "Name", "Title", "Topic", "Encoding",
+        ];
+        let base = matrix(vec![rd_rds::RStr::Na; columns.len()], 1, &columns);
+        let index = RObject::from_parts(RValue::List(vec![base]), rd_rds::Attributes::default());
+
+        assert!(extract_help_topics(&index).is_empty());
+        assert!(
+            extract_help_topics(&RObject::from_parts(
+                RValue::List(Vec::new()),
+                rd_rds::Attributes::default(),
+            ))
+            .is_empty()
+        );
+    }
+
     #[test]
     fn test_help_topic_qualified_name() {
         let topic = HelpTopic {
@@ -562,11 +616,11 @@ More text after.
 }
 "#;
 
-        let qmd = rd2qmd_core::RdConverter::new(rd_content)
-            .quarto_code_blocks(false)
-            .arguments_format(rd2qmd_core::ArgumentsFormat::PipeTable)
-            .convert()
-            .unwrap();
+        let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
+        let mut options = rd2qmd_core::RdConvertOptions::default();
+        options.code.quarto_code_blocks = false;
+        options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+        let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
     }

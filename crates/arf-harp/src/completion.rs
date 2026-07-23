@@ -16,6 +16,7 @@
 //! tilde expansion (`~`).
 
 use crate::error::{HarpError, HarpResult};
+use crate::lib_paths::{installed_package_dirs, lib_paths};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value, restore_stderr, suppress_stderr};
 use std::ffi::CString;
@@ -55,6 +56,11 @@ impl PackageCache {
             packages: Vec::new(),
             last_updated: None,
         }
+    }
+
+    fn is_fresh(&self) -> bool {
+        self.last_updated
+            .is_some_and(|last_updated| last_updated.elapsed() < CACHE_DURATION)
     }
 }
 
@@ -247,24 +253,27 @@ fn extract_identifier_before_cursor(before_cursor: &str) -> Option<String> {
 }
 
 /// Get the list of installed packages with caching.
+///
+/// The cache is checked before refreshing R's library paths, so completion
+/// avoids R evaluation while the five-minute cache is fresh. Consequently,
+/// package and library-path changes may remain undetected for up to five
+/// minutes on this completion path.
 pub fn get_installed_packages() -> HarpResult<Vec<String>> {
-    // Check cache first
-    if let Ok(cache) = PACKAGE_CACHE.lock()
-        && let Some(last_updated) = cache.last_updated
-        && last_updated.elapsed() < CACHE_DURATION
-        && !cache.packages.is_empty()
-    {
+    let cache = PACKAGE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.is_fresh() {
         return Ok(cache.packages.clone());
     }
+    drop(cache);
 
-    // Fetch from R
-    let packages = fetch_installed_packages()?;
+    let paths = lib_paths()?;
+
+    // Once the TTL has elapsed, always rescan, even if the library paths are unchanged.
+    let packages = scan_installed_packages(&paths);
 
     // Update cache
-    if let Ok(mut cache) = PACKAGE_CACHE.lock() {
-        cache.packages = packages.clone();
-        cache.last_updated = Some(Instant::now());
-    }
+    let mut cache = PACKAGE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.packages = packages.clone();
+    cache.last_updated = Some(Instant::now());
 
     Ok(packages)
 }
@@ -294,65 +303,12 @@ fn get_namespace_completions(partial: &str) -> HarpResult<Vec<String>> {
     Ok(completions)
 }
 
-/// Fetch installed packages from R using .packages(all.available = TRUE).
-fn fetch_installed_packages() -> HarpResult<Vec<String>> {
-    let lib = r_library()?;
-    let mut protect = RProtect::new();
-
-    unsafe {
-        let code = r#"
-            tryCatch({
-                .packages(all.available = TRUE)
-            }, error = function(e) character(0))
-        "#;
-
-        let code_cstring = CString::new(code).map_err(|_| HarpError::TypeMismatch {
-            expected: "valid UTF-8".to_string(),
-            actual: "string with null byte".to_string(),
-        })?;
-
-        let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
-
-        // Parse the code
-        let mut status = ParseStatus::Null;
-        let parsed = protect.protect((lib.r_parsevector)(
-            code_sexp,
-            -1,
-            &mut status,
-            r_nil_value()?,
-        ));
-
-        if status != ParseStatus::Ok {
-            return Ok(vec![]);
-        }
-
-        let n_expr = (lib.rf_length)(parsed);
-        if n_expr == 0 {
-            return Ok(vec![]);
-        }
-
-        let expr = (lib.vector_elt)(parsed, 0);
-        let base_env = *lib.r_baseenv;
-
-        let mut payload = EvalPayload {
-            expr,
-            env: base_env,
-            result: None,
-        };
-
-        let success = (lib.r_toplevelexec)(
-            Some(eval_callback),
-            &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
-        );
-
-        if success == 0 || payload.result.is_none() {
-            return Ok(vec![]);
-        }
-
-        let result = protect.protect(payload.result.unwrap());
-
-        extract_string_vector(result)
-    }
+/// Find package directories by checking their metadata marker files.
+fn scan_installed_packages(paths: &[String]) -> Vec<String> {
+    installed_package_dirs(paths)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// Get the names from a package's namespace.
@@ -924,6 +880,42 @@ unsafe fn extract_logical_vector(sexp: SEXP, expected_len: usize) -> HarpResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_cache_freshness_is_time_based() {
+        let mut cache = PackageCache {
+            packages: vec!["old-package".to_string()],
+            last_updated: Some(Instant::now()),
+        };
+        assert!(cache.is_fresh());
+
+        cache.last_updated = Some(Instant::now() - CACHE_DURATION);
+        assert!(!cache.is_fresh());
+    }
+
+    #[test]
+    fn test_scan_installed_packages() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory should be created");
+        let lib_one = temp_dir.path().join("library-one");
+        let lib_two = temp_dir.path().join("library-two");
+
+        std::fs::create_dir_all(lib_one.join("pkgA/Meta")).unwrap();
+        std::fs::write(lib_one.join("pkgA/Meta/package.rds"), []).unwrap();
+        std::fs::create_dir_all(lib_one.join("pkgB")).unwrap();
+        std::fs::create_dir_all(lib_one.join(".hidden/Meta")).unwrap();
+        std::fs::write(lib_one.join(".hidden/Meta/package.rds"), []).unwrap();
+
+        std::fs::create_dir_all(lib_two.join("pkgA/Meta")).unwrap();
+        std::fs::write(lib_two.join("pkgA/Meta/package.rds"), []).unwrap();
+        std::fs::create_dir_all(lib_two.join("pkgC/Meta")).unwrap();
+        std::fs::write(lib_two.join("pkgC/Meta/package.rds"), []).unwrap();
+
+        let paths = vec![
+            lib_one.to_string_lossy().into_owned(),
+            lib_two.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(scan_installed_packages(&paths), ["pkgA", "pkgC"]);
+    }
 
     #[test]
     fn test_escape_r_string() {

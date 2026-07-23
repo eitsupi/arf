@@ -20,6 +20,34 @@ pub enum HarpError {
     /// Null pointer.
     #[error("Unexpected null pointer")]
     NullPointer,
+
+    /// An installed package could not be found in the cached library paths.
+    #[error("Package {package:?} not found in the cached library paths")]
+    PackageNotFound { package: String },
+
+    /// An installed package's compiled help database could not be read.
+    #[error(
+        "Failed to read help for topic {topic:?} in package {package:?} (lookup key {key:?}): {source}"
+    )]
+    HelpDatabase {
+        package: String,
+        topic: String,
+        key: String,
+        #[source]
+        source: Box<rd_helpdb::Error>,
+    },
+
+    /// A decoded help record could not be lowered to an Rd document.
+    #[error(
+        "Failed to decode help for topic {topic:?} in package {package:?} (lookup key {key:?}): {source}"
+    )]
+    HelpLowering {
+        package: String,
+        topic: String,
+        key: String,
+        #[source]
+        source: Box<rd_ast::LowerError>,
+    },
 }
 
 /// Result type for harp operations.
