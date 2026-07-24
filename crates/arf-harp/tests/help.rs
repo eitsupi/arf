@@ -67,6 +67,29 @@ fn test_help_package_alias_and_exact_key() {
 }
 
 #[test]
+fn test_help_package_embed_fonts_does_not_have_excessive_prose_spaces() {
+    if !ld_library_path_is_set() {
+        eprintln!(
+            "Skipping test_help_package_embed_fonts_does_not_have_excessive_prose_spaces: \
+             LD_LIBRARY_PATH not set."
+        );
+        return;
+    }
+
+    with_r(|| {
+        let markdown = get_package_help_markdown("embedFonts", "grDevices")
+            .expect("grDevices::embedFonts help should be available");
+        assert!(
+            markdown.contains("and embed all fonts"),
+            "unexpected markdown:\n{markdown}"
+        );
+        assert!(markdown.contains("as the name of a Ghostscript"));
+        assert!(!markdown.contains("and   embed"));
+        assert!(!markdown.contains("as     the"));
+    });
+}
+
+#[test]
 fn test_help_package_and_topic_not_found() {
     if !ld_library_path_is_set() {
         eprintln!("Skipping test_help_package_and_topic_not_found: LD_LIBRARY_PATH not set.");
