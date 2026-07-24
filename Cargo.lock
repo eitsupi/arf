@@ -1641,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "rd-ast"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aaa5a549cda19d85723d7f7e2f4713224daa6b6aada7f9d0359a7006bdb0daaa"
+checksum = "03a90f843c732928497c9633c0e53836d09dc5b184226fa52ca023f79b9028dd"
 dependencies = [
  "rd-rds",
  "serde",
@@ -1651,8 +1651,9 @@ dependencies = [
 
 [[package]]
 name = "rd-helpdb"
-version = "0.0.1"
-source = "git+https://github.com/eitsupi/r-documentation-rs?rev=632e7c35f640814785238ca87ff8bf70b5a2f0cd#632e7c35f640814785238ca87ff8bf70b5a2f0cd"
+version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "690a16f3bfe77e82863180e3dcd0df6e6fc537e35b11e9f9d408f6f4e8a5352d"
 dependencies = [
  "flate2",
  "rd-rds",
@@ -1661,8 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.0.1"
-source = "git+https://github.com/eitsupi/r-documentation-rs?rev=632e7c35f640814785238ca87ff8bf70b5a2f0cd#632e7c35f640814785238ca87ff8bf70b5a2f0cd"
+version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33e085779f77d443991c2ac8d5fb0263958b037035e840e5d8f6bede993b7df9"
 dependencies = [
  "bzip2",
  "flate2",
@@ -1673,18 +1675,18 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6f4eead470493d660bf3c23f6e6bb9d15e433b8f944f8cb2989897bf7f7e109"
+checksum = "99f11c13c76965e24666211487409ee08ef55638cf713894a4f5063208847370"
 dependencies = [
  "rd-ast",
 ]
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.5.0-alpha.1"
+version = "0.5.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "428d631d0cf54cb15009f50272e3eae380042872517bd0893a7e22d27dcddd7c"
+checksum = "2cfa387c53a0f0c2ea94452c8bb90bd6b0a201d20ef93c930d6c7406205d2319"
 dependencies = [
  "rd-ast",
  "rd2qmd-mdast",
@@ -1696,9 +1698,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.5.0-alpha.1"
+version = "0.5.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e54757b76b971c3da6a8bc45298d544338f8ec60519f4db97cdf890e33e4dd57"
+checksum = "e6c9b31d2174e2c95d8ea8d653cfe13dede3dbbdead0827d9956e2f1d04d4e4c"
 dependencies = [
  "serde",
 ]
