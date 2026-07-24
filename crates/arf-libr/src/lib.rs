@@ -13,7 +13,9 @@ mod sys;
 pub use error::{RError, RResult};
 
 // functions
-pub use functions::{RLibrary, init_r_library, r_global_env, r_library, r_nil_value};
+pub use functions::{
+    RLibrary, init_r_library, r_class_symbol, r_global_env, r_library, r_nil_value, r_unbound_value,
+};
 
 // types
 pub use types::{

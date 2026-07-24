@@ -128,6 +128,16 @@ const META_COMMANDS: &[MetaCommandDef] = &[
         takes_argument: true,
     },
     MetaCommandDef {
+        name: "objects",
+        description: "Browse .GlobalEnv objects",
+        takes_argument: false,
+    },
+    MetaCommandDef {
+        name: "objs",
+        description: "Browse .GlobalEnv objects (alias)",
+        takes_argument: false,
+    },
+    MetaCommandDef {
         name: "quit",
         description: "Quit arf",
         takes_argument: false,

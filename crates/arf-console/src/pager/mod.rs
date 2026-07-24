@@ -8,6 +8,7 @@ mod help;
 pub mod history_browser;
 pub mod history_schema;
 pub(crate) mod markdown;
+pub mod objects_browser;
 pub mod session_info;
 pub(crate) mod style_convert;
 pub(crate) mod text_utils;
@@ -15,6 +16,7 @@ pub(crate) mod text_utils;
 pub use changelog::display_changelog;
 pub use help::run_help_browser;
 pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};
+pub use objects_browser::run_objects_browser;
 pub use session_info::display_session_info;
 
 use base64::{Engine, engine::general_purpose};
