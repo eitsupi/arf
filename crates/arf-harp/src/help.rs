@@ -403,7 +403,9 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
     let mut options = rd2qmd_core::RdConvertOptions::default();
     options.code.quarto_code_blocks = false;
     options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
-    Ok(rd2qmd_core::convert_rd_document(&doc, &options))
+    Ok(normalize_markdown_whitespace(
+        rd2qmd_core::convert_rd_document(&doc, &options),
+    ))
 }
 
 fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
@@ -437,10 +439,73 @@ fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
     let mut options = rd2qmd_core::RdConvertOptions::default();
     options.code.quarto_code_blocks = false;
     options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
-    Ok(rd2qmd_core::convert_rd_document(
-        parsed.document(),
-        &options,
+    Ok(normalize_markdown_whitespace(
+        rd2qmd_core::convert_rd_document(parsed.document(), &options),
     ))
+}
+
+/// Remove duplicated prose spaces introduced when the Rd AST converter joins
+/// adjacent text nodes. Two spaces are retained because Markdown uses them for
+/// a hard line break; code spans and fenced code blocks are left untouched.
+fn normalize_markdown_whitespace(markdown: String) -> String {
+    let mut normalized = String::with_capacity(markdown.len());
+    let mut in_fenced_code = false;
+
+    for line in markdown.split_inclusive('\n') {
+        let content_end = line.strip_suffix('\n').map_or(line.len(), str::len);
+        let content = &line[..content_end];
+        let is_fence =
+            content.trim_start().starts_with("```") || content.trim_start().starts_with("~~~");
+
+        if is_fence {
+            in_fenced_code = !in_fenced_code;
+            normalized.push_str(line);
+        } else if in_fenced_code {
+            normalized.push_str(line);
+        } else {
+            normalized.push_str(&normalize_markdown_line(content));
+            normalized.push_str(&line[content_end..]);
+        }
+    }
+
+    normalized
+}
+
+fn normalize_markdown_line(line: &str) -> String {
+    let mut normalized = String::with_capacity(line.len());
+    let mut inline_code_delimiter = None;
+    let mut chars = line.char_indices().peekable();
+
+    while let Some((index, character)) = chars.next() {
+        if character == '`' {
+            let mut delimiter_length = 1;
+            while chars.peek().is_some_and(|(_, next)| *next == '`') {
+                chars.next();
+                delimiter_length += 1;
+            }
+            if inline_code_delimiter == Some(delimiter_length) {
+                inline_code_delimiter = None;
+            } else if inline_code_delimiter.is_none() {
+                inline_code_delimiter = Some(delimiter_length);
+            }
+            normalized.push_str(&line[index..index + delimiter_length]);
+        } else if character == ' '
+            && inline_code_delimiter.is_none()
+            && chars
+                .clone()
+                .find(|(_, next)| *next != ' ')
+                .is_some_and(|(next_index, _)| next_index - index >= 3)
+        {
+            normalized.push(' ');
+            while chars.peek().is_some_and(|(_, next)| *next == ' ') {
+                chars.next();
+            }
+        } else {
+            normalized.push(character);
+        }
+    }
+
+    normalized
 }
 
 /// Sentinel value returned by R when a vignette is in PDF format.
@@ -623,5 +688,14 @@ More text after.
         let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
+    }
+
+    #[test]
+    fn test_normalize_markdown_whitespace_preserves_code_and_hard_breaks() {
+        let markdown = "prose   spaces  stay\n`code   spaces`\n```r\ncode   spaces\n```\n";
+        assert_eq!(
+            normalize_markdown_whitespace(markdown.to_string()),
+            "prose spaces  stay\n`code   spaces`\n```r\ncode   spaces\n```\n"
+        );
     }
 }
