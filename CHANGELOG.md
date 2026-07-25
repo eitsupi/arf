@@ -5,6 +5,7 @@
 ### Changed
 
 - Tab completion of package names and the `:help` browser (search and rendering) are now noticeably faster, especially with many installed packages, since they read R's on-disk package metadata directly instead of evaluating R code for most lookups (#257).
+- The `:help` browser now renders the Arguments section as a list instead of a table, so argument descriptions containing bullet lists or multiple paragraphs are shown in full rather than squashed onto one line.
 
 ## [0.4.3] - 2026-07-04
 

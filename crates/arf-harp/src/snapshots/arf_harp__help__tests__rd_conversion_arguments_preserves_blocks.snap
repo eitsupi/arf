@@ -1,0 +1,17 @@
+---
+source: crates/arf-harp/src/help.rs
+assertion_line: 652
+expression: qmd
+---
+# Arguments
+
+## Arguments
+
+- **`value`**
+
+  Description before the list.
+
+  - First nested item.
+  - Second nested item.
+
+  A second paragraph after the list.
