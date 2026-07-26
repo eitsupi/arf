@@ -25,6 +25,8 @@ use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
+#[cfg(windows)]
+use app::setup::source_r_profiles;
 use app::setup::{create_session_id, run_script, setup_r};
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, RArgsBuilder};
