@@ -457,12 +457,60 @@ mod ipc_tests {
             .expect("should see R output");
         terminal.wait_for_prompt().expect("should return to prompt");
 
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen
+                .lines
+                .iter()
+                .any(|line| line.contains("agent> cat('marker_output\\n')")),
+            "IPC echo should remain visible when the expression produces output; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
         // The line immediately above the prompt should be the R output,
         // not a blank line.
         terminal
             .previous_line(1)
             .assert_contains("marker_output")
             .expect("line above prompt should be R output, not a blank line");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an IPC user_input echo remains visible when R produces no output.
+    #[test]
+    fn test_ipc_user_input_silent_expression_keeps_echo() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "ipc_silent_echo <- 1" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert!(
+            response
+                .get("result")
+                .and_then(|r| r.get("accepted"))
+                .and_then(|a| a.as_bool())
+                == Some(true),
+            "user_input should be accepted, got: {response:?}"
+        );
+
+        // The IPC response is sent as soon as the input is accepted, before R
+        // evaluates it. Wait for the no-output expression and prompt repaint.
+        std::thread::sleep(Duration::from_millis(500));
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen
+                .lines
+                .iter()
+                .any(|line| line.contains("agent> ipc_silent_echo <- 1")),
+            "IPC echo should remain visible after a silent expression; screen:\n{}",
+            screen.lines.join("\n")
+        );
 
         terminal.quit().expect("Should quit cleanly");
     }
