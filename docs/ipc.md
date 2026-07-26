@@ -123,6 +123,7 @@ Error code strings:
 | `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
 | `USER_IS_TYPING` | 4 | User is typing in the REPL (see `data` fields below) |
+| `INCOMPLETE_INPUT` | 4 | R code is syntactically incomplete and would enter the continuation prompt |
 | `EMPTY_RESPONSE` | 4 | Server returned no result |
 | `PARSE_ERROR` | 4 | Invalid JSON in request |
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
@@ -374,6 +375,7 @@ Within a running session, you can start and stop the IPC server:
 When both a human and an external tool use the same session, arf prevents conflicts:
 
 - If you are typing when an IPC `eval` or `send` request arrives, the request is rejected with a `USER_IS_TYPING` error
+- If an IPC `eval` or `send` request contains syntactically incomplete R code, it is rejected with an `INCOMPLETE_INPUT` error
 - If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
 - Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially

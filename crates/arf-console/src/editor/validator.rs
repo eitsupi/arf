@@ -28,6 +28,11 @@ impl RValidator {
         self
     }
 
+    /// Check whether an R expression is complete without synchronizing editor state.
+    pub fn is_complete(&self, line: &str) -> bool {
+        matches!(self.validate(line), ValidationResult::Complete)
+    }
+
     fn create_parser() -> tree_sitter::Parser {
         let mut parser = tree_sitter::Parser::new();
         parser

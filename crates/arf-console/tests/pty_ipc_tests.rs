@@ -439,6 +439,76 @@ mod ipc_tests {
         terminal.quit().expect("Should quit cleanly");
     }
 
+    /// Test that incomplete user_input is rejected before it can enter R's
+    /// continuation prompt.
+    #[test]
+    fn test_ipc_user_input_rejects_incomplete_code() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+        clear_before_ipc_request(&mut terminal);
+
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "foo(" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert_eq!(response["error"]["code"], -32004);
+        assert_eq!(
+            response["error"]["message"],
+            "R code is syntactically incomplete"
+        );
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen.lines.iter().any(|line| line.contains("> ")),
+            "REPL should remain at the normal prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+        assert!(
+            !screen.lines.iter().any(|line| line.contains("+ ")),
+            "REPL should not enter the continuation prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that silent evaluate rejects incomplete code before it can make R
+    /// wait for continuation input.
+    #[test]
+    fn test_ipc_evaluate_rejects_incomplete_code() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+        clear_before_ipc_request(&mut terminal);
+
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "function(x) {" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert_eq!(response["error"]["code"], -32004);
+        assert_eq!(
+            response["error"]["message"],
+            "R code is syntactically incomplete"
+        );
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen.lines.iter().any(|line| line.contains("> ")),
+            "REPL should remain at the normal prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+        assert!(
+            !screen.lines.iter().any(|line| line.contains("+ ")),
+            "REPL should not enter the continuation prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
     /// Test that an IPC request arriving while reedline is already waiting
     /// persists the user_input command through the ExternalBreak path.
     #[test]

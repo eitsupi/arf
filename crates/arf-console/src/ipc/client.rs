@@ -115,6 +115,10 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
                  their input.",
             ),
         ),
+        INCOMPLETE_INPUT => (
+            "INCOMPLETE_INPUT",
+            Some("Complete the R expression before sending it over IPC."),
+        ),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
