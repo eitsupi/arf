@@ -499,8 +499,20 @@ mod ipc_tests {
         );
 
         // The IPC response is sent as soon as the input is accepted, before R
-        // evaluates it. Wait for the no-output expression and prompt repaint.
-        std::thread::sleep(Duration::from_millis(500));
+        // evaluates it. Wait for the echo to appear, then synchronize on the
+        // next fresh prompt so the post-evaluation repaint has definitely
+        // happened before inspecting the screen — a fixed sleep would let the
+        // test pass by inspecting the echo before the repaint that used to
+        // erase it.
+        terminal
+            .expect("ipc_silent_echo <- 1")
+            .expect("should see the echoed code in the output stream");
+        terminal
+            .clear_buffer()
+            .expect("should clear the output buffer");
+        terminal
+            .wait_for_prompt()
+            .expect("should return to a fresh prompt after evaluation");
 
         let screen = terminal.screen().expect("should get terminal screen");
         assert!(
