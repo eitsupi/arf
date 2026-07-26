@@ -1110,9 +1110,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // For non-standard prompts (menus, etc.), pass input directly to R
                     // without any processing (meta commands, shell mode, reprex, autoformat)
                     if is_menu_prompt {
-                        if !line.trim().is_empty() {
-                            state.pending_history_context = PendingHistoryContext::Reedline;
-                        }
+                        // Deliberately leave pending_history_context alone. This
+                        // input was requested by R during an evaluation that is
+                        // already in progress (readline(), menu(), browser()),
+                        // so the outer command still owns the result. Claiming
+                        // the context here would strand the outer entry without
+                        // an exit status, which matters most when that entry
+                        // came from IPC and cannot be recovered from reedline's
+                        // own last-command context.
                         return Some(line);
                     }
 
