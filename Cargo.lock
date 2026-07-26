@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "arf-console"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "arf-libr",
  "insta",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -436,7 +436,7 @@ dependencies = [
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "git+https://github.com/crossterm-rs/crossterm?rev=03bb4f26610a5904b8e875fcb610d16bf7d00814#03bb4f26610a5904b8e875fcb610d16bf7d00814"
+source = "git+https://github.com/crossterm-rs/crossterm?rev=5c56270f3347f1906e15a383d5342e875f1b3b1d#5c56270f3347f1906e15a383d5342e875f1b3b1d"
 dependencies = [
  "bitflags 2.13.0",
  "crossterm_winapi",
@@ -1568,7 +1568,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r-vignette-to-md"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "htmd",
 ]
@@ -1641,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "rd-ast"
-version = "0.1.0-rc.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03a90f843c732928497c9633c0e53836d09dc5b184226fa52ca023f79b9028dd"
+checksum = "0cd34b9f48d1d7e4b54fcb38e191460edaac7bcef76685235394649868e7c728"
 dependencies = [
  "rd-rds",
  "serde",
@@ -1651,9 +1651,9 @@ dependencies = [
 
 [[package]]
 name = "rd-helpdb"
-version = "0.1.0-rc.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "690a16f3bfe77e82863180e3dcd0df6e6fc537e35b11e9f9d408f6f4e8a5352d"
+checksum = "306a2d0a2548c9a4eda615817d2f7d3ac74b886a632d178f5d973fe95572e0a1"
 dependencies = [
  "flate2",
  "rd-rds",
@@ -1662,9 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.1.0-rc.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33e085779f77d443991c2ac8d5fb0263958b037035e840e5d8f6bede993b7df9"
+checksum = "9007f260e5d0ff385c164391fe76162d0525ed7bc37650ff2066bc64ef4441a2"
 dependencies = [
  "bzip2",
  "flate2",
@@ -1675,17 +1675,18 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.1.0-rc.1"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99f11c13c76965e24666211487409ee08ef55638cf713894a4f5063208847370"
+checksum = "498b9c8e7c53b728a85178ca0dcf37c432c108f104bf236d743cd0a33be3a85f"
 dependencies = [
  "rd-ast",
 ]
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.5.0-beta.1"
-source = "git+https://github.com/eitsupi/rd2qmd?rev=2dce12b6b41f74a02e68a1514c4be500f6f841fc#2dce12b6b41f74a02e68a1514c4be500f6f841fc"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9220c6cca64ee4a1590cbca66962dae9e6290bdfe89262f8cadeaf624b36f8ec"
 dependencies = [
  "rd-ast",
  "rd2qmd-mdast",
@@ -1697,8 +1698,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.5.0-beta.1"
-source = "git+https://github.com/eitsupi/rd2qmd?rev=2dce12b6b41f74a02e68a1514c4be500f6f841fc#2dce12b6b41f74a02e68a1514c4be500f6f841fc"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7e61854dfdd6601bb77080abbada03b259980497bd4305fe17e8075838bdf3e"
 dependencies = [
  "serde",
 ]
