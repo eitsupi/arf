@@ -544,6 +544,7 @@ The result fields in the JSON response are already properly escaped strings — 
 | -32001 | R Not At Prompt | R has not returned to the prompt |
 | -32002 | Input Already Pending | Another IPC request is already queued |
 | -32003 | User Is Typing | User is typing in the REPL (interactive mode only) |
+| -32004 | Incomplete Input | R code is syntactically incomplete |
 
 ## Troubleshooting
 
