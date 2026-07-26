@@ -402,7 +402,7 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
     })?;
     let mut options = rd2qmd_core::RdConvertOptions::default();
     options.code.quarto_code_blocks = false;
-    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
     Ok(rd2qmd_core::convert_rd_document(&doc, &options))
 }
 
@@ -436,7 +436,7 @@ fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
     })?;
     let mut options = rd2qmd_core::RdConvertOptions::default();
     options.code.quarto_code_blocks = false;
-    options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
     Ok(rd2qmd_core::convert_rd_document(
         parsed.document(),
         &options,
@@ -619,9 +619,36 @@ More text after.
         let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
         let mut options = rd2qmd_core::RdConvertOptions::default();
         options.code.quarto_code_blocks = false;
-        options.arguments_format = rd2qmd_core::ArgumentsFormat::PipeTable;
+        options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
         let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
+    }
+
+    #[test]
+    fn test_rd_conversion_arguments_preserves_blocks() {
+        let rd_content = r#"
+\name{arguments}
+\title{Arguments}
+\arguments{
+    \item{value}{
+        Description before the list.
+        \itemize{
+            \item First nested item.
+            \item Second nested item.
+        }
+
+        A second paragraph after the list.
+    }
+}
+"#;
+
+        let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
+        let mut options = rd2qmd_core::RdConvertOptions::default();
+        options.code.quarto_code_blocks = false;
+        options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+        let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
+
+        insta::assert_snapshot!("rd_conversion_arguments_preserves_blocks", qmd);
     }
 }
