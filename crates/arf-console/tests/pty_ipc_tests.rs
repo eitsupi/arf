@@ -499,19 +499,19 @@ mod ipc_tests {
         );
 
         // The IPC response is sent as soon as the input is accepted, before R
-        // evaluates it. Wait for the echo to appear, then synchronize on the
-        // next fresh prompt so the post-evaluation repaint has definitely
-        // happened before inspecting the screen — a fixed sleep would let the
+        // evaluates it. `expect()` matches against the whole accumulated
+        // buffer, so the echo and the post-evaluation prompt can arrive in
+        // the same PTY read — clearing the buffer between two separate
+        // `expect()` calls would risk discarding the prompt bytes and
+        // timing out. Instead, match a single regex requiring a "> " prompt
+        // AFTER the echoed code; the only such prompt is the real one
+        // redrawn once evaluation completes (the "agent> " echo itself
+        // precedes the code, not follows it). A fixed sleep would let the
         // test pass by inspecting the echo before the repaint that used to
-        // erase it.
+        // erase it — this waits for a definitive post-evaluation signal
+        // instead.
         terminal
-            .expect("ipc_silent_echo <- 1")
-            .expect("should see the echoed code in the output stream");
-        terminal
-            .clear_buffer()
-            .expect("should clear the output buffer");
-        terminal
-            .wait_for_prompt()
+            .expect_regex(r"ipc_silent_echo <- 1[\s\S]*> ")
             .expect("should return to a fresh prompt after evaluation");
 
         let screen = terminal.screen().expect("should get terminal screen");
