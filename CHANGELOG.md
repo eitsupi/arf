@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-07-26
+
 ### Changed
 
 - Tab completion of package names and the `:help` browser (search and rendering) are now noticeably faster, especially with many installed packages, since they read R's on-disk package metadata directly instead of evaluating R code for most lookups (#257).
