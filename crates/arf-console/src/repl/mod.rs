@@ -1484,6 +1484,11 @@ fn handle_meta_command_result(
 /// Reference: This approach is used by ark (Positron's R kernel).
 fn is_r_command_prompt(prompt: &str) -> bool {
     // Continuation prompts (starting with '+') are NOT command prompts
+    //
+    // TODO: R lets users change this prefix with options(continue = "..."),
+    // and a custom value is then misread as a command prompt. Compare against
+    // R's configured continuation string instead. Every caller of this
+    // function is affected, including IPC request admission.
     if prompt.starts_with('+') {
         return false;
     }
