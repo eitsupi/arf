@@ -753,6 +753,9 @@ package_functions = ["library", "require", "box::use"]
 
 Automatically removes commands that produced errors from history. Similar to fish's [sponge](https://github.com/meaningful-ooo/sponge) plugin.
 
+> [!NOTE]
+> History forget only applies to commands typed interactively by the user in the REPL. It does not apply to headless mode or commands sent via IPC, because agent-sent commands are valuable as an execution log and should not be silently pruned just because they failed.
+
 ```toml
 [experimental.history_forget]
 enabled = true

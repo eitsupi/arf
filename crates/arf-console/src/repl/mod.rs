@@ -1207,7 +1207,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     crate::ipc::set_r_at_prompt(false);
 
                     // Return the (possibly formatted) code to R
-                    if !code.trim().is_empty() {
+                    // Only a top-level command starts a new Reedline history
+                    // context. Continuation prompts remain part of the outer
+                    // command, so preserve its context until evaluation ends.
+                    if is_r_command_prompt(r_prompt) && !code.trim().is_empty() {
                         state.pending_history_context = PendingHistoryContext::Reedline;
                     }
                     return Some(code);
