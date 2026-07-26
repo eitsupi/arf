@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived.
+
 ## [0.4.4] - 2026-07-26
 
 ### Changed
