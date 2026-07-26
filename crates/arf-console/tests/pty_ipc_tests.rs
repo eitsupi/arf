@@ -104,6 +104,42 @@ mod ipc_tests {
         serde_json::from_str(json_body).map_err(|e| format!("Parse failed: {e}: {json_body}"))
     }
 
+    /// Query the interactive session's history for a command marker.
+    fn query_history(socket_path: &str, marker: &str) -> serde_json::Value {
+        let response = send_ipc_request(
+            socket_path,
+            "history",
+            serde_json::json!({
+                "all_sessions": true,
+                "grep": marker,
+                "limit": 10
+            }),
+        )
+        .expect("history request should succeed");
+        response
+            .get("result")
+            .cloned()
+            .expect("history response should have a result")
+    }
+
+    /// Assert that a user_input command has been persisted with the expected
+    /// session metadata, rather than only being evaluated in R.
+    fn assert_ipc_history_entry(socket_path: &str, marker: &str) {
+        let result = query_history(socket_path, marker);
+        let entries = result
+            .get("entries")
+            .and_then(|entries| entries.as_array())
+            .expect("history result should contain entries");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("command").and_then(|v| v.as_str()) == Some(marker))
+            .unwrap_or_else(|| panic!("history should contain {marker}: {result}"));
+
+        assert!(entry.get("timestamp").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("cwd").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("session_id").and_then(|v| v.as_i64()).is_some());
+    }
+
     /// Helper to spawn arf with IPC and return (terminal, socket_path).
     fn spawn_ipc_session() -> (Terminal, String) {
         let mut terminal =
@@ -363,6 +399,72 @@ mod ipc_tests {
             .wait_for_prompt()
             .expect("Should return to prompt after IPC input execution");
 
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an IPC request arriving while reedline is already waiting
+    /// persists the user_input command through the ExternalBreak path.
+    #[test]
+    fn test_ipc_user_input_history_external_break() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let (mut terminal, socket_path) = {
+            let mut terminal =
+                Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+                    .expect("Failed to spawn arf with IPC");
+            terminal
+                .wait_for_prompt()
+                .expect("Should show prompt after startup");
+            std::thread::sleep(Duration::from_millis(500));
+            let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(1))
+                .expect("find socket");
+            (terminal, socket_path)
+        };
+
+        let marker = "ipc_external_history_marker <- 1";
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": marker }),
+        )
+        .expect("IPC request should succeed");
+        assert_eq!(response["result"]["accepted"], true);
+        terminal
+            .wait_for_prompt()
+            .expect("Should return to prompt after IPC input");
+
+        assert_ipc_history_entry(&socket_path, marker);
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test the fast-path timing window by sending immediately after the
+    /// prompt is displayed, before reedline has necessarily entered its input
+    /// loop. The same assertion also protects against route-dependent saves.
+    #[test]
+    fn test_ipc_user_input_history_fast_path() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+            .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let marker = "ipc_fast_history_marker <- 1";
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": marker }),
+        )
+        .expect("IPC request should succeed");
+        assert_eq!(response["result"]["accepted"], true);
+        terminal
+            .wait_for_prompt()
+            .expect("Should return to prompt after IPC input");
+
+        assert_ipc_history_entry(&socket_path, marker);
         terminal.quit().expect("Should quit cleanly");
     }
 

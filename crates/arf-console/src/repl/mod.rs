@@ -544,10 +544,11 @@ impl Repl {
                 dir_stack: Vec::new(),
                 // Only expose session ID if at least one history DB was opened
                 history_session_id: if r_history_ok || shell_history_ok {
-                    self.history_session_id_raw()
+                    self.session_id
                 } else {
                     None
                 },
+                skip_next_command_context_update: false,
             });
         });
 
@@ -942,7 +943,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
         crate::ipc::set_r_at_prompt(is_r_command_prompt(r_prompt));
 
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
-            let had_error = if state.line_editor.has_last_command_context() {
+            let had_error = if state.skip_next_command_context_update {
+                state.skip_next_command_context_update = false;
+                false
+            } else if state.line_editor.has_last_command_context() {
                 let had_error = arf_libr::command_had_error();
                 let exit_status = if had_error { 1i64 } else { 0i64 };
 
@@ -1020,6 +1024,10 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                 }
                 PendingIpcKind::UserInput { reply } => {
                     accept_user_input(reply);
+                    save_ipc_history(&mut state.line_editor, &op.code, state.history_session_id);
+                    if !op.code.is_empty() {
+                        state.skip_next_command_context_update = true;
+                    }
                     let prompt_str = "agent> ";
                     println!("{}{}", prompt_str.dark_cyan(), op.code);
                     if !op.code.is_empty() {
@@ -1079,7 +1087,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.shell_history_path,
                         &state.r_source_status,
                         &mut state.dir_stack,
-                        state.history_session_id,
+                        state.history_session_id.map(i64::from),
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
@@ -1242,6 +1250,11 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
                         }
 
+                        save_ipc_history(editor, &op.code, state.history_session_id);
+                        if !op.code.is_empty() {
+                            state.skip_next_command_context_update = true;
+                        }
+
                         clear_and_show_agent_prompt(&op.code);
 
                         // ExternalBreak leaves reedline's previous prompt position suspended.
@@ -1250,11 +1263,6 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // no output, the next repaint reuses the old prompt origin and clears the
                         // echoed agent line.
                         println!();
-
-                        if !op.code.is_empty() {
-                            let entry = reedline::HistoryItem::from_command_line(&op.code);
-                            let _ = editor.history_mut().save(entry);
-                        }
 
                         if !op.code.is_empty() {
                             state.prompt_config.set_command_start();
@@ -1468,6 +1476,28 @@ fn setup_history(
             log::warn!("Failed to open history database {}: {}", path.display(), e);
             (line_editor, false)
         }
+    }
+}
+
+/// Save an IPC-injected command using the same metadata as headless history.
+///
+/// A history failure is deliberately non-fatal: the injected code must still
+/// be evaluated and its IPC response must still be delivered.
+fn save_ipc_history(editor: &mut Reedline, code: &str, session_id: Option<HistorySessionId>) {
+    if code.is_empty() {
+        return;
+    }
+
+    let mut item = reedline::HistoryItem::from_command_line(code);
+    item.start_timestamp = Some(chrono::Utc::now());
+    item.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
+    item.cwd = std::env::current_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    item.session_id = session_id;
+
+    if let Err(e) = editor.history_mut().save(item) {
+        log::warn!("Failed to save IPC history: {}", e);
     }
 }
 

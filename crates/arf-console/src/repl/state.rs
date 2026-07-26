@@ -7,7 +7,7 @@ use crate::config::{
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
 use nu_ansi_term::Color;
-use reedline::{HistoryItemId, Reedline};
+use reedline::{HistoryItemId, HistorySessionId, Reedline};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -122,8 +122,10 @@ pub struct ReplState {
     pub sponge_queue: SpongeQueue,
     /// Directory stack for :pushd/:popd navigation.
     pub dir_stack: Vec<PathBuf>,
-    /// History session ID as raw i64 (for IPC).
-    pub history_session_id: Option<i64>,
+    /// History session ID for R history entries and IPC metadata.
+    pub history_session_id: Option<HistorySessionId>,
+    /// Skip updating reedline's last interactive command after an IPC entry.
+    pub skip_next_command_context_update: bool,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.
