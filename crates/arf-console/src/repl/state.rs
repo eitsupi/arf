@@ -12,6 +12,9 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod sponge_tests;
+
 use super::prompt::RPrompt;
 
 /// Queue for the sponge-like "forget failed commands" feature.
