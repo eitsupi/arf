@@ -1244,6 +1244,13 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
 
                         clear_and_show_agent_prompt(&op.code);
 
+                        // ExternalBreak leaves reedline's previous prompt position suspended.
+                        // Its saved row range includes the line after a single-line prompt, so
+                        // leave the cursor one row beyond that range. Otherwise, when R produces
+                        // no output, the next repaint reuses the old prompt origin and clears the
+                        // echoed agent line.
+                        println!();
+
                         if !op.code.is_empty() {
                             let entry = reedline::HistoryItem::from_command_line(&op.code);
                             let _ = editor.history_mut().save(entry);

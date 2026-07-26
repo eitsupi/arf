@@ -7,6 +7,10 @@
 - Tab completion of package names and the `:help` browser (search and rendering) are now noticeably faster, especially with many installed packages, since they read R's on-disk package metadata directly instead of evaluating R code for most lookups (#257).
 - The `:help` browser now renders the Arguments section as a list instead of a table, so argument descriptions containing bullet lists or multiple paragraphs are shown in full rather than squashed onto one line.
 
+### Fixed
+
+- `arf ipc send` input that produced no R output (e.g. assignments) could vanish from the REPL instead of being echoed, while inputs that produced output were shown reliably (#265).
+
 ## [0.4.3] - 2026-07-04
 
 ### Fixed

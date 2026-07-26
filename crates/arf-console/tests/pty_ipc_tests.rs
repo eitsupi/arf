@@ -457,12 +457,72 @@ mod ipc_tests {
             .expect("should see R output");
         terminal.wait_for_prompt().expect("should return to prompt");
 
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen
+                .lines
+                .iter()
+                .any(|line| line.contains("agent> cat('marker_output\\n')")),
+            "IPC echo should remain visible when the expression produces output; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
         // The line immediately above the prompt should be the R output,
         // not a blank line.
         terminal
             .previous_line(1)
             .assert_contains("marker_output")
             .expect("line above prompt should be R output, not a blank line");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an IPC user_input echo remains visible when R produces no output.
+    #[test]
+    fn test_ipc_user_input_silent_expression_keeps_echo() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "ipc_silent_echo <- 1" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert!(
+            response
+                .get("result")
+                .and_then(|r| r.get("accepted"))
+                .and_then(|a| a.as_bool())
+                == Some(true),
+            "user_input should be accepted, got: {response:?}"
+        );
+
+        // The IPC response is sent as soon as the input is accepted, before R
+        // evaluates it. `expect()` matches against the whole accumulated
+        // buffer, so the echo and the post-evaluation prompt can arrive in
+        // the same PTY read — clearing the buffer between two separate
+        // `expect()` calls would risk discarding the prompt bytes and
+        // timing out. Instead, match a single regex requiring a "> " prompt
+        // AFTER the echoed code; the only such prompt is the real one
+        // redrawn once evaluation completes (the "agent> " echo itself
+        // precedes the code, not follows it). A fixed sleep would let the
+        // test pass by inspecting the echo before the repaint that used to
+        // erase it — this waits for a definitive post-evaluation signal
+        // instead.
+        terminal
+            .expect_regex(r"ipc_silent_echo <- 1[\s\S]*> ")
+            .expect("should return to a fresh prompt after evaluation");
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen
+                .lines
+                .iter()
+                .any(|line| line.contains("agent> ipc_silent_echo <- 1")),
+            "IPC echo should remain visible after a silent expression; screen:\n{}",
+            screen.lines.join("\n")
+        );
 
         terminal.quit().expect("Should quit cleanly");
     }
