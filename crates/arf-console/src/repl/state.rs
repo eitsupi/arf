@@ -7,7 +7,7 @@ use crate::config::{
 use crate::editor::prompt::PromptFormatter;
 use crate::external::formatter;
 use nu_ansi_term::Color;
-use reedline::{HistoryItemId, Reedline};
+use reedline::{HistoryItemId, HistorySessionId, Reedline};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -27,6 +27,26 @@ use super::prompt::RPrompt;
 pub struct SpongeQueue {
     /// Queue of command entries. Newer commands at front, older at back.
     queue: VecDeque<Option<HistoryItemId>>,
+}
+
+/// Identifies which history entry should receive the result of the command
+/// that just finished evaluating.
+///
+/// IPC entries are saved before R evaluates them, so they cannot use
+/// reedline's internal last-command context. Keep their ID explicitly and
+/// update that entry when the next prompt is built instead.
+#[derive(Debug, Default)]
+pub enum PendingHistoryContext {
+    /// The last command was submitted through reedline and its context should
+    /// be updated through `update_last_command_context`.
+    Reedline,
+    /// The last command was injected through IPC. The ID is absent when the
+    /// history backend rejected the save, but the command status still needs
+    /// to be reflected in the prompt.
+    Ipc { history_id: Option<HistoryItemId> },
+    /// No command needs a history context update.
+    #[default]
+    None,
 }
 
 impl SpongeQueue {
@@ -122,8 +142,10 @@ pub struct ReplState {
     pub sponge_queue: SpongeQueue,
     /// Directory stack for :pushd/:popd navigation.
     pub dir_stack: Vec<PathBuf>,
-    /// History session ID as raw i64 (for IPC).
-    pub history_session_id: Option<i64>,
+    /// History session ID for R history entries and IPC metadata.
+    pub history_session_id: Option<HistorySessionId>,
+    /// History context for the command whose evaluation just completed.
+    pub pending_history_context: PendingHistoryContext,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

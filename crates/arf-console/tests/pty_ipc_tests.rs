@@ -10,6 +10,7 @@ mod common;
 #[cfg(unix)]
 mod ipc_tests {
     use super::common::Terminal;
+    use regex::escape;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
@@ -102,6 +103,78 @@ mod ipc_tests {
         };
 
         serde_json::from_str(json_body).map_err(|e| format!("Parse failed: {e}: {json_body}"))
+    }
+
+    /// Query the interactive session's history for a command marker.
+    fn query_history(socket_path: &str, marker: &str) -> serde_json::Value {
+        let response = send_ipc_request(
+            socket_path,
+            "history",
+            serde_json::json!({
+                "all_sessions": true,
+                "grep": marker,
+                "limit": 10
+            }),
+        )
+        .expect("history request should succeed");
+        response
+            .get("result")
+            .cloned()
+            .expect("history response should have a result")
+    }
+
+    /// Assert that a user_input command has been persisted with the expected
+    /// session metadata, rather than only being evaluated in R.
+    fn assert_ipc_history_entry(socket_path: &str, marker: &str) {
+        let result = query_history(socket_path, marker);
+        let entries = result
+            .get("entries")
+            .and_then(|entries| entries.as_array())
+            .expect("history result should contain entries");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("command").and_then(|v| v.as_str()) == Some(marker))
+            .unwrap_or_else(|| panic!("history should contain {marker}: {result}"));
+
+        assert!(entry.get("timestamp").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("cwd").and_then(|v| v.as_str()).is_some());
+        assert!(entry.get("session_id").and_then(|v| v.as_i64()).is_some());
+        assert!(entry.get("exit_status").and_then(|v| v.as_i64()).is_some());
+    }
+
+    /// Assert that a saved IPC command has the expected exit status.
+    fn assert_ipc_history_exit_status(socket_path: &str, marker: &str, expected: i64) {
+        let result = query_history(socket_path, marker);
+        let entries = result
+            .get("entries")
+            .and_then(|entries| entries.as_array())
+            .expect("history result should contain entries");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.get("command").and_then(|v| v.as_str()) == Some(marker))
+            .unwrap_or_else(|| panic!("history should contain {marker}: {result}"));
+        assert_eq!(
+            entry.get("exit_status").and_then(|v| v.as_i64()),
+            Some(expected),
+            "IPC history entry should contain the evaluated exit status"
+        );
+    }
+
+    /// Clear accumulated PTY output before sending an IPC request.
+    fn clear_before_ipc_request(terminal: &mut Terminal) {
+        terminal.clear_buffer().expect("clear PTY output buffer");
+    }
+
+    /// Wait for the prompt that follows a specific IPC command.
+    ///
+    /// The caller must clear the PTY output buffer before sending the request.
+    /// Requiring the echoed command to precede the next prompt waits until the
+    /// command has been evaluated, rather than merely until the early
+    /// `user_input` acceptance reply has arrived.
+    fn wait_for_ipc_prompt(terminal: &mut Terminal, marker: &str) {
+        terminal
+            .expect_regex(&format!(r"{}[\s\S]*> ", escape(marker)))
+            .unwrap_or_else(|e| panic!("Should return to prompt after IPC input: {e}"));
     }
 
     /// Helper to spawn arf with IPC and return (terminal, socket_path).
@@ -362,6 +435,180 @@ mod ipc_tests {
         terminal
             .wait_for_prompt()
             .expect("Should return to prompt after IPC input execution");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that incomplete user_input is rejected before it can enter R's
+    /// continuation prompt.
+    #[test]
+    fn test_ipc_user_input_rejects_incomplete_code() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+        clear_before_ipc_request(&mut terminal);
+
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "foo(" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert_eq!(response["error"]["code"], -32004);
+        assert_eq!(
+            response["error"]["message"],
+            "R code is syntactically incomplete"
+        );
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen.lines.iter().any(|line| line.contains("> ")),
+            "REPL should remain at the normal prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+        assert!(
+            !screen.lines.iter().any(|line| line.contains("+ ")),
+            "REPL should not enter the continuation prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that silent evaluate rejects incomplete code before it can make R
+    /// wait for continuation input.
+    #[test]
+    fn test_ipc_evaluate_rejects_incomplete_code() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+        clear_before_ipc_request(&mut terminal);
+
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": "function(x) {" }),
+        )
+        .expect("IPC request should succeed");
+
+        assert_eq!(response["error"]["code"], -32004);
+        assert_eq!(
+            response["error"]["message"],
+            "R code is syntactically incomplete"
+        );
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen.lines.iter().any(|line| line.contains("> ")),
+            "REPL should remain at the normal prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+        assert!(
+            !screen.lines.iter().any(|line| line.contains("+ ")),
+            "REPL should not enter the continuation prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an IPC request arriving while reedline is already waiting
+    /// persists the user_input command through the ExternalBreak path.
+    #[test]
+    fn test_ipc_user_input_history_external_break() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let (mut terminal, socket_path) = {
+            let mut terminal =
+                Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+                    .expect("Failed to spawn arf with IPC");
+            terminal
+                .wait_for_prompt()
+                .expect("Should show prompt after startup");
+            std::thread::sleep(Duration::from_millis(500));
+            let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(1))
+                .expect("find socket");
+            (terminal, socket_path)
+        };
+
+        let marker = "ipc_external_history_marker <- 1";
+        clear_before_ipc_request(&mut terminal);
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": marker }),
+        )
+        .expect("IPC request should succeed");
+        assert_eq!(response["result"]["accepted"], true);
+        wait_for_ipc_prompt(&mut terminal, marker);
+
+        assert_ipc_history_entry(&socket_path, marker);
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that history is persisted for a request sent immediately after
+    /// startup. The prompt has already been rendered by reedline at this
+    /// point, so this test intentionally makes no claim about which dispatch
+    /// path handled the request; the fast-path save is covered by the shared
+    /// `save_ipc_history` unit tests.
+    #[test]
+    fn test_ipc_user_input_history_after_startup() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+            .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let marker = "ipc_fast_history_marker <- 1";
+        clear_before_ipc_request(&mut terminal);
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": marker }),
+        )
+        .expect("IPC request should succeed");
+        assert_eq!(response["result"]["accepted"], true);
+        wait_for_ipc_prompt(&mut terminal, marker);
+
+        assert_ipc_history_entry(&socket_path, marker);
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an IPC evaluation error still reaches the prompt status and
+    /// the pre-saved IPC history entry receives exit_status=1.
+    #[test]
+    fn test_ipc_user_input_error_status_and_history() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+            .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let marker = "stop('ipc_history_error_marker')";
+        clear_before_ipc_request(&mut terminal);
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": marker }),
+        )
+        .expect("IPC request should succeed");
+        assert_eq!(response["result"]["accepted"], true);
+
+        terminal
+            .expect_regex(r"[\s\S]*✗ [\s\S]*> ")
+            .expect("Should show a failed prompt after IPC input");
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen.lines.iter().any(|line| line.contains("✗ ")),
+            "IPC evaluation error should be reflected in the next prompt; screen:\n{}",
+            screen.lines.join("\n")
+        );
+        assert_ipc_history_exit_status(&socket_path, marker, 1);
 
         terminal.quit().expect("Should quit cleanly");
     }

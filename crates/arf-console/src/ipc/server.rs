@@ -4,10 +4,11 @@
 //! Each connection is handled as a simple HTTP-like JSON-RPC endpoint:
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
+use crate::editor::validator::RValidator;
 use crate::ipc::protocol::{
-    EvaluateParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, IpcMethod,
-    IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, PARSE_ERROR,
-    ShutdownResult, UserInputParams,
+    EvaluateParams, HistoryParams, INCOMPLETE_INPUT, INTERNAL_ERROR, INVALID_PARAMS,
+    INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
+    METHOD_NOT_FOUND, PARSE_ERROR, ShutdownResult, UserInputParams,
 };
 use crate::ipc::session::{SessionInfo, remove_session, write_session};
 use std::sync::mpsc;
@@ -746,6 +747,9 @@ async fn dispatch_request(
                     );
                 }
             };
+            if let Some(response) = incomplete_input_response(id.clone(), &params.code) {
+                return response;
+            }
             IpcMethod::Evaluate {
                 code: params.code,
                 visible: params.visible,
@@ -779,6 +783,9 @@ async fn dispatch_request(
                     );
                 }
             };
+            if let Some(response) = incomplete_input_response(id.clone(), &params.code) {
+                return response;
+            }
             IpcMethod::UserInput { code: params.code }
         }
         "session" => IpcMethod::Session,
@@ -905,6 +912,19 @@ async fn dispatch_request(
             JsonRpcResponse::error(id, INTERNAL_ERROR, "Request timed out".to_string())
         }
     }
+}
+
+/// Reject code that would make R wait for continuation input.
+fn incomplete_input_response(id: Option<serde_json::Value>, code: &str) -> Option<JsonRpcResponse> {
+    if RValidator::new().is_complete(code) {
+        return None;
+    }
+
+    Some(JsonRpcResponse::error(
+        id,
+        INCOMPLETE_INPUT,
+        "R code is syntactically incomplete".to_string(),
+    ))
 }
 
 /// Find the position of the end of HTTP headers (`\r\n\r\n`).

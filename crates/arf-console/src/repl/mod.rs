@@ -46,7 +46,7 @@ use meta_command::{MetaCommandResult, process_meta_command};
 use prompt::RPrompt;
 use reprex::{clear_input_lines, strip_reprex_output};
 use shell::{execute_shell_command, restart_process};
-use state::{PromptRuntimeConfig, ReplState};
+use state::{PendingHistoryContext, PromptRuntimeConfig, ReplState};
 
 // Thread-local storage for the REPL state.
 // This allows the ReadConsole callback to access the line editor.
@@ -544,10 +544,11 @@ impl Repl {
                 dir_stack: Vec::new(),
                 // Only expose session ID if at least one history DB was opened
                 history_session_id: if r_history_ok || shell_history_ok {
-                    self.history_session_id_raw()
+                    self.session_id
                 } else {
                     None
                 },
+                pending_history_context: PendingHistoryContext::None,
             });
         });
 
@@ -942,41 +943,66 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
         crate::ipc::set_r_at_prompt(is_r_command_prompt(r_prompt));
 
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
-            let had_error = if state.line_editor.has_last_command_context() {
-                let had_error = arf_libr::command_had_error();
-                let exit_status = if had_error { 1i64 } else { 0i64 };
+            let pending_history_context = std::mem::take(&mut state.pending_history_context);
+            let had_error = match pending_history_context {
+                PendingHistoryContext::Reedline => {
+                    if state.line_editor.has_last_command_context() {
+                        let had_error = arf_libr::command_had_error();
+                        let exit_status = if had_error { 1i64 } else { 0i64 };
 
-                // Use Cell to capture the history item ID through the immutable closure
-                let captured_id: std::cell::Cell<Option<reedline::HistoryItemId>> =
-                    std::cell::Cell::new(None);
-                let _ = state.line_editor.update_last_command_context(&|mut item| {
-                    item.exit_status = Some(exit_status);
-                    captured_id.set(item.id);
-                    item
-                });
+                        // Use Cell to capture the history item ID through the immutable closure
+                        let captured_id: std::cell::Cell<Option<reedline::HistoryItemId>> =
+                            std::cell::Cell::new(None);
+                        let _ = state.line_editor.update_last_command_context(&|mut item| {
+                            item.exit_status = Some(exit_status);
+                            captured_id.set(item.id);
+                            item
+                        });
 
-                // Sponge feature: track all commands and purge old failed ones.
-                // See SpongeQueue for the algorithm details.
-                if state.forget_config.enabled {
-                    // Determine effective delay: use configured delay normally,
-                    // or usize::MAX for on_exit_only (defer all deletions until exit)
-                    let effective_delay = if state.forget_config.on_exit_only {
-                        usize::MAX
+                        // Sponge feature: track all commands and purge old failed ones.
+                        // See SpongeQueue for the algorithm details.
+                        if state.forget_config.enabled {
+                            // Determine effective delay: use configured delay normally,
+                            // or usize::MAX for on_exit_only (defer all deletions until exit)
+                            let effective_delay = if state.forget_config.on_exit_only {
+                                usize::MAX
+                            } else {
+                                state.forget_config.delay
+                            };
+
+                            if let Some(id_to_delete) = state.sponge_queue.record_command(
+                                had_error,
+                                captured_id.get(),
+                                effective_delay,
+                            ) {
+                                let _ = state.line_editor.history_mut().delete(id_to_delete);
+                            }
+                        }
+                        had_error
                     } else {
-                        state.forget_config.delay
-                    };
-
-                    if let Some(id_to_delete) = state.sponge_queue.record_command(
-                        had_error,
-                        captured_id.get(),
-                        effective_delay,
-                    ) {
-                        let _ = state.line_editor.history_mut().delete(id_to_delete);
+                        false
                     }
                 }
-                had_error
-            } else {
-                false
+                PendingHistoryContext::Ipc { history_id } => {
+                    // IPC history is saved before evaluation. Reedline's
+                    // History::update API accepts that saved ID, so update the
+                    // IPC entry directly instead of touching the previous
+                    // interactive entry. This also preserves the error status
+                    // for IPC commands in the history database.
+                    let had_error = arf_libr::command_had_error();
+                    if let Some(history_id) = history_id {
+                        let exit_status = if had_error { 1i64 } else { 0i64 };
+                        let _ = state
+                            .line_editor
+                            .history_mut()
+                            .update(history_id, &|mut item| {
+                                item.exit_status = Some(exit_status);
+                                item
+                            });
+                    }
+                    had_error
+                }
+                PendingHistoryContext::None => false,
             };
 
             // Update prompt status indicator for the next prompt
@@ -1009,6 +1035,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                 }
                 PendingIpcKind::VisibleEvaluate { reply, timeout } => {
                     setup_visible_eval(reply, timeout);
+                    let history_id = save_ipc_history(
+                        &mut state.line_editor,
+                        &op.code,
+                        state.history_session_id,
+                    );
+                    if !op.code.trim().is_empty() {
+                        state.pending_history_context = PendingHistoryContext::Ipc { history_id };
+                    }
                     let prompt_str = "agent> ";
                     println!("{}{}", prompt_str.dark_cyan(), op.code);
                     if !op.code.is_empty() {
@@ -1020,6 +1054,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                 }
                 PendingIpcKind::UserInput { reply } => {
                     accept_user_input(reply);
+                    let history_id = save_ipc_history(
+                        &mut state.line_editor,
+                        &op.code,
+                        state.history_session_id,
+                    );
+                    if !op.code.trim().is_empty() {
+                        state.pending_history_context = PendingHistoryContext::Ipc { history_id };
+                    }
                     let prompt_str = "agent> ";
                     println!("{}{}", prompt_str.dark_cyan(), op.code);
                     if !op.code.is_empty() {
@@ -1068,6 +1110,14 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // For non-standard prompts (menus, etc.), pass input directly to R
                     // without any processing (meta commands, shell mode, reprex, autoformat)
                     if is_menu_prompt {
+                        // Deliberately leave pending_history_context alone. This
+                        // input was requested by R during an evaluation that is
+                        // already in progress (readline(), menu(), browser()),
+                        // so the outer command still owns the result. Claiming
+                        // the context here would strand the outer entry without
+                        // an exit status, which matters most when that entry
+                        // came from IPC and cannot be recovered from reedline's
+                        // own last-command context.
                         return Some(line);
                     }
 
@@ -1079,7 +1129,7 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.shell_history_path,
                         &state.r_source_status,
                         &mut state.dir_stack,
-                        state.history_session_id,
+                        state.history_session_id.map(i64::from),
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
@@ -1157,6 +1207,12 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                     crate::ipc::set_r_at_prompt(false);
 
                     // Return the (possibly formatted) code to R
+                    // Only a top-level command starts a new Reedline history
+                    // context. Continuation prompts remain part of the outer
+                    // command, so preserve its context until evaluation ends.
+                    if is_r_command_prompt(r_prompt) && !code.trim().is_empty() {
+                        state.pending_history_context = PendingHistoryContext::Reedline;
+                    }
                     return Some(code);
                 }
                 Ok(Signal::CtrlC) => {
@@ -1242,6 +1298,13 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                             PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
                         }
 
+                        let history_id =
+                            save_ipc_history(editor, &op.code, state.history_session_id);
+                        if !op.code.trim().is_empty() {
+                            state.pending_history_context =
+                                PendingHistoryContext::Ipc { history_id };
+                        }
+
                         clear_and_show_agent_prompt(&op.code);
 
                         // ExternalBreak leaves reedline's previous prompt position suspended.
@@ -1250,11 +1313,6 @@ fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // no output, the next repaint reuses the old prompt origin and clears the
                         // echoed agent line.
                         println!();
-
-                        if !op.code.is_empty() {
-                            let entry = reedline::HistoryItem::from_command_line(&op.code);
-                            let _ = editor.history_mut().save(entry);
-                        }
 
                         if !op.code.is_empty() {
                             state.prompt_config.set_command_start();
@@ -1426,6 +1484,11 @@ fn handle_meta_command_result(
 /// Reference: This approach is used by ark (Positron's R kernel).
 fn is_r_command_prompt(prompt: &str) -> bool {
     // Continuation prompts (starting with '+') are NOT command prompts
+    //
+    // TODO: R lets users change this prefix with options(continue = "..."),
+    // and a custom value is then misread as a command prompt. Compare against
+    // R's configured continuation string instead. Every caller of this
+    // function is affected, including IPC request admission.
     if prompt.starts_with('+') {
         return false;
     }
@@ -1468,6 +1531,85 @@ fn setup_history(
             log::warn!("Failed to open history database {}: {}", path.display(), e);
             (line_editor, false)
         }
+    }
+}
+
+/// Save an IPC-injected command using the same metadata as headless history.
+///
+/// A history failure is deliberately non-fatal: the injected code must still
+/// be evaluated and its IPC response must still be delivered.
+fn save_ipc_history(
+    editor: &mut Reedline,
+    code: &str,
+    session_id: Option<HistorySessionId>,
+) -> Option<reedline::HistoryItemId> {
+    if code.trim().is_empty() {
+        return None;
+    }
+
+    let mut item = reedline::HistoryItem::from_command_line(code);
+    item.start_timestamp = Some(chrono::Utc::now());
+    item.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
+    item.cwd = std::env::current_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    item.session_id = session_id;
+
+    match editor.history_mut().save(item) {
+        Ok(item) => item.id,
+        Err(e) => {
+            log::warn!("Failed to save IPC history: {}", e);
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod ipc_history_tests {
+    use super::save_ipc_history;
+    use reedline::{Reedline, SearchDirection, SearchQuery, SqliteBackedHistory};
+
+    fn everything_query() -> SearchQuery {
+        SearchQuery::everything(SearchDirection::Forward, None)
+    }
+
+    #[test]
+    fn save_ipc_history_ignores_whitespace_only_code() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let history = SqliteBackedHistory::with_file(temp_dir.path().join("r.db"), None, None)
+            .expect("create SQLite history");
+        let mut editor = Reedline::create().with_history(Box::new(history));
+
+        assert!(save_ipc_history(&mut editor, " \t\n ", None).is_none());
+        assert_eq!(
+            editor
+                .history()
+                .count(everything_query())
+                .expect("count history entries"),
+            0
+        );
+    }
+
+    #[test]
+    fn save_ipc_history_returns_id_for_later_status_update() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let history = SqliteBackedHistory::with_file(temp_dir.path().join("r.db"), None, None)
+            .expect("create SQLite history");
+        let mut editor = Reedline::create().with_history(Box::new(history));
+
+        let id = save_ipc_history(&mut editor, "ipc_history_test <- 1", None)
+            .expect("saved IPC history should have an ID");
+        editor
+            .history_mut()
+            .update(id, &|mut item| {
+                item.exit_status = Some(1);
+                item
+            })
+            .expect("saved IPC history should be updateable by ID");
+
+        let item = editor.history().load(id).expect("load saved IPC history");
+        assert_eq!(item.command_line, "ipc_history_test <- 1");
+        assert_eq!(item.exit_status, Some(1));
     }
 }
 
