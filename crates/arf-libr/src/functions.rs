@@ -161,10 +161,6 @@ pub struct RLibrary {
     // Event processing functions
     pub r_processevents: unsafe extern "C" fn(),
 
-    // Windows-specific event processing (from Rgraphapp.dll)
-    #[cfg(windows)]
-    pub ga_peekevent: Option<unsafe extern "C" fn() -> c_int>,
-
     // Unix-specific event processing
     #[cfg(unix)]
     pub r_checkactivity: unsafe extern "C" fn(c_int, c_int) -> *mut std::ffi::c_void,
@@ -402,9 +398,9 @@ impl RLibrary {
             #[cfg(windows)]
             load_symbol!(get_r_user, b"getRUser\0");
 
-            // Load Rgraphapp.dll functions (GA_initapp, GA_peekevent)
+            // Load Rgraphapp.dll functions (GA_initapp)
             #[cfg(windows)]
-            let (ga_initapp, ga_peekevent) = {
+            let ga_initapp = {
                 // Find Rgraphapp.dll in the same directory as R.dll
                 let rgraphapp_path = library_path.parent().map(|p| p.join("Rgraphapp.dll"));
 
@@ -443,37 +439,23 @@ impl RLibrary {
                                     }
                                 );
 
-                                let ga_peekevent: Option<unsafe extern "C" fn() -> c_int> =
-                                    graphapp_lib
-                                        .get::<unsafe extern "C" fn() -> c_int>(b"GA_peekevent\0")
-                                        .ok()
-                                        .map(|s| *s);
-                                log::info!(
-                                    "[WINDOWS] GA_peekevent: {}",
-                                    if ga_peekevent.is_some() {
-                                        "found"
-                                    } else {
-                                        "not found"
-                                    }
-                                );
-
                                 // Leak the library so it stays loaded
                                 std::mem::forget(graphapp_lib);
 
-                                (ga_initapp, ga_peekevent)
+                                ga_initapp
                             }
                             Err(e) => {
                                 log::warn!("[WINDOWS] Failed to load Rgraphapp.dll: {:?}", e);
-                                (None, None)
+                                None
                             }
                         }
                     } else {
                         log::warn!("[WINDOWS] Rgraphapp.dll not found at {:?}", path);
-                        (None, None)
+                        None
                     }
                 } else {
                     log::warn!("[WINDOWS] Could not determine Rgraphapp.dll path");
-                    (None, None)
+                    None
                 }
             };
 
@@ -667,8 +649,6 @@ impl RLibrary {
                 #[cfg(windows)]
                 character_mode,
                 r_processevents,
-                #[cfg(windows)]
-                ga_peekevent,
                 #[cfg(unix)]
                 r_checkactivity,
                 #[cfg(unix)]
