@@ -158,10 +158,14 @@ pub fn process_r_events() {
     };
 
     // Drop any pending interrupt before calling into R's event machinery.
-    // See peek_r_event() for the rationale: an interrupt observed here
-    // (by R_ProcessEvents on Windows or R_checkActivity/R_runHandlers on
-    // Unix) would longjmp through the Rust frames of the input-waiting
-    // loop that called us.
+    // This function is only called from Rust input-waiting loops (reedline
+    // idle callback, headless loop), where there is no R computation to
+    // interrupt. If the flag were left set, an interrupt observed here (by
+    // R_ProcessEvents on Windows or R_checkActivity/R_runHandlers on Unix)
+    // would call onintr(), which longjmps to R's top level straight through
+    // the Rust frames of the waiting loop (undefined behavior; in practice
+    // it leaks a RefCell borrow and the session exits on the next
+    // ReadConsole).
     clear_r_interrupt_pending();
 
     // Suspend interrupts for the duration of the call so that a flag set
@@ -185,86 +189,6 @@ pub fn process_r_events() {
                 }
             }
         }
-    }
-}
-
-/// Check if there are pending R events that need processing.
-///
-/// This is useful for polling before calling `process_r_events()` to avoid
-/// unnecessary processing when idle.
-///
-/// Returns `true` if there are events to process, `false` otherwise.
-///
-/// # Safety
-/// R must be initialized before calling this function.
-pub fn peek_r_event() -> bool {
-    let lib = match r_library() {
-        Ok(lib) => lib,
-        Err(_) => return false,
-    };
-
-    // Drop any pending interrupt before calling into R's event machinery.
-    // This function is only called from Rust input-waiting loops (reedline
-    // idle callback, headless loop), where there is no R computation to
-    // interrupt. If the flag were left set, R_checkActivity would call
-    // onintr(), which longjmps to R's top level straight through the Rust
-    // frames of the waiting loop (undefined behavior; in practice it leaks
-    // a RefCell borrow and the session exits on the next ReadConsole).
-    clear_r_interrupt_pending();
-
-    // Suspend interrupts for the duration of the call so that a flag set
-    // concurrently (by a SIGINT handler running on another thread) cannot
-    // trigger that longjmp either. See SuspendRInterruptsGuard.
-    let _suspend_guard = SuspendRInterruptsGuard::new(lib.r_interrupts_suspended);
-
-    unsafe {
-        #[cfg(windows)]
-        {
-            // On Windows, use GA_peekevent from Rgraphapp.dll
-            if let Some(ga_peekevent) = lib.ga_peekevent {
-                return ga_peekevent() != 0;
-            }
-            false
-        }
-
-        #[cfg(unix)]
-        {
-            // On Unix, use R_checkActivity
-            if lib.r_inputhandlers.is_null() {
-                return false;
-            }
-            let what = (lib.r_checkactivity)(0, 1);
-            !what.is_null()
-        }
-    }
-}
-
-/// Process R events in a loop suitable for use during input waiting.
-///
-/// This function processes any pending events and returns. It's designed
-/// to be called from an input hook or polling loop.
-///
-/// The pattern for use is:
-/// ```ignore
-/// loop {
-///     if input_ready() {
-///         break;
-///     }
-///     polled_events_for_repl();
-///     std::thread::sleep(Duration::from_millis(33)); // ~30fps
-/// }
-/// ```
-///
-/// # Safety
-/// R must be initialized before calling this function.
-pub fn polled_events_for_repl() {
-    // Check if there are pending events first
-    if peek_r_event() {
-        process_r_events();
-    } else {
-        // Even if no events are pending, call R_ProcessEvents occasionally
-        // to handle R's internal housekeeping
-        process_r_events();
     }
 }
 
