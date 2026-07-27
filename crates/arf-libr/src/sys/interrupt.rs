@@ -147,13 +147,14 @@ pub fn process_r_events() {
     };
 
     // Drop any pending interrupt before calling into R's event machinery.
-    // This function is only called from Rust input-waiting loops (reedline
-    // idle callback, headless loop), where there is no R computation to
+    // This function is only called while no R computation is running: from
+    // Rust input-waiting code (the reedline idle callback, the headless
+    // loop, and once just before read_line()), so there is nothing to
     // interrupt. If the flag were left set, an interrupt observed here (by
     // R_ProcessEvents on Windows or R_checkActivity/R_runHandlers on Unix)
     // would call onintr(), which longjmps to R's top level straight through
-    // the Rust frames of the waiting loop (undefined behavior; in practice
-    // it leaks a RefCell borrow and the session exits on the next
+    // the Rust frames of the caller (undefined behavior; in practice it
+    // leaks a RefCell borrow and the session exits on the next
     // ReadConsole).
     clear_r_interrupt_pending();
 
