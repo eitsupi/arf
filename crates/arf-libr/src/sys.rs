@@ -21,7 +21,7 @@ pub use error_state::{
 pub use init::{initialize_r, initialize_r_with_args, run_r_mainloop};
 pub use interrupt::{
     clear_r_interrupt_pending, is_r_awaiting_console_input, is_r_interrupt_flag_available,
-    peek_r_event, polled_events_for_repl, process_r_events, set_r_interrupt_pending,
+    process_r_events, set_r_interrupt_pending,
 };
 pub use output::{
     clear_write_console_callback, finish_ipc_capture, flush_reprex_buffer, set_reprex_mode,
