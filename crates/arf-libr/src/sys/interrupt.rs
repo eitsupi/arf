@@ -134,20 +134,9 @@ impl Drop for AwaitConsoleInputGuard {
 /// On Unix, this also runs input handlers for background tasks.
 ///
 /// This function should be called periodically while waiting for user input
-/// to keep R's interactive windows responsive.
-///
-/// # Current Limitations
-///
-/// Currently, this function is only called once before `read_line()` due to
-/// reedline's blocking design. This means graphics windows are only updated
-/// when the user presses a key. For fully responsive graphics windows,
-/// reedline would need an idle callback feature to call this function
-/// periodically during input waiting.
-///
-/// TODO: Consider forking reedline to add an idle callback feature, or
-/// contribute such a feature upstream. See:
-/// - Similar discussion: <https://github.com/nushell/reedline/issues/311>
-/// - External event queue PR (closed): <https://github.com/nushell/reedline/pull/822>
+/// to keep R's interactive windows responsive. arf does so from reedline's
+/// idle callback in the interactive REPL and from the polling loop in
+/// headless mode.
 ///
 /// # Safety
 /// R must be initialized before calling this function.
