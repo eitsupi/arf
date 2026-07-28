@@ -123,6 +123,11 @@ impl std::error::Error for VersionSpecParseError {}
 const VERSION_COMPONENT_COUNT: usize = 3;
 
 impl VersionSpec {
+    /// Return whether this is a numeric version selector rather than a range.
+    pub fn is_concrete_version(&self) -> bool {
+        matches!(self, Self::Digits(_))
+    }
+
     /// Parse a version specification.
     ///
     /// Plain numeric strings are kept separate from semver parsing because an

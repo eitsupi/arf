@@ -426,7 +426,7 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
         }
 
         if !external::rig::rig_available() {
-            diagnostics.push(not_installed_warning(&trimmed_version));
+            diagnostics.push(rig_unavailable_warning());
             return Some(OverrideResolution::Fallback { diagnostics });
         }
 
@@ -446,7 +446,7 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             .collect::<Vec<_>>();
 
         let Some(selected) = rversion::resolve_version(&spec, &installed_versions) else {
-            diagnostics.push(not_installed_warning(&trimmed_version));
+            diagnostics.push(not_installed_warning(&trimmed_version, &spec));
             return Some(OverrideResolution::Fallback { diagnostics });
         };
 
@@ -526,10 +526,21 @@ fn override_location(source: &RSourceOverride) -> String {
     }
 }
 
-fn not_installed_warning(version: &str) -> String {
-    format!(
-        "Warning: R version \"{version}\" from source override is not installed.\n         Install it with rig add {version}, then restart arf.\n         Falling back to startup.r_source."
-    )
+fn rig_unavailable_warning() -> String {
+    "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+        .to_owned()
+}
+
+fn not_installed_warning(version: &str, spec: &rversion::VersionSpec) -> String {
+    if spec.is_concrete_version() {
+        format!(
+            "Warning: R version \"{version}\" from source override is not installed.\n         Install it with rig add {version}, then restart arf.\n         Falling back to startup.r_source."
+        )
+    } else {
+        format!(
+            "Warning: No installed R version matches source override specification \"{version}\".\n         Install a matching R version with rig, then restart arf.\n         Falling back to startup.r_source."
+        )
+    }
 }
 
 /// Resolve R_HOME from a user-provided path.
@@ -834,5 +845,22 @@ mod r_source_override_tests {
             status.display(),
             "rig (R 4.4.2; override: toml-key rproject.toml:project.r_version = \"4.4\")"
         );
+    }
+
+    #[test]
+    fn rig_unavailable_warning_explains_fallback() {
+        assert_eq!(
+            rig_unavailable_warning(),
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+        );
+    }
+
+    #[test]
+    fn range_not_installed_warning_does_not_suggest_rig_add() {
+        let spec = rversion::VersionSpec::parse(">=4.3, <5.0").unwrap();
+        let warning = not_installed_warning(">=4.3, <5.0", &spec);
+
+        assert!(warning.contains("Install a matching R version with rig"));
+        assert!(!warning.contains("rig add"));
     }
 }

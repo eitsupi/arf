@@ -842,11 +842,19 @@ When resolving providers, a missing file is silently skipped and arf moves to th
 
 > Warning: R source override provider 'pixi' is not implemented; trying the next R source override.
 
-If a version is resolved but no matching R installation is found, arf prints guidance to install it with `rig add`, then falls back to `startup.r_source`; startup continues rather than aborting. The guidance is:
+If rig is unavailable, arf warns that the R source override cannot be resolved, points to the rig installation guide, and falls back to `startup.r_source`. If rig is available but no matching R installation is found, arf prints installation guidance and falls back to `startup.r_source`; startup continues rather than aborting. Numeric version selectors use `rig add`, while semver ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
 
 ```text
+Warning: rig is not installed, so the R source override cannot be resolved.
+         Install rig from https://github.com/r-lib/rig or use "auto".
+         Falling back to startup.r_source.
+
 Warning: R version "4.4" from source override is not installed.
          Install it with rig add 4.4, then restart arf.
+         Falling back to startup.r_source.
+
+Warning: No installed R version matches source override specification ">=4.3, <5.0".
+         Install a matching R version with rig, then restart arf.
          Falling back to startup.r_source.
 ```
 

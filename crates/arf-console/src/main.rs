@@ -39,6 +39,10 @@ use pid_file::{
 use repl::Repl;
 use std::process::ExitCode;
 
+fn no_r_source_overrides_enabled(top_level: bool, subcommand: bool) -> bool {
+    top_level || subcommand
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -156,7 +160,7 @@ fn run() -> Result<()> {
                 log_file.as_deref(),
                 history_dir.as_deref(),
                 *no_history,
-                *no_r_source_overrides,
+                no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
             );
         }
         None => {}
@@ -396,4 +400,27 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_level_no_r_source_overrides_applies_to_headless() {
+        let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides", "headless"]).unwrap();
+        let top_level = cli.no_r_source_overrides;
+        let Some(Commands::Headless {
+            no_r_source_overrides,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected headless command");
+        };
+
+        assert!(no_r_source_overrides_enabled(
+            top_level,
+            no_r_source_overrides
+        ));
+    }
 }
