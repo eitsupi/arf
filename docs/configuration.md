@@ -797,14 +797,71 @@ Fish-style abbreviations for the shell editor. When you type an abbreviation and
 
 Abbreviations are matched against the word immediately to the left of the cursor at the moment you press Space or Enter. The expansion replaces the abbreviation in place.
 
+### R Source Overrides
+
+Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
+
+Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though tools such as pixi or uvr may walk up the directory tree themselves. Relative `file` paths are therefore relative to the current working directory.
+
+Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
+| `type = "version-file"` | — | Reads the complete version specification from the `file` field. |
+| `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
+| `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
+
+For example, rv stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
+
+```toml
+[experimental]
+r_source_overrides = [
+  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+]
+```
+
+The other provider forms are:
+
+```toml
+{ type = "version-file", file = ".r-version" }
+{ type = "pixi" }
+```
+
+Version strings are interpreted as follows:
+
+- Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
+- If multiple installed R versions match, the newest matching version is selected.
+- Semantic-version ranges such as `^4.4` and `>=4.3, <5.0` are also supported.
+- The `devel` and `release` aliases are not currently supported by the R source override path.
+- Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
+
+When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
+
+> Warning: R source override provider 'pixi' is not implemented; trying the next R source override.
+
+If a version is resolved but no matching R installation is found, arf prints guidance to install it with `rig add`, then falls back to `startup.r_source`; startup continues rather than aborting. The guidance is:
+
+```text
+Warning: R version "4.4" from source override is not installed.
+         Install it with rig add 4.4, then restart arf.
+         Falling back to startup.r_source.
+```
+
+Use `--no-r-source-overrides` to disable this feature entirely.
+
 ## CLI Options Override
 
 Command-line options take precedence over config file settings:
 
 | CLI Option | Config Setting |
 |------------|----------------|
-| `--r-home` | Overrides `startup.r_source` (explicit path) |
-| `--with-r-version` | Overrides `startup.r_source` (uses rig) |
+| `--r-home` | Highest-priority R source; explicit path |
+| `--with-r-version` | Next-priority R source; uses rig |
+| `[experimental].r_source_overrides` | Next-priority R source; resolved before `startup.r_source` |
+| `startup.r_source` | Final R source fallback |
 | `--no-banner` | `startup.show_banner` |
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |
