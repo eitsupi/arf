@@ -4,7 +4,13 @@
 
 ### Added
 
-- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order. A `version-file` entry reads a plain file such as `.r-version`, and a `toml-key` entry reads a value out of a TOML file — for example rv's `rproject.toml`:
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order. A `version-file` entry reads a plain text file containing just the version — for example a file named `.r-version` containing:
+
+  ```
+  4.4
+  ```
+
+  A `toml-key` entry reads a value out of a TOML file — for example rv's `rproject.toml`:
 
   ```toml
   [project]

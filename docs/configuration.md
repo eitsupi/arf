@@ -816,6 +816,8 @@ Automatically select an installed R version from project tooling. This feature i
 
 Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
 
+arf uses the `file` value as written and performs no case folding, so whether `.r-version` also matches a file named `.R-version` depends on the filesystem: case-insensitive on typical macOS and Windows setups, case-sensitive on typical Linux ones. Write the exact spelling your project uses to keep the config portable across platforms.
+
 Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
 
 **Configuration options:**
