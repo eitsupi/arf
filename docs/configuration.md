@@ -815,7 +815,7 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | Option | Default | Description |
 |--------|---------|-------------|
 | `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
-| `type = "version-file"` | — | Reads the complete version specification from the `file` field. |
+| `type = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
 | `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
 | `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
 
@@ -837,13 +837,13 @@ The other provider forms are:
 
 **File formats read by each provider:**
 
-`version-file` reads the entire file as text and trims leading/trailing whitespace and newlines; the trimmed result is used as the version specification. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
+`version-file` reads the first non-empty line and trims its leading/trailing whitespace; the trimmed result is used as the version specification. Values longer than 256 bytes are rejected. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
 
 ```
 4.4.1
 ```
 
-Comments are not supported, and the whole trimmed file has to be one specification — it may be any supported form, including a range such as `>=4.3, <5.0`, but not several specifications. Only spaces are accepted inside a specification, so a range must stay on one line: leading and trailing newlines are trimmed away, but one in the middle makes the file invalid.
+Comments are not supported. The first non-empty line may be any supported form, including a range such as `>=4.3, <5.0`; later lines are ignored. Only spaces are accepted inside a specification, so a range must stay on one line.
 
 `toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
 

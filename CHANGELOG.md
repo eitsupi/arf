@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` or `.r-version` and switch to it. Override files are resolved from the current directory and must be bare filenames; this feature is opt-in.
+- **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` or `.r-version` and switch to it. Override files are resolved from the current directory, version files use their first non-empty line, and filenames must be bare; this feature is opt-in.
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
 - `--with-r-version` and `:switch` now accept version ranges in the style Cargo and npm use (e.g. `^4.4`, `>=4.3, <5.0`) in addition to exact and partial version numbers.
 

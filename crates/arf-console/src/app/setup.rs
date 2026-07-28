@@ -11,9 +11,7 @@ use crate::rversion;
 use anyhow::{Context, Result};
 use reedline::Reedline;
 use std::fs;
-use std::path::Path;
-#[cfg(windows)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Run in script execution mode (non-interactive).
 pub(crate) fn run_script(cli: &Cli) -> Result<()> {
@@ -21,11 +19,10 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     let config = load_config_or_warn(cli.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
-    let base_dir = std::env::current_dir().context("Failed to determine current directory")?;
     let resolution = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
-        &base_dir,
+        None,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
         cli.no_r_source_overrides,
@@ -199,7 +196,7 @@ impl RSourceResolutionReport {
 pub(crate) fn setup_r(
     r_source: &RSource,
     r_source_overrides: &[RSourceOverride],
-    base_dir: &Path,
+    base_dir: Option<&Path>,
     cli_r_home: Option<&std::path::Path>,
     cli_version: Option<&str>,
     no_r_source_overrides: bool,
@@ -356,7 +353,7 @@ enum OverrideResolution {
 /// Try the configured directory-level R source overrides in priority order.
 fn setup_r_via_overrides(
     overrides: &[RSourceOverride],
-    base_dir: &Path,
+    base_dir: Option<&Path>,
 ) -> Option<OverrideResolution> {
     setup_r_via_overrides_with(
         overrides,
@@ -367,9 +364,20 @@ fn setup_r_via_overrides(
     )
 }
 
+fn resolve_override_path(file: &Path, base_dir: &mut Option<PathBuf>) -> std::io::Result<PathBuf> {
+    if let Some(base_dir) = base_dir.as_ref() {
+        return Ok(base_dir.join(file));
+    }
+
+    let current_dir = std::env::current_dir()?;
+    let path = current_dir.join(file);
+    *base_dir = Some(current_dir);
+    Ok(path)
+}
+
 fn setup_r_via_overrides_with<FAvailable, FList, FResolve>(
     overrides: &[RSourceOverride],
-    base_dir: &Path,
+    base_dir: Option<&Path>,
     rig_available: FAvailable,
     list_versions: FList,
     resolve_selected_rig_version: FResolve,
@@ -383,6 +391,7 @@ where
     let mut evaluated_provider = false;
     let mut rig_available_cache = None;
     let mut installed_versions_cache = None;
+    let mut base_dir = base_dir.map(Path::to_path_buf);
 
     for source in overrides {
         let provider = override_provider_name(source);
@@ -400,7 +409,17 @@ where
                     diagnostics.push(invalid_override_file_warning(provider, file));
                     continue;
                 }
-                let path = base_dir.join(file);
+                let path = match resolve_override_path(file, &mut base_dir) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        evaluated_provider = true;
+                        diagnostics.push(format!(
+                            "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
+                            file.display()
+                        ));
+                        continue;
+                    }
+                };
                 match rversion::read_version_file(&path) {
                     Ok(version) => {
                         evaluated_provider = true;
@@ -426,7 +445,17 @@ where
                     diagnostics.push(invalid_override_file_warning(provider, file));
                     continue;
                 }
-                let path = base_dir.join(file);
+                let path = match resolve_override_path(file, &mut base_dir) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        evaluated_provider = true;
+                        diagnostics.push(format!(
+                            "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
+                            file.display()
+                        ));
+                        continue;
+                    }
+                };
                 match rversion::read_toml_key(&path, key) {
                     Ok(version) => {
                         evaluated_provider = true;
@@ -903,7 +932,7 @@ mod r_source_override_tests {
             &[RSourceOverride::VersionFile {
                 file: ".r-version".into(),
             }],
-            temp.path(),
+            Some(temp.path()),
             None,
             None,
             false,
@@ -917,18 +946,27 @@ mod r_source_override_tests {
     #[test]
     fn empty_override_configuration_is_not_configured() {
         let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(&path_source(temp.path()), &[], None, None, None, false).unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::NotConfigured);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn pixi_only_override_resolution_does_not_need_a_base_dir() {
+        let temp = tempfile::tempdir().unwrap();
         let report = setup_r(
             &path_source(temp.path()),
-            &[],
-            temp.path(),
+            &[RSourceOverride::Pixi],
+            None,
             None,
             None,
             false,
         )
         .unwrap();
 
-        assert_eq!(report.override_state, RSourceOverrideState::NotConfigured);
-        assert!(report.diagnostics.is_empty());
+        assert_eq!(report.override_state, RSourceOverrideState::Failed);
+        assert!(report.diagnostics[0].contains("pixi"));
     }
 
     #[test]
@@ -937,7 +975,7 @@ mod r_source_override_tests {
         let report = setup_r(
             &path_source(temp.path()),
             &[RSourceOverride::Pixi],
-            temp.path(),
+            Some(temp.path()),
             None,
             None,
             true,
@@ -962,7 +1000,7 @@ mod r_source_override_tests {
                 file: "rproject.toml".into(),
                 key: "project.r_version".to_string(),
             }],
-            temp.path(),
+            Some(temp.path()),
             Some(temp.path()),
             None,
             false,
@@ -980,7 +1018,7 @@ mod r_source_override_tests {
         let report = setup_r(
             &path_source(temp.path()),
             &[RSourceOverride::Pixi],
-            temp.path(),
+            Some(temp.path()),
             Some(temp.path()),
             None,
             true,
@@ -997,7 +1035,7 @@ mod r_source_override_tests {
         let report = setup_r(
             &path_source(temp.path()),
             &[RSourceOverride::Pixi],
-            temp.path(),
+            Some(temp.path()),
             None,
             None,
             false,
@@ -1104,7 +1142,7 @@ mod r_source_override_tests {
                     file: second_file.clone(),
                 },
             ],
-            temp.path(),
+            Some(temp.path()),
             || true,
             || Ok(vec![rig_version("4.4.2")]),
             |selected, versions| {
@@ -1134,6 +1172,107 @@ mod r_source_override_tests {
             }
             OverrideResolution::Fallback { .. } => {
                 panic!("the installed provider should be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn version_file_resolution_uses_first_line_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = Path::new("project.r-version");
+        std::fs::write(
+            temp.path().join(file),
+            "4.4.2\nprivate trailing contents that must not be read\n",
+        )
+        .unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::VersionFile {
+                file: file.to_path_buf(),
+            }],
+            Some(temp.path()),
+            || true,
+            || Ok(vec![rig_version("4.4.2")]),
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                Ok(RSourceStatus::Rig {
+                    version: versions[0].version.clone(),
+                    override_info: None,
+                })
+            },
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Applied {
+                info, diagnostics, ..
+            } => {
+                assert_eq!(info.requested_version, "4.4.2");
+                assert!(diagnostics.is_empty());
+            }
+            OverrideResolution::Fallback { .. } => {
+                panic!("the first version-file line should resolve")
+            }
+        }
+    }
+
+    #[test]
+    fn overlong_version_file_value_is_not_disclosed_in_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = "4".repeat(300);
+        std::fs::write(temp.path().join("project.r-version"), &marker).unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::VersionFile {
+                file: "project.r-version".into(),
+            }],
+            Some(temp.path()),
+            || panic!("rig should not be queried when reading the version file fails"),
+            || panic!("installed versions should not be queried when reading fails"),
+            |_, _| panic!("version resolution should not be attempted"),
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Fallback { diagnostics } => {
+                let diagnostics = diagnostics.join("\n");
+                assert!(diagnostics.contains("exceeds 256 bytes"));
+                assert!(!diagnostics.contains(&marker));
+            }
+            OverrideResolution::Applied { .. } => {
+                panic!("an overlong version-file value must not be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn later_version_file_lines_are_not_disclosed_in_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let private_contents = "private trailing contents that must not be disclosed";
+        std::fs::write(
+            temp.path().join("project.r-version"),
+            format!("not-a-version\n{private_contents}\n"),
+        )
+        .unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::VersionFile {
+                file: "project.r-version".into(),
+            }],
+            Some(temp.path()),
+            || true,
+            || Ok(vec![rig_version("4.4.2")]),
+            |_, _| panic!("version resolution should not be attempted"),
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Fallback { diagnostics } => {
+                let diagnostics = diagnostics.join("\n");
+                assert!(!diagnostics.contains(private_contents));
+            }
+            OverrideResolution::Applied { .. } => {
+                panic!("an invalid first line must not be applied")
             }
         }
     }
@@ -1180,7 +1319,7 @@ mod r_source_override_tests {
 
                 let result = setup_r_via_overrides_with(
                     &overrides,
-                    temp.path(),
+                    Some(temp.path()),
                     || true,
                     || Ok(vec![rig_version("4.4.2")]),
                     |selected, versions| {
@@ -1229,7 +1368,7 @@ mod r_source_override_tests {
                     file: second_file.clone(),
                 },
             ],
-            temp.path(),
+            Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
                 true
@@ -1270,7 +1409,7 @@ mod r_source_override_tests {
                     file: "missing-second.r-version".into(),
                 },
             ],
-            temp.path(),
+            Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
                 true

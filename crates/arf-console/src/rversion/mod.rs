@@ -5,8 +5,9 @@
 
 use semver::{Version, VersionReq};
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
 use std::io;
+use std::io::BufRead;
 use std::path::Path;
 
 /// A parsed R version specification.
@@ -70,9 +71,35 @@ impl TomlKeyError {
     }
 }
 
-/// Read a complete version specification from a plain text file.
+/// The maximum length of the trimmed value read from a version file.
+const MAX_VERSION_FILE_VALUE_LENGTH: usize = 256;
+
+/// Read the first non-empty version specification from a plain text file.
 pub fn read_version_file(path: &Path) -> io::Result<String> {
-    fs::read_to_string(path).map(|contents| contents.trim().to_owned())
+    let file = File::open(path)?;
+    let mut reader = io::BufReader::new(file);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(String::new());
+        }
+
+        let value = line.trim();
+        if value.is_empty() {
+            continue;
+        }
+
+        // Reject rather than truncate: truncation could turn an invalid value into a valid one.
+        if value.len() > MAX_VERSION_FILE_VALUE_LENGTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("version file value exceeds {MAX_VERSION_FILE_VALUE_LENGTH} bytes"),
+            ));
+        }
+        return Ok(value.to_owned());
+    }
 }
 
 /// Read a string value from a dot-separated key path in a TOML file.
@@ -298,11 +325,25 @@ mod tests {
     }
 
     #[test]
-    fn version_file_contents_are_trimmed() {
+    fn version_file_uses_first_non_empty_line() {
         let file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), "\n  4.4.2\r\n").unwrap();
+        std::fs::write(file.path(), "\n  4.4.2\r\nprivate trailing contents\n").unwrap();
 
         assert_eq!(read_version_file(file.path()).unwrap(), "4.4.2");
+    }
+
+    #[test]
+    fn version_file_rejects_overlong_first_non_empty_line() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            format!("{}\n", "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH + 1)),
+        )
+        .unwrap();
+
+        let error = read_version_file(file.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "version file value exceeds 256 bytes");
     }
 
     #[test]
