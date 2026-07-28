@@ -6,6 +6,11 @@
 
 - **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` and switch to it. This feature is opt-in.
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
+- `--with-r-version` and `:switch` now accept version ranges in the style Cargo and npm use (e.g. `^4.4`, `>=4.3, <5.0`) in addition to exact and partial version numbers.
+
+### Changed
+
+- Partial version numbers passed to `--with-r-version` and `:switch` (e.g. `4.4`) now match only that release series (`4.4.x`) instead of any version starting with the same text.
 
 ### Fixed
 

@@ -45,8 +45,13 @@ pub struct Cli {
 
     /// Highest-priority R source: use this R version via rig
     ///
-    /// Requires rig. Use "default" for rig's default, or a version like "4.5"
-    /// or "release".
+    /// Accepts a rig alias (e.g. "release"), "default", a rig-assigned name,
+    /// a full version ("4.4.1"), a partial version ("4.4" or "4", matching
+    /// the latest release in that series), or a version range in the style
+    /// Cargo and npm use ("^4.4", ">=4.3, <5.0").
+    ///
+    /// Requires rig. Candidates are limited to R versions rig has installed
+    /// (from `rig list --json`); the version string is never passed to rig.
     ///
     /// Takes precedence over ARF_R_VERSION, r_source_overrides and
     /// startup.r_source, which are not consulted at all when this is set.
@@ -333,7 +338,14 @@ Examples:
 
         /// Highest-priority R source: use this R version via rig
         ///
-        /// Requires rig.
+        /// Accepts a rig alias (e.g. "release"), "default", a rig-assigned
+        /// name, a full version ("4.4.1"), a partial version ("4.4" or "4",
+        /// matching the latest release in that series), or a version range in
+        /// the style Cargo and npm use ("^4.4", ">=4.3, <5.0").
+        ///
+        /// Requires rig. Candidates are limited to R versions rig has
+        /// installed (from `rig list --json`); the version string is never
+        /// passed to rig.
         ///
         /// Takes precedence over ARF_R_VERSION, r_source_overrides and
         /// startup.r_source, which are not consulted at all when this is set.

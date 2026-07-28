@@ -149,7 +149,7 @@ pub fn process_meta_command(
                 return Some(MetaCommandResult::Handled);
             }
 
-            // Extract the complete version argument, since semver ranges may
+            // Extract the complete version argument, since version ranges may
             // contain spaces (for example, ">=4.3, <5.0").
             let version = trimmed[1..]
                 .strip_prefix(cmd)

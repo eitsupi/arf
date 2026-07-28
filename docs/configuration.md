@@ -841,7 +841,7 @@ The other provider forms are:
 4.4.1
 ```
 
-Comments and multiple independent specifications are not supported. After trimming leading and trailing whitespace and newlines, arf passes the entire file to its version-specification parser as one specification. That single specification may be any supported form, including a semantic-version range such as `>=4.3, <5.0`; separate lines or other extra text make it invalid.
+Comments and multiple independent specifications are not supported. After trimming leading and trailing whitespace and newlines, arf passes the entire file to its version-specification parser as one specification. That single specification may be any supported form, including a version range such as `>=4.3, <5.0`; separate lines or other extra text make it invalid.
 
 `toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
 
@@ -857,19 +857,19 @@ With `key = "project.r_version"`, arf looks up the `project` table and reads its
 
 - Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
 - If multiple installed R versions match, the newest matching version is selected.
-- Semantic-version ranges such as `^4.4` and `>=4.3, <5.0` are also supported.
+- Version ranges such as `^4.4` and `>=4.3, <5.0` are also supported. These use the syntax Cargo and npm popularised; the SemVer specification itself does not define range operators.
 - The `devel` and `release` aliases are not currently supported by the R source override path.
 - Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
 
 **Who performs the matching:** arf runs rig only to check that it is there (`rig --version`) and to list what is installed (`rig list --json`). It then matches the specification against that list itself and asks the selected installation's R binary for its `R_HOME`. rig never sees the specification, so it is arf that decides what `4.4` means.
 
-`--with-r-version`, `:switch` and `r_source_overrides` share that matching, so numeric specifications and semver ranges mean the same thing everywhere. Only the selectors that come from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, and have no equivalent in an override file.
+`--with-r-version`, `:switch` and `r_source_overrides` share that matching, so numeric specifications and version ranges mean the same thing everywhere. Only the selectors that come from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, and have no equivalent in an override file.
 
 When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
 
 > Warning: R source override provider 'pixi' is not implemented; trying the next R source override.
 
-If rig is unavailable, arf warns that the R source override cannot be resolved, points to the rig installation guide, and falls back to `startup.r_source`. If rig is available but no matching R installation is found, arf prints installation guidance and falls back to `startup.r_source`; startup continues rather than aborting. Numeric version selectors use `rig add`, while semver ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
+If rig is unavailable, arf warns that the R source override cannot be resolved, points to the rig installation guide, and falls back to `startup.r_source`. If rig is available but no matching R installation is found, arf prints installation guidance and falls back to `startup.r_source`; startup continues rather than aborting. Numeric version selectors use `rig add`, while version ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
 
 ```text
 Warning: rig is not installed, so the R source override cannot be resolved.
