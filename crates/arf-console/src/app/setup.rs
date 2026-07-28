@@ -501,11 +501,17 @@ where
         let trimmed_version = version.trim().to_owned();
         let spec = match rversion::VersionSpec::parse(&trimmed_version) {
             Ok(spec) => spec,
-            Err(error) => {
+            Err(rversion::VersionSpecParseError::Empty) => {
                 diagnostics.push(format!(
-                    "Warning: {} contains invalid R version \"{}\" ({error}); trying the next R source override.",
-                    override_location(source),
-                    trimmed_version
+                    "Warning: {} contains an empty R version specification; trying the next R source override.",
+                    override_location(source)
+                ));
+                continue;
+            }
+            Err(rversion::VersionSpecParseError::Invalid) => {
+                diagnostics.push(format!(
+                    "Warning: {} contains an R version specification that could not be parsed; trying the next R source override.",
+                    override_location(source)
                 ));
                 continue;
             }
@@ -1273,6 +1279,51 @@ mod r_source_override_tests {
             }
             OverrideResolution::Applied { .. } => {
                 panic!("an invalid first line must not be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_version_markers_are_not_disclosed_for_file_providers() {
+        let marker = "SUPER-SECRET-TOKEN-abc123";
+
+        for provider in ["version-file", "toml-key"] {
+            let temp = tempfile::tempdir().unwrap();
+            let overrides = if provider == "version-file" {
+                std::fs::write(temp.path().join("project.r-version"), marker).unwrap();
+                vec![RSourceOverride::VersionFile {
+                    file: "project.r-version".into(),
+                }]
+            } else {
+                std::fs::write(
+                    temp.path().join("rproject.toml"),
+                    format!("[project]\nr_version = \"{marker}\"\n"),
+                )
+                .unwrap();
+                vec![RSourceOverride::TomlKey {
+                    file: "rproject.toml".into(),
+                    key: "project.r_version".to_string(),
+                }]
+            };
+
+            let result = setup_r_via_overrides_with(
+                &overrides,
+                Some(temp.path()),
+                || panic!("rig should not be queried for an invalid version"),
+                || panic!("installed versions should not be queried for an invalid version"),
+                |_, _| panic!("version resolution should not be attempted"),
+            )
+            .unwrap();
+
+            match result {
+                OverrideResolution::Fallback { diagnostics } => {
+                    let diagnostics = diagnostics.join("\n");
+                    assert!(!diagnostics.contains(marker));
+                    assert!(diagnostics.contains("could not be parsed"));
+                }
+                OverrideResolution::Applied { .. } => {
+                    panic!("an invalid version must not be applied")
+                }
             }
         }
     }

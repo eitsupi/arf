@@ -7,7 +7,7 @@ use semver::{Version, VersionReq};
 use std::fmt;
 use std::fs::{self, File};
 use std::io;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::path::Path;
 
 /// A parsed R version specification.
@@ -27,7 +27,7 @@ pub enum VersionSpecParseError {
     /// The specification is empty.
     Empty,
     /// The specification is not a valid numeric prefix, name, or semver requirement.
-    Invalid(String),
+    Invalid,
 }
 
 /// An error returned when reading a version from a TOML key.
@@ -47,7 +47,7 @@ impl fmt::Display for TomlKeyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read(error) => write!(formatter, "failed to read TOML file: {error}"),
-            Self::Parse(error) => write!(formatter, "failed to parse TOML: {error}"),
+            Self::Parse(_) => formatter.write_str("failed to parse TOML"),
             Self::MissingKey(key) => write!(formatter, "TOML key not found: {key}"),
             Self::NotString(key) => write!(formatter, "TOML key is not a string: {key}"),
         }
@@ -82,8 +82,20 @@ pub fn read_version_file(path: &Path) -> io::Result<String> {
 
     loop {
         line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        let bytes_read = reader
+            .by_ref()
+            .take((MAX_VERSION_FILE_VALUE_LENGTH + 1) as u64)
+            .read_line(&mut line)?;
+        if bytes_read == 0 {
             return Ok(String::new());
+        }
+
+        // Reject rather than truncate: truncation could turn an invalid value into a valid one.
+        if bytes_read > MAX_VERSION_FILE_VALUE_LENGTH && !line.ends_with('\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("version file value exceeds {MAX_VERSION_FILE_VALUE_LENGTH} bytes"),
+            ));
         }
 
         let value = line.trim();
@@ -127,7 +139,7 @@ impl fmt::Display for VersionSpecParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => formatter.write_str("version specification must not be empty"),
-            Self::Invalid(spec) => write!(formatter, "invalid version specification: {spec}"),
+            Self::Invalid => formatter.write_str("invalid version specification"),
         }
     }
 }
@@ -164,19 +176,19 @@ impl VersionSpec {
             // A version has at most major, minor and patch, so a longer
             // specification could never match anything.
             if components.len() > VERSION_COMPONENT_COUNT {
-                return Err(VersionSpecParseError::Invalid(input.to_owned()));
+                return Err(VersionSpecParseError::Invalid);
             }
             let digits = components
                 .iter()
                 .map(|component| component.parse::<u64>())
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| VersionSpecParseError::Invalid(input.to_owned()))?;
+                .map_err(|_| VersionSpecParseError::Invalid)?;
             return Ok(Self::Digits(digits));
         }
 
         VersionReq::parse(input)
             .map(Self::Range)
-            .map_err(|_| VersionSpecParseError::Invalid(input.to_owned()))
+            .map_err(|_| VersionSpecParseError::Invalid)
     }
 
     fn matches(&self, version: &Version) -> bool {
@@ -320,7 +332,7 @@ mod tests {
     fn numeric_specs_longer_than_a_version_are_rejected() {
         assert!(matches!(
             VersionSpec::parse("4.4.1.0"),
-            Err(VersionSpecParseError::Invalid(spec)) if spec == "4.4.1.0"
+            Err(VersionSpecParseError::Invalid)
         ));
     }
 
@@ -344,6 +356,24 @@ mod tests {
         let error = read_version_file(file.path()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(error.to_string(), "version file value exceeds 256 bytes");
+    }
+
+    #[test]
+    fn version_file_rejects_an_enormous_single_line() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), format!("{}\n", "4".repeat(1024 * 1024))).unwrap();
+
+        let error = read_version_file(file.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn version_file_rejects_an_enormous_whitespace_only_line() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), format!("{}\n", " ".repeat(1024 * 1024))).unwrap();
+
+        let error = read_version_file(file.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
