@@ -49,6 +49,9 @@ Options:
           
           Use this to specify a specific R installation directory. Mutually exclusive with --with-r-version.
 
+      --no-r-source-overrides
+          Disable experimental directory-level R source overrides
+
       --vanilla
           Start R in vanilla mode (no init files, no save/restore)
 

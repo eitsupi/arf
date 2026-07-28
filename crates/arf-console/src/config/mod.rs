@@ -14,7 +14,7 @@ pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig,
 pub use completion::CompletionConfig;
 pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::{
-    ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, SpinnerConfig,
+    ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
 };
 pub use history::HistoryConfig;
 pub use mode::ModeConfig;
@@ -24,7 +24,7 @@ pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
 pub use r::RConfig;
-pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
+pub use startup::{RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, StartupConfig};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

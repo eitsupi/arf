@@ -5,6 +5,9 @@
 
 use semver::{Version, VersionReq};
 use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 /// A parsed R version specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +27,85 @@ pub enum VersionSpecParseError {
     Empty,
     /// The specification is not a valid numeric prefix, name, or semver requirement.
     Invalid(String),
+}
+
+/// An error returned when reading a version from a TOML key.
+#[derive(Debug)]
+pub enum TomlKeyError {
+    /// The TOML file could not be read.
+    Read(io::Error),
+    /// The TOML document could not be parsed.
+    Parse(toml::de::Error),
+    /// The requested key path does not exist.
+    MissingKey(String),
+    /// The requested key does not contain a string.
+    NotString(String),
+}
+
+impl fmt::Display for TomlKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read(error) => write!(formatter, "failed to read TOML file: {error}"),
+            Self::Parse(error) => write!(formatter, "failed to parse TOML: {error}"),
+            Self::MissingKey(key) => write!(formatter, "TOML key not found: {key}"),
+            Self::NotString(key) => write!(formatter, "TOML key is not a string: {key}"),
+        }
+    }
+}
+
+impl std::error::Error for TomlKeyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read(error) => Some(error),
+            Self::Parse(error) => Some(error),
+            Self::MissingKey(_) | Self::NotString(_) => None,
+        }
+    }
+}
+
+impl TomlKeyError {
+    /// Return whether this error means that the configured file is absent.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Read(error) if error.kind() == io::ErrorKind::NotFound)
+    }
+}
+
+/// Read a complete version specification from a plain text file.
+pub fn read_version_file(path: &Path) -> io::Result<String> {
+    fs::read_to_string(path).map(|contents| contents.trim().to_owned())
+}
+
+/// Read a string value from a dot-separated key path in a TOML file.
+pub fn read_toml_key(path: &Path, key: &str) -> Result<String, TomlKeyError> {
+    let contents = fs::read_to_string(path).map_err(TomlKeyError::Read)?;
+    let document = toml::from_str::<toml::Value>(&contents).map_err(TomlKeyError::Parse)?;
+
+    let mut value = &document;
+    for component in key.split('.') {
+        if component.is_empty() {
+            return Err(TomlKeyError::MissingKey(key.to_owned()));
+        }
+        value = value
+            .get(component)
+            .ok_or_else(|| TomlKeyError::MissingKey(key.to_owned()))?;
+    }
+
+    value
+        .as_str()
+        .map(|version| version.trim().to_owned())
+        .ok_or_else(|| TomlKeyError::NotString(key.to_owned()))
+}
+
+/// Parse and resolve one extracted version specification.
+pub fn resolve_version_string<'a>(
+    input: &str,
+    installed: &'a [Version],
+) -> Result<Option<&'a Version>, VersionSpecParseError> {
+    let spec = VersionSpec::parse(input)?;
+    if matches!(spec, VersionSpec::Named(_)) {
+        return Ok(None);
+    }
+    Ok(resolve_version(&spec, installed))
 }
 
 impl fmt::Display for VersionSpecParseError {
@@ -203,5 +285,57 @@ mod tests {
             Err(VersionSpecParseError::Empty)
         ));
         assert!(VersionSpec::parse("r-4.4.1").is_err());
+    }
+
+    #[test]
+    fn version_file_contents_are_trimmed() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "\n  4.4.2\r\n").unwrap();
+
+        assert_eq!(read_version_file(file.path()).unwrap(), "4.4.2");
+    }
+
+    #[test]
+    fn toml_key_reads_nested_string() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "[project]\nr_version = \"4.4\"\n").unwrap();
+
+        assert_eq!(
+            read_toml_key(file.path(), "project.r_version").unwrap(),
+            "4.4"
+        );
+    }
+
+    #[test]
+    fn toml_key_reports_missing_key() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "[project]\nname = \"arf\"\n").unwrap();
+
+        assert!(matches!(
+            read_toml_key(file.path(), "project.r_version"),
+            Err(TomlKeyError::MissingKey(_))
+        ));
+    }
+
+    #[test]
+    fn toml_key_reports_parse_errors() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "[project\n").unwrap();
+
+        assert!(matches!(
+            read_toml_key(file.path(), "project.r_version"),
+            Err(TomlKeyError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn version_string_resolution_skips_named_selectors() {
+        let installed = versions(&["4.4.1"]);
+
+        assert_eq!(resolve_version_string("devel", &installed).unwrap(), None);
+        assert_eq!(
+            resolve_version_string("4.4", &installed).unwrap(),
+            Some(&Version::parse("4.4.1").unwrap())
+        );
     }
 }

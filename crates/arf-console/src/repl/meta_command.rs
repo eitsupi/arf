@@ -699,6 +699,7 @@ mod tests {
         // Just verify it doesn't immediately reject
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
+            override_info: None,
         };
         // Note: This will prompt for confirmation, so we can't fully test it in unit tests
         // Just testing the setup path here
@@ -936,6 +937,7 @@ mod tests {
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
+            override_info: None,
         };
         let result = call_meta(":switch! 4.4", &mut config, &None, &None, &status_rig);
         assert!(matches!(result, Some(MetaCommandResult::Restart(Some(ref v))) if v == "4.4"));
@@ -946,6 +948,7 @@ mod tests {
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
+            override_info: None,
         };
         // :switch! without version should still show usage
         let result = call_meta(":switch!", &mut config, &None, &None, &status_rig);

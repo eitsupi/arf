@@ -115,6 +115,7 @@ fn run() -> Result<()> {
             config,
             r_version,
             r_home,
+            no_r_source_overrides,
             bind,
             pid_file,
             quiet,
@@ -155,6 +156,7 @@ fn run() -> Result<()> {
                 log_file.as_deref(),
                 history_dir.as_deref(),
                 *no_history,
+                *no_r_source_overrides,
             );
         }
         None => {}
@@ -231,11 +233,15 @@ fn run() -> Result<()> {
     }
 
     // Set up R based on r_source config (with optional CLI override)
-    let r_source_status = setup_r(
+    let resolution = setup_r(
         &config.startup.r_source,
+        &config.experimental.r_source_overrides,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
+        cli.no_r_source_overrides,
     )?;
+    resolution.emit_diagnostics();
+    let r_source_status = resolution.status;
     log::debug!("R source status: {:?}", r_source_status);
 
     // Ensure LD_LIBRARY_PATH includes R library directory.

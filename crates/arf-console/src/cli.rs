@@ -57,6 +57,10 @@ pub struct Cli {
     #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
     pub r_home: Option<PathBuf>,
 
+    /// Disable experimental directory-level R source overrides.
+    #[arg(long = "no-r-source-overrides")]
+    pub no_r_source_overrides: bool,
+
     // R-compatible flags (passed to R, for vscode-R and radian compatibility)
     // Hidden from short help (-h) but shown in long help (--help).
     /// Start R in vanilla mode (no init files, no save/restore)
@@ -316,6 +320,10 @@ Examples:
         /// Explicit R_HOME path (overrides r_source config)
         #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
         r_home: Option<PathBuf>,
+
+        /// Disable experimental directory-level R source overrides.
+        #[arg(long = "no-r-source-overrides")]
+        no_r_source_overrides: bool,
 
         /// Bind IPC socket to a specific path instead of the default.
         /// On Unix, ensure the parent directory is user-private (mode 0700)
@@ -913,5 +921,31 @@ mod tests {
     fn test_history_dir_rejects_empty_string() {
         let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
         assert!(result.is_err(), "empty --history-dir should be rejected");
+    }
+
+    #[test]
+    fn test_no_r_source_overrides_flag_is_available_on_normal_cli() {
+        let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
+        assert!(cli.no_r_source_overrides);
+    }
+
+    #[test]
+    fn test_no_r_source_overrides_flag_is_available_on_headless_cli() {
+        let cli = Cli::try_parse_from(["arf", "headless", "--no-r-source-overrides"]).unwrap();
+        let Some(Commands::Headless {
+            no_r_source_overrides,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected headless command");
+        };
+        assert!(no_r_source_overrides);
+    }
+
+    #[test]
+    fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
+        let cli =
+            Cli::try_parse_from(["arf", "--no-r-source-overrides", "--r-home", "/tmp/r-home"]);
+        assert!(cli.is_ok());
     }
 }

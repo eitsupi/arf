@@ -44,6 +44,7 @@ _arf() {
 '--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
 '--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
 '--no-banner[Suppress the startup banner]' \
+'--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
 '-q[\[R\] Don'\''t print R startup message]' \
 '--quiet[\[R\] Don'\''t print R startup message]' \
@@ -356,6 +357,7 @@ _arguments "${_arguments_options[@]}" : \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
+'--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
 '--json[Print session info as JSON to stdout when ready]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \

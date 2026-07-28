@@ -43,7 +43,7 @@ use crate::editor::keybindings::{
     add_shell_semicolon_keybinding, wrap_edit_mode_with_conditional_rules,
 };
 use crate::editor::validator::RValidator;
-use banner::format_banner;
+use banner::{format_banner, format_override_line};
 use history::setup_history;
 use meta_command::{MetaCommandResult, process_meta_command};
 use pager_ui::{run_pager_help_browser, run_pager_history_browser, with_ipc_alternate_guard};
@@ -311,7 +311,11 @@ impl Repl {
     pub fn run(&mut self) -> Result<()> {
         // Show startup banner unless disabled
         if self.config.startup.show_banner {
-            let banner = format_banner(&self.config, self.r_initialized);
+            let banner = format_banner(
+                &self.config,
+                self.r_initialized,
+                self.r_source_status.override_info(),
+            );
             // Apply color to the "not initialized" warning if present
             if !self.r_initialized {
                 for line in banner.lines() {
@@ -327,6 +331,10 @@ impl Repl {
             } else {
                 print!("{}", banner);
             }
+        } else if self.r_initialized
+            && let Some(info) = self.r_source_status.override_info()
+        {
+            eprintln!("{}", format_override_line(info));
         }
 
         if self.r_initialized {

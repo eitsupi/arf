@@ -44,6 +44,7 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
 | `--r-home <PATH>` | Explicit R_HOME path |
+| `--no-r-source-overrides` | Disable directory-level R source overrides |
 | `--vanilla` | Start R without init files |
 
 ### JSON Output (`--json`)
@@ -58,11 +59,20 @@ When `--json` is specified, arf prints session connection info to stdout as a si
   "cwd": "/workspace",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
+  "r_source_override": {
+    "enabled": true,
+    "state": "applied",
+    "provider": "toml-key",
+    "file": "rproject.toml",
+    "key": "project.r_version",
+    "requested_version": "4.4",
+    "resolved_version": "4.4.2"
+  },
   "warnings": []
 }
 ```
 
-All keys are always present. `r_version` and `log_file` may be `null`. `warnings` captures non-fatal startup issues (e.g., config parse errors) that would otherwise only appear on stderr.
+All keys are always present. `r_version` and `log_file` may be `null`. The `r_source_override` object is always present; its state is one of `applied`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
 Output is pretty-printed when stdout is a terminal, compact when piped. This is useful in CI scripts:
 

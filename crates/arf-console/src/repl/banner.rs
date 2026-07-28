@@ -1,6 +1,6 @@
 //! Startup banner formatting.
 
-use crate::config::Config;
+use crate::config::{Config, RSourceOverrideInfo};
 use crate::editor::prompt::get_r_version;
 
 /// Format the startup banner.
@@ -12,7 +12,11 @@ use crate::editor::prompt::get_r_version;
 /// - Always shows version and edit mode info
 /// - Shows reprex mode info when enabled
 /// - Shows R initialization status
-pub fn format_banner(config: &Config, r_initialized: bool) -> String {
+pub fn format_banner(
+    config: &Config,
+    r_initialized: bool,
+    override_info: Option<&RSourceOverrideInfo>,
+) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!("# arf console v{}", env!("CARGO_PKG_VERSION")));
@@ -36,6 +40,9 @@ pub fn format_banner(config: &Config, r_initialized: bool) -> String {
         } else {
             lines.push(format!("# R {} is ready.", r_version));
         }
+        if let Some(info) = override_info {
+            lines.push(format_override_line(info));
+        }
     } else {
         lines.push("# R is not initialized. Commands will not be evaluated.".to_string());
     }
@@ -46,6 +53,11 @@ pub fn format_banner(config: &Config, r_initialized: bool) -> String {
     lines.join("\n")
 }
 
+/// Format the one-line override notice used when the startup banner is hidden.
+pub(crate) fn format_override_line(info: &RSourceOverrideInfo) -> String {
+    format!("# R source override: {}", info.display())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,14 +65,14 @@ mod tests {
     #[test]
     fn test_banner_default_r_initialized() {
         let config = Config::default();
-        let banner = format_banner(&config, true);
+        let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_default_r_initialized", banner);
     }
 
     #[test]
     fn test_banner_default_r_not_initialized() {
         let config = Config::default();
-        let banner = format_banner(&config, false);
+        let banner = format_banner(&config, false, None);
         insta::assert_snapshot!("banner_default_r_not_initialized", banner);
     }
 
@@ -68,7 +80,7 @@ mod tests {
     fn test_banner_reprex_mode() {
         let mut config = Config::default();
         config.startup.mode.reprex = true;
-        let banner = format_banner(&config, true);
+        let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_reprex_mode", banner);
     }
 
@@ -77,7 +89,7 @@ mod tests {
         let mut config = Config::default();
         config.startup.mode.reprex = true;
         config.mode.reprex.comment = "## ".to_string();
-        let banner = format_banner(&config, true);
+        let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_reprex_custom_comment", banner);
     }
 
@@ -85,14 +97,14 @@ mod tests {
     fn test_banner_vi_mode() {
         let mut config = Config::default();
         config.editor.mode = crate::config::EditorMode::Vi;
-        let banner = format_banner(&config, true);
+        let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_vi_mode", banner);
     }
 
     #[test]
     fn test_banner_all_lines_start_with_comment() {
         let config = Config::default();
-        let banner = format_banner(&config, true);
+        let banner = format_banner(&config, true, None);
         for line in banner.lines() {
             if !line.is_empty() {
                 assert!(
@@ -102,5 +114,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_banner_includes_r_source_override_line() {
+        let config = Config::default();
+        let info = RSourceOverrideInfo {
+            provider: "toml-key".to_string(),
+            file: Some("rproject.toml".into()),
+            key: Some("project.r_version".to_string()),
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        let banner = format_banner(&config, true, Some(&info));
+        assert!(
+            banner.contains(
+                "# R source override: toml-key rproject.toml:project.r_version = \"4.4\""
+            )
+        );
+    }
+
+    #[test]
+    fn test_hidden_banner_override_line_is_one_stderr_line() {
+        let info = RSourceOverrideInfo {
+            provider: "version-file".to_string(),
+            file: Some(".r-version".into()),
+            key: None,
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        let line = format_override_line(&info);
+        assert_eq!(
+            line,
+            "# R source override: version-file .r-version = \"4.4\""
+        );
+        assert!(!line.contains('\n'));
     }
 }
