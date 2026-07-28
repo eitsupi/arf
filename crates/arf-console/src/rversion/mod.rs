@@ -186,9 +186,20 @@ impl VersionSpec {
             return Ok(Self::Digits(digits));
         }
 
-        VersionReq::parse(input)
-            .map(Self::Range)
-            .map_err(|_| VersionSpecParseError::Invalid)
+        let requirement = VersionReq::parse(input).map_err(|_| VersionSpecParseError::Invalid)?;
+
+        // R versions have no prerelease identifiers or build metadata, so a
+        // requirement containing either could never match an installed R version.
+        if input.contains('+')
+            || requirement
+                .comparators
+                .iter()
+                .any(|comparator| !comparator.pre.is_empty())
+        {
+            return Err(VersionSpecParseError::Invalid);
+        }
+
+        Ok(Self::Range(requirement))
     }
 
     fn matches(&self, version: &Version) -> bool {
@@ -308,6 +319,16 @@ mod tests {
     }
 
     #[test]
+    fn supported_r_version_specifications_are_accepted() {
+        for specification in ["4.4.2", "4.4", "4", "^4.4", ">=4.3, <5.0", "~4.4", "*"] {
+            assert!(
+                VersionSpec::parse(specification).is_ok(),
+                "expected {specification:?} to be accepted"
+            );
+        }
+    }
+
+    #[test]
     fn named_specs_use_a_dedicated_variant() {
         assert_eq!(
             VersionSpec::parse("devel").unwrap(),
@@ -334,6 +355,22 @@ mod tests {
             VersionSpec::parse("4.4.1.0"),
             Err(VersionSpecParseError::Invalid)
         ));
+    }
+
+    #[test]
+    fn prerelease_and_build_metadata_specs_are_rejected() {
+        for specification in [
+            "4.3.0-SUPER-SECRET-TOKEN",
+            ">=4.3.0-alpha",
+            "=4.4.2-x",
+            ">=4.3.0+SUPERSECRET",
+            "^4.4.0+build",
+        ] {
+            assert!(matches!(
+                VersionSpec::parse(specification),
+                Err(VersionSpecParseError::Invalid)
+            ));
+        }
     }
 
     #[test]

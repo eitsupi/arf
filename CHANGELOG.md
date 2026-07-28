@@ -4,9 +4,16 @@
 
 ### Added
 
-- **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` or `.r-version` and switch to it. Override files are resolved from the current directory, version files use their first non-empty line, and filenames must be bare; this feature is opt-in.
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order. A `version-file` entry reads a plain file such as `.r-version`, and a `toml-key` entry reads a value out of a TOML file — for example rv's `rproject.toml`:
+
+  ```toml
+  [project]
+  r_version = "4.4"
+  ```
+
+  is read by `{ type = "toml-key", file = "rproject.toml", key = "project.r_version" }`. Only the current directory is searched, and only R versions rig has already installed can be selected.
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
-- `--with-r-version` and `:switch` now accept version ranges in the style Cargo and npm use (e.g. `^4.4`, `>=4.3, <5.0`) in addition to exact and partial version numbers.
+- `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4`. Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
 
 ### Changed
 

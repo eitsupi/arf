@@ -860,6 +860,7 @@ With `key = "project.r_version"`, arf looks up the `project` table and reads its
 - Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
 - If multiple installed R versions match, the newest matching version is selected.
 - Version ranges such as `^4.4` and `>=4.3, <5.0` are also supported. These use the syntax Cargo and npm popularised; the SemVer specification itself does not define range operators.
+- Prerelease identifiers and build metadata are not supported because R versions are release versions in `major.minor.patch` form.
 - The `devel` and `release` aliases are not currently supported by the R source override path.
 - Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
 

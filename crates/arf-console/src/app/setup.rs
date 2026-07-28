@@ -477,10 +477,10 @@ where
                     ));
                         continue;
                     }
-                    Err(rversion::TomlKeyError::Parse(error)) => {
+                    Err(rversion::TomlKeyError::Parse(_)) => {
                         evaluated_provider = true;
                         diagnostics.push(format!(
-                        "Warning: Failed to parse R source override file {}: {error}; trying the next R source override.",
+                        "Warning: Failed to parse R source override file {}; trying the next R source override.",
                         file.display()
                     ));
                         continue;
@@ -1324,6 +1324,42 @@ mod r_source_override_tests {
                 OverrideResolution::Applied { .. } => {
                     panic!("an invalid version must not be applied")
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_toml_does_not_disclose_file_contents_in_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = "SUPER-SECRET-TOML-CONTENTS";
+        std::fs::write(
+            temp.path().join("rproject.toml"),
+            format!("[project]\nr_version = \"{marker}\n"),
+        )
+        .unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::TomlKey {
+                file: "rproject.toml".into(),
+                key: "project.r_version".to_string(),
+            }],
+            Some(temp.path()),
+            || panic!("rig should not be queried for malformed TOML"),
+            || panic!("installed versions should not be queried for malformed TOML"),
+            |_, _| panic!("version resolution should not be attempted"),
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Fallback { diagnostics } => {
+                let diagnostics = diagnostics.join("\n");
+                assert!(diagnostics.contains(
+                    "Warning: Failed to parse R source override file rproject.toml; trying the next R source override."
+                ));
+                assert!(!diagnostics.contains(marker));
+            }
+            OverrideResolution::Applied { .. } => {
+                panic!("malformed TOML must not be applied")
             }
         }
     }
