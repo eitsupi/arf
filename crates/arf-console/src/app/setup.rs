@@ -28,10 +28,8 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
         cli.no_r_source_overrides,
     )?;
     resolution.emit_diagnostics();
-    if !config.startup.show_banner
-        && let Some(info) = resolution.override_info()
-    {
-        eprintln!("# R source override: {}", info.display());
+    if let Some(notice) = script_override_notice(&resolution) {
+        eprintln!("{notice}");
     }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
@@ -466,8 +464,13 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             .collect::<Vec<_>>();
 
         let Some(selected) = rversion::resolve_version(&spec, &installed_versions) else {
-            diagnostics.push(not_installed_warning(&trimmed_version, &spec));
-            return Some(OverrideResolution::Fallback { diagnostics });
+            diagnostics.push(not_installed_warning(
+                provider,
+                &override_location(source),
+                &trimmed_version,
+                &spec,
+            ));
+            continue;
         };
 
         match setup_r_via_selected_rig_version(selected, &installed) {
@@ -508,10 +511,17 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
     }
 
     if evaluated_provider {
+        diagnostics.push(fallback_warning());
         Some(OverrideResolution::Fallback { diagnostics })
     } else {
         None
     }
+}
+
+fn script_override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
+    resolution
+        .override_info()
+        .map(|info| format!("# R source override: {}", info.display()))
 }
 
 fn override_provider_name(source: &RSourceOverride) -> &'static str {
@@ -551,14 +561,23 @@ fn rig_unavailable_warning() -> String {
         .to_owned()
 }
 
-fn not_installed_warning(version: &str, spec: &rversion::VersionSpec) -> String {
+fn fallback_warning() -> String {
+    "Warning: All R source overrides failed.\n         Falling back to startup.r_source.".to_owned()
+}
+
+fn not_installed_warning(
+    provider: &str,
+    location: &str,
+    version: &str,
+    spec: &rversion::VersionSpec,
+) -> String {
     if spec.is_concrete_version() {
         format!(
-            "Warning: R version \"{version}\" from source override is not installed.\n         Install it with rig add {version}, then restart arf.\n         Falling back to startup.r_source."
+            "Warning: R source override provider '{provider}' at {location} requested R version \"{version}\", which is not installed.\n         Install it with rig add {version}, then restart arf.\n         Trying the next R source override."
         )
     } else {
         format!(
-            "Warning: No installed R version matches source override specification \"{version}\".\n         Install a matching R version with rig, then restart arf.\n         Falling back to startup.r_source."
+            "Warning: R source override provider '{provider}' at {location} has no installed R version matching specification \"{version}\".\n         Install a matching R version with rig, then restart arf.\n         Trying the next R source override."
         )
     }
 }
@@ -767,6 +786,43 @@ mod r_source_override_tests {
     use super::*;
     use std::path::Path;
 
+    #[cfg(unix)]
+    struct EnvVarGuard {
+        name: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(unix)]
+    impl EnvVarGuard {
+        fn capture(name: &'static str) -> Self {
+            Self {
+                name,
+                original: std::env::var_os(name),
+            }
+        }
+
+        fn set(name: &'static str, value: std::ffi::OsString) -> Self {
+            let guard = Self::capture(name);
+            // SAFETY: This test serializes access to the process-global environment.
+            unsafe { std::env::set_var(name, value) };
+            guard
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: This test serializes access to the process-global environment.
+            unsafe {
+                if let Some(value) = &self.original {
+                    std::env::set_var(self.name, value);
+                } else {
+                    std::env::remove_var(self.name);
+                }
+            }
+        }
+    }
+
     fn path_source(path: &Path) -> RSource {
         RSource::Path {
             path: path.to_path_buf(),
@@ -892,8 +948,9 @@ mod r_source_override_tests {
         .unwrap();
 
         assert_eq!(report.override_state, RSourceOverrideState::Failed);
-        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics.len(), 2);
         assert!(report.diagnostics[0].contains("pixi"));
+        assert!(report.diagnostics[1].contains("Falling back to startup.r_source"));
     }
 
     #[test]
@@ -928,9 +985,123 @@ mod r_source_override_tests {
     #[test]
     fn range_not_installed_warning_does_not_suggest_rig_add() {
         let spec = rversion::VersionSpec::parse(">=4.3, <5.0").unwrap();
-        let warning = not_installed_warning(">=4.3, <5.0", &spec);
+        let warning = not_installed_warning(
+            "toml-key",
+            "rproject.toml:project.r_version",
+            ">=4.3, <5.0",
+            &spec,
+        );
 
         assert!(warning.contains("Install a matching R version with rig"));
         assert!(!warning.contains("rig add"));
+        assert!(warning.contains("toml-key"));
+        assert!(warning.contains("rproject.toml:project.r_version"));
+        assert!(!warning.contains("Falling back to startup.r_source"));
+    }
+
+    #[test]
+    fn script_override_notice_is_available_with_default_banner_setting() {
+        let config = Config::default();
+        assert!(config.startup.show_banner);
+
+        let info = RSourceOverrideInfo {
+            provider: "version-file".to_string(),
+            file: Some(".r-version".into()),
+            key: None,
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        let report = RSourceResolutionReport::applied(
+            RSourceStatus::Rig {
+                version: "4.4.2".to_string(),
+                override_info: Some(info),
+            },
+            RSourceOverrideInfo {
+                provider: "version-file".to_string(),
+                file: Some(".r-version".into()),
+                key: None,
+                requested_version: "4.4".to_string(),
+                resolved_version: "4.4.2".to_string(),
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(
+            script_override_notice(&report).as_deref(),
+            Some("# R source override: version-file .r-version = \"4.4\"")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn not_installed_override_falls_through_to_installed_provider() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        static RIG_ENV_MUTEX: Mutex<()> = Mutex::new(());
+        let _env_lock = RIG_ENV_MUTEX.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let _r_home_guard = EnvVarGuard::capture("R_HOME");
+        let bin_dir = temp.path().join("bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+
+        let r_binary = bin_dir.join("fake-r");
+        std::fs::write(
+            &r_binary,
+            "#!/bin/sh\nprintf '%s\\n' '/fake/R/4.4.2/lib/R'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&r_binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let rig_json = serde_json::json!([{
+            "name": "4.4.2",
+            "default": true,
+            "version": "4.4.2",
+            "aliases": [],
+            "path": "/fake/R/4.4.2",
+            "binary": r_binary,
+        }]);
+        let rig_binary = bin_dir.join("rig");
+        let rig_script = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nif [ \"$1\" = \"list\" ] && [ \"$2\" = \"--json\" ]; then printf '%s\\n' '{}'; exit 0; fi\nexit 1\n",
+            rig_json
+        );
+        std::fs::write(&rig_binary, rig_script).unwrap();
+        std::fs::set_permissions(&rig_binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let original_path = std::env::var_os("PATH");
+        let mut path_entries = vec![bin_dir];
+        if let Some(path) = original_path.as_ref() {
+            path_entries.extend(std::env::split_paths(path));
+        }
+        let path = std::env::join_paths(path_entries).unwrap();
+        let _path_guard = EnvVarGuard::set("PATH", path);
+
+        let first_file = temp.path().join("first.r-version");
+        let second_file = temp.path().join("second.r-version");
+        std::fs::write(&first_file, "4.3.0\n").unwrap();
+        std::fs::write(&second_file, "4.4.2\n").unwrap();
+
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[
+                RSourceOverride::VersionFile { file: first_file },
+                RSourceOverride::VersionFile {
+                    file: second_file.clone(),
+                },
+            ],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::Applied);
+        assert_eq!(report.resolved_version.as_deref(), Some("4.4.2"));
+        assert_eq!(report.file, Some(second_file));
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0].contains("4.3.0"));
+        assert!(report.diagnostics[0].contains("Trying the next R source override"));
+        assert!(!report.diagnostics[0].contains("Falling back to startup.r_source"));
     }
 }
