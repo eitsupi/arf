@@ -470,7 +470,8 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             return Some(OverrideResolution::Fallback { diagnostics });
         };
 
-        match setup_r_via_rig(&selected.to_string()) {
+        let selected_version = selected.to_string();
+        match setup_r_via_rig_from_versions(&selected_version, &installed) {
             Ok(RSourceStatus::Rig { version, .. }) => {
                 let info = RSourceOverrideInfo {
                     provider: provider.to_owned(),
@@ -622,23 +623,41 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
     }
 
     match external::rig::resolve_version(version_spec) {
-        Ok(resolved) => {
-            log::info!(
-                "Using R version {} from {}",
-                resolved.version,
-                resolved.r_home
-            );
-            // SAFETY: We're single-threaded at this point during startup
-            unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
-            Ok(RSourceStatus::Rig {
-                version: resolved.version,
-                override_info: None,
-            })
-        }
+        Ok(resolved) => apply_rig_resolution(resolved),
         Err(e) => {
             anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
         }
     }
+}
+
+/// Set up R from a version list that was already fetched for an override.
+///
+/// The caller has already confirmed that rig is available and obtained the
+/// list, so neither is checked again here.
+fn setup_r_via_rig_from_versions(
+    version_spec: &str,
+    versions: &[external::rig::RigVersion],
+) -> Result<RSourceStatus> {
+    match external::rig::resolve_version_from_versions(version_spec, versions) {
+        Ok(resolved) => apply_rig_resolution(resolved),
+        Err(e) => {
+            anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
+        }
+    }
+}
+
+fn apply_rig_resolution(resolved: external::rig::ResolvedVersion) -> Result<RSourceStatus> {
+    log::info!(
+        "Using R version {} from {}",
+        resolved.version,
+        resolved.r_home
+    );
+    // SAFETY: We're single-threaded at this point during startup
+    unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
+    Ok(RSourceStatus::Rig {
+        version: resolved.version,
+        override_info: None,
+    })
 }
 
 /// Source R profile files after R initialization.

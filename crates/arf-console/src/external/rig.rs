@@ -115,6 +115,43 @@ fn fix_windows_json_paths(json: &str) -> String {
 pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
     let versions = list_versions()?;
 
+    resolve_version_from_versions(spec, &versions)
+}
+
+/// Resolve a version specification using an already-fetched rig version list.
+///
+/// This is used by callers that have already called [`list_versions`] and need
+/// to avoid fetching the same list again.
+pub fn resolve_version_from_versions(
+    spec: &str,
+    versions: &[RigVersion],
+) -> Result<ResolvedVersion, RigError> {
+    resolve_version_from_versions_with(spec, versions, get_r_home_from_binary)
+}
+
+fn resolve_version_from_versions_with<F>(
+    spec: &str,
+    versions: &[RigVersion],
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
+    let version = select_version_from_versions(spec, versions)?;
+
+    // Resolve R_HOME from the selected installation.
+    let r_home = get_r_home(&version.binary)?;
+
+    Ok(ResolvedVersion {
+        r_home,
+        version: version.version,
+    })
+}
+
+fn select_version_from_versions(
+    spec: &str,
+    versions: &[RigVersion],
+) -> Result<RigVersion, RigError> {
     if versions.is_empty() {
         return Err(RigError::NoVersionsInstalled);
     }
@@ -123,8 +160,9 @@ pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
         "default" => {
             // Find the default version
             versions
-                .into_iter()
+                .iter()
                 .find(|v| v.default)
+                .cloned()
                 .ok_or(RigError::NoDefaultVersion)?
         }
         _ => {
@@ -165,14 +203,7 @@ pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
         }
     };
 
-    // Get actual R_HOME by running the R binary with RHOME
-    // rig's "path" is the installation prefix, not R_HOME
-    let r_home = get_r_home_from_binary(&version.binary)?;
-
-    Ok(ResolvedVersion {
-        r_home,
-        version: version.version,
-    })
+    Ok(version)
 }
 
 /// Get R_HOME by running `<R binary> RHOME`.
@@ -295,6 +326,37 @@ mod tests {
         let v3 = parse_version("4.10.0").unwrap();
         let v4 = parse_version("4.9.0").unwrap();
         assert!(v3 > v4);
+    }
+
+    #[test]
+    fn resolve_version_from_versions_uses_supplied_list_without_process_spawns() {
+        let versions = vec![
+            RigVersion {
+                name: "4.4.1".to_string(),
+                default: false,
+                version: "4.4.1".to_string(),
+                aliases: Vec::new(),
+                path: "/opt/R/4.4.1".to_string(),
+                binary: "/opt/R/4.4.1/bin/R".to_string(),
+            },
+            RigVersion {
+                name: "4.4.10".to_string(),
+                default: true,
+                version: "4.4.10".to_string(),
+                aliases: vec!["release".to_string()],
+                path: "/opt/R/4.4.10".to_string(),
+                binary: "/opt/R/4.4.10/bin/R".to_string(),
+            },
+        ];
+
+        let resolved = resolve_version_from_versions_with("4.4.1", &versions, |binary| {
+            assert_eq!(binary, "/opt/R/4.4.1/bin/R");
+            Ok("/opt/R/4.4.1/lib/R".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(resolved.version, "4.4.1");
+        assert_eq!(resolved.r_home, "/opt/R/4.4.1/lib/R");
     }
 
     #[test]

@@ -858,9 +858,9 @@ With `key = "project.r_version"`, arf looks up the `project` table and reads its
 - The `devel` and `release` aliases are not currently supported by the R source override path.
 - Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
 
-**Who performs the matching:** rig never sees the version specification. It only lists the installed R versions (`rig list --json`) and reports where one exact version is installed. arf reads the specification from the provider, matches it against that list itself, and hands rig the single concrete version it settled on.
+**Who performs the matching:** rig never sees the version specification. For an override, arf calls `rig list --json` once, matches the specification against that list itself, and uses the selected installation's R binary to determine `R_HOME`. The rig integration receives only the single concrete version selected by arf.
 
-arf matches specifications in two different places, and `r_source_overrides` uses the stricter one. `--with-r-version` and `:switch` try a rig alias, then an exact name, then an exact version, and finally a plain string prefix — so `4.4` there can also select an unrelated `4.40.0`, and rig's `release`, `devel` and `default` selectors work. Overrides compare numeric components instead, so `4.4` only ever selects `4.4.x`, and those selectors are unavailable.
+For numeric specifications such as `4` and `4.4`, both paths select the highest matching installed version for ordinary R version series. A difference can occur at patch precision: rig's prefix fallback can make `4.4.1` match `4.4.10`, while an override requires the patch component to be exactly `1`. The rig resolver also uses `default`, installed rig aliases (including `release` or `devel` when present), and exact rig `name` matches; the override path does not use those selectors or names, and instead accepts semver ranges such as `^4.4` and `>=4.3, <5.0`.
 
 When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
 
