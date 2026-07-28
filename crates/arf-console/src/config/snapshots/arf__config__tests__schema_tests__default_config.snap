@@ -96,6 +96,7 @@ non_vi = "Default"
 
 [experimental]
 shell_semicolon_shortcut = false
+r_source_overrides = []
 
 [experimental.history_forget]
 enabled = false

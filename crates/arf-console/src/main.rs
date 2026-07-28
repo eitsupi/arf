@@ -16,6 +16,7 @@ mod pager;
 mod pid_file;
 pub(crate) mod r_parser;
 mod repl;
+pub mod rversion;
 mod traps;
 
 #[cfg(test)]
@@ -29,7 +30,7 @@ use app::headless::run_headless;
 use app::setup::source_r_profiles;
 use app::setup::{create_session_id, run_script, setup_r};
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Commands, RArgsBuilder};
+use cli::{Cli, Commands, RArgsBuilder, resolve_headless_r_source};
 use config::ensure_directories;
 use logging::init_logger;
 use pid_file::{
@@ -37,6 +38,10 @@ use pid_file::{
 };
 use repl::Repl;
 use std::process::ExitCode;
+
+fn no_r_source_overrides_enabled(top_level: bool, subcommand: bool) -> bool {
+    top_level || subcommand
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -114,6 +119,7 @@ fn run() -> Result<()> {
             config,
             r_version,
             r_home,
+            no_r_source_overrides,
             bind,
             pid_file,
             quiet,
@@ -130,6 +136,10 @@ fn run() -> Result<()> {
             min_nsize,
             min_vsize,
         }) => {
+            let (r_home, r_version) = resolve_headless_r_source(
+                (cli.r_home.as_ref(), cli.r_version.as_ref()),
+                (r_home.as_ref(), r_version.as_ref()),
+            );
             let r_args_builder = RArgsBuilder {
                 vanilla: *vanilla,
                 no_environ: *no_environ,
@@ -144,8 +154,8 @@ fn run() -> Result<()> {
             };
             return run_headless(
                 config.as_ref(),
-                r_home.as_deref(),
-                r_version.as_deref(),
+                r_home.map(|path| path.as_path()),
+                r_version.map(String::as_str),
                 r_args_builder,
                 bind.as_deref(),
                 pid_file.as_deref(),
@@ -154,6 +164,7 @@ fn run() -> Result<()> {
                 log_file.as_deref(),
                 history_dir.as_deref(),
                 *no_history,
+                no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
             );
         }
         None => {}
@@ -230,11 +241,15 @@ fn run() -> Result<()> {
     }
 
     // Set up R based on r_source config (with optional CLI override)
-    let r_source_status = setup_r(
+    let resolution = setup_r(
         &config.startup.r_source,
+        &config.experimental.r_source_overrides,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
+        cli.no_r_source_overrides,
     )?;
+    resolution.emit_diagnostics();
+    let r_source_status = resolution.status;
     log::debug!("R source status: {:?}", r_source_status);
 
     // Ensure LD_LIBRARY_PATH includes R library directory.
@@ -389,4 +404,27 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_level_no_r_source_overrides_applies_to_headless() {
+        let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides", "headless"]).unwrap();
+        let top_level = cli.no_r_source_overrides;
+        let Some(Commands::Headless {
+            no_r_source_overrides,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected headless command");
+        };
+
+        assert!(no_r_source_overrides_enabled(
+            top_level,
+            no_r_source_overrides
+        ));
+    }
 }

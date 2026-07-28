@@ -3,7 +3,9 @@
 use crate::app::config_load::{load_config_collecting_warnings, load_config_or_warn};
 #[cfg(windows)]
 use crate::app::setup::source_r_profiles;
-use crate::app::setup::{create_session_id, setup_r};
+use crate::app::setup::{
+    RSourceOverrideState, RSourceResolutionReport, create_session_id, setup_r,
+};
 use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::ipc;
@@ -29,11 +31,42 @@ struct HeadlessInfo {
     started_at: String,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    r_source_override: HeadlessRSourceOverride,
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct HeadlessRSourceOverride {
+    state: String,
+    provider: Option<String>,
+    file: Option<String>,
+    key: Option<String>,
+    requested_version: Option<String>,
+    resolved_version: Option<String>,
+}
+
+impl HeadlessRSourceOverride {
+    fn from_report(report: &RSourceResolutionReport) -> Self {
+        let applied = report.override_state == RSourceOverrideState::Applied;
+        Self {
+            state: report.override_state.as_str().to_owned(),
+            provider: applied.then(|| report.provider.clone()).flatten(),
+            file: applied
+                .then(|| report.file.as_ref().map(|path| path.display().to_string()))
+                .flatten(),
+            key: applied.then(|| report.key.clone()).flatten(),
+            requested_version: applied.then(|| report.requested_version.clone()).flatten(),
+            resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
+        }
+    }
+}
+
 impl HeadlessInfo {
-    fn from_session(session: &SessionInfo, warnings: Vec<String>) -> Self {
+    fn from_session(
+        session: &SessionInfo,
+        warnings: Vec<String>,
+        resolution: &RSourceResolutionReport,
+    ) -> Self {
         // Normalize empty/whitespace-only R version to None so JSON shows null
         let r_version = session
             .r_version
@@ -49,6 +82,7 @@ impl HeadlessInfo {
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
             history_session_id: session.history_session_id,
+            r_source_override: HeadlessRSourceOverride::from_report(resolution),
             warnings,
         }
     }
@@ -72,6 +106,7 @@ pub(crate) fn run_headless(
     log_file: Option<&std::path::Path>,
     cli_history_dir: Option<&std::path::Path>,
     no_history: bool,
+    no_r_source_overrides: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -93,7 +128,18 @@ pub(crate) fn run_headless(
     };
 
     // Set up R
-    setup_r(&config.startup.r_source, r_home, r_version)?;
+    let resolution = setup_r(
+        &config.startup.r_source,
+        &config.experimental.r_source_overrides,
+        r_home,
+        r_version,
+        no_r_source_overrides,
+    )?;
+    if json {
+        warnings.extend(resolution.diagnostics.iter().cloned());
+    } else {
+        resolution.emit_diagnostics();
+    }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
     if let Err(e) = arf_libr::ensure_ld_library_path() {
@@ -211,7 +257,7 @@ pub(crate) fn run_headless(
 
     if json {
         // Output session info as JSON to stdout
-        let output = HeadlessInfo::from_session(&session, warnings);
+        let output = HeadlessInfo::from_session(&session, warnings, &resolution);
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
         let json_str = if is_tty {
             serde_json::to_string_pretty(&output)
@@ -344,4 +390,61 @@ local({
         .context("Failed to configure headless R options (pager, browser, graphics device)")?;
     log::info!("Headless R options configured (pager, browser, graphics device)");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(state: RSourceOverrideState) -> RSourceResolutionReport {
+        RSourceResolutionReport {
+            status: crate::config::RSourceStatus::Path,
+            provider: None,
+            file: None,
+            key: None,
+            requested_version: None,
+            resolved_version: None,
+            diagnostics: Vec::new(),
+            override_state: state,
+        }
+    }
+
+    #[test]
+    fn r_source_override_json_object_is_always_present_for_each_state() {
+        for state in [
+            RSourceOverrideState::Applied,
+            RSourceOverrideState::NotConfigured,
+            RSourceOverrideState::NoMatch,
+            RSourceOverrideState::Failed,
+            RSourceOverrideState::Disabled,
+            RSourceOverrideState::ShadowedByCli,
+        ] {
+            let value =
+                serde_json::to_value(HeadlessRSourceOverride::from_report(&report(state))).unwrap();
+            assert_eq!(value["state"], state.as_str());
+            assert!(value.get("provider").is_some());
+            assert!(value.get("file").is_some());
+            assert!(value.get("key").is_some());
+            assert!(value.get("requested_version").is_some());
+            assert!(value.get("resolved_version").is_some());
+        }
+    }
+
+    #[test]
+    fn applied_r_source_override_json_contains_resolution_metadata() {
+        let mut report = report(RSourceOverrideState::Applied);
+        report.provider = Some("toml-key".to_string());
+        report.file = Some("rproject.toml".into());
+        report.key = Some("project.r_version".to_string());
+        report.requested_version = Some("4.4".to_string());
+        report.resolved_version = Some("4.4.2".to_string());
+
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        assert_eq!(value["state"], "applied");
+        assert_eq!(value["provider"], "toml-key");
+        assert_eq!(value["file"], "rproject.toml");
+        assert_eq!(value["key"], "project.r_version");
+        assert_eq!(value["requested_version"], "4.4");
+        assert_eq!(value["resolved_version"], "4.4.2");
+    }
 }

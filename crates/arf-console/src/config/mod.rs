@@ -14,7 +14,7 @@ pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig,
 pub use completion::CompletionConfig;
 pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::{
-    ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, SpinnerConfig,
+    ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
 };
 pub use history::HistoryConfig;
 pub use mode::ModeConfig;
@@ -24,7 +24,7 @@ pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
 pub use r::RConfig;
-pub use startup::{RSource, RSourceMode, RSourceStatus, StartupConfig};
+pub use startup::{RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, StartupConfig};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -850,6 +850,23 @@ show_banner = false
             assert!(
                 properties.get("formatter").is_none(),
                 "Schema should NOT have formatter section"
+            );
+        }
+
+        #[test]
+        fn test_schema_has_r_source_overrides() {
+            let schema = generate_schema();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&schema).expect("Schema should be valid JSON");
+
+            let experimental = parsed
+                .get("$defs")
+                .and_then(|defs| defs.get("ExperimentalConfigSchema"))
+                .and_then(|schema| schema.get("properties"))
+                .expect("Schema should define experimental properties");
+            assert!(
+                experimental.get("r_source_overrides").is_some(),
+                "Schema should have r_source_overrides"
             );
         }
     }

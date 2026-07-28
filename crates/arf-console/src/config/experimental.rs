@@ -4,6 +4,19 @@ use nu_ansi_term::Color;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+/// A provider for resolving an R installation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum RSourceOverride {
+    /// Resolve R using the active pixi environment.
+    Pixi,
+    /// Read the R version from a version file.
+    VersionFile { file: PathBuf },
+    /// Read the R version from a TOML key.
+    TomlKey { file: PathBuf, key: String },
+}
 
 /// Experimental features configuration.
 ///
@@ -65,6 +78,10 @@ pub struct ExperimentalConfig {
     /// Example: `"gc" = "git commit"`
     #[serde(default)]
     pub shell_abbreviations: BTreeMap<String, String>,
+
+    /// Ordered providers for experimental R source resolution.
+    #[serde(default)]
+    pub r_source_overrides: Vec<RSourceOverride>,
 }
 
 /// Configuration for shell mode completion.
@@ -221,6 +238,9 @@ struct ExperimentalConfigSchema {
     /// Format: `"abbreviation" = "expansion"`
     /// Example: `"gc" = "git commit"`
     pub shell_abbreviations: BTreeMap<String, String>,
+
+    /// Ordered providers for experimental R source resolution.
+    pub r_source_overrides: Vec<RSourceOverride>,
 }
 
 // Manual JsonSchema implementation for ExperimentalConfig since nu_ansi_term::Color
@@ -392,6 +412,7 @@ mod tests {
             vec!["library".to_string(), "require".to_string()]
         );
         assert!(!config.shell_completion.command_names); // Disabled by default
+        assert!(config.r_source_overrides.is_empty());
     }
 
     #[test]
@@ -490,5 +511,54 @@ shell_semicolon_shortcut = true
 "#;
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
         assert!(config.experimental.shell_semicolon_shortcut);
+    }
+
+    #[test]
+    fn test_parse_r_source_overrides() {
+        let toml_str = r#"
+[experimental]
+r_source_overrides = [
+  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { type = "version-file", file = ".r-version" },
+  { type = "pixi" },
+]
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+
+        assert!(matches!(
+            &config.experimental.r_source_overrides[0],
+            RSourceOverride::TomlKey { file, key }
+                if file == &PathBuf::from("rproject.toml") && key == "project.r_version"
+        ));
+        assert!(matches!(
+            &config.experimental.r_source_overrides[1],
+            RSourceOverride::VersionFile { file } if file == &PathBuf::from(".r-version")
+        ));
+        assert!(matches!(
+            config.experimental.r_source_overrides[2],
+            RSourceOverride::Pixi
+        ));
+    }
+
+    #[test]
+    fn test_parse_r_source_override_unknown_type_fails() {
+        let toml_str = r#"
+[experimental]
+r_source_overrides = [{ type = "unknown-thing" }]
+"#;
+        let result: Result<crate::config::Config, _> = toml::from_str(toml_str);
+        let error = result.expect_err("unknown R source override types should fail");
+        assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn test_parse_existing_config_without_r_source_overrides() {
+        let toml_str = r#"
+[startup]
+show_banner = false
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.startup.show_banner);
+        assert!(config.experimental.r_source_overrides.is_empty());
     }
 }

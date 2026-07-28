@@ -610,7 +610,7 @@ These options are mutually exclusive.
 
 ### rig Integration
 
-When using rig (either via `r_source = "auto"` with rig installed, `r_source = "rig"`, or `--with-r-version`), arf uses rig's default version. You can change the default with:
+When using rig via `r_source = "auto"` with rig installed or `r_source = "rig"`, arf uses rig's default version. The `--with-r-version` flag accepts an explicit specification: `--with-r-version default` selects rig's default, while another specification selects the matching installed version. You can change the default with:
 
 ```bash
 rig default 4.5
@@ -621,9 +621,11 @@ The `--with-r-version` flag supports version resolution:
 | Specification | Description |
 |--------------|-------------|
 | `default` | Use rig's default R version |
-| `release` | Use the version aliased as "release" |
-| `4.5` | Match the first version starting with "4.5" |
-| `4.5.2` | Match exact version |
+| Rig alias (e.g. `release`) | Use the version associated with that rig alias |
+| Rig-assigned name (e.g. `custom-name`) | Use the installed version with that rig name |
+| Full version (e.g. `4.5.2`) | Match that exact version |
+| Partial version (e.g. `4.5` or `4`) | Use the latest installed version in the `4.5.x` or `4.x` series |
+| Version range (e.g. `^4.4` or `>=4.3, <5.0`) | Use the latest installed version that satisfies the range |
 
 ## History Configuration
 
@@ -797,14 +799,130 @@ Fish-style abbreviations for the shell editor. When you type an abbreviation and
 
 Abbreviations are matched against the word immediately to the left of the cursor at the moment you press Space or Enter. The expansion replaces the abbreviation in place.
 
-## CLI Options Override
+### R Source Overrides
 
-Command-line options take precedence over config file settings:
+Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
+
+> [!IMPORTANT]
+> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file` and `toml-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
+
+Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though the tools that write these files often do. Relative `file` paths are therefore relative to the current working directory.
+
+Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
+| `type = "version-file"` | — | Reads the complete version specification from the `file` field. |
+| `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
+| `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
+
+For example, rv stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
+
+```toml
+[experimental]
+r_source_overrides = [
+  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+]
+```
+
+The other provider forms are:
+
+```toml
+{ type = "version-file", file = ".r-version" }
+{ type = "pixi" }
+```
+
+**File formats read by each provider:**
+
+`version-file` reads the entire file as text and trims leading/trailing whitespace and newlines; the trimmed result is used as the version specification. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
+
+```
+4.4.1
+```
+
+Comments are not supported, and the whole trimmed file has to be one specification — it may be any supported form, including a range such as `>=4.3, <5.0`, but not several specifications. Only spaces are accepted inside a specification, so a range must stay on one line: leading and trailing newlines are trimmed away, but one in the middle makes the file invalid.
+
+`toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
+
+```toml
+[project]
+name = "my-analysis"
+r_version = "4.4"
+```
+
+With `key = "project.r_version"`, arf looks up the `project` table and reads its `r_version` field. The value must be a TOML string; any other type is treated as an error.
+
+**Version strings are interpreted as follows:**
+
+- Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
+- If multiple installed R versions match, the newest matching version is selected.
+- Version ranges such as `^4.4` and `>=4.3, <5.0` are also supported. These use the syntax Cargo and npm popularised; the SemVer specification itself does not define range operators.
+- The `devel` and `release` aliases are not currently supported by the R source override path.
+- Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
+
+**Who performs the matching:** arf runs rig only to check that it is there (`rig --version`) and to list what is installed (`rig list --json`). It then matches the specification against that list itself and asks the selected installation's R binary for its `R_HOME`. rig never sees the specification, so it is arf that decides what `4.4` means.
+
+`--with-r-version`, `:switch` and `r_source_overrides` share that matching, so numeric specifications and version ranges mean the same thing everywhere. Only the selectors that come from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, and have no equivalent in an override file.
+
+When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
+
+> Warning: R source override provider 'pixi' is not implemented; trying the next R source override.
+
+When a provider's requested version is not installed, arf prints installation guidance and tries the next provider. Only after all providers fail does it fall back to `startup.r_source`; startup continues rather than aborting. Rig being unavailable is different: arf cannot evaluate the overrides, so it falls back immediately without trying further providers. Numeric version selectors use `rig add`, while version ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
+
+```text
+Warning: rig is not installed, so the R source override cannot be resolved.
+         Install rig from https://github.com/r-lib/rig or use "auto".
+         Falling back to startup.r_source.
+
+Warning: R source override provider 'version-file' at .r-version requested R version "4.4", which is not installed.
+         Install it with rig add 4.4, then restart arf.
+         Trying the next R source override.
+
+Warning: R source override provider 'version-file' at .r-version has no installed R version matching specification ">=4.3, <5.0".
+         Install a matching R version with rig, then restart arf.
+         Trying the next R source override.
+
+Warning: All R source overrides failed.
+         Falling back to startup.r_source.
+```
+
+Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It is an override-disable switch, not an R source tier, and it does not disable explicit `--r-home`, `--with-r-version`, `ARF_R_HOME`, or `ARF_R_VERSION` selection.
+
+## R Source Precedence
+
+The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single `arf.toml` configuration file that arf loaded, either from `--config` or from the XDG global config path: `r_source_overrides` is the ordered provider list, and `startup.r_source` is its configuration-level fallback. The providers may consult project-local files such as `rproject.toml` and `.r-version`; those files are not separate arf configuration files. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
+
+For `headless`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair. If either option is provided on the subcommand, the complete subcommand pair is used and the top-level pair is ignored; otherwise, the complete top-level pair is used. The top-level pair may come from the CLI or its environment variables.
+
+| Tier | Source | Evaluation behavior |
+|------|--------|---------------------|
+| 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
+| 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
+| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. |
+| 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A provider's project-local file may be absent or fail to resolve; those cases fall through to the next provider and then to tier 5. |
+| 5 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
+| 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
+| 7 | `R RHOME` / built-in default paths | Final fallback search used to discover R when PATH-mode resolution needs it. |
+
+Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
+
+> [!WARNING]
+> With the default `startup.r_source = "auto"`, arf uses rig's default R directly when rig is available and its default can be resolved; otherwise it falls back to the R found on PATH. This does not guarantee that arf and an editor use the same installation: for example, a conda-provided R can appear before rig's shim on PATH, so the editor may discover it while arf uses rig's default.
+>
+> `r_source_overrides` and `ARF_R_HOME` / `ARF_R_VERSION` select R independently of PATH, so arf's R can silently diverge from the editor's. That breaks integrations assuming a shared installation, because installed packages and library paths are resolved against the editor's R.
+>
+> Consider leaving both disabled in an IDE-integrated workflow. If you enable them, keep the selection in sync with the editor, or have the editor launch arf with `--r-home` pointing at its own R.
+
+## Other CLI Options
+
+Command-line options take precedence over their corresponding config file settings:
 
 | CLI Option | Config Setting |
 |------------|----------------|
-| `--r-home` | Overrides `startup.r_source` (explicit path) |
-| `--with-r-version` | Overrides `startup.r_source` (uses rig) |
 | `--no-banner` | `startup.show_banner` |
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |

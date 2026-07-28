@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` and switch to it. This feature is opt-in.
+- `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
+- `--with-r-version` and `:switch` now accept version ranges in the style Cargo and npm use (e.g. `^4.4`, `>=4.3, <5.0`) in addition to exact and partial version numbers.
+
+### Changed
+
+- Partial version numbers passed to `--with-r-version` and `:switch` (e.g. `4.4`) now match only that release series (`4.4.x`) instead of any version starting with the same text.
+
 ### Fixed
 
 - Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived.

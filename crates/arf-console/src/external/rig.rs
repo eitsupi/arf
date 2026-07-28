@@ -3,6 +3,7 @@
 //! This module provides functions to detect and manage R versions
 //! using rig when available.
 
+use crate::rversion;
 use serde::Deserialize;
 use std::process::Command;
 
@@ -110,11 +111,87 @@ fn fix_windows_json_paths(json: &str) -> String {
 ///
 /// - `"default"` - Use rig's default version
 /// - `"release"` - Use the version aliased as "release"
-/// - `"4.5"` - Match version starting with "4.5"
+/// - `"4.5"` - Match the newest installed version in the 4.5 series
 /// - `"4.5.2"` - Match exact version
 pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
     let versions = list_versions()?;
 
+    resolve_version_from_versions(spec, &versions)
+}
+
+/// Resolve a version specification using an already-fetched rig version list.
+///
+/// This is used by callers that have already called [`list_versions`] and need
+/// to avoid fetching the same list again.
+fn resolve_version_from_versions(
+    spec: &str,
+    versions: &[RigVersion],
+) -> Result<ResolvedVersion, RigError> {
+    resolve_version_from_versions_with(spec, versions, get_r_home_from_binary)
+}
+
+/// Resolve an already-selected semantic version from an installed rig list.
+///
+/// Unlike [`resolve_version_from_versions`], this deliberately matches only
+/// the reported version field. It is used by R source overrides after the
+/// shared version resolver has selected a semantic version, so rig names and
+/// aliases must not reinterpret that selection.
+pub fn resolve_selected_version_from_versions(
+    selected: &semver::Version,
+    versions: &[RigVersion],
+) -> Result<ResolvedVersion, RigError> {
+    resolve_selected_version_from_versions_with(selected, versions, get_r_home_from_binary)
+}
+
+fn resolve_version_from_versions_with<F>(
+    spec: &str,
+    versions: &[RigVersion],
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
+    let version = select_version_from_versions(spec, versions)?;
+
+    resolve_rig_version_with(&version, get_r_home)
+}
+
+fn resolve_selected_version_from_versions_with<F>(
+    selected: &semver::Version,
+    versions: &[RigVersion],
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
+    let version = versions
+        .iter()
+        .find(|version| parse_version(&version.version).as_ref() == Some(selected))
+        .ok_or_else(|| RigError::VersionNotFound(selected.to_string()))?;
+
+    resolve_rig_version_with(version, get_r_home)
+}
+
+fn resolve_rig_version_with<F>(
+    version: &RigVersion,
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
+    // Resolve R_HOME from the selected installation.
+    let r_home = get_r_home(&version.binary)?;
+
+    Ok(ResolvedVersion {
+        r_home,
+        version: version.version.clone(),
+    })
+}
+
+fn select_version_from_versions(
+    spec: &str,
+    versions: &[RigVersion],
+) -> Result<RigVersion, RigError> {
     if versions.is_empty() {
         return Err(RigError::NoVersionsInstalled);
     }
@@ -123,8 +200,9 @@ pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
         "default" => {
             // Find the default version
             versions
-                .into_iter()
+                .iter()
                 .find(|v| v.default)
+                .cloned()
                 .ok_or(RigError::NoDefaultVersion)?
         }
         _ => {
@@ -143,36 +221,32 @@ pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
             else if let Some(v) = versions.iter().find(|v| v.version == spec) {
                 v.clone()
             }
-            // Then try prefix match (e.g., "4" matches "4.5.2", selecting highest version)
+            // Finally, use the shared version-spec matching semantics.
             else {
-                let mut matches: Vec<_> = versions
+                let parsed_spec = match rversion::VersionSpec::parse(spec) {
+                    Ok(parsed_spec) => parsed_spec,
+                    Err(_) => return Err(RigError::VersionNotFound(spec.to_string())),
+                };
+                let installed_versions = versions
                     .iter()
-                    .filter(|v| v.version.starts_with(spec))
-                    .collect();
+                    .filter_map(|version| parse_version(&version.version))
+                    .collect::<Vec<_>>();
 
-                if !matches.is_empty() {
-                    // Sort by version (highest first) using semver comparison
-                    matches.sort_by(|a, b| {
-                        let va = parse_version(&a.version);
-                        let vb = parse_version(&b.version);
-                        vb.cmp(&va) // Reverse order (highest first)
-                    });
-                    matches[0].clone()
-                } else {
+                let Some(selected) = rversion::resolve_version(&parsed_spec, &installed_versions)
+                else {
                     return Err(RigError::VersionNotFound(spec.to_string()));
-                }
+                };
+
+                versions
+                    .iter()
+                    .find(|version| parse_version(&version.version).as_ref() == Some(selected))
+                    .cloned()
+                    .ok_or_else(|| RigError::VersionNotFound(spec.to_string()))?
             }
         }
     };
 
-    // Get actual R_HOME by running the R binary with RHOME
-    // rig's "path" is the installation prefix, not R_HOME
-    let r_home = get_r_home_from_binary(&version.binary)?;
-
-    Ok(ResolvedVersion {
-        r_home,
-        version: version.version,
-    })
+    Ok(version)
 }
 
 /// Get R_HOME by running `<R binary> RHOME`.
@@ -295,6 +369,165 @@ mod tests {
         let v3 = parse_version("4.10.0").unwrap();
         let v4 = parse_version("4.9.0").unwrap();
         assert!(v3 > v4);
+    }
+
+    #[test]
+    fn resolve_version_from_versions_uses_supplied_list_without_process_spawns() {
+        let versions = vec![
+            RigVersion {
+                name: "4.4.1".to_string(),
+                default: false,
+                version: "4.4.1".to_string(),
+                aliases: Vec::new(),
+                path: "/opt/R/4.4.1".to_string(),
+                binary: "/opt/R/4.4.1/bin/R".to_string(),
+            },
+            RigVersion {
+                name: "4.4.10".to_string(),
+                default: true,
+                version: "4.4.10".to_string(),
+                aliases: vec!["release".to_string()],
+                path: "/opt/R/4.4.10".to_string(),
+                binary: "/opt/R/4.4.10/bin/R".to_string(),
+            },
+        ];
+
+        let resolved = resolve_version_from_versions_with("4.4.1", &versions, |binary| {
+            assert_eq!(binary, "/opt/R/4.4.1/bin/R");
+            Ok("/opt/R/4.4.1/lib/R".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(resolved.version, "4.4.1");
+        assert_eq!(resolved.r_home, "/opt/R/4.4.1/lib/R");
+    }
+
+    #[test]
+    fn selected_version_ignores_conflicting_rig_names_and_aliases() {
+        let versions = vec![
+            rig_version("4.4.1", false, "4.5.0", &["4.4.1"]),
+            rig_version("installed-4.4.1", false, "4.4.1", &[]),
+        ];
+        let selected = semver::Version::parse("4.4.1").unwrap();
+
+        let resolved =
+            resolve_selected_version_from_versions_with(&selected, &versions, |binary| {
+                assert_eq!(binary, "/opt/R/installed-4.4.1/bin/R");
+                Ok("/opt/R/installed-4.4.1/lib/R".to_string())
+            })
+            .unwrap();
+
+        assert_eq!(resolved.version, "4.4.1");
+        assert_eq!(resolved.r_home, "/opt/R/installed-4.4.1/lib/R");
+    }
+
+    fn rig_version(name: &str, default: bool, version: &str, aliases: &[&str]) -> RigVersion {
+        RigVersion {
+            name: name.to_string(),
+            default,
+            version: version.to_string(),
+            aliases: aliases.iter().map(|alias| (*alias).to_string()).collect(),
+            path: format!("/opt/R/{name}"),
+            binary: format!("/opt/R/{name}/bin/R"),
+        }
+    }
+
+    #[test]
+    fn version_spec_does_not_use_digit_boundary_prefix_matching() {
+        let versions = vec![rig_version("4.4.10", false, "4.4.10", &[])];
+
+        let result =
+            resolve_version_from_versions_with("4.4.1", &versions, |_| Ok("unused".to_string()));
+
+        assert!(matches!(
+            result,
+            Err(RigError::VersionNotFound(spec)) if spec == "4.4.1"
+        ));
+    }
+
+    #[test]
+    fn partial_numeric_version_selects_newest_matching_version() {
+        let versions = vec![
+            rig_version("4.4.1", false, "4.4.1", &[]),
+            rig_version("4.4.10", false, "4.4.10", &[]),
+            rig_version("4.5.0", false, "4.5.0", &[]),
+        ];
+
+        let resolved = resolve_version_from_versions_with("4.4", &versions, |binary| {
+            assert_eq!(binary, "/opt/R/4.4.10/bin/R");
+            Ok("/opt/R/4.4.10/lib/R".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(resolved.version, "4.4.10");
+    }
+
+    #[test]
+    fn rig_specific_selectors_keep_their_existing_behavior() {
+        let versions = vec![
+            rig_version("4.4.1", false, "4.4.1", &[]),
+            rig_version("custom-name", false, "4.4.2", &[]),
+            rig_version("4.5.0", true, "4.5.0", &["release"]),
+        ];
+
+        assert_eq!(
+            select_version_from_versions("default", &versions)
+                .unwrap()
+                .name,
+            "4.5.0"
+        );
+        assert_eq!(
+            select_version_from_versions("RELEASE", &versions)
+                .unwrap()
+                .name,
+            "4.5.0"
+        );
+        assert_eq!(
+            select_version_from_versions("custom-name", &versions)
+                .unwrap()
+                .name,
+            "custom-name"
+        );
+        assert_eq!(
+            select_version_from_versions("4.4.1", &versions)
+                .unwrap()
+                .name,
+            "4.4.1"
+        );
+    }
+
+    #[test]
+    fn semver_ranges_select_the_newest_matching_version() {
+        let versions = vec![
+            rig_version("4.3.9", false, "4.3.9", &[]),
+            rig_version("4.4.0", false, "4.4.0", &[]),
+            rig_version("4.4.5", false, "4.4.5", &[]),
+            rig_version("4.5.0", false, "4.5.0", &[]),
+            rig_version("5.0.0", false, "5.0.0", &[]),
+        ];
+
+        for spec in ["^4.4", ">=4.3, <5.0"] {
+            let resolved = resolve_version_from_versions_with(spec, &versions, |binary| {
+                assert_eq!(binary, "/opt/R/4.5.0/bin/R");
+                Ok("/opt/R/4.5.0/lib/R".to_string())
+            })
+            .unwrap();
+
+            assert_eq!(resolved.version, "4.5.0");
+        }
+    }
+
+    #[test]
+    fn trailing_dot_and_unmatched_named_specs_do_not_match() {
+        let versions = vec![rig_version("4.4.10", false, "4.4.10", &[])];
+
+        for spec in ["4.4.", "release", "devel"] {
+            let result = select_version_from_versions(spec, &versions);
+            assert!(matches!(
+                result,
+                Err(RigError::VersionNotFound(found)) if found == spec
+            ));
+        }
     }
 
     #[test]

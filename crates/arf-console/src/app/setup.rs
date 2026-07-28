@@ -3,8 +3,11 @@
 use crate::app::config_load::load_config_or_warn;
 use crate::cli::Cli;
 use crate::config;
-use crate::config::{Config, RSource, RSourceMode, RSourceStatus};
+use crate::config::{
+    Config, RSource, RSourceMode, RSourceOverride, RSourceOverrideInfo, RSourceStatus,
+};
 use crate::external;
+use crate::rversion;
 use anyhow::{Context, Result};
 use reedline::Reedline;
 use std::fs;
@@ -17,11 +20,17 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     let config = load_config_or_warn(cli.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
-    setup_r(
+    let resolution = setup_r(
         &config.startup.r_source,
+        &config.experimental.r_source_overrides,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
+        cli.no_r_source_overrides,
     )?;
+    resolution.emit_diagnostics();
+    if let Some(notice) = script_override_notice(&resolution) {
+        eprintln!("{notice}");
+    }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
     if let Err(e) = arf_libr::ensure_ld_library_path() {
@@ -89,15 +98,110 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
 /// CLI options override config in this order:
 /// 1. `cli_r_home` - explicit R_HOME path
 /// 2. `cli_version` - rig version specification
-/// 3. Config `r_source` setting
+/// 3. Experimental directory-level R source overrides
+/// 4. Config `r_source` setting
 ///
-/// Returns an `RSourceStatus` describing how R was resolved (for display and feature gating).
+/// The state of override resolution for reporting to users and headless clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RSourceOverrideState {
+    /// An override selected the active R installation.
+    Applied,
+    /// No R source override providers are configured.
+    NotConfigured,
+    /// No configured provider matched a file in the current directory.
+    NoMatch,
+    /// At least one provider was evaluated but no override could be applied.
+    Failed,
+    /// Override resolution was disabled by the CLI.
+    Disabled,
+    /// A CLI R source took precedence over overrides.
+    ShadowedByCli,
+}
+
+impl RSourceOverrideState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::NotConfigured => "not_configured",
+            Self::NoMatch => "no_match",
+            Self::Failed => "failed",
+            Self::Disabled => "disabled",
+            Self::ShadowedByCli => "shadowed_by_cli",
+        }
+    }
+}
+
+/// The result of resolving the configured R source and any directory override.
+#[derive(Debug, Clone)]
+pub(crate) struct RSourceResolutionReport {
+    pub(crate) status: RSourceStatus,
+    pub(crate) provider: Option<String>,
+    pub(crate) file: Option<std::path::PathBuf>,
+    pub(crate) key: Option<String>,
+    pub(crate) requested_version: Option<String>,
+    pub(crate) resolved_version: Option<String>,
+    pub(crate) diagnostics: Vec<String>,
+    pub(crate) override_state: RSourceOverrideState,
+}
+
+impl RSourceResolutionReport {
+    fn from_status(status: RSourceStatus, override_state: RSourceOverrideState) -> Self {
+        Self {
+            status,
+            provider: None,
+            file: None,
+            key: None,
+            requested_version: None,
+            resolved_version: None,
+            diagnostics: Vec::new(),
+            override_state,
+        }
+    }
+
+    fn applied(status: RSourceStatus, info: RSourceOverrideInfo, diagnostics: Vec<String>) -> Self {
+        Self {
+            status,
+            provider: Some(info.provider),
+            file: info.file,
+            key: info.key,
+            requested_version: Some(info.requested_version),
+            resolved_version: Some(info.resolved_version),
+            diagnostics,
+            override_state: RSourceOverrideState::Applied,
+        }
+    }
+
+    /// Emit all override diagnostics as one warning block for normal startup.
+    pub(crate) fn emit_diagnostics(&self) {
+        if self.diagnostics.is_empty() {
+            return;
+        }
+        let block = self.diagnostics.join("\n");
+        eprintln!("{block}");
+        log::warn!("{block}");
+    }
+
+    pub(crate) fn override_info(&self) -> Option<RSourceOverrideInfo> {
+        Some(RSourceOverrideInfo {
+            provider: self.provider.clone()?,
+            file: self.file.clone(),
+            key: self.key.clone(),
+            requested_version: self.requested_version.clone()?,
+            resolved_version: self.resolved_version.clone()?,
+        })
+    }
+}
+
+/// Set up R and return a resolution report for display and feature gating.
 pub(crate) fn setup_r(
     r_source: &RSource,
+    r_source_overrides: &[RSourceOverride],
     cli_r_home: Option<&std::path::Path>,
     cli_version: Option<&str>,
-) -> Result<RSourceStatus> {
-    // CLI --r-home overrides everything
+    no_r_source_overrides: bool,
+) -> Result<RSourceResolutionReport> {
+    // CLI --r-home overrides everything. An explicit disable still controls
+    // the reported override state without changing the selected R source.
     if let Some(path) = cli_r_home {
         if !path.exists() {
             anyhow::bail!(
@@ -112,15 +216,62 @@ pub(crate) fn setup_r(
         log::info!("Using R from --r-home: {}", r_home.display());
         // SAFETY: We're single-threaded at this point during startup
         unsafe { std::env::set_var("R_HOME", &r_home) };
-        return Ok(RSourceStatus::ExplicitPath { path: r_home });
+        return Ok(RSourceResolutionReport::from_status(
+            RSourceStatus::ExplicitPath { path: r_home },
+            if no_r_source_overrides {
+                RSourceOverrideState::Disabled
+            } else {
+                RSourceOverrideState::ShadowedByCli
+            },
+        ));
     }
 
     // CLI --with-r-version overrides config (uses rig)
     if let Some(version) = cli_version {
-        return setup_r_via_rig(version);
+        return setup_r_via_rig(version).map(|status| {
+            RSourceResolutionReport::from_status(
+                status,
+                if no_r_source_overrides {
+                    RSourceOverrideState::Disabled
+                } else {
+                    RSourceOverrideState::ShadowedByCli
+                },
+            )
+        });
     }
 
-    match r_source {
+    if no_r_source_overrides {
+        return setup_r_fallback(r_source, RSourceOverrideState::Disabled);
+    }
+
+    if let Some(result) = setup_r_via_overrides(r_source_overrides) {
+        match result {
+            OverrideResolution::Applied {
+                status,
+                info,
+                diagnostics,
+            } => return Ok(RSourceResolutionReport::applied(*status, info, diagnostics)),
+            OverrideResolution::Fallback { diagnostics } => {
+                let mut report = setup_r_fallback(r_source, RSourceOverrideState::Failed)?;
+                report.diagnostics = diagnostics;
+                return Ok(report);
+            }
+        }
+    }
+
+    let override_state = if r_source_overrides.is_empty() {
+        RSourceOverrideState::NotConfigured
+    } else {
+        RSourceOverrideState::NoMatch
+    };
+    setup_r_fallback(r_source, override_state)
+}
+
+fn setup_r_fallback(
+    r_source: &RSource,
+    override_state: RSourceOverrideState,
+) -> Result<RSourceResolutionReport> {
+    let status = match r_source {
         RSource::Mode(RSourceMode::Auto) => {
             // Auto mode: try rig if available, otherwise use PATH
             if external::rig::rig_available() {
@@ -129,20 +280,21 @@ pub(crate) fn setup_r(
                         log::info!("Using rig default R version: {}", resolved.version);
                         // SAFETY: We're single-threaded at this point during startup
                         unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
-                        return Ok(RSourceStatus::Rig {
+                        RSourceStatus::Rig {
                             version: resolved.version,
-                        });
+                            override_info: None,
+                        }
                     }
                     Err(e) => {
                         log::debug!("Could not get rig default version: {}", e);
                         log::info!("Using R from PATH");
-                        // Fall through to use system R from PATH
+                        RSourceStatus::Path
                     }
                 }
             } else {
                 log::info!("Using R from PATH (rig not available)");
+                RSourceStatus::Path
             }
-            Ok(RSourceStatus::Path)
         }
         RSource::Mode(RSourceMode::Rig) => {
             // Rig mode: require rig
@@ -157,9 +309,10 @@ Install rig from https://github.com/r-lib/rig or use "auto"."#
                     log::info!("Using rig default R version: {}", resolved.version);
                     // SAFETY: We're single-threaded at this point during startup
                     unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
-                    Ok(RSourceStatus::Rig {
+                    RSourceStatus::Rig {
                         version: resolved.version,
-                    })
+                        override_info: None,
+                    }
                 }
                 Err(e) => {
                     anyhow::bail!("Failed to get rig default R version: {}", e);
@@ -178,8 +331,280 @@ Install rig from https://github.com/r-lib/rig or use "auto"."#
             log::info!("Using R from explicit path: {}", path.display());
             // SAFETY: We're single-threaded at this point during startup
             unsafe { std::env::set_var("R_HOME", path) };
-            Ok(RSourceStatus::ExplicitPath { path: path.clone() })
+            RSourceStatus::ExplicitPath { path: path.clone() }
         }
+    };
+
+    Ok(RSourceResolutionReport::from_status(status, override_state))
+}
+
+enum OverrideResolution {
+    Applied {
+        status: Box<RSourceStatus>,
+        info: RSourceOverrideInfo,
+        diagnostics: Vec<String>,
+    },
+    Fallback {
+        diagnostics: Vec<String>,
+    },
+}
+
+/// Try the configured directory-level R source overrides in priority order.
+fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolution> {
+    setup_r_via_overrides_with(
+        overrides,
+        external::rig::rig_available,
+        external::rig::list_versions,
+        setup_r_via_selected_rig_version,
+    )
+}
+
+fn setup_r_via_overrides_with<FAvailable, FList, FResolve>(
+    overrides: &[RSourceOverride],
+    rig_available: FAvailable,
+    list_versions: FList,
+    resolve_selected_rig_version: FResolve,
+) -> Option<OverrideResolution>
+where
+    FAvailable: Fn() -> bool,
+    FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
+    FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<RSourceStatus>,
+{
+    let mut diagnostics = Vec::new();
+    let mut evaluated_provider = false;
+    let mut rig_available_cache = None;
+    let mut installed_versions_cache = None;
+
+    for source in overrides {
+        let provider = override_provider_name(source);
+        let version = match source {
+            RSourceOverride::Pixi => {
+                evaluated_provider = true;
+                diagnostics.push(format!(
+                    "Warning: R source override provider '{provider}' is not implemented; trying the next R source override."
+                ));
+                continue;
+            }
+            RSourceOverride::VersionFile { file } => match rversion::read_version_file(file) {
+                Ok(version) => {
+                    evaluated_provider = true;
+                    version
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    log::debug!("R source override file {} is not present", file.display());
+                    continue;
+                }
+                Err(error) => {
+                    evaluated_provider = true;
+                    diagnostics.push(format!(
+                        "Warning: Failed to read R version override file {}: {error}; trying the next R source override.",
+                        file.display()
+                    ));
+                    continue;
+                }
+            },
+            RSourceOverride::TomlKey { file, key } => match rversion::read_toml_key(file, key) {
+                Ok(version) => {
+                    evaluated_provider = true;
+                    version
+                }
+                Err(error) if error.is_not_found() => {
+                    log::debug!("R source override file {} is not present", file.display());
+                    continue;
+                }
+                Err(
+                    rversion::TomlKeyError::MissingKey(_) | rversion::TomlKeyError::NotString(_),
+                ) => {
+                    evaluated_provider = true;
+                    diagnostics.push(format!(
+                        "Warning: {}:{} does not contain the configured R version key; trying the next R source override.",
+                        file.display(),
+                        key
+                    ));
+                    continue;
+                }
+                Err(rversion::TomlKeyError::Parse(error)) => {
+                    evaluated_provider = true;
+                    diagnostics.push(format!(
+                        "Warning: Failed to parse R source override file {}: {error}; trying the next R source override.",
+                        file.display()
+                    ));
+                    continue;
+                }
+                Err(error) => {
+                    evaluated_provider = true;
+                    diagnostics.push(format!(
+                        "Warning: Failed to read R version from TOML key '{}' in {}: {error}; trying the next R source override.",
+                        key,
+                        file.display()
+                    ));
+                    continue;
+                }
+            },
+        };
+
+        let trimmed_version = version.trim().to_owned();
+        let spec = match rversion::VersionSpec::parse(&trimmed_version) {
+            Ok(spec) => spec,
+            Err(error) => {
+                diagnostics.push(format!(
+                    "Warning: {} contains invalid R version \"{}\" ({error}); trying the next R source override.",
+                    override_location(source),
+                    trimmed_version
+                ));
+                continue;
+            }
+        };
+
+        if let rversion::VersionSpec::Named(name) = &spec {
+            diagnostics.push(format!(
+                "Warning: R version \"{name}\" from {} is unsupported in the R source override path; trying the next R source override.",
+                override_location(source)
+            ));
+            continue;
+        }
+
+        let rig_is_available = *rig_available_cache.get_or_insert_with(&rig_available);
+        if !rig_is_available {
+            diagnostics.push(rig_unavailable_warning());
+            return Some(OverrideResolution::Fallback { diagnostics });
+        }
+
+        let installed = if let Some(installed) = installed_versions_cache.as_ref() {
+            installed
+        } else {
+            match list_versions() {
+                Ok(versions) => installed_versions_cache.insert(versions),
+                Err(error) => {
+                    diagnostics.push(format!(
+                        "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
+                        override_location(source)
+                    ));
+                    return Some(OverrideResolution::Fallback { diagnostics });
+                }
+            }
+        };
+        let installed_versions = installed
+            .iter()
+            .filter_map(|installed| semver::Version::parse(&installed.version).ok())
+            .collect::<Vec<_>>();
+
+        let Some(selected) = rversion::resolve_version(&spec, &installed_versions) else {
+            diagnostics.push(not_installed_warning(
+                provider,
+                &override_location(source),
+                &trimmed_version,
+                &spec,
+            ));
+            continue;
+        };
+
+        match resolve_selected_rig_version(selected, installed) {
+            Ok(RSourceStatus::Rig { version, .. }) => {
+                let info = RSourceOverrideInfo {
+                    provider: provider.to_owned(),
+                    file: override_file(source),
+                    key: override_key(source),
+                    requested_version: trimmed_version,
+                    resolved_version: version.clone(),
+                };
+                return Some(OverrideResolution::Applied {
+                    status: RSourceStatus::Rig {
+                        version,
+                        override_info: Some(info.clone()),
+                    }
+                    .into(),
+                    info,
+                    diagnostics,
+                });
+            }
+            Ok(status) => {
+                diagnostics.push(format!(
+                    "Warning: R source override {} resolved to an unsupported R source status ({status:?}); falling back to startup.r_source.",
+                    override_location(source)
+                ));
+                return Some(OverrideResolution::Fallback { diagnostics });
+            }
+            Err(error) => {
+                diagnostics.push(format!(
+                    "Warning: Failed to use R version \"{}\" from {}: {error}; trying the next R source override.",
+                    trimmed_version,
+                    override_location(source)
+                ));
+                continue;
+            }
+        }
+    }
+
+    if evaluated_provider {
+        diagnostics.push(fallback_warning());
+        Some(OverrideResolution::Fallback { diagnostics })
+    } else {
+        None
+    }
+}
+
+fn script_override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
+    resolution
+        .override_info()
+        .map(|info| format!("# R source override: {}", info.display()))
+}
+
+fn override_provider_name(source: &RSourceOverride) -> &'static str {
+    match source {
+        RSourceOverride::Pixi => "pixi",
+        RSourceOverride::VersionFile { .. } => "version-file",
+        RSourceOverride::TomlKey { .. } => "toml-key",
+    }
+}
+
+fn override_file(source: &RSourceOverride) -> Option<std::path::PathBuf> {
+    match source {
+        RSourceOverride::Pixi => None,
+        RSourceOverride::VersionFile { file } | RSourceOverride::TomlKey { file, .. } => {
+            Some(file.clone())
+        }
+    }
+}
+
+fn override_key(source: &RSourceOverride) -> Option<String> {
+    match source {
+        RSourceOverride::TomlKey { key, .. } => Some(key.clone()),
+        RSourceOverride::Pixi | RSourceOverride::VersionFile { .. } => None,
+    }
+}
+
+fn override_location(source: &RSourceOverride) -> String {
+    match source {
+        RSourceOverride::Pixi => "pixi".to_owned(),
+        RSourceOverride::VersionFile { file } => file.display().to_string(),
+        RSourceOverride::TomlKey { file, key } => format!("{}:{}", file.display(), key),
+    }
+}
+
+fn rig_unavailable_warning() -> String {
+    "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+        .to_owned()
+}
+
+fn fallback_warning() -> String {
+    "Warning: All R source overrides failed.\n         Falling back to startup.r_source.".to_owned()
+}
+
+fn not_installed_warning(
+    provider: &str,
+    location: &str,
+    version: &str,
+    spec: &rversion::VersionSpec,
+) -> String {
+    if spec.is_concrete_version() {
+        format!(
+            "Warning: R source override provider '{provider}' at {location} requested R version \"{version}\", which is not installed.\n         Install it with rig add {version}, then restart arf.\n         Trying the next R source override."
+        )
+    } else {
+        format!(
+            "Warning: R source override provider '{provider}' at {location} has no installed R version matching specification \"{version}\".\n         Install a matching R version with rig, then restart arf.\n         Trying the next R source override."
+        )
     }
 }
 
@@ -242,22 +667,40 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
     }
 
     match external::rig::resolve_version(version_spec) {
-        Ok(resolved) => {
-            log::info!(
-                "Using R version {} from {}",
-                resolved.version,
-                resolved.r_home
-            );
-            // SAFETY: We're single-threaded at this point during startup
-            unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
-            Ok(RSourceStatus::Rig {
-                version: resolved.version,
-            })
-        }
+        Ok(resolved) => apply_rig_resolution(resolved),
         Err(e) => {
             anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
         }
     }
+}
+
+/// Set up R from the exact semantic version selected for an override.
+///
+/// The override resolver has already selected a version from rig's reported
+/// version fields. Re-resolving its string would allow a rig name or alias to
+/// select a different installation.
+fn setup_r_via_selected_rig_version(
+    selected: &semver::Version,
+    versions: &[external::rig::RigVersion],
+) -> Result<RSourceStatus> {
+    match external::rig::resolve_selected_version_from_versions(selected, versions) {
+        Ok(resolved) => apply_rig_resolution(resolved),
+        Err(error) => anyhow::bail!("Failed to resolve R version '{}': {}", selected, error),
+    }
+}
+
+fn apply_rig_resolution(resolved: external::rig::ResolvedVersion) -> Result<RSourceStatus> {
+    log::info!(
+        "Using R version {} from {}",
+        resolved.version,
+        resolved.r_home
+    );
+    // SAFETY: We're single-threaded at this point during startup
+    unsafe { std::env::set_var("R_HOME", &resolved.r_home) };
+    Ok(RSourceStatus::Rig {
+        version: resolved.version,
+        override_info: None,
+    })
 }
 
 /// Source R profile files after R initialization.
@@ -361,5 +804,357 @@ mod session_id_tests {
         // On most platforms history_dir() returns Some, so session ID is generated.
         // On exotic platforms where it returns None, session ID should be None.
         assert_eq!(id.is_some(), config::history_dir().is_some());
+    }
+}
+
+#[cfg(test)]
+mod r_source_override_tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn path_source(path: &Path) -> RSource {
+        RSource::Path {
+            path: path.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn toml_override_does_not_search_parent_directories() {
+        let _cwd_lock = crate::test_utils::lock_cwd();
+        let parent = tempfile::tempdir().unwrap();
+        let child = parent.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(
+            parent.path().join("rproject.toml"),
+            "[project]\nr_version = \"4.4\"\n",
+        )
+        .unwrap();
+        std::env::set_current_dir(&child).unwrap();
+
+        let result = rversion::read_toml_key(Path::new("rproject.toml"), "project.r_version");
+
+        assert!(matches!(
+            result,
+            Err(rversion::TomlKeyError::Read(error))
+                if error.kind() == std::io::ErrorKind::NotFound
+        ));
+    }
+
+    #[test]
+    fn default_override_resolution_has_no_match_and_no_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::VersionFile {
+                file: temp.path().join(".r-version"),
+            }],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::NoMatch);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn empty_override_configuration_is_not_configured() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(&path_source(temp.path()), &[], None, None, false).unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::NotConfigured);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn disabled_override_resolution_has_no_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::Pixi],
+            None,
+            None,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::Disabled);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn cli_r_home_shadows_overrides_without_a_conflict() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("rproject.toml"),
+            "[project]\nr_version = \"4.4\"\n",
+        )
+        .unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::TomlKey {
+                file: temp.path().join("rproject.toml"),
+                key: "project.r_version".to_string(),
+            }],
+            Some(temp.path()),
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::ShadowedByCli);
+        assert!(report.diagnostics.is_empty());
+        assert!(matches!(report.status, RSourceStatus::ExplicitPath { .. }));
+    }
+
+    #[test]
+    fn disabled_override_resolution_reports_disabled_for_cli_r_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::Pixi],
+            Some(temp.path()),
+            None,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::Disabled);
+        assert!(matches!(report.status, RSourceStatus::ExplicitPath { .. }));
+    }
+
+    #[test]
+    fn unsupported_pixi_provider_is_reported_and_falls_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::Pixi],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::Failed);
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics[0].contains("pixi"));
+        assert!(report.diagnostics[1].contains("Falling back to startup.r_source"));
+    }
+
+    #[test]
+    fn override_status_display_includes_resolution_metadata() {
+        let info = RSourceOverrideInfo {
+            provider: "toml-key".to_string(),
+            file: Some("rproject.toml".into()),
+            key: Some("project.r_version".to_string()),
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        let status = RSourceStatus::Rig {
+            version: "4.4.2".to_string(),
+            override_info: Some(info),
+        };
+
+        assert!(status.rig_enabled());
+        assert_eq!(
+            status.display(),
+            "rig (R 4.4.2; override: toml-key rproject.toml:project.r_version = \"4.4\")"
+        );
+    }
+
+    #[test]
+    fn rig_unavailable_warning_explains_fallback() {
+        assert_eq!(
+            rig_unavailable_warning(),
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+        );
+    }
+
+    #[test]
+    fn range_not_installed_warning_does_not_suggest_rig_add() {
+        let spec = rversion::VersionSpec::parse(">=4.3, <5.0").unwrap();
+        let warning = not_installed_warning(
+            "toml-key",
+            "rproject.toml:project.r_version",
+            ">=4.3, <5.0",
+            &spec,
+        );
+
+        assert!(warning.contains("Install a matching R version with rig"));
+        assert!(!warning.contains("rig add"));
+        assert!(warning.contains("toml-key"));
+        assert!(warning.contains("rproject.toml:project.r_version"));
+        assert!(!warning.contains("Falling back to startup.r_source"));
+    }
+
+    #[test]
+    fn script_override_notice_is_available_with_default_banner_setting() {
+        let config = Config::default();
+        assert!(config.startup.show_banner);
+
+        let info = RSourceOverrideInfo {
+            provider: "version-file".to_string(),
+            file: Some(".r-version".into()),
+            key: None,
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        let report = RSourceResolutionReport::applied(
+            RSourceStatus::Rig {
+                version: "4.4.2".to_string(),
+                override_info: Some(info),
+            },
+            RSourceOverrideInfo {
+                provider: "version-file".to_string(),
+                file: Some(".r-version".into()),
+                key: None,
+                requested_version: "4.4".to_string(),
+                resolved_version: "4.4.2".to_string(),
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(
+            script_override_notice(&report).as_deref(),
+            Some("# R source override: version-file .r-version = \"4.4\"")
+        );
+    }
+
+    #[test]
+    fn not_installed_override_falls_through_to_installed_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_file = temp.path().join("first.r-version");
+        let second_file = temp.path().join("second.r-version");
+        std::fs::write(&first_file, "4.3.0\n").unwrap();
+        std::fs::write(&second_file, "4.4.2\n").unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::VersionFile { file: first_file },
+                RSourceOverride::VersionFile {
+                    file: second_file.clone(),
+                },
+            ],
+            || true,
+            || Ok(vec![rig_version("4.4.2")]),
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                assert_eq!(versions[0].version, "4.4.2");
+                Ok(RSourceStatus::Rig {
+                    version: versions[0].version.clone(),
+                    override_info: None,
+                })
+            },
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Applied {
+                status,
+                info,
+                diagnostics,
+            } => {
+                assert!(matches!(*status, RSourceStatus::Rig { .. }));
+                assert_eq!(info.file, Some(second_file));
+                assert_eq!(info.resolved_version, "4.4.2");
+                assert_eq!(diagnostics.len(), 1);
+                assert!(diagnostics[0].contains("4.3.0"));
+                assert!(diagnostics[0].contains("Trying the next R source override"));
+                assert!(!diagnostics[0].contains("Falling back to startup.r_source"));
+            }
+            OverrideResolution::Fallback { .. } => {
+                panic!("the installed provider should be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn rig_data_is_fetched_once_across_override_providers() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_file = temp.path().join("first.r-version");
+        let second_file = temp.path().join("second.r-version");
+        std::fs::write(&first_file, "4.3.0\n").unwrap();
+        std::fs::write(&second_file, "4.4.2\n").unwrap();
+
+        let rig_available_calls = Arc::new(AtomicUsize::new(0));
+        let list_versions_calls = Arc::new(AtomicUsize::new(0));
+        let rig_available_calls_for_closure = Arc::clone(&rig_available_calls);
+        let list_versions_calls_for_closure = Arc::clone(&list_versions_calls);
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::VersionFile { file: first_file },
+                RSourceOverride::VersionFile {
+                    file: second_file.clone(),
+                },
+            ],
+            move || {
+                rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                true
+            },
+            move || {
+                list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                Ok(vec![rig_version("4.4.2")])
+            },
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                Ok(RSourceStatus::Rig {
+                    version: versions[0].version.clone(),
+                    override_info: None,
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(result, OverrideResolution::Applied { .. }));
+        assert_eq!(rig_available_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(list_versions_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn missing_override_files_do_not_fetch_rig_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let rig_available_calls = Arc::new(AtomicUsize::new(0));
+        let list_versions_calls = Arc::new(AtomicUsize::new(0));
+        let rig_available_calls_for_closure = Arc::clone(&rig_available_calls);
+        let list_versions_calls_for_closure = Arc::clone(&list_versions_calls);
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::VersionFile {
+                    file: temp.path().join("missing-first.r-version"),
+                },
+                RSourceOverride::VersionFile {
+                    file: temp.path().join("missing-second.r-version"),
+                },
+            ],
+            move || {
+                rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                true
+            },
+            move || {
+                list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                Ok(Vec::new())
+            },
+            |_, _| panic!("R version resolution should not be attempted"),
+        );
+
+        assert!(result.is_none());
+        assert_eq!(rig_available_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(list_versions_calls.load(Ordering::Relaxed), 0);
+    }
+
+    fn rig_version(version: &str) -> external::rig::RigVersion {
+        external::rig::RigVersion {
+            name: version.to_owned(),
+            default: true,
+            version: version.to_owned(),
+            aliases: Vec::new(),
+            path: format!("/opt/R/{version}"),
+            binary: format!("/opt/R/{version}/bin/R"),
+        }
     }
 }

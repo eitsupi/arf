@@ -86,6 +86,7 @@
             "require"
           ]
         },
+        "r_source_overrides": [],
         "shell_abbreviations": {},
         "shell_completion": {
           "command_names": false
@@ -1605,6 +1606,14 @@
             ]
           }
         },
+        "r_source_overrides": {
+          "description": "Ordered providers for experimental R source resolution.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RSourceOverride"
+          }
+        },
         "shell_abbreviations": {
           "description": "Fish-style abbreviations for shell mode.\n\nAbbreviations are expanded automatically when you press Space or Enter.\nOnly applies to the shell editor (not the R editor).\n\nFormat: `\"abbreviation\" = \"expansion\"`\nExample: `\"gc\" = \"git commit\"`",
           "type": "object",
@@ -1867,6 +1876,62 @@
           "description": "Use rig's default R version (error if rig unavailable).",
           "type": "string",
           "const": "rig"
+        }
+      ]
+    },
+    "RSourceOverride": {
+      "description": "A provider for resolving an R installation.",
+      "oneOf": [
+        {
+          "description": "Resolve R using the active pixi environment.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "pixi"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Read the R version from a version file.",
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "version-file"
+            }
+          },
+          "required": [
+            "type",
+            "file"
+          ]
+        },
+        {
+          "description": "Read the R version from a TOML key.",
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "toml-key"
+            }
+          },
+          "required": [
+            "type",
+            "file",
+            "key"
+          ]
         }
       ]
     },
