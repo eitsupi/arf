@@ -858,18 +858,30 @@ Warning: No installed R version matches source override specification ">=4.3, <5
          Falling back to startup.r_source.
 ```
 
-Use `--no-r-source-overrides` to disable this feature entirely.
+Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It is an override-disable switch, not an R source tier, and it does not disable explicit `--r-home`, `--with-r-version`, `ARF_R_HOME`, or `ARF_R_VERSION` selection.
 
-## CLI Options Override
+## R Source Precedence
 
-Command-line options take precedence over config file settings:
+The first five tiers express the expected `CLI > env > local config file > global config file` precedence. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
+
+| Tier | Source | Evaluation behavior |
+|------|--------|---------------------|
+| 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
+| 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
+| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. |
+| 4 | `r_source_overrides` (local project config file) | Returns early only when a provider matches and resolves successfully. A no-match or failure falls through to lower tiers. |
+| 5 | `startup.r_source` (global config file) | Resolves the configured source; when it resolves here, source selection ends. |
+| 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
+| 7 | `R RHOME` / built-in default paths | Final fallback search used to discover R when PATH-mode resolution needs it. |
+
+Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
+
+## Other CLI Options
+
+Command-line options take precedence over their corresponding config file settings:
 
 | CLI Option | Config Setting |
 |------------|----------------|
-| `--r-home` | Highest-priority R source; explicit path |
-| `--with-r-version` | Next-priority R source; uses rig |
-| `[experimental].r_source_overrides` | Next-priority R source; resolved before `startup.r_source` |
-| `startup.r_source` | Final R source fallback |
 | `--no-banner` | `startup.show_banner` |
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |

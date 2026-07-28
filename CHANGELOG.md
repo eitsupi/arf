@@ -5,6 +5,7 @@
 ### Added
 
 - **Experimental:** arf can now automatically pick up the R version pinned by project tooling such as rv via `rproject.toml` and switch to it. This feature is opt-in.
+- `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
 
 ### Fixed
 

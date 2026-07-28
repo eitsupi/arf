@@ -37,7 +37,6 @@ struct HeadlessInfo {
 
 #[derive(Debug, Serialize)]
 struct HeadlessRSourceOverride {
-    enabled: bool,
     state: String,
     provider: Option<String>,
     file: Option<String>,
@@ -50,7 +49,6 @@ impl HeadlessRSourceOverride {
     fn from_report(report: &RSourceResolutionReport) -> Self {
         let applied = report.override_state == RSourceOverrideState::Applied;
         Self {
-            enabled: report.override_state != RSourceOverrideState::Disabled,
             state: report.override_state.as_str().to_owned(),
             provider: applied.then(|| report.provider.clone()).flatten(),
             file: applied
@@ -415,6 +413,7 @@ mod tests {
     fn r_source_override_json_object_is_always_present_for_each_state() {
         for state in [
             RSourceOverrideState::Applied,
+            RSourceOverrideState::NotConfigured,
             RSourceOverrideState::NoMatch,
             RSourceOverrideState::Failed,
             RSourceOverrideState::Disabled,
@@ -422,7 +421,6 @@ mod tests {
         ] {
             let value =
                 serde_json::to_value(HeadlessRSourceOverride::from_report(&report(state))).unwrap();
-            assert!(value.get("enabled").is_some());
             assert_eq!(value["state"], state.as_str());
             assert!(value.get("provider").is_some());
             assert!(value.get("file").is_some());
@@ -442,7 +440,6 @@ mod tests {
         report.resolved_version = Some("4.4.2".to_string());
 
         let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
-        assert_eq!(value["enabled"], true);
         assert_eq!(value["state"], "applied");
         assert_eq!(value["provider"], "toml-key");
         assert_eq!(value["file"], "rproject.toml");

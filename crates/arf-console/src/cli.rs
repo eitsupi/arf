@@ -43,21 +43,39 @@ pub struct Cli {
     #[arg(long)]
     pub no_banner: bool,
 
-    /// R version to use via rig (overrides r_source config)
+    /// Highest-priority R source: use this R version via rig
     ///
-    /// Requires rig to be installed. Use "default" for rig's default,
-    /// or specify a version like "4.5" or "release".
-    #[arg(long = "with-r-version", conflicts_with = "r_home")]
+    /// Requires rig. Use "default" for rig's default, or a version like "4.5"
+    /// or "release".
+    ///
+    /// Takes precedence over ARF_R_VERSION, r_source_overrides and
+    /// startup.r_source, which are not consulted at all when this is set.
+    ///
+    /// Config: startup.r_source
+    #[arg(
+        long = "with-r-version",
+        env = "ARF_R_VERSION",
+        conflicts_with = "r_home"
+    )]
     pub r_version: Option<String>,
 
-    /// Explicit R_HOME path (overrides r_source config)
+    /// Highest-priority R source: use this explicit R_HOME path
     ///
-    /// Use this to specify a specific R installation directory.
-    /// Mutually exclusive with --with-r-version.
-    #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
+    /// Mutually exclusive with --with-r-version and ARF_R_VERSION.
+    ///
+    /// Takes precedence over ARF_R_HOME, r_source_overrides and
+    /// startup.r_source, which are not consulted at all when this is set.
+    ///
+    /// Config: startup.r_source
+    #[arg(long = "r-home", value_hint = ValueHint::DirPath, env = "ARF_R_HOME", conflicts_with = "r_version")]
     pub r_home: Option<PathBuf>,
 
-    /// Disable experimental directory-level R source overrides.
+    /// Disable experimental directory-level R source overrides
+    ///
+    /// This only disables r_source_overrides. An R source given by
+    /// --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
+    ///
+    /// Config: [experimental].r_source_overrides
     #[arg(long = "no-r-source-overrides")]
     pub no_r_source_overrides: bool,
 
@@ -313,15 +331,38 @@ Examples:
         #[arg(short, long, value_hint = ValueHint::FilePath)]
         config: Option<PathBuf>,
 
-        /// R version to use via rig (overrides r_source config)
-        #[arg(long = "with-r-version", conflicts_with = "r_home")]
+        /// Highest-priority R source: use this R version via rig
+        ///
+        /// Requires rig.
+        ///
+        /// Takes precedence over ARF_R_VERSION, r_source_overrides and
+        /// startup.r_source, which are not consulted at all when this is set.
+        ///
+        /// Config: startup.r_source
+        #[arg(
+            long = "with-r-version",
+            env = "ARF_R_VERSION",
+            conflicts_with = "r_home"
+        )]
         r_version: Option<String>,
 
-        /// Explicit R_HOME path (overrides r_source config)
-        #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
+        /// Highest-priority R source: use this explicit R_HOME path
+        ///
+        /// Mutually exclusive with --with-r-version and ARF_R_VERSION.
+        ///
+        /// Takes precedence over ARF_R_HOME, r_source_overrides and
+        /// startup.r_source, which are not consulted at all when this is set.
+        ///
+        /// Config: startup.r_source
+        #[arg(long = "r-home", value_hint = ValueHint::DirPath, env = "ARF_R_HOME", conflicts_with = "r_version")]
         r_home: Option<PathBuf>,
 
-        /// Disable experimental directory-level R source overrides.
+        /// Disable experimental directory-level R source overrides
+        ///
+        /// This only disables r_source_overrides. An R source given by
+        /// --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
+        ///
+        /// Config: [experimental].r_source_overrides
         #[arg(long = "no-r-source-overrides")]
         no_r_source_overrides: bool,
 
@@ -875,6 +916,40 @@ impl Cli {
 mod tests {
     use super::*;
 
+    struct EnvVarGuard {
+        name: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(name);
+            // SAFETY: Tests serialize access to these process-global variables.
+            unsafe { std::env::set_var(name, value) };
+            Self { name, original }
+        }
+
+        fn unset(name: &'static str) -> Self {
+            let original = std::env::var_os(name);
+            // SAFETY: Tests serialize access to these process-global variables.
+            unsafe { std::env::remove_var(name) };
+            Self { name, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: Tests serialize access to these process-global variables.
+            unsafe {
+                if let Some(value) = &self.original {
+                    std::env::set_var(self.name, value);
+                } else {
+                    std::env::remove_var(self.name);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_completions_bash_snapshot() {
         let completions = Cli::generate_completions_string(Shell::Bash);
@@ -911,8 +986,17 @@ mod tests {
         insta::assert_snapshot!("help_history_export", help);
     }
 
+    // clap renders the current value of an option's environment variable into
+    // the long help, so this snapshot only holds if those variables are unset.
+    // Clearing them keeps the test independent of the surrounding environment,
+    // and serializing keeps the tests below from setting them concurrently.
     #[test]
+    #[serial_test::serial]
     fn test_help_long_snapshot() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let _history_dir = EnvVarGuard::unset("ARF_HISTORY_DIR");
+
         let help = Cli::generate_help_string(&[]);
         insta::assert_snapshot!("help_long", help);
     }
@@ -943,9 +1027,59 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
         let cli =
             Cli::try_parse_from(["arf", "--no-r-source-overrides", "--r-home", "/tmp/r-home"]);
         assert!(cli.is_ok());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_arf_r_home_has_same_precedence_as_r_home() {
+        let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+        let cli = Cli::try_parse_from(["arf"]).unwrap();
+
+        assert_eq!(
+            cli.r_home.as_deref(),
+            Some(std::path::Path::new("/env/r-home"))
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_arf_r_version_has_same_precedence_as_with_r_version() {
+        let _env = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        let cli = Cli::try_parse_from(["arf"]).unwrap();
+
+        assert_eq!(cli.r_version.as_deref(), Some("4.5"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_cli_value_wins_over_r_source_environment_value() {
+        {
+            let _home_env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+            let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
+            assert_eq!(
+                home_cli.r_home.as_deref(),
+                Some(std::path::Path::new("/cli/r-home"))
+            );
+        }
+
+        {
+            let _version_env = EnvVarGuard::set("ARF_R_VERSION", "4.4");
+            let version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
+            assert_eq!(version_cli.r_version.as_deref(), Some("4.5"));
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_arf_r_home_conflicts_with_with_r_version() {
+        let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+        let result = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]);
+
+        assert!(result.is_err());
     }
 }

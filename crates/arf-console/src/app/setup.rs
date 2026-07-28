@@ -108,6 +108,8 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
 pub(crate) enum RSourceOverrideState {
     /// An override selected the active R installation.
     Applied,
+    /// No R source override providers are configured.
+    NotConfigured,
     /// No configured provider matched a file in the current directory.
     NoMatch,
     /// At least one provider was evaluated but no override could be applied.
@@ -122,6 +124,7 @@ impl RSourceOverrideState {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Applied => "applied",
+            Self::NotConfigured => "not_configured",
             Self::NoMatch => "no_match",
             Self::Failed => "failed",
             Self::Disabled => "disabled",
@@ -199,7 +202,8 @@ pub(crate) fn setup_r(
     cli_version: Option<&str>,
     no_r_source_overrides: bool,
 ) -> Result<RSourceResolutionReport> {
-    // CLI --r-home overrides everything
+    // CLI --r-home overrides everything. An explicit disable still controls
+    // the reported override state without changing the selected R source.
     if let Some(path) = cli_r_home {
         if !path.exists() {
             anyhow::bail!(
@@ -216,14 +220,25 @@ pub(crate) fn setup_r(
         unsafe { std::env::set_var("R_HOME", &r_home) };
         return Ok(RSourceResolutionReport::from_status(
             RSourceStatus::ExplicitPath { path: r_home },
-            RSourceOverrideState::ShadowedByCli,
+            if no_r_source_overrides {
+                RSourceOverrideState::Disabled
+            } else {
+                RSourceOverrideState::ShadowedByCli
+            },
         ));
     }
 
     // CLI --with-r-version overrides config (uses rig)
     if let Some(version) = cli_version {
         return setup_r_via_rig(version).map(|status| {
-            RSourceResolutionReport::from_status(status, RSourceOverrideState::ShadowedByCli)
+            RSourceResolutionReport::from_status(
+                status,
+                if no_r_source_overrides {
+                    RSourceOverrideState::Disabled
+                } else {
+                    RSourceOverrideState::ShadowedByCli
+                },
+            )
         });
     }
 
@@ -246,7 +261,12 @@ pub(crate) fn setup_r(
         }
     }
 
-    setup_r_fallback(r_source, RSourceOverrideState::NoMatch)
+    let override_state = if r_source_overrides.is_empty() {
+        RSourceOverrideState::NotConfigured
+    } else {
+        RSourceOverrideState::NoMatch
+    };
+    setup_r_fallback(r_source, override_state)
 }
 
 fn setup_r_fallback(
@@ -777,6 +797,15 @@ mod r_source_override_tests {
     }
 
     #[test]
+    fn empty_override_configuration_is_not_configured() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(&path_source(temp.path()), &[], None, None, false).unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::NotConfigured);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
     fn disabled_override_resolution_has_no_diagnostics() {
         let temp = tempfile::tempdir().unwrap();
         let report = setup_r(
@@ -795,9 +824,17 @@ mod r_source_override_tests {
     #[test]
     fn cli_r_home_shadows_overrides_without_a_conflict() {
         let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("rproject.toml"),
+            "[project]\nr_version = \"4.4\"\n",
+        )
+        .unwrap();
         let report = setup_r(
             &path_source(temp.path()),
-            &[RSourceOverride::Pixi],
+            &[RSourceOverride::TomlKey {
+                file: temp.path().join("rproject.toml"),
+                key: "project.r_version".to_string(),
+            }],
             Some(temp.path()),
             None,
             false,
@@ -806,6 +843,22 @@ mod r_source_override_tests {
 
         assert_eq!(report.override_state, RSourceOverrideState::ShadowedByCli);
         assert!(report.diagnostics.is_empty());
+        assert!(matches!(report.status, RSourceStatus::ExplicitPath { .. }));
+    }
+
+    #[test]
+    fn disabled_override_resolution_reports_disabled_for_cli_r_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let report = setup_r(
+            &path_source(temp.path()),
+            &[RSourceOverride::Pixi],
+            Some(temp.path()),
+            None,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(report.override_state, RSourceOverrideState::Disabled);
         assert!(matches!(report.status, RSourceStatus::ExplicitPath { .. }));
     }
 

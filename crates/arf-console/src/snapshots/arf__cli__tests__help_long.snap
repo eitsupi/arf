@@ -40,17 +40,33 @@ Options:
           Config: show_banner
 
       --with-r-version <R_VERSION>
-          R version to use via rig (overrides r_source config)
+          Highest-priority R source: use this R version via rig
           
-          Requires rig to be installed. Use "default" for rig's default, or specify a version like "4.5" or "release".
+          Requires rig. Use "default" for rig's default, or a version like "4.5" or "release".
+          
+          Takes precedence over ARF_R_VERSION, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+          
+          [env: ARF_R_VERSION=]
 
       --r-home <R_HOME>
-          Explicit R_HOME path (overrides r_source config)
+          Highest-priority R source: use this explicit R_HOME path
           
-          Use this to specify a specific R installation directory. Mutually exclusive with --with-r-version.
+          Mutually exclusive with --with-r-version and ARF_R_VERSION.
+          
+          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+          
+          [env: ARF_R_HOME=]
 
       --no-r-source-overrides
           Disable experimental directory-level R source overrides
+          
+          This only disables r_source_overrides. An R source given by --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
+          
+          Config: [experimental].r_source_overrides
 
       --vanilla
           Start R in vanilla mode (no init files, no save/restore)

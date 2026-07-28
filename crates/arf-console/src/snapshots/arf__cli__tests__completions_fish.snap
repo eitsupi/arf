@@ -31,8 +31,8 @@ end
 complete -c arf -n "__fish_arf_needs_command" -s e -l eval -d 'Evaluate R expression and exit' -r
 complete -c arf -n "__fish_arf_needs_command" -s f -l file -d '[R] Take input from FILE' -r -F
 complete -c arf -n "__fish_arf_needs_command" -s c -l config -d 'Path to configuration file' -r -F
-complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
-complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
+complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_needs_command" -l encoding -d '[R] Specify encoding to be used for stdin (no-op)' -r
 complete -c arf -n "__fish_arf_needs_command" -l max-connections -d '[R] Set max number of connections to N' -r
 complete -c arf -n "__fish_arf_needs_command" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
@@ -150,8 +150,8 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "history" -d 'Query command history from a running session'
 complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
-complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'R version to use via rig (overrides r_source config)' -r
-complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Explicit R_HOME path (overrides r_source config)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
+complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-bind -d 'Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-pid-file -d 'Write server PID to a file (removed on shutdown)' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l log-file -d 'Redirect log output to a file instead of stderr' -r -F

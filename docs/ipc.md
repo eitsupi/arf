@@ -60,7 +60,6 @@ When `--json` is specified, arf prints session connection info to stdout as a si
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
   "r_source_override": {
-    "enabled": true,
     "state": "applied",
     "provider": "toml-key",
     "file": "rproject.toml",
@@ -72,7 +71,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version` and `log_file` may be `null`. The `r_source_override` object is always present; its state is one of `applied`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version` and `log_file` may be `null`. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
 Output is pretty-printed when stdout is a terminal, compact when piped. This is useful in CI scripts:
 
