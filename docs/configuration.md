@@ -594,7 +594,7 @@ r_source = { path = "/opt/R/4.5.2" }
 
 ### Version Specifications
 
-arf uses the same installed-version matching for `--with-r-version`, `:switch`, and R source overrides. An R version is a plain `major.minor.patch` number: R does not publish prereleases or build metadata, and rig reports installed R versions in that form. For installed-version matching, arf accepts two forms:
+arf uses the same installed-version matching for `--with-r-version`, `:switch`, and R source overrides. `--with-r-version` and `:switch` additionally accept rig's own selectors, which are tried first — see [rig Integration](#rig-integration). An R version is a plain `major.minor.patch` number: R does not publish prereleases or build metadata, and rig reports installed R versions in that form. For installed-version matching, arf accepts two forms:
 
 - Exact or partial version numbers: `4`, `4.4`, or `4.4.2`. The number of components written determines the precision: `4.4` matches the `4.4.x` series, while `4.4.2` matches only `4.4.2`.
 - Ranges using comparison operators such as `^4.4`, `~4.4`, `>=4.3`, `<5.0`, and `*`. Operators can be combined, for example `>=4.3, <5.0`.
@@ -632,6 +632,8 @@ Rig selectors are separate from version specifications:
 | `default` | Use rig's default R version |
 | Rig alias (e.g. `release` or `devel`) | Use the version associated with that rig alias |
 | Rig-assigned name (e.g. `custom-name`) | Use the installed version with that rig name |
+
+`--with-r-version` and `:switch` try these selectors before interpreting the value as a version specification, in the order listed above. R source overrides never consult them and always interpret the value as a version specification. This matters when a rig alias or name looks like a version number: if an installation is named `4.4`, then `--with-r-version 4.4` selects that installation by name, while `4.4` in an override file selects the newest installed `4.4.x` release, which may be a different installation.
 
 ## History Configuration
 
