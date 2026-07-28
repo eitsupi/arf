@@ -448,12 +448,19 @@ Examples:
     },
 }
 
-/// Resolve a subcommand value over its top-level counterpart.
-pub(crate) fn subcommand_value_or_top_level<'a, T>(
-    top_level: Option<&'a T>,
-    subcommand: Option<&'a T>,
-) -> Option<&'a T> {
-    subcommand.or(top_level)
+/// Resolve the headless R source as a pair of mutually exclusive options.
+///
+/// If either subcommand option is set, the subcommand pair determines the
+/// source. Otherwise, the top-level pair is used.
+pub(crate) fn resolve_headless_r_source<'a>(
+    top_level: (Option<&'a PathBuf>, Option<&'a String>),
+    subcommand: (Option<&'a PathBuf>, Option<&'a String>),
+) -> (Option<&'a PathBuf>, Option<&'a String>) {
+    if subcommand.0.is_some() || subcommand.1.is_some() {
+        subcommand
+    } else {
+        top_level
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1105,10 +1112,11 @@ mod tests {
             panic!("expected headless command");
         };
 
-        (
-            subcommand_value_or_top_level(cli.r_home.as_ref(), r_home.as_ref()).cloned(),
-            subcommand_value_or_top_level(cli.r_version.as_ref(), r_version.as_ref()).cloned(),
-        )
+        let (r_home, r_version) = resolve_headless_r_source(
+            (cli.r_home.as_ref(), cli.r_version.as_ref()),
+            (r_home.as_ref(), r_version.as_ref()),
+        );
+        (r_home.cloned(), r_version.cloned())
     }
 
     #[test]
@@ -1156,6 +1164,20 @@ mod tests {
             headless_r_source_values(&cli).0.as_deref(),
             Some(std::path::Path::new("/b"))
         );
+
+        let cli = Cli::try_parse_from([
+            "arf",
+            "--with-r-version",
+            "4.4",
+            "headless",
+            "--r-home",
+            "/b",
+        ])
+        .unwrap();
+        assert_eq!(
+            headless_r_source_values(&cli),
+            (Some(PathBuf::from("/b")), None)
+        );
     }
 
     #[test]
@@ -1195,11 +1217,25 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
+
+        let cli = Cli::try_parse_from([
+            "arf",
+            "--r-home",
+            "/a",
+            "headless",
+            "--with-r-version",
+            "4.5",
+        ])
+        .unwrap();
+        assert_eq!(
+            headless_r_source_values(&cli),
+            (None, Some(String::from("4.5")))
+        );
     }
 
     #[test]
     #[serial_test::serial]
-    fn test_cross_scope_r_source_conflicts_are_accepted_and_r_home_wins() {
+    fn test_cross_scope_r_source_conflicts_use_the_subcommand_pair() {
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
 
@@ -1214,7 +1250,7 @@ mod tests {
         .unwrap();
         let (r_home, r_version) = headless_r_source_values(&cli);
         assert_eq!(r_home.as_deref(), Some(std::path::Path::new("/sub/r-home")));
-        assert_eq!(r_version.as_deref(), Some("4.5"));
+        assert_eq!(r_version, None);
 
         let cli = Cli::try_parse_from([
             "arf",
@@ -1226,7 +1262,32 @@ mod tests {
         ])
         .unwrap();
         let (r_home, r_version) = headless_r_source_values(&cli);
-        assert_eq!(r_home.as_deref(), Some(std::path::Path::new("/top/r-home")));
+        assert_eq!(r_home, None);
         assert_eq!(r_version.as_deref(), Some("4.5"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_cross_scope_r_source_environment_values_are_replaced_by_subcommand_pair() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
+            let cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
+            assert_eq!(
+                headless_r_source_values(&cli),
+                (None, Some(String::from("4.5")))
+            );
+        }
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
+            let cli = Cli::try_parse_from(["arf", "headless", "--r-home", "/cli"]).unwrap();
+            assert_eq!(
+                headless_r_source_values(&cli),
+                (Some(PathBuf::from("/cli")), None)
+            );
+        }
     }
 }
