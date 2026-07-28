@@ -801,6 +801,9 @@ Abbreviations are matched against the word immediately to the left of the cursor
 
 Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
 
+> [!IMPORTANT]
+> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file` and `toml-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
+
 Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though the tools that write these files often do. Relative `file` paths are therefore relative to the current working directory.
 
 Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
@@ -858,9 +861,9 @@ With `key = "project.r_version"`, arf looks up the `project` table and reads its
 - The `devel` and `release` aliases are not currently supported by the R source override path.
 - Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
 
-**Who performs the matching:** rig never sees the version specification. For an override, arf calls `rig list --json` once, matches the specification against that list itself, and uses the selected installation's R binary to determine `R_HOME`. The rig integration receives only the single concrete version selected by arf.
+**Who performs the matching:** arf runs rig only to check that it is there (`rig --version`) and to list what is installed (`rig list --json`). It then matches the specification against that list itself and asks the selected installation's R binary for its `R_HOME`. rig never sees the specification, so it is arf that decides what `4.4` means.
 
-For numeric specifications such as `4` and `4.4`, both paths select the highest matching installed version for ordinary R version series. A difference can occur at patch precision: rig's prefix fallback can make `4.4.1` match `4.4.10`, while an override requires the patch component to be exactly `1`. The rig resolver also uses `default`, installed rig aliases (including `release` or `devel` when present), and exact rig `name` matches; the override path does not use those selectors or names, and instead accepts semver ranges such as `^4.4` and `>=4.3, <5.0`.
+`--with-r-version`, `:switch` and `r_source_overrides` share that matching, so numeric specifications and semver ranges mean the same thing everywhere. Only the selectors that come from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, and have no equivalent in an override file.
 
 When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
 
