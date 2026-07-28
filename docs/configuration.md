@@ -847,7 +847,7 @@ The other provider forms are:
 
 **File formats read by each provider:**
 
-`version-file` reads the first non-empty line and trims its leading/trailing whitespace; the trimmed result is used as the version specification. Values longer than 256 bytes are rejected. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
+`version-file` reads the first non-empty line and trims its leading/trailing whitespace; the trimmed result is used as the version specification. Values longer than 256 bytes are rejected. The format follows the version-file convention popularised by other ecosystems' version managers — `.python-version`, `.ruby-version` and similar files — a single version on its own line, e.g. a `.r-version` containing:
 
 ```
 4.4.1
