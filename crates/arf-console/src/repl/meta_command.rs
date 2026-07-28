@@ -152,6 +152,7 @@ pub fn process_meta_command(
             // Extract the complete version argument, since version ranges may
             // contain spaces (for example, ">=4.3, <5.0").
             let version = trimmed[1..]
+                .trim_start()
                 .strip_prefix(cmd)
                 .map(str::trim)
                 .filter(|version| !version.is_empty())
@@ -946,6 +947,22 @@ mod tests {
         };
         let result = call_meta(":switch! 4.4", &mut config, &None, &None, &status_rig);
         assert!(matches!(result, Some(MetaCommandResult::Restart(Some(ref v))) if v == "4.4"));
+    }
+
+    #[test]
+    fn test_process_meta_command_switch_force_accepts_space_after_colon() {
+        let mut config = create_test_prompt_config();
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+            override_info: None,
+        };
+
+        let result = call_meta(": switch! 4.4", &mut config, &None, &None, &status_rig);
+
+        assert!(matches!(
+            result,
+            Some(MetaCommandResult::Restart(Some(ref version))) if version == "4.4"
+        ));
     }
 
     #[test]

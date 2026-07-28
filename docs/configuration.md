@@ -610,7 +610,7 @@ These options are mutually exclusive.
 
 ### rig Integration
 
-When using rig (either via `r_source = "auto"` with rig installed, `r_source = "rig"`, or `--with-r-version`), arf uses rig's default version. You can change the default with:
+When using rig via `r_source = "auto"` with rig installed or `r_source = "rig"`, arf uses rig's default version. The `--with-r-version` flag accepts an explicit specification: `--with-r-version default` selects rig's default, while another specification selects the matching installed version. You can change the default with:
 
 ```bash
 rig default 4.5
@@ -621,9 +621,11 @@ The `--with-r-version` flag supports version resolution:
 | Specification | Description |
 |--------------|-------------|
 | `default` | Use rig's default R version |
-| `release` | Use the version aliased as "release" |
-| `4.5` | Match the first version starting with "4.5" |
-| `4.5.2` | Match exact version |
+| Rig alias (e.g. `release`) | Use the version associated with that rig alias |
+| Rig-assigned name (e.g. `custom-name`) | Use the installed version with that rig name |
+| Full version (e.g. `4.5.2`) | Match that exact version |
+| Partial version (e.g. `4.5` or `4`) | Use the latest installed version in the `4.5.x` or `4.x` series |
+| Version range (e.g. `^4.4` or `>=4.3, <5.0`) | Use the latest installed version that satisfies the range |
 
 ## History Configuration
 
@@ -841,7 +843,7 @@ The other provider forms are:
 4.4.1
 ```
 
-Comments and multiple independent specifications are not supported. After trimming leading and trailing whitespace and newlines, arf passes the entire file to its version-specification parser as one specification. That single specification may be any supported form, including a version range such as `>=4.3, <5.0`; separate lines or other extra text make it invalid.
+Comments are not supported, and the whole trimmed file has to be one specification — it may be any supported form, including a range such as `>=4.3, <5.0`, but not several specifications. Only spaces are accepted inside a specification, so a range must stay on one line: leading and trailing newlines are trimmed away, but one in the middle makes the file invalid.
 
 `toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
 
