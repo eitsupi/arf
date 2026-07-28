@@ -841,7 +841,7 @@ The other provider forms are:
 4.4.1
 ```
 
-There is no support for comments or multiple lines: the whole file is treated as one version string, so anything beyond a single version makes the specification invalid.
+Comments and multiple independent specifications are not supported. After trimming leading and trailing whitespace and newlines, arf passes the entire file to its version-specification parser as one specification. That single specification may be any supported form, including a semantic-version range such as `>=4.3, <5.0`; separate lines or other extra text make it invalid.
 
 `toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
 
@@ -906,7 +906,7 @@ For `headless`, `--r-home` and `--with-r-version` are resolved as one mutually e
 Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
 
 > [!WARNING]
-> With the default `startup.r_source = "auto"`, arf ends up on the R that rig has made the default, which is also the `R` first on PATH. IDE integrations such as vscode-R discover that same R, so the editor and the console have historically agreed on one installation.
+> With the default `startup.r_source = "auto"`, arf uses rig's default R directly when rig is available and its default can be resolved; otherwise it falls back to the R found on PATH. This does not guarantee that arf and an editor use the same installation: for example, a conda-provided R can appear before rig's shim on PATH, so the editor may discover it while arf uses rig's default.
 >
 > `r_source_overrides` and `ARF_R_HOME` / `ARF_R_VERSION` select R independently of PATH, so arf's R can silently diverge from the editor's. That breaks integrations assuming a shared installation, because installed packages and library paths are resolved against the editor's R.
 >

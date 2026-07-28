@@ -123,11 +123,24 @@ pub fn resolve_version(spec: &str) -> Result<ResolvedVersion, RigError> {
 ///
 /// This is used by callers that have already called [`list_versions`] and need
 /// to avoid fetching the same list again.
-pub fn resolve_version_from_versions(
+fn resolve_version_from_versions(
     spec: &str,
     versions: &[RigVersion],
 ) -> Result<ResolvedVersion, RigError> {
     resolve_version_from_versions_with(spec, versions, get_r_home_from_binary)
+}
+
+/// Resolve an already-selected semantic version from an installed rig list.
+///
+/// Unlike [`resolve_version_from_versions`], this deliberately matches only
+/// the reported version field. It is used by R source overrides after the
+/// shared version resolver has selected a semantic version, so rig names and
+/// aliases must not reinterpret that selection.
+pub fn resolve_selected_version_from_versions(
+    selected: &semver::Version,
+    versions: &[RigVersion],
+) -> Result<ResolvedVersion, RigError> {
+    resolve_selected_version_from_versions_with(selected, versions, get_r_home_from_binary)
 }
 
 fn resolve_version_from_versions_with<F>(
@@ -140,12 +153,38 @@ where
 {
     let version = select_version_from_versions(spec, versions)?;
 
+    resolve_rig_version_with(&version, get_r_home)
+}
+
+fn resolve_selected_version_from_versions_with<F>(
+    selected: &semver::Version,
+    versions: &[RigVersion],
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
+    let version = versions
+        .iter()
+        .find(|version| parse_version(&version.version).as_ref() == Some(selected))
+        .ok_or_else(|| RigError::VersionNotFound(selected.to_string()))?;
+
+    resolve_rig_version_with(version, get_r_home)
+}
+
+fn resolve_rig_version_with<F>(
+    version: &RigVersion,
+    get_r_home: F,
+) -> Result<ResolvedVersion, RigError>
+where
+    F: FnOnce(&str) -> Result<String, RigError>,
+{
     // Resolve R_HOME from the selected installation.
     let r_home = get_r_home(&version.binary)?;
 
     Ok(ResolvedVersion {
         r_home,
-        version: version.version,
+        version: version.version.clone(),
     })
 }
 
@@ -361,6 +400,25 @@ mod tests {
 
         assert_eq!(resolved.version, "4.4.1");
         assert_eq!(resolved.r_home, "/opt/R/4.4.1/lib/R");
+    }
+
+    #[test]
+    fn selected_version_ignores_conflicting_rig_names_and_aliases() {
+        let versions = vec![
+            rig_version("4.4.1", false, "4.5.0", &["4.4.1"]),
+            rig_version("installed-4.4.1", false, "4.4.1", &[]),
+        ];
+        let selected = semver::Version::parse("4.4.1").unwrap();
+
+        let resolved =
+            resolve_selected_version_from_versions_with(&selected, &versions, |binary| {
+                assert_eq!(binary, "/opt/R/installed-4.4.1/bin/R");
+                Ok("/opt/R/installed-4.4.1/lib/R".to_string())
+            })
+            .unwrap();
+
+        assert_eq!(resolved.version, "4.4.1");
+        assert_eq!(resolved.r_home, "/opt/R/installed-4.4.1/lib/R");
     }
 
     fn rig_version(name: &str, default: bool, version: &str, aliases: &[&str]) -> RigVersion {

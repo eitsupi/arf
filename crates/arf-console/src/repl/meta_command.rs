@@ -149,8 +149,13 @@ pub fn process_meta_command(
                 return Some(MetaCommandResult::Handled);
             }
 
-            // Extract version argument
-            let version = parts.get(1).map(|s| s.to_string());
+            // Extract the complete version argument, since semver ranges may
+            // contain spaces (for example, ">=4.3, <5.0").
+            let version = trimmed[1..]
+                .strip_prefix(cmd)
+                .map(str::trim)
+                .filter(|version| !version.is_empty())
+                .map(str::to_owned);
             if version.is_none() {
                 arf_println!("Usage: :{cmd} <version>");
                 arf_println!("Example: :{cmd} 4.4 or :{cmd} release");
@@ -941,6 +946,45 @@ mod tests {
         };
         let result = call_meta(":switch! 4.4", &mut config, &None, &None, &status_rig);
         assert!(matches!(result, Some(MetaCommandResult::Restart(Some(ref v))) if v == "4.4"));
+    }
+
+    #[test]
+    fn test_process_meta_command_switch_force_accepts_spaced_semver_range() {
+        let mut config = create_test_prompt_config();
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+            override_info: None,
+        };
+
+        let result = call_meta(
+            ":switch! >=4.3, <5.0",
+            &mut config,
+            &None,
+            &None,
+            &status_rig,
+        );
+
+        assert!(matches!(
+            result,
+            Some(MetaCommandResult::Restart(Some(ref version)))
+                if version == ">=4.3, <5.0"
+        ));
+    }
+
+    #[test]
+    fn test_process_meta_command_switch_force_preserves_named_version() {
+        let mut config = create_test_prompt_config();
+        let status_rig = RSourceStatus::Rig {
+            version: "4.4.0".to_string(),
+            override_info: None,
+        };
+
+        let result = call_meta(":switch! release", &mut config, &None, &None, &status_rig);
+
+        assert!(matches!(
+            result,
+            Some(MetaCommandResult::Restart(Some(ref version))) if version == "release"
+        ));
     }
 
     #[test]

@@ -470,8 +470,7 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             return Some(OverrideResolution::Fallback { diagnostics });
         };
 
-        let selected_version = selected.to_string();
-        match setup_r_via_rig_from_versions(&selected_version, &installed) {
+        match setup_r_via_selected_rig_version(selected, &installed) {
             Ok(RSourceStatus::Rig { version, .. }) => {
                 let info = RSourceOverrideInfo {
                     provider: provider.to_owned(),
@@ -630,19 +629,18 @@ fn setup_r_via_rig(version_spec: &str) -> Result<RSourceStatus> {
     }
 }
 
-/// Set up R from a version list that was already fetched for an override.
+/// Set up R from the exact semantic version selected for an override.
 ///
-/// The caller has already confirmed that rig is available and obtained the
-/// list, so neither is checked again here.
-fn setup_r_via_rig_from_versions(
-    version_spec: &str,
+/// The override resolver has already selected a version from rig's reported
+/// version fields. Re-resolving its string would allow a rig name or alias to
+/// select a different installation.
+fn setup_r_via_selected_rig_version(
+    selected: &semver::Version,
     versions: &[external::rig::RigVersion],
 ) -> Result<RSourceStatus> {
-    match external::rig::resolve_version_from_versions(version_spec, versions) {
+    match external::rig::resolve_selected_version_from_versions(selected, versions) {
         Ok(resolved) => apply_rig_resolution(resolved),
-        Err(e) => {
-            anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
-        }
+        Err(error) => anyhow::bail!("Failed to resolve R version '{}': {}", selected, error),
     }
 }
 
