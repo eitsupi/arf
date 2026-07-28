@@ -801,7 +801,7 @@ Abbreviations are matched against the word immediately to the left of the cursor
 
 Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
 
-Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though tools such as pixi or uvr may walk up the directory tree themselves. Relative `file` paths are therefore relative to the current working directory.
+Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though the tools that write these files often do. Relative `file` paths are therefore relative to the current working directory.
 
 Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
 
@@ -830,13 +830,37 @@ The other provider forms are:
 { type = "pixi" }
 ```
 
-Version strings are interpreted as follows:
+**File formats read by each provider:**
+
+`version-file` reads the entire file as text and trims leading/trailing whitespace and newlines; the trimmed result is used as the version specification. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
+
+```
+4.4.1
+```
+
+There is no support for comments or multiple lines: the whole file is treated as one version string, so anything beyond a single version makes the specification invalid.
+
+`toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
+
+```toml
+[project]
+name = "my-analysis"
+r_version = "4.4"
+```
+
+With `key = "project.r_version"`, arf looks up the `project` table and reads its `r_version` field. The value must be a TOML string; any other type is treated as an error.
+
+**Version strings are interpreted as follows:**
 
 - Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
 - If multiple installed R versions match, the newest matching version is selected.
 - Semantic-version ranges such as `^4.4` and `>=4.3, <5.0` are also supported.
 - The `devel` and `release` aliases are not currently supported by the R source override path.
 - Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
+
+**Who performs the matching:** rig never sees the version specification. It only lists the installed R versions (`rig list --json`) and reports where one exact version is installed. arf reads the specification from the provider, matches it against that list itself, and hands rig the single concrete version it settled on.
+
+arf matches specifications in two different places, and `r_source_overrides` uses the stricter one. `--with-r-version` and `:switch` try a rig alias, then an exact name, then an exact version, and finally a plain string prefix — so `4.4` there can also select an unrelated `4.40.0`, and rig's `release`, `devel` and `default` selectors work. Overrides compare numeric components instead, so `4.4` only ever selects `4.4.x`, and those selectors are unavailable.
 
 When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
 
