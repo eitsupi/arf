@@ -878,6 +878,13 @@ For `headless`, `--r-home` and `--with-r-version` are resolved as one mutually e
 
 Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
 
+> [!WARNING]
+> With the default `startup.r_source = "auto"`, arf ends up on the R that rig has made the default, which is also the `R` first on PATH. IDE integrations such as vscode-R discover that same R, so the editor and the console have historically agreed on one installation.
+>
+> `r_source_overrides` and `ARF_R_HOME` / `ARF_R_VERSION` select R independently of PATH, so arf's R can silently diverge from the editor's. That breaks integrations assuming a shared installation, because installed packages and library paths are resolved against the editor's R.
+>
+> Consider leaving both disabled in an IDE-integrated workflow. If you enable them, keep the selection in sync with the editor, or have the editor launch arf with `--r-home` pointing at its own R.
+
 ## Other CLI Options
 
 Command-line options take precedence over their corresponding config file settings:
