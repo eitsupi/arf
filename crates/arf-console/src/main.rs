@@ -16,6 +16,7 @@ mod pager;
 mod pid_file;
 pub(crate) mod r_parser;
 mod repl;
+pub mod rversion;
 mod traps;
 
 #[cfg(test)]
