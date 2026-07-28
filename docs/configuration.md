@@ -806,7 +806,7 @@ Automatically select an installed R version from project tooling. This feature i
 > [!IMPORTANT]
 > A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file` and `toml-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
 
-Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though the tools that write these files often do. Relative `file` paths are therefore relative to the current working directory.
+Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
 
 Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
 

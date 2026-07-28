@@ -22,7 +22,7 @@ mod traps;
 #[cfg(test)]
 mod test_utils;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
@@ -241,9 +241,11 @@ fn run() -> Result<()> {
     }
 
     // Set up R based on r_source config (with optional CLI override)
+    let base_dir = std::env::current_dir().context("Failed to determine current directory")?;
     let resolution = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
+        &base_dir,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
         cli.no_r_source_overrides,

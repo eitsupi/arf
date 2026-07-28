@@ -128,9 +128,11 @@ pub(crate) fn run_headless(
     };
 
     // Set up R
+    let base_dir = std::env::current_dir().context("Failed to determine current directory")?;
     let resolution = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
+        &base_dir,
         r_home,
         r_version,
         no_r_source_overrides,
