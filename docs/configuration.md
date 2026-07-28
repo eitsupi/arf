@@ -592,6 +592,15 @@ r_source = "rig"
 r_source = { path = "/opt/R/4.5.2" }
 ```
 
+### Version Specifications
+
+arf uses the same installed-version matching for `--with-r-version`, `:switch`, and R source overrides. `--with-r-version` and `:switch` additionally accept rig's own selectors, which are tried first — see [rig Integration](#rig-integration). An R version is a plain `major.minor.patch` number: R does not publish prereleases or build metadata, and rig reports installed R versions in that form. For installed-version matching, arf accepts two forms:
+
+- Exact or partial version numbers: `4`, `4.4`, or `4.4.2`. The number of components written determines the precision: `4.4` matches the `4.4.x` series, while `4.4.2` matches only `4.4.2`.
+- Ranges using comparison operators such as `^4.4`, `~4.4`, `>=4.3`, `<5.0`, and `*`. Operators can be combined, for example `>=4.3, <5.0`.
+
+The range operators use the syntax popularised by Cargo and npm. This is only range notation for selecting R versions; R version numbers are not SemVer. Because an R version has only three components, numeric specifications with four or more components, such as `4.4.1.0`, cannot match and are rejected. Likewise, prerelease identifiers and build metadata are rejected because installed R versions never carry them. If multiple installed versions match, arf selects the newest one.
+
 ### CLI Options
 
 The `--r-home` flag specifies an explicit R_HOME path:
@@ -600,7 +609,7 @@ The `--r-home` flag specifies an explicit R_HOME path:
 arf --r-home /opt/R/4.5.2
 ```
 
-The `--with-r-version` flag temporarily overrides `r_source` and uses rig:
+The `--with-r-version` flag temporarily overrides `r_source` and uses rig. It accepts one of the version specifications above or a selector from rig's own metadata:
 
 ```bash
 arf --with-r-version 4.5
@@ -616,16 +625,15 @@ When using rig via `r_source = "auto"` with rig installed or `r_source = "rig"`,
 rig default 4.5
 ```
 
-The `--with-r-version` flag supports version resolution:
+Rig selectors are separate from version specifications:
 
-| Specification | Description |
+| Selector | Description |
 |--------------|-------------|
 | `default` | Use rig's default R version |
-| Rig alias (e.g. `release`) | Use the version associated with that rig alias |
+| Rig alias (e.g. `release` or `devel`) | Use the version associated with that rig alias |
 | Rig-assigned name (e.g. `custom-name`) | Use the installed version with that rig name |
-| Full version (e.g. `4.5.2`) | Match that exact version |
-| Partial version (e.g. `4.5` or `4`) | Use the latest installed version in the `4.5.x` or `4.x` series |
-| Version range (e.g. `^4.4` or `>=4.3, <5.0`) | Use the latest installed version that satisfies the range |
+
+`--with-r-version` and `:switch` try these selectors before interpreting the value as a version specification, in the order listed above. R source overrides never consult them and always interpret the value as a version specification. This matters when a rig alias or name looks like a version number: if an installation is named `4.4`, then `--with-r-version 4.4` selects that installation by name, while `4.4` in an override file selects the newest installed `4.4.x` release, which may be a different installation.
 
 ## History Configuration
 
@@ -806,7 +814,9 @@ Automatically select an installed R version from project tooling. This feature i
 > [!IMPORTANT]
 > A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file` and `toml-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
 
-Override files are searched in the current working directory only. arf does **not** walk up parent directories, even though the tools that write these files often do. Relative `file` paths are therefore relative to the current working directory.
+Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
+
+arf uses the `file` value as written and performs no case folding, so whether `.r-version` also matches a file named `.R-version` depends on the filesystem: case-insensitive on typical macOS and Windows setups, case-sensitive on typical Linux ones. Write the exact spelling your project uses to keep the config portable across platforms.
 
 Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
 
@@ -815,7 +825,7 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | Option | Default | Description |
 |--------|---------|-------------|
 | `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
-| `type = "version-file"` | — | Reads the complete version specification from the `file` field. |
+| `type = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
 | `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
 | `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
 
@@ -837,13 +847,13 @@ The other provider forms are:
 
 **File formats read by each provider:**
 
-`version-file` reads the entire file as text and trims leading/trailing whitespace and newlines; the trimmed result is used as the version specification. This is the same shape as `.python-version`, `.node-version` and similar files in other ecosystems — a single version on its own line, e.g. a `.r-version` containing:
+`version-file` reads the first non-empty line and trims its leading/trailing whitespace; the trimmed result is used as the version specification. Values longer than 256 bytes are rejected. The format follows the version-file convention popularised by other ecosystems' version managers — `.python-version`, `.ruby-version` and similar files — a single version on its own line, e.g. a `.r-version` containing:
 
 ```
 4.4.1
 ```
 
-Comments are not supported, and the whole trimmed file has to be one specification — it may be any supported form, including a range such as `>=4.3, <5.0`, but not several specifications. Only spaces are accepted inside a specification, so a range must stay on one line: leading and trailing newlines are trimmed away, but one in the middle makes the file invalid.
+Comments are not supported. The first non-empty line may be any supported form, including a range such as `>=4.3, <5.0`; later lines are ignored. Only spaces are accepted inside a specification, so a range must stay on one line.
 
 `toml-key` parses `file` as TOML and follows `key` as a dot-separated path through its tables. For example, rv's `rproject.toml` might contain:
 
@@ -855,17 +865,11 @@ r_version = "4.4"
 
 With `key = "project.r_version"`, arf looks up the `project` table and reads its `r_version` field. The value must be a TOML string; any other type is treated as an error.
 
-**Version strings are interpreted as follows:**
-
-- Numeric precision is determined by the number of components written: `4.4` matches any `4.4.x` release, while `4.4.1` matches only `4.4.1`.
-- If multiple installed R versions match, the newest matching version is selected.
-- Version ranges such as `^4.4` and `>=4.3, <5.0` are also supported. These use the syntax Cargo and npm popularised; the SemVer specification itself does not define range operators.
-- The `devel` and `release` aliases are not currently supported by the R source override path.
-- Numeric version strings with four or more components, such as `4.4.1.0`, are invalid.
+**Version strings read by `version-file` and `toml-key` use the version specifications above.** These providers accept exact or partial numbers and ranges, and select the newest installed version that matches. `devel` and `release` are recognised names, but named selectors are not supported by the R source override path.
 
 **Who performs the matching:** arf runs rig only to check that it is there (`rig --version`) and to list what is installed (`rig list --json`). It then matches the specification against that list itself and asks the selected installation's R binary for its `R_HOME`. rig never sees the specification, so it is arf that decides what `4.4` means.
 
-`--with-r-version`, `:switch` and `r_source_overrides` share that matching, so numeric specifications and version ranges mean the same thing everywhere. Only the selectors that come from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, and have no equivalent in an override file.
+`--with-r-version`, `:switch` and `r_source_overrides` share the numeric and range matching described above. Only selectors from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, while named selectors are unsupported in an override file.
 
 When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
 

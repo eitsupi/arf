@@ -244,6 +244,7 @@ fn run() -> Result<()> {
     let resolution = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
+        None,
         cli.r_home.as_deref(),
         cli.r_version.as_deref(),
         cli.no_r_source_overrides,

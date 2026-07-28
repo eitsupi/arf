@@ -131,6 +131,7 @@ pub(crate) fn run_headless(
     let resolution = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
+        None,
         r_home,
         r_version,
         no_r_source_overrides,
