@@ -119,6 +119,9 @@ impl fmt::Display for VersionSpecParseError {
 
 impl std::error::Error for VersionSpecParseError {}
 
+/// The number of components in a `semver::Version`.
+const VERSION_COMPONENT_COUNT: usize = 3;
+
 impl VersionSpec {
     /// Parse a version specification.
     ///
@@ -138,6 +141,11 @@ impl VersionSpec {
         if components.iter().all(|component| {
             !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
         }) {
+            // A version has at most major, minor and patch, so a longer
+            // specification could never match anything.
+            if components.len() > VERSION_COMPONENT_COUNT {
+                return Err(VersionSpecParseError::Invalid(input.to_owned()));
+            }
             let digits = components
                 .iter()
                 .map(|component| component.parse::<u64>())
@@ -154,7 +162,8 @@ impl VersionSpec {
     fn matches(&self, version: &Version) -> bool {
         match self {
             Self::Digits(digits) => {
-                let version_components = [version.major, version.minor, version.patch];
+                let version_components: [u64; VERSION_COMPONENT_COUNT] =
+                    [version.major, version.minor, version.patch];
                 digits.len() <= version_components.len()
                     && digits
                         .iter()
@@ -285,6 +294,14 @@ mod tests {
             Err(VersionSpecParseError::Empty)
         ));
         assert!(VersionSpec::parse("r-4.4.1").is_err());
+    }
+
+    #[test]
+    fn numeric_specs_longer_than_a_version_are_rejected() {
+        assert!(matches!(
+            VersionSpec::parse("4.4.1.0"),
+            Err(VersionSpecParseError::Invalid(spec)) if spec == "4.4.1.0"
+        ));
     }
 
     #[test]
