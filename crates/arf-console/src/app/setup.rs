@@ -372,6 +372,8 @@ where
 {
     let mut diagnostics = Vec::new();
     let mut evaluated_provider = false;
+    let mut rig_available_cache = None;
+    let mut installed_versions_cache = None;
 
     for source in overrides {
         let provider = override_provider_name(source);
@@ -462,19 +464,24 @@ where
             continue;
         }
 
-        if !rig_available() {
+        let rig_is_available = *rig_available_cache.get_or_insert_with(&rig_available);
+        if !rig_is_available {
             diagnostics.push(rig_unavailable_warning());
             return Some(OverrideResolution::Fallback { diagnostics });
         }
 
-        let installed = match list_versions() {
-            Ok(versions) => versions,
-            Err(error) => {
-                diagnostics.push(format!(
-                    "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
-                    override_location(source)
-                ));
-                return Some(OverrideResolution::Fallback { diagnostics });
+        let installed = if let Some(installed) = installed_versions_cache.as_ref() {
+            installed
+        } else {
+            match list_versions() {
+                Ok(versions) => installed_versions_cache.insert(versions),
+                Err(error) => {
+                    diagnostics.push(format!(
+                        "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
+                        override_location(source)
+                    ));
+                    return Some(OverrideResolution::Fallback { diagnostics });
+                }
             }
         };
         let installed_versions = installed
@@ -492,7 +499,7 @@ where
             continue;
         };
 
-        match resolve_selected_rig_version(selected, &installed) {
+        match resolve_selected_rig_version(selected, installed) {
             Ok(RSourceStatus::Rig { version, .. }) => {
                 let info = RSourceOverrideInfo {
                     provider: provider.to_owned(),
@@ -804,6 +811,8 @@ mod session_id_tests {
 mod r_source_override_tests {
     use super::*;
     use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn path_source(path: &Path) -> RSource {
         RSource::Path {
@@ -1060,6 +1069,82 @@ mod r_source_override_tests {
                 panic!("the installed provider should be applied")
             }
         }
+    }
+
+    #[test]
+    fn rig_data_is_fetched_once_across_override_providers() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_file = temp.path().join("first.r-version");
+        let second_file = temp.path().join("second.r-version");
+        std::fs::write(&first_file, "4.3.0\n").unwrap();
+        std::fs::write(&second_file, "4.4.2\n").unwrap();
+
+        let rig_available_calls = Arc::new(AtomicUsize::new(0));
+        let list_versions_calls = Arc::new(AtomicUsize::new(0));
+        let rig_available_calls_for_closure = Arc::clone(&rig_available_calls);
+        let list_versions_calls_for_closure = Arc::clone(&list_versions_calls);
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::VersionFile { file: first_file },
+                RSourceOverride::VersionFile {
+                    file: second_file.clone(),
+                },
+            ],
+            move || {
+                rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                true
+            },
+            move || {
+                list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                Ok(vec![rig_version("4.4.2")])
+            },
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                Ok(RSourceStatus::Rig {
+                    version: versions[0].version.clone(),
+                    override_info: None,
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(result, OverrideResolution::Applied { .. }));
+        assert_eq!(rig_available_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(list_versions_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn missing_override_files_do_not_fetch_rig_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let rig_available_calls = Arc::new(AtomicUsize::new(0));
+        let list_versions_calls = Arc::new(AtomicUsize::new(0));
+        let rig_available_calls_for_closure = Arc::clone(&rig_available_calls);
+        let list_versions_calls_for_closure = Arc::clone(&list_versions_calls);
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::VersionFile {
+                    file: temp.path().join("missing-first.r-version"),
+                },
+                RSourceOverride::VersionFile {
+                    file: temp.path().join("missing-second.r-version"),
+                },
+            ],
+            move || {
+                rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                true
+            },
+            move || {
+                list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                Ok(Vec::new())
+            },
+            |_, _| panic!("R version resolution should not be attempted"),
+        );
+
+        assert!(result.is_none());
+        assert_eq!(rig_available_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(list_versions_calls.load(Ordering::Relaxed), 0);
     }
 
     fn rig_version(version: &str) -> external::rig::RigVersion {
