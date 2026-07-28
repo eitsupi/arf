@@ -864,6 +864,8 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 The first five tiers express the expected `CLI > env > local config file > global config file` precedence. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
 
+For `headless`, a subcommand CLI value takes precedence over the top-level value; the top-level value may come from the CLI or its environment variable.
+
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|
 | 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |

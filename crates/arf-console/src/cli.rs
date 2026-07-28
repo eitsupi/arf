@@ -339,11 +339,7 @@ Examples:
         /// startup.r_source, which are not consulted at all when this is set.
         ///
         /// Config: startup.r_source
-        #[arg(
-            long = "with-r-version",
-            env = "ARF_R_VERSION",
-            conflicts_with = "r_home"
-        )]
+        #[arg(long = "with-r-version", conflicts_with = "r_home")]
         r_version: Option<String>,
 
         /// Highest-priority R source: use this explicit R_HOME path
@@ -354,7 +350,7 @@ Examples:
         /// startup.r_source, which are not consulted at all when this is set.
         ///
         /// Config: startup.r_source
-        #[arg(long = "r-home", value_hint = ValueHint::DirPath, env = "ARF_R_HOME", conflicts_with = "r_version")]
+        #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
         r_home: Option<PathBuf>,
 
         /// Disable experimental directory-level R source overrides
@@ -450,6 +446,14 @@ Examples:
         #[arg(long = "min-vsize", hide = true)]
         min_vsize: Option<String>,
     },
+}
+
+/// Resolve a subcommand value over its top-level counterpart.
+pub(crate) fn subcommand_value_or_top_level<'a, T>(
+    top_level: Option<&'a T>,
+    subcommand: Option<&'a T>,
+) -> Option<&'a T> {
+    subcommand.or(top_level)
 }
 
 #[derive(Subcommand, Debug)]
@@ -1029,6 +1033,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli =
             Cli::try_parse_from(["arf", "--no-r-source-overrides", "--r-home", "/tmp/r-home"]);
         assert!(cli.is_ok());
@@ -1037,6 +1043,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_arf_r_home_has_same_precedence_as_r_home() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
@@ -1049,6 +1057,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_arf_r_version_has_same_precedence_as_with_r_version() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let _env = EnvVarGuard::set("ARF_R_VERSION", "4.5");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
@@ -1058,6 +1068,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_cli_value_wins_over_r_source_environment_value() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         {
             let _home_env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
             let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
@@ -1077,9 +1089,144 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_arf_r_home_conflicts_with_with_r_version() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
         let result = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]);
 
         assert!(result.is_err());
+    }
+
+    fn headless_r_source_values(cli: &Cli) -> (Option<PathBuf>, Option<String>) {
+        let Some(Commands::Headless {
+            r_home, r_version, ..
+        }) = cli.command.as_ref()
+        else {
+            panic!("expected headless command");
+        };
+
+        (
+            subcommand_value_or_top_level(cli.r_home.as_ref(), r_home.as_ref()).cloned(),
+            subcommand_value_or_top_level(cli.r_version.as_ref(), r_version.as_ref()).cloned(),
+        )
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_headless_r_home_uses_subcommand_cli_over_top_level_and_env() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+
+        let cli = Cli::try_parse_from(["arf", "--r-home", "/cli", "headless"]).unwrap();
+        assert_eq!(
+            headless_r_source_values(&cli).0.as_deref(),
+            Some(std::path::Path::new("/cli"))
+        );
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
+            let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+            assert_eq!(
+                headless_r_source_values(&cli).0.as_deref(),
+                Some(std::path::Path::new("/env"))
+            );
+        }
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
+            let cli = Cli::try_parse_from(["arf", "--r-home", "/cli", "headless"]).unwrap();
+            assert_eq!(
+                headless_r_source_values(&cli).0.as_deref(),
+                Some(std::path::Path::new("/cli"))
+            );
+        }
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
+            let cli = Cli::try_parse_from(["arf", "headless", "--r-home", "/cli"]).unwrap();
+            assert_eq!(
+                headless_r_source_values(&cli).0.as_deref(),
+                Some(std::path::Path::new("/cli"))
+            );
+        }
+
+        let cli =
+            Cli::try_parse_from(["arf", "--r-home", "/a", "headless", "--r-home", "/b"]).unwrap();
+        assert_eq!(
+            headless_r_source_values(&cli).0.as_deref(),
+            Some(std::path::Path::new("/b"))
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_headless_r_version_uses_subcommand_cli_over_top_level_and_env() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+
+        let cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5", "headless"]).unwrap();
+        assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
+            let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.9"));
+        }
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
+            let cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5", "headless"]).unwrap();
+            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
+        }
+
+        {
+            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
+            let cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
+            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
+        }
+
+        let cli = Cli::try_parse_from([
+            "arf",
+            "--with-r-version",
+            "4.4",
+            "headless",
+            "--with-r-version",
+            "4.5",
+        ])
+        .unwrap();
+        assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_cross_scope_r_source_conflicts_are_accepted_and_r_home_wins() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+
+        let cli = Cli::try_parse_from([
+            "arf",
+            "--with-r-version",
+            "4.5",
+            "headless",
+            "--r-home",
+            "/sub/r-home",
+        ])
+        .unwrap();
+        let (r_home, r_version) = headless_r_source_values(&cli);
+        assert_eq!(r_home.as_deref(), Some(std::path::Path::new("/sub/r-home")));
+        assert_eq!(r_version.as_deref(), Some("4.5"));
+
+        let cli = Cli::try_parse_from([
+            "arf",
+            "--r-home",
+            "/top/r-home",
+            "headless",
+            "--with-r-version",
+            "4.5",
+        ])
+        .unwrap();
+        let (r_home, r_version) = headless_r_source_values(&cli);
+        assert_eq!(r_home.as_deref(), Some(std::path::Path::new("/top/r-home")));
+        assert_eq!(r_version.as_deref(), Some("4.5"));
     }
 }

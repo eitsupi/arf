@@ -30,7 +30,7 @@ use app::headless::run_headless;
 use app::setup::source_r_profiles;
 use app::setup::{create_session_id, run_script, setup_r};
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Commands, RArgsBuilder};
+use cli::{Cli, Commands, RArgsBuilder, subcommand_value_or_top_level};
 use config::ensure_directories;
 use logging::init_logger;
 use pid_file::{
@@ -136,6 +136,9 @@ fn run() -> Result<()> {
             min_nsize,
             min_vsize,
         }) => {
+            let r_home = subcommand_value_or_top_level(cli.r_home.as_ref(), r_home.as_ref());
+            let r_version =
+                subcommand_value_or_top_level(cli.r_version.as_ref(), r_version.as_ref());
             let r_args_builder = RArgsBuilder {
                 vanilla: *vanilla,
                 no_environ: *no_environ,
@@ -150,8 +153,8 @@ fn run() -> Result<()> {
             };
             return run_headless(
                 config.as_ref(),
-                r_home.as_deref(),
-                r_version.as_deref(),
+                r_home.map(|path| path.as_path()),
+                r_version.map(String::as_str),
                 r_args_builder,
                 bind.as_deref(),
                 pid_file.as_deref(),
