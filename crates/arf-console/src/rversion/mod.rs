@@ -84,7 +84,8 @@ pub fn read_version_file(path: &Path) -> io::Result<String> {
         line.clear();
         let bytes_read = reader
             .by_ref()
-            .take((MAX_VERSION_FILE_VALUE_LENGTH + 1) as u64)
+            // Limit + 1 for the line's own `\n`, plus 1 to recognize `\r\n` before judging length.
+            .take((MAX_VERSION_FILE_VALUE_LENGTH + 2) as u64)
             .read_line(&mut line)?;
         if bytes_read == 0 {
             return Ok(String::new());
@@ -393,6 +394,77 @@ mod tests {
         let error = read_version_file(file.path()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(error.to_string(), "version file value exceeds 256 bytes");
+    }
+
+    #[test]
+    fn version_file_accepts_value_one_byte_under_limit_with_unix_and_windows_line_endings() {
+        for line_ending in ["\n", "\r\n"] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(
+                file.path(),
+                format!(
+                    "{}{}",
+                    "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH - 1),
+                    line_ending
+                ),
+            )
+            .unwrap();
+
+            assert_eq!(
+                read_version_file(file.path()).unwrap(),
+                "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH - 1)
+            );
+        }
+    }
+
+    #[test]
+    fn version_file_accepts_value_at_limit_with_unix_and_windows_line_endings() {
+        for line_ending in ["\n", "\r\n"] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(
+                file.path(),
+                format!(
+                    "{}{}",
+                    "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH),
+                    line_ending
+                ),
+            )
+            .unwrap();
+
+            assert_eq!(
+                read_version_file(file.path()).unwrap(),
+                "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH)
+            );
+        }
+    }
+
+    #[test]
+    fn version_file_rejects_value_one_byte_over_limit_with_unix_and_windows_line_endings() {
+        for line_ending in ["\n", "\r\n"] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(
+                file.path(),
+                format!(
+                    "{}{}",
+                    "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH + 1),
+                    line_ending
+                ),
+            )
+            .unwrap();
+
+            let error = read_version_file(file.path()).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "version file value exceeds 256 bytes");
+        }
+    }
+
+    #[test]
+    fn version_file_accepts_value_at_limit_at_end_of_file_without_trailing_newline() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let value = "4".repeat(MAX_VERSION_FILE_VALUE_LENGTH);
+        std::fs::write(file.path(), &value).unwrap();
+
+        assert_eq!(read_version_file(file.path()).unwrap(), value);
     }
 
     #[test]
