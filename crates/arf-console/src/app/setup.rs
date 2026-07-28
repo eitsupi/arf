@@ -351,6 +351,25 @@ enum OverrideResolution {
 
 /// Try the configured directory-level R source overrides in priority order.
 fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolution> {
+    setup_r_via_overrides_with(
+        overrides,
+        external::rig::rig_available,
+        external::rig::list_versions,
+        setup_r_via_selected_rig_version,
+    )
+}
+
+fn setup_r_via_overrides_with<FAvailable, FList, FResolve>(
+    overrides: &[RSourceOverride],
+    rig_available: FAvailable,
+    list_versions: FList,
+    resolve_selected_rig_version: FResolve,
+) -> Option<OverrideResolution>
+where
+    FAvailable: Fn() -> bool,
+    FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
+    FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<RSourceStatus>,
+{
     let mut diagnostics = Vec::new();
     let mut evaluated_provider = false;
 
@@ -443,12 +462,12 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             continue;
         }
 
-        if !external::rig::rig_available() {
+        if !rig_available() {
             diagnostics.push(rig_unavailable_warning());
             return Some(OverrideResolution::Fallback { diagnostics });
         }
 
-        let installed = match external::rig::list_versions() {
+        let installed = match list_versions() {
             Ok(versions) => versions,
             Err(error) => {
                 diagnostics.push(format!(
@@ -473,7 +492,7 @@ fn setup_r_via_overrides(overrides: &[RSourceOverride]) -> Option<OverrideResolu
             continue;
         };
 
-        match setup_r_via_selected_rig_version(selected, &installed) {
+        match resolve_selected_rig_version(selected, &installed) {
             Ok(RSourceStatus::Rig { version, .. }) => {
                 let info = RSourceOverrideInfo {
                     provider: provider.to_owned(),
@@ -786,43 +805,6 @@ mod r_source_override_tests {
     use super::*;
     use std::path::Path;
 
-    #[cfg(unix)]
-    struct EnvVarGuard {
-        name: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    #[cfg(unix)]
-    impl EnvVarGuard {
-        fn capture(name: &'static str) -> Self {
-            Self {
-                name,
-                original: std::env::var_os(name),
-            }
-        }
-
-        fn set(name: &'static str, value: std::ffi::OsString) -> Self {
-            let guard = Self::capture(name);
-            // SAFETY: This test serializes access to the process-global environment.
-            unsafe { std::env::set_var(name, value) };
-            guard
-        }
-    }
-
-    #[cfg(unix)]
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            // SAFETY: This test serializes access to the process-global environment.
-            unsafe {
-                if let Some(value) = &self.original {
-                    std::env::set_var(self.name, value);
-                } else {
-                    std::env::remove_var(self.name);
-                }
-            }
-        }
-    }
-
     fn path_source(path: &Path) -> RSource {
         RSource::Path {
             path: path.to_path_buf(),
@@ -1032,76 +1014,62 @@ mod r_source_override_tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn not_installed_override_falls_through_to_installed_provider() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::sync::Mutex;
-
-        static RIG_ENV_MUTEX: Mutex<()> = Mutex::new(());
-        let _env_lock = RIG_ENV_MUTEX.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
-        let _r_home_guard = EnvVarGuard::capture("R_HOME");
-        let bin_dir = temp.path().join("bin");
-        std::fs::create_dir(&bin_dir).unwrap();
-
-        let r_binary = bin_dir.join("fake-r");
-        std::fs::write(
-            &r_binary,
-            "#!/bin/sh\nprintf '%s\\n' '/fake/R/4.4.2/lib/R'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&r_binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let rig_json = serde_json::json!([{
-            "name": "4.4.2",
-            "default": true,
-            "version": "4.4.2",
-            "aliases": [],
-            "path": "/fake/R/4.4.2",
-            "binary": r_binary,
-        }]);
-        let rig_binary = bin_dir.join("rig");
-        let rig_script = format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nif [ \"$1\" = \"list\" ] && [ \"$2\" = \"--json\" ]; then printf '%s\\n' '{}'; exit 0; fi\nexit 1\n",
-            rig_json
-        );
-        std::fs::write(&rig_binary, rig_script).unwrap();
-        std::fs::set_permissions(&rig_binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let original_path = std::env::var_os("PATH");
-        let mut path_entries = vec![bin_dir];
-        if let Some(path) = original_path.as_ref() {
-            path_entries.extend(std::env::split_paths(path));
-        }
-        let path = std::env::join_paths(path_entries).unwrap();
-        let _path_guard = EnvVarGuard::set("PATH", path);
-
         let first_file = temp.path().join("first.r-version");
         let second_file = temp.path().join("second.r-version");
         std::fs::write(&first_file, "4.3.0\n").unwrap();
         std::fs::write(&second_file, "4.4.2\n").unwrap();
 
-        let report = setup_r(
-            &path_source(temp.path()),
+        let result = setup_r_via_overrides_with(
             &[
                 RSourceOverride::VersionFile { file: first_file },
                 RSourceOverride::VersionFile {
                     file: second_file.clone(),
                 },
             ],
-            None,
-            None,
-            false,
+            || true,
+            || Ok(vec![rig_version("4.4.2")]),
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                assert_eq!(versions[0].version, "4.4.2");
+                Ok(RSourceStatus::Rig {
+                    version: versions[0].version.clone(),
+                    override_info: None,
+                })
+            },
         )
         .unwrap();
 
-        assert_eq!(report.override_state, RSourceOverrideState::Applied);
-        assert_eq!(report.resolved_version.as_deref(), Some("4.4.2"));
-        assert_eq!(report.file, Some(second_file));
-        assert_eq!(report.diagnostics.len(), 1);
-        assert!(report.diagnostics[0].contains("4.3.0"));
-        assert!(report.diagnostics[0].contains("Trying the next R source override"));
-        assert!(!report.diagnostics[0].contains("Falling back to startup.r_source"));
+        match result {
+            OverrideResolution::Applied {
+                status,
+                info,
+                diagnostics,
+            } => {
+                assert!(matches!(*status, RSourceStatus::Rig { .. }));
+                assert_eq!(info.file, Some(second_file));
+                assert_eq!(info.resolved_version, "4.4.2");
+                assert_eq!(diagnostics.len(), 1);
+                assert!(diagnostics[0].contains("4.3.0"));
+                assert!(diagnostics[0].contains("Trying the next R source override"));
+                assert!(!diagnostics[0].contains("Falling back to startup.r_source"));
+            }
+            OverrideResolution::Fallback { .. } => {
+                panic!("the installed provider should be applied")
+            }
+        }
+    }
+
+    fn rig_version(version: &str) -> external::rig::RigVersion {
+        external::rig::RigVersion {
+            name: version.to_owned(),
+            default: true,
+            version: version.to_owned(),
+            aliases: Vec::new(),
+            path: format!("/opt/R/{version}"),
+            binary: format!("/opt/R/{version}/bin/R"),
+        }
     }
 }
