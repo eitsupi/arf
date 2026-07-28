@@ -96,18 +96,6 @@ pub fn read_toml_key(path: &Path, key: &str) -> Result<String, TomlKeyError> {
         .ok_or_else(|| TomlKeyError::NotString(key.to_owned()))
 }
 
-/// Parse and resolve one extracted version specification.
-pub fn resolve_version_string<'a>(
-    input: &str,
-    installed: &'a [Version],
-) -> Result<Option<&'a Version>, VersionSpecParseError> {
-    let spec = VersionSpec::parse(input)?;
-    if matches!(spec, VersionSpec::Named(_)) {
-        return Ok(None);
-    }
-    Ok(resolve_version(&spec, installed))
-}
-
 impl fmt::Display for VersionSpecParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -348,16 +336,5 @@ mod tests {
             read_toml_key(file.path(), "project.r_version"),
             Err(TomlKeyError::Parse(_))
         ));
-    }
-
-    #[test]
-    fn version_string_resolution_skips_named_selectors() {
-        let installed = versions(&["4.4.1"]);
-
-        assert_eq!(resolve_version_string("devel", &installed).unwrap(), None);
-        assert_eq!(
-            resolve_version_string("4.4", &installed).unwrap(),
-            Some(&Version::parse("4.4.1").unwrap())
-        );
     }
 }
