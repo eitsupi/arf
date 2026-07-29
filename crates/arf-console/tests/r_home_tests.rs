@@ -36,11 +36,16 @@ impl RLessEnvironment {
 
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
-        let mut path_entries = vec![self.bin_dir.clone()];
+        // Built per platform rather than extended in place, so the binding
+        // never needs `mut` on targets where the extension is compiled out.
         #[cfg(unix)]
-        {
-            path_entries.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
-        }
+        let path_entries = vec![
+            self.bin_dir.clone(),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+        ];
+        #[cfg(not(unix))]
+        let path_entries = vec![self.bin_dir.clone()];
         command
             .env_remove("R_HOME")
             .env_remove("ARF_R_HOME")
