@@ -92,16 +92,16 @@ impl super::Cli {
     /// Returns a vector of R arguments like ["--quiet", "--no-save", "--no-restore"].
     pub fn r_args(&self) -> Vec<String> {
         RArgsBuilder {
-            vanilla: self.vanilla,
-            no_environ: self.no_environ,
-            no_site_file: self.no_site_file,
-            no_init_file: self.no_init_file,
+            vanilla: self.r_compat.vanilla,
+            no_environ: self.r_compat.no_environ,
+            no_site_file: self.r_compat.no_site_file,
+            no_init_file: self.r_compat.no_init_file,
             save: self.save,
             restore: self.restore_data || self.restore,
-            max_connections: self.max_connections,
-            max_ppsize: self.max_ppsize,
-            min_nsize: self.min_nsize.as_deref(),
-            min_vsize: self.min_vsize.as_deref(),
+            max_connections: self.r_compat.max_connections,
+            max_ppsize: self.r_compat.max_ppsize,
+            min_nsize: self.r_compat.min_nsize.as_deref(),
+            min_vsize: self.r_compat.min_vsize.as_deref(),
         }
         .build()
     }

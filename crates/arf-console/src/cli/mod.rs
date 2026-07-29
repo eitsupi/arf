@@ -7,13 +7,13 @@ mod history;
 mod ipc;
 mod r_args;
 mod r_home;
+mod shared;
 
 pub(crate) use config::ConfigAction;
 pub(crate) use history::{HistoryAction, ImportSource};
 pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
 
-use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand, ValueHint};
 #[cfg(test)]
 use clap_complete::Shell;
@@ -44,9 +44,9 @@ pub struct Cli {
     #[arg(long)]
     pub auto_format: bool,
 
-    /// Path to configuration file
-    #[arg(short, long, value_hint = ValueHint::FilePath)]
-    pub config: Option<PathBuf>,
+    /// Shared R source options
+    #[command(flatten)]
+    pub r_source: shared::RSourceArgs,
 
     /// Suppress the startup banner
     ///
@@ -54,52 +54,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_banner: bool,
 
-    /// Highest-priority R source: use this R version via rig
-    ///
-    /// Accepts a rig alias (e.g. "release"), "default", a rig-assigned name,
-    /// a full version ("4.4.1"), a partial version ("4.4" or "4", matching
-    /// the latest release in that series), or a version range in the style
-    /// Cargo and npm use ("^4.4", ">=4.3, <5.0").
-    ///
-    /// Requires rig. Candidates are limited to R versions rig has installed
-    /// (from `rig list --json`); the version string is never passed to rig.
-    ///
-    /// Takes precedence over ARF_R_VERSION, r_source_overrides and
-    /// startup.r_source, which are not consulted at all when this is set.
-    ///
-    /// Config: startup.r_source
-    #[arg(
-        long = "with-r-version",
-        env = "ARF_R_VERSION",
-        conflicts_with = "r_home"
-    )]
-    pub r_version: Option<String>,
-
-    /// Highest-priority R source: use this explicit R_HOME path
-    ///
-    /// Mutually exclusive with --with-r-version and ARF_R_VERSION.
-    ///
-    /// Takes precedence over ARF_R_HOME, r_source_overrides and
-    /// startup.r_source, which are not consulted at all when this is set.
-    ///
-    /// Config: startup.r_source
-    #[arg(long = "r-home", value_hint = ValueHint::DirPath, env = "ARF_R_HOME", conflicts_with = "r_version")]
-    pub r_home: Option<PathBuf>,
-
-    /// Disable experimental directory-level R source overrides
-    ///
-    /// This only disables r_source_overrides. An R source given by
-    /// --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
-    ///
-    /// Config: [experimental].r_source_overrides
-    #[arg(long = "no-r-source-overrides")]
-    pub no_r_source_overrides: bool,
-
     // R-compatible flags (passed to R, for vscode-R and radian compatibility)
     // Hidden from short help (-h) but shown in long help (--help).
-    /// Start R in vanilla mode (no init files, no save/restore)
-    #[arg(long = "vanilla")]
-    pub vanilla: bool,
+    #[command(flatten)]
+    pub r_compat: shared::RCompatArgs,
 
     /// [R] Don't print R startup message
     #[arg(short = 'q', long = "quiet", alias = "silent", hide_short_help = true)]
@@ -125,18 +83,6 @@ pub struct Cli {
     #[arg(long = "restore-data", conflicts_with_all = ["no_restore", "no_restore_data"], hide_short_help = true)]
     pub restore_data: bool,
 
-    /// [R] Don't read the site and user environment files
-    #[arg(long = "no-environ", hide_short_help = true)]
-    pub no_environ: bool,
-
-    /// [R] Don't read the site-wide Rprofile
-    #[arg(long = "no-site-file", hide_short_help = true)]
-    pub no_site_file: bool,
-
-    /// [R] Don't read the user's .Rprofile
-    #[arg(long = "no-init-file", hide_short_help = true)]
-    pub no_init_file: bool,
-
     /// [R] Force R to run interactively (no-op, always interactive)
     #[arg(long = "interactive", hide = true)]
     pub interactive: bool,
@@ -160,22 +106,6 @@ pub struct Cli {
     /// [R] Specify encoding to be used for stdin (no-op)
     #[arg(long = "encoding", hide = true)]
     pub encoding: Option<String>,
-
-    /// [R] Set max number of connections to N
-    #[arg(long = "max-connections", hide = true)]
-    pub max_connections: Option<u32>,
-
-    /// [R] Set max size of protect stack to N
-    #[arg(long = "max-ppsize", hide = true)]
-    pub max_ppsize: Option<u32>,
-
-    /// [R] Set min number of fixed size obj's ("cons cells") to N
-    #[arg(long = "min-nsize", hide = true)]
-    pub min_nsize: Option<String>,
-
-    /// [R] Set vector heap minimum to N bytes; '4M' = 4 MegaB
-    #[arg(long = "min-vsize", hide = true)]
-    pub min_vsize: Option<String>,
 
     /// [R] Run R through debugger NAME (no-op)
     #[arg(short = 'd', long = "debugger", hide = true)]
@@ -238,25 +168,8 @@ pub struct Cli {
     #[arg(long = "no-completion", hide = true)]
     pub no_completion: bool,
 
-    /// Custom history directory (overrides default XDG location)
-    ///
-    /// R history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.
-    ///
-    /// Config: history.dir
-    #[arg(
-        long = "history-dir",
-        value_hint = ValueHint::DirPath,
-        env = "ARF_HISTORY_DIR",
-        hide_short_help = true,
-        value_parser = clap::builder::NonEmptyStringValueParser::new().map(PathBuf::from),
-    )]
-    pub history_dir: Option<PathBuf>,
-
-    /// Disable history (no history saved or loaded)
-    ///
-    /// Config: history.disabled
-    #[arg(long = "no-history", hide_short_help = true)]
-    pub no_history: bool,
+    #[command(flatten)]
+    pub history: shared::HistoryOptions,
 
     /// Subcommands
     #[command(subcommand)]
@@ -464,7 +377,7 @@ mod tests {
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
-        assert!(cli.no_r_source_overrides);
+        assert!(cli.r_source.no_r_source_overrides);
     }
 
     #[test]
@@ -476,7 +389,7 @@ mod tests {
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
-        assert!(args.no_r_source_overrides);
+        assert!(args.r_source.no_r_source_overrides);
     }
 
     #[test]
@@ -500,11 +413,11 @@ mod tests {
             panic!("expected r-home command");
         };
 
-        assert_eq!(args.config, Some(PathBuf::from("/tmp/arf.toml")));
-        assert_eq!(args.r_home, Some(PathBuf::from("/tmp/r-home")));
-        assert!(args.no_r_source_overrides);
+        assert_eq!(args.r_source.config, Some(PathBuf::from("/tmp/arf.toml")));
+        assert_eq!(args.r_source.r_home, Some(PathBuf::from("/tmp/r-home")));
+        assert!(args.r_source.no_r_source_overrides);
         assert!(args.json);
-        assert!(args.r_version.is_none());
+        assert!(args.r_source.r_version.is_none());
     }
 
     #[test]
@@ -526,7 +439,7 @@ mod tests {
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
         assert_eq!(
-            cli.r_home.as_deref(),
+            cli.r_source.r_home.as_deref(),
             Some(std::path::Path::new("/env/r-home"))
         );
     }
@@ -539,7 +452,7 @@ mod tests {
         let _env = EnvVarGuard::set("ARF_R_VERSION", "4.5");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
-        assert_eq!(cli.r_version.as_deref(), Some("4.5"));
+        assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
@@ -551,7 +464,7 @@ mod tests {
             let _home_env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
             let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
             assert_eq!(
-                home_cli.r_home.as_deref(),
+                home_cli.r_source.r_home.as_deref(),
                 Some(std::path::Path::new("/cli/r-home"))
             );
         }
@@ -559,7 +472,7 @@ mod tests {
         {
             let _version_env = EnvVarGuard::set("ARF_R_VERSION", "4.4");
             let version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
-            assert_eq!(version_cli.r_version.as_deref(), Some("4.5"));
+            assert_eq!(version_cli.r_source.r_version.as_deref(), Some("4.5"));
         }
     }
 
@@ -583,7 +496,7 @@ mod tests {
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
-        assert_eq!(args.r_home, Some(PathBuf::from("/env/r-home")));
+        assert_eq!(args.r_source.r_home, Some(PathBuf::from("/env/r-home")));
 
         drop(_r_home);
         drop(_r_version);
@@ -593,7 +506,7 @@ mod tests {
         let Some(Commands::RHome(args)) = cli.command else {
             panic!("expected r-home command");
         };
-        assert_eq!(args.r_version.as_deref(), Some("4.5"));
+        assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
@@ -618,6 +531,9 @@ mod tests {
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
-        assert_eq!(args.history_dir, Some(PathBuf::from("/env/history")));
+        assert_eq!(
+            args.history.history_dir,
+            Some(PathBuf::from("/env/history"))
+        );
     }
 }

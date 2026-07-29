@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/src/cli.rs
+source: crates/arf-console/src/cli/mod.rs
 expression: completions
 ---
 _arf() {
@@ -186,7 +186,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --no-r-source-overrides --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r-home help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --r-home --with-r-version --no-r-source-overrides --no-banner --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --quiet --no-save --save --no-restore --no-restore-data --restore-data --interactive --no-echo --slave --restore --verbose --encoding --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r-home help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -260,10 +260,6 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --with-r-version)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
                 --r-home)
                     COMPREPLY=()
                     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
@@ -271,7 +267,7 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --encoding)
+                --with-r-version)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
@@ -288,6 +284,10 @@ _arf() {
                     return 0
                     ;;
                 --min-vsize)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --encoding)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
@@ -502,7 +502,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__headless)
-            opts="-c -h --config --with-r-version --r-home --no-r-source-overrides --ipc-bind --ipc-pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --history-dir --no-history --min-nsize --min-vsize --help"
+            opts="-c -h --config --r-home --with-r-version --no-r-source-overrides --ipc-bind --ipc-pid-file --quiet --json --log-file --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --history-dir --no-history --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -538,15 +538,15 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --with-r-version)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
                 --r-home)
                     COMPREPLY=()
                     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
                         compopt -o plusdirs
                     fi
+                    return 0
+                    ;;
+                --with-r-version)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 --ipc-bind)
@@ -602,19 +602,19 @@ _arf() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
-                --history-dir)
-                    COMPREPLY=()
-                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
-                        compopt -o plusdirs
-                    fi
-                    return 0
-                    ;;
                 --min-nsize)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 --min-vsize)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --history-dir)
+                    COMPREPLY=()
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o plusdirs
+                    fi
                     return 0
                     ;;
                 *)
@@ -1321,7 +1321,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__r__subcmd__home)
-            opts="-c -h --config --with-r-version --r-home --no-r-source-overrides --json --help"
+            opts="-c -h --config --r-home --with-r-version --no-r-source-overrides --json --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1357,15 +1357,15 @@ _arf() {
                     fi
                     return 0
                     ;;
-                --with-r-version)
-                    COMPREPLY=($(compgen -f "${cur}"))
-                    return 0
-                    ;;
                 --r-home)
                     COMPREPLY=()
                     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
                         compopt -o plusdirs
                     fi
+                    return 0
+                    ;;
+                --with-r-version)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)

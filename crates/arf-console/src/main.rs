@@ -131,8 +131,8 @@ fn run() -> Result<()> {
         Some(Commands::History(args)) => {
             return handle_history_command(
                 &args.action,
-                cli.config.as_ref(),
-                cli.history_dir.as_ref(),
+                cli.r_source.config.as_ref(),
+                cli.history.history_dir.as_ref(),
             );
         }
         Some(Commands::Ipc(args)) => {
@@ -141,38 +141,38 @@ fn run() -> Result<()> {
         }
         Some(Commands::Headless(args)) => {
             let r_args_builder = RArgsBuilder {
-                vanilla: args.vanilla,
-                no_environ: args.no_environ,
-                no_site_file: args.no_site_file,
-                no_init_file: args.no_init_file,
+                vanilla: args.r_compat.vanilla,
+                no_environ: args.r_compat.no_environ,
+                no_site_file: args.r_compat.no_site_file,
+                no_init_file: args.r_compat.no_init_file,
                 save: false,
                 restore: false,
-                max_connections: args.max_connections,
-                max_ppsize: args.max_ppsize,
-                min_nsize: args.min_nsize.as_deref(),
-                min_vsize: args.min_vsize.as_deref(),
+                max_connections: args.r_compat.max_connections,
+                max_ppsize: args.r_compat.max_ppsize,
+                min_nsize: args.r_compat.min_nsize.as_deref(),
+                min_vsize: args.r_compat.min_vsize.as_deref(),
             };
             return run_headless(
-                args.config.as_ref(),
-                args.r_home.as_deref(),
-                args.r_version.as_deref(),
+                args.r_source.config.as_ref(),
+                args.r_source.r_home.as_deref(),
+                args.r_source.r_version.as_deref(),
                 r_args_builder,
                 args.bind.as_deref(),
                 args.pid_file.as_deref(),
                 args.quiet,
                 args.json,
                 args.log_file.as_deref(),
-                args.history_dir.as_deref(),
-                args.no_history,
-                args.no_r_source_overrides,
+                args.history.history_dir.as_deref(),
+                args.history.no_history,
+                args.r_source.no_r_source_overrides,
             );
         }
         Some(Commands::RHome(args)) => {
             return run_r_home(
-                args.config.as_deref(),
-                args.r_home.as_deref(),
-                args.r_version.as_deref(),
-                args.no_r_source_overrides,
+                args.r_source.config.as_deref(),
+                args.r_source.r_home.as_deref(),
+                args.r_source.r_version.as_deref(),
+                args.r_source.no_r_source_overrides,
                 args.json,
             );
         }
@@ -229,9 +229,9 @@ fn run() -> Result<()> {
     }
 
     // History configuration: CLI flag overrides default XDG location
-    if cli.no_history {
+    if cli.history.no_history {
         config.history.disabled = true;
-    } else if let Some(history_dir) = &cli.history_dir {
+    } else if let Some(history_dir) = &cli.history.history_dir {
         config.history.dir = Some(history_dir.clone());
     }
 
@@ -254,9 +254,9 @@ fn run() -> Result<()> {
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
-        cli.r_home.as_deref(),
-        cli.r_version.as_deref(),
-        cli.no_r_source_overrides,
+        cli.r_source.r_home.as_deref(),
+        cli.r_source.r_version.as_deref(),
+        cli.r_source.no_r_source_overrides,
     )?;
     resolution.emit_diagnostics();
     let r_source_status = resolution.status;

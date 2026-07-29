@@ -12,6 +12,17 @@ Options:
   -c, --config <CONFIG>
           Path to configuration file
 
+      --r-home <R_HOME>
+          Highest-priority R source: use this explicit R_HOME path
+          
+          Mutually exclusive with --with-r-version and ARF_R_VERSION.
+          
+          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+          
+          [env: ARF_R_HOME=]
+
       --with-r-version <R_VERSION>
           Highest-priority R source: use this R version via rig
           
@@ -24,17 +35,6 @@ Options:
           Config: startup.r_source
           
           [env: ARF_R_VERSION=]
-
-      --r-home <R_HOME>
-          Highest-priority R source: use this explicit R_HOME path
-          
-          Mutually exclusive with --with-r-version and ARF_R_VERSION.
-          
-          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
-          
-          Config: startup.r_source
-          
-          [env: ARF_R_HOME=]
 
       --no-r-source-overrides
           Disable experimental directory-level R source overrides
@@ -77,14 +77,14 @@ Options:
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
           
-          History will be stored at `{dir}/r.db`.
+          R history is stored at `{dir}/r.db`. The interactive console also stores shell history at `{dir}/shell.db`.
           
           Config: history.dir
           
           [env: ARF_HISTORY_DIR=]
 
       --no-history
-          Disable history (no history saved)
+          Disable history (no history saved or loaded)
           
           Config: history.disabled
 
