@@ -417,6 +417,7 @@ mod tests {
     fn test_help_headless_snapshot() {
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let _history_dir = EnvVarGuard::unset("ARF_HISTORY_DIR");
         let help = Cli::generate_help_string(&["headless"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {
             insta::assert_snapshot!("help_headless", help);
@@ -610,6 +611,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_headless_history_dir_reads_environment_value() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let _history_dir = EnvVarGuard::set("ARF_HISTORY_DIR", "/env/history");
         let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
