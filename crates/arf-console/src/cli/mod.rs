@@ -415,6 +415,14 @@ mod tests {
     }
 
     #[test]
+    fn test_help_headless_snapshot() {
+        let help = Cli::generate_help_string(&["headless"]);
+        insta::with_settings!({snapshot_path => "../snapshots"}, {
+            insta::assert_snapshot!("help_headless", help);
+        });
+    }
+
+    #[test]
     fn test_help_history_export_snapshot() {
         let help = Cli::generate_help_string(&["history", "export"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {

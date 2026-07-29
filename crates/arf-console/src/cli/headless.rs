@@ -3,25 +3,6 @@ use clap::{Args, ValueHint};
 use std::path::PathBuf;
 
 #[derive(Args, Debug)]
-#[command(after_long_help = "\
-Examples:
-  Start headless and evaluate R code:
-    $ arf headless &
-    # (wait for the server to be ready)
-    $ arf ipc eval '1 + 1'
-
-  CI usage with JSON output:
-    $ arf headless --json | jq -r .socket_path
-
-  Run with logging to a file:
-    $ arf headless --log-file arf.log --ipc-pid-file arf.pid
-
-  Use a custom socket path:
-    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
-    $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
-
-  Shut down a headless session:
-    $ arf ipc shutdown")]
 pub(crate) struct HeadlessArgs {
     /// Path to configuration file
     #[arg(short, long, value_hint = ValueHint::FilePath)]
