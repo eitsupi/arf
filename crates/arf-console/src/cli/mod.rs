@@ -7,13 +7,11 @@ mod history;
 mod ipc;
 mod r_args;
 mod r_home;
-mod r_source;
 
 pub(crate) use config::ConfigAction;
 pub(crate) use history::{HistoryAction, ImportSource};
 pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
-pub(crate) use r_source::resolve_headless_r_source;
 
 use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand, ValueHint};
@@ -221,7 +219,7 @@ pub struct Cli {
     ///
     /// Unix: filesystem path (e.g. /tmp/my-arf.sock)
     /// Windows: named pipe path (e.g. \\.\pipe\my-arf)
-    #[arg(long = "ipc-bind", requires = "with_ipc", value_hint = ValueHint::FilePath)]
+    #[arg(long = "ipc-bind", value_hint = ValueHint::FilePath)]
     pub ipc_bind: Option<String>,
 
     /// Write server PID to a file on startup (requires --with-ipc)
@@ -229,7 +227,7 @@ pub struct Cli {
     /// The file is removed when the REPL exits. Startup fails if the file
     /// cannot be written, so the editor is guaranteed to own the session or
     /// get an error — there is no silent fallback.
-    #[arg(long = "ipc-pid-file", requires = "with_ipc", value_hint = ValueHint::FilePath)]
+    #[arg(long = "ipc-pid-file", value_hint = ValueHint::FilePath)]
     pub ipc_pid_file: Option<PathBuf>,
 
     /// Disable auto-matching of brackets and quotes (for testing)
@@ -415,7 +413,11 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_help_headless_snapshot() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let _history_dir = EnvVarGuard::unset("ARF_HISTORY_DIR");
         let help = Cli::generate_help_string(&["headless"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {
             insta::assert_snapshot!("help_headless", help);
@@ -448,19 +450,28 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_history_dir_rejects_empty_string() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
         assert!(result.is_err(), "empty --history-dir should be rejected");
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_normal_cli() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
         assert!(cli.no_r_source_overrides);
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_headless_cli() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "headless", "--no-r-source-overrides"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
@@ -469,7 +480,10 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_r_home_subcommand_has_its_own_resolution_flags() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from([
             "arf",
             "r-home",
@@ -560,187 +574,50 @@ mod tests {
         assert!(result.is_err());
     }
 
-    fn headless_r_source_values(cli: &Cli) -> (Option<PathBuf>, Option<String>) {
-        let Some(Commands::Headless(args)) = cli.command.as_ref() else {
+    #[test]
+    #[serial_test::serial]
+    fn test_headless_r_source_flags_read_environment_values() {
+        let _r_home = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+        let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
+        assert_eq!(args.r_home, Some(PathBuf::from("/env/r-home")));
 
-        let (r_home, r_version) = resolve_headless_r_source(
-            (cli.r_home.as_ref(), cli.r_version.as_ref()),
-            (args.r_home.as_ref(), args.r_version.as_ref()),
-        );
-        (r_home.cloned(), r_version.cloned())
+        drop(_r_home);
+        drop(_r_version);
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        let cli = Cli::try_parse_from(["arf", "r-home"]).unwrap();
+        let Some(Commands::RHome(args)) = cli.command else {
+            panic!("expected r-home command");
+        };
+        assert_eq!(args.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
     #[serial_test::serial]
-    fn test_headless_r_home_uses_subcommand_cli_over_top_level_and_env() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+    fn test_headless_r_source_flags_conflict_with_environment_values() {
+        let _r_home = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        assert!(Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).is_err());
 
-        let cli = Cli::try_parse_from(["arf", "--r-home", "/cli", "headless"]).unwrap();
-        assert_eq!(
-            headless_r_source_values(&cli).0.as_deref(),
-            Some(std::path::Path::new("/cli"))
-        );
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
-            let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
-            assert_eq!(
-                headless_r_source_values(&cli).0.as_deref(),
-                Some(std::path::Path::new("/env"))
-            );
-        }
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
-            let cli = Cli::try_parse_from(["arf", "--r-home", "/cli", "headless"]).unwrap();
-            assert_eq!(
-                headless_r_source_values(&cli).0.as_deref(),
-                Some(std::path::Path::new("/cli"))
-            );
-        }
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
-            let cli = Cli::try_parse_from(["arf", "headless", "--r-home", "/cli"]).unwrap();
-            assert_eq!(
-                headless_r_source_values(&cli).0.as_deref(),
-                Some(std::path::Path::new("/cli"))
-            );
-        }
-
-        let cli =
-            Cli::try_parse_from(["arf", "--r-home", "/a", "headless", "--r-home", "/b"]).unwrap();
-        assert_eq!(
-            headless_r_source_values(&cli).0.as_deref(),
-            Some(std::path::Path::new("/b"))
-        );
-
-        let cli = Cli::try_parse_from([
-            "arf",
-            "--with-r-version",
-            "4.4",
-            "headless",
-            "--r-home",
-            "/b",
-        ])
-        .unwrap();
-        assert_eq!(
-            headless_r_source_values(&cli),
-            (Some(PathBuf::from("/b")), None)
-        );
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        assert!(Cli::try_parse_from(["arf", "r-home", "--r-home", "/cli"]).is_err());
     }
 
     #[test]
     #[serial_test::serial]
-    fn test_headless_r_version_uses_subcommand_cli_over_top_level_and_env() {
+    fn test_headless_history_dir_reads_environment_value() {
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-
-        let cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5", "headless"]).unwrap();
-        assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
-            let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
-            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.9"));
-        }
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
-            let cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5", "headless"]).unwrap();
-            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
-        }
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
-            let cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
-            assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
-        }
-
-        let cli = Cli::try_parse_from([
-            "arf",
-            "--with-r-version",
-            "4.4",
-            "headless",
-            "--with-r-version",
-            "4.5",
-        ])
-        .unwrap();
-        assert_eq!(headless_r_source_values(&cli).1.as_deref(), Some("4.5"));
-
-        let cli = Cli::try_parse_from([
-            "arf",
-            "--r-home",
-            "/a",
-            "headless",
-            "--with-r-version",
-            "4.5",
-        ])
-        .unwrap();
-        assert_eq!(
-            headless_r_source_values(&cli),
-            (None, Some(String::from("4.5")))
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn test_cross_scope_r_source_conflicts_use_the_subcommand_pair() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-
-        let cli = Cli::try_parse_from([
-            "arf",
-            "--with-r-version",
-            "4.5",
-            "headless",
-            "--r-home",
-            "/sub/r-home",
-        ])
-        .unwrap();
-        let (r_home, r_version) = headless_r_source_values(&cli);
-        assert_eq!(r_home.as_deref(), Some(std::path::Path::new("/sub/r-home")));
-        assert_eq!(r_version, None);
-
-        let cli = Cli::try_parse_from([
-            "arf",
-            "--r-home",
-            "/top/r-home",
-            "headless",
-            "--with-r-version",
-            "4.5",
-        ])
-        .unwrap();
-        let (r_home, r_version) = headless_r_source_values(&cli);
-        assert_eq!(r_home, None);
-        assert_eq!(r_version.as_deref(), Some("4.5"));
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn test_cross_scope_r_source_environment_values_are_replaced_by_subcommand_pair() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_HOME", "/env");
-            let cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
-            assert_eq!(
-                headless_r_source_values(&cli),
-                (None, Some(String::from("4.5")))
-            );
-        }
-
-        {
-            let _env = EnvVarGuard::set("ARF_R_VERSION", "4.9");
-            let cli = Cli::try_parse_from(["arf", "headless", "--r-home", "/cli"]).unwrap();
-            assert_eq!(
-                headless_r_source_values(&cli),
-                (Some(PathBuf::from("/cli")), None)
-            );
-        }
+        let _history_dir = EnvVarGuard::set("ARF_HISTORY_DIR", "/env/history");
+        let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+        let Some(Commands::Headless(args)) = cli.command else {
+            panic!("expected headless command");
+        };
+        assert_eq!(args.history_dir, Some(PathBuf::from("/env/history")));
     }
 }

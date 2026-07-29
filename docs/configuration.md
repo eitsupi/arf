@@ -908,13 +908,13 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single `arf.toml` configuration file that arf loaded, either from `--config` or from the XDG global config path: `r_source_overrides` is the ordered provider list, and `startup.r_source` is its configuration-level fallback. The providers may consult project-local files such as `rproject.toml` and `.r-version`; those files are not separate arf configuration files. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
 
-For `headless` and `r-home`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair. If either option is provided on the subcommand, the complete subcommand pair is used and the top-level pair is ignored; otherwise, the complete top-level pair is used. The top-level pair may come from the CLI or its environment variables.
+For `headless` and `r-home`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R`, not `arf --r-home /opt/R headless`. Placing them before the subcommand is an error that names the corrected form, because the value would otherwise be silently dropped. `ARF_R_HOME` and `ARF_R_VERSION` need no placement — the subcommands read them directly.
 
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|
 | 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
 | 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
-| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. |
+| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. The interactive console, `headless` and `r-home` each read these variables for themselves. |
 | 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A provider's project-local file may be absent or fail to resolve; those cases fall through to the next provider and then to tier 5. |
 | 5 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
 | 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
