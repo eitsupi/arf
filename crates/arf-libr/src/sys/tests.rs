@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 /// Combined spinner test to avoid race conditions from parallel tests sharing global state.
 /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
@@ -186,6 +187,23 @@ export R_DOC_DIR
 
     // Variable not present
     assert_eq!(parse_var_from_wrapper_script(script, "R_MISSING_VAR"), None);
+}
+
+#[test]
+fn r_home_from_library_path_inverts_r_library_path() {
+    let r_home = Path::new("/opt/R/4.5.2");
+    assert_eq!(
+        r_home_from_library_path(&r_library_path(r_home)),
+        Some(r_home.to_path_buf())
+    );
+}
+
+#[test]
+fn r_home_from_library_path_rejects_other_files() {
+    assert_eq!(
+        r_home_from_library_path(Path::new("/opt/R/4.5.2/lib/R/not-libR")),
+        None
+    );
 }
 
 #[test]

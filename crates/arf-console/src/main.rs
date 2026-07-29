@@ -26,6 +26,7 @@ use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
+use app::r_home::run_r_home;
 #[cfg(windows)]
 use app::setup::source_r_profiles;
 use app::setup::{create_session_id, run_script, setup_r};
@@ -74,6 +75,7 @@ fn run() -> Result<()> {
             Some(Commands::History { .. }) => "history",
             Some(Commands::Ipc { .. }) => "ipc",
             Some(Commands::Headless { .. }) => "headless",
+            Some(Commands::RHome { .. }) => "r-home",
             None => unreachable!(),
         };
         Cli::command()
@@ -165,6 +167,26 @@ fn run() -> Result<()> {
                 history_dir.as_deref(),
                 *no_history,
                 no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
+            );
+        }
+        Some(Commands::RHome {
+            config,
+            r_version,
+            r_home,
+            no_r_source_overrides,
+            json,
+        }) => {
+            let (r_home, r_version) = resolve_headless_r_source(
+                (cli.r_home.as_ref(), cli.r_version.as_ref()),
+                (r_home.as_ref(), r_version.as_ref()),
+            );
+            let config_path = config.as_ref().or(cli.config.as_ref());
+            return run_r_home(
+                config_path.map(std::path::PathBuf::as_path),
+                r_home.map(std::path::PathBuf::as_path),
+                r_version.map(String::as_str),
+                no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
+                *json,
             );
         }
         None => {}

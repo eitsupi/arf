@@ -12,7 +12,9 @@ mod spinner;
 pub use askpass::askpass_handler_code;
 #[cfg(unix)]
 pub use discovery::ensure_ld_library_path_with_pre_exec;
-pub use discovery::{ensure_ld_library_path, find_r_library, get_r_home};
+pub use discovery::{
+    ensure_ld_library_path, find_r_library, get_r_home, r_home_from_library_path, r_library_path,
+};
 pub use error_state::{
     command_had_error, global_error_handler_code, mark_error_condition,
     mark_global_error_handler_initialized, reset_command_error_state, restore_stderr,

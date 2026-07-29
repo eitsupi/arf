@@ -20,6 +20,7 @@
   is read by `{ type = "toml-key", file = "rproject.toml", key = "project.r_version" }`. Only the current directory is searched, and only R versions rig has already installed can be selected.
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
 - `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4`. Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
+- `arf r-home` reports the `R_HOME` selected by arf without starting R, including installations found through platform-specific default library paths, so external tools can use the same R version and source overrides. If no R installation can be discovered, normal startup continues without R evaluation while `arf r-home` exits with an error because there is no path to report.
 
 ### Changed
 

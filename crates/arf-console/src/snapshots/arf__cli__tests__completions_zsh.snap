@@ -369,6 +369,18 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
+(r-home)
+_arguments "${_arguments_options[@]}" : \
+'-c+[Path to configuration file]:CONFIG:_files' \
+'--config=[Path to configuration file]:CONFIG:_files' \
+'(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
+'--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
+'--json[Print resolution details as JSON]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_arf__subcmd__help_commands" \
@@ -481,6 +493,10 @@ esac
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(r-home)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -502,6 +518,7 @@ _arf_commands() {
 'history:History management' \
 'ipc:Interact with a running arf session via IPC' \
 'headless:Run R with IPC server only (no interactive REPL)' \
+'r-home:Print the R_HOME path arf would use without starting R' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf commands' commands "$@"
@@ -567,6 +584,7 @@ _arf__subcmd__help_commands() {
 'history:History management' \
 'ipc:Interact with a running arf session via IPC' \
 'headless:Run R with IPC server only (no interactive REPL)' \
+'r-home:Print the R_HOME path arf would use without starting R' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'arf help commands' commands "$@"
@@ -669,6 +687,11 @@ _arf__subcmd__help__subcmd__ipc__subcmd__session_commands() {
 _arf__subcmd__help__subcmd__ipc__subcmd__shutdown_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc shutdown commands' commands "$@"
+}
+(( $+functions[_arf__subcmd__help__subcmd__r-home_commands] )) ||
+_arf__subcmd__help__subcmd__r-home_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help r-home commands' commands "$@"
 }
 (( $+functions[_arf__subcmd__history_commands] )) ||
 _arf__subcmd__history_commands() {
@@ -815,6 +838,11 @@ _arf__subcmd__ipc__subcmd__session_commands() {
 _arf__subcmd__ipc__subcmd__shutdown_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc shutdown commands' commands "$@"
+}
+(( $+functions[_arf__subcmd__r-home_commands] )) ||
+_arf__subcmd__r-home_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf r-home commands' commands "$@"
 }
 
 if [ "$funcstack[1]" = "_arf" ]; then
