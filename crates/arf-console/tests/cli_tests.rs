@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 /// Test that arf binary exists and can show version.
 #[test]
 fn test_version_flag() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("--version")
         .output()
         .expect("Failed to run arf");
@@ -33,7 +33,7 @@ fn test_version_flag() {
 /// Test that arf binary can show help.
 #[test]
 fn test_help_flag() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("--help")
         .output()
         .expect("Failed to run arf");
@@ -51,7 +51,7 @@ fn test_help_flag() {
 /// Test shell completion generation.
 #[test]
 fn test_completions_subcommand() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["completions", "bash"])
         .output()
         .expect("Failed to run arf completions");
@@ -72,7 +72,7 @@ fn test_completions_subcommand() {
 /// Test `arf history schema` subcommand displays schema information.
 #[test]
 fn test_history_schema_subcommand() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["history", "schema"])
         .output()
         .expect("Failed to run arf history schema");
@@ -136,7 +136,7 @@ fn test_history_schema_subcommand() {
 /// Test `arf history schema` outputs plain text when piped.
 #[test]
 fn test_history_schema_piped_no_colors() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["history", "schema"])
         .output()
         .expect("Failed to run arf history schema");
@@ -171,7 +171,7 @@ fn test_history_import_rejects_self_import_r_db() {
 
     // Try to import from r.db into the same directory's r.db
     // Note: --history-dir is a top-level option, must come before subcommand
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "--history-dir",
             history_dir.to_str().unwrap(),
@@ -216,7 +216,7 @@ fn test_history_import_rejects_self_import_shell_db() {
     drop(_db); // Close the database
 
     // Try to import from shell.db into the same directory's shell.db
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "--history-dir",
             history_dir.to_str().unwrap(),
@@ -247,7 +247,7 @@ fn test_history_import_rejects_self_import_shell_db() {
 /// Test `arf history import --from arf` requires --file option.
 #[test]
 fn test_history_import_arf_requires_file() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["history", "import", "--from", "arf"])
         .output()
         .expect("Failed to run arf history import");
@@ -266,8 +266,16 @@ fn test_history_import_arf_requires_file() {
     );
 }
 
+fn sanitized_arf_command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
+    for variable in ["ARF_R_HOME", "ARF_R_VERSION", "ARF_HISTORY_DIR"] {
+        command.env_remove(variable);
+    }
+    command
+}
+
 fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(args)
         .output()
         .expect("Failed to run arf");
@@ -338,7 +346,7 @@ fn test_top_level_history_dir_before_history_schema_rejected() {
 
 #[test]
 fn test_top_level_config_before_config_check_rejected_with_nested_corrected_form() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["--config", "x", "config", "check"])
         .output()
         .expect("Failed to run arf config check");
@@ -419,7 +427,7 @@ fn test_top_level_config_is_consumed_by_history_export() {
     );
     let export_file = history_dir.path().join("export.db");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .env("ARF_HISTORY_DIR", history_dir.path())
         .args([
             "--config",
@@ -452,7 +460,7 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
     );
     let target_dir = temp.path().join("target");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "--history-dir",
             target_dir.to_str().unwrap(),
@@ -476,7 +484,7 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
 
 #[test]
 fn test_vanilla_without_subcommand_still_works() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["--vanilla", "-e", "1 + 1"])
         .output()
         .expect("Failed to run arf");
@@ -495,7 +503,7 @@ fn test_vanilla_without_subcommand_still_works() {
 /// Test basic R evaluation with -e flag.
 #[test]
 fn test_eval_basic() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "1 + 1"])
         .output()
         .expect("Failed to run arf -e");
@@ -509,7 +517,7 @@ fn test_eval_basic() {
 /// Test multiple expressions with -e flag.
 #[test]
 fn test_eval_multiple_expressions() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "x <- 5\nx * 2"])
         .output()
         .expect("Failed to run arf -e");
@@ -527,7 +535,7 @@ fn test_eval_multiple_expressions() {
 /// Test function definition and call with -e flag.
 #[test]
 fn test_eval_function() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "f <- function(x) { x + 1 }\nf(10)"])
         .output()
         .expect("Failed to run arf -e");
@@ -545,7 +553,7 @@ fn test_eval_function() {
 /// Test that R errors are handled gracefully.
 #[test]
 fn test_eval_error_handling() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "stop('Test error')"])
         .output()
         .expect("Failed to run arf -e");
@@ -567,7 +575,7 @@ fn test_eval_error_handling() {
 /// Test pipe operator error handling.
 #[test]
 fn test_eval_pipe_error() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "1 |> 1"])
         .output()
         .expect("Failed to run arf -e");
@@ -589,7 +597,7 @@ fn test_eval_pipe_error() {
 /// Verifies that source code is echoed before output in reprex format.
 #[test]
 fn test_eval_reprex_mode() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["--reprex", "-e", "1 + 1"])
         .output()
         .expect("Failed to run arf --reprex -e");
@@ -625,7 +633,7 @@ comment = "## "
     )
     .expect("Failed to write config file");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "--config",
             config_file.path().to_str().unwrap(),
@@ -660,7 +668,7 @@ comment = "## "
 /// cat() writes to stdout without trailing newline, which should still be captured.
 #[test]
 fn test_eval_reprex_cat_output() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["--reprex", "-e", r#"cat("hello")"#])
         .output()
         .expect("Failed to run arf --reprex -e cat()");
@@ -688,7 +696,7 @@ fn test_eval_reprex_cat_output() {
 /// Test reprex mode with cat() output that includes newline.
 #[test]
 fn test_eval_reprex_cat_with_newline() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["--reprex", "-e", r#"cat("hello\n")"#])
         .output()
         .expect("Failed to run arf --reprex -e cat() with newline");
@@ -719,7 +727,7 @@ fn test_script_file() {
     writeln!(file, "y <- 10").expect("Failed to write");
     writeln!(file, "x + y").expect("Failed to write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("-f")
         .arg(file.path())
         .output()
@@ -744,7 +752,7 @@ fn test_script_file_function() {
     writeln!(file, "}}").expect("Failed to write");
     writeln!(file, "f(10)").expect("Failed to write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("-f")
         .arg(file.path())
         .output()
@@ -767,7 +775,7 @@ fn test_script_file_reprex() {
     let mut file = NamedTempFile::new().expect("Failed to create temp file");
     writeln!(file, "1 + 1").expect("Failed to write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("--reprex")
         .arg("-f")
         .arg(file.path())
@@ -797,7 +805,7 @@ fn test_script_file_reprex() {
 /// Test non-existent script file.
 #[test]
 fn test_script_file_not_found() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("-f")
         .arg("/nonexistent/path/to/script.R")
         .output()
@@ -819,7 +827,7 @@ fn test_script_file_not_found() {
 /// Test that `arf -f -` reads R code from stdin and executes it.
 #[test]
 fn test_script_file_stdin() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let mut child = sanitized_arf_command()
         .args(["-f", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -853,7 +861,7 @@ fn test_script_file_stdin() {
 /// Test that `arf -f -` in reprex mode echoes source and prefixes output.
 #[test]
 fn test_script_file_stdin_reprex() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let mut child = sanitized_arf_command()
         .args(["--reprex", "-f", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -896,7 +904,7 @@ fn test_ipc_eval_stdin_fallback() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
     // Piped stdin is sufficient to make is_terminal() return false; no data
     // needs to be written since the process exits at session resolution first.
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["ipc", "eval"])
         .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
@@ -928,7 +936,7 @@ fn test_ipc_send_stdin_fallback() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
     // Piped stdin is sufficient to make is_terminal() return false; no data
     // needs to be written since the process exits at session resolution first.
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["ipc", "send"])
         .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
         .stdin(Stdio::piped())
@@ -966,7 +974,7 @@ fn test_eval_sources_user_rprofile() {
     writeln!(rprofile, "cat('ARF_RPROFILE_MARKER\\n')").expect("Failed to write .Rprofile");
     let rprofile_path = rprofile.path().to_path_buf();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .env("R_PROFILE_USER", &rprofile_path)
         .args(["-e", "1"])
         .output()
@@ -992,7 +1000,7 @@ fn test_eval_empty_r_profile_user_sources_default_rprofile() {
     std::fs::write(&rprofile_path, "cat('ARF_RPROFILE_MARKER\\n')\n")
         .expect("Failed to write .Rprofile");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .current_dir(working_dir.path())
         .env("R_PROFILE_USER", "")
         .args(["-e", "1"])
@@ -1020,7 +1028,7 @@ fn test_eval_vanilla_skips_user_rprofile() {
     writeln!(rprofile, "cat('ARF_RPROFILE_MARKER\\n')").expect("Failed to write .Rprofile");
     let rprofile_path = rprofile.path().to_path_buf();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .env("R_PROFILE_USER", &rprofile_path)
         .args(["--vanilla", "-e", "1"])
         .output()
@@ -1040,7 +1048,7 @@ fn test_eval_vanilla_skips_user_rprofile() {
 /// The old `arf file.R` syntax was removed; clap now rejects it as an unknown subcommand/argument.
 #[test]
 fn test_positional_script_rejected() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .arg("some_script.R")
         .output()
         .expect("Failed to run arf");
@@ -1067,7 +1075,7 @@ fn test_positional_script_rejected() {
 /// Test that -e/--eval combined with a subcommand is rejected with exit code 2.
 #[test]
 fn test_eval_with_subcommand_rejected() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-e", "1+1", "completions", "bash"])
         .output()
         .expect("Failed to run arf");
@@ -1096,7 +1104,7 @@ fn test_eval_with_subcommand_rejected() {
 /// Test that -f/--file combined with a subcommand is rejected with exit code 2.
 #[test]
 fn test_file_with_subcommand_rejected() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args(["-f", "some.R", "completions", "bash"])
         .output()
         .expect("Failed to run arf");
@@ -1130,7 +1138,7 @@ fn test_file_with_subcommand_rejected() {
 #[test]
 fn test_r_completion_functions() {
     // Test that utils completion functions are available
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "-e",
             r#"
@@ -1152,7 +1160,7 @@ fn test_r_completion_functions() {
 /// Test that R's completeToken works.
 #[test]
 fn test_r_complete_token() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = sanitized_arf_command()
         .args([
             "-e",
             r#"
