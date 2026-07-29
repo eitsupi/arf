@@ -105,6 +105,20 @@ pub fn r_library_path(r_home: &Path) -> PathBuf {
     r_home.join(r_lib_folder()).join(r_lib_name())
 }
 
+/// Return the R_HOME directory for a shared library path returned by
+/// [`r_library_path`].
+pub fn r_home_from_library_path(library_path: &Path) -> Option<PathBuf> {
+    if library_path.file_name()?.to_str()? != r_lib_name() {
+        return None;
+    }
+
+    let mut r_home = library_path;
+    for _ in 0..=Path::new(r_lib_folder()).components().count() {
+        r_home = r_home.parent()?;
+    }
+    Some(r_home.to_path_buf())
+}
+
 /// Get R_HOME from the system.
 pub fn get_r_home() -> RResult<PathBuf> {
     // Check environment variable first

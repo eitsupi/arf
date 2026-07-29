@@ -439,20 +439,33 @@ struct ResolvedRSource {
     r_home: Option<PathBuf>,
 }
 
-fn resolve_path_r_home() -> Result<PathBuf> {
-    arf_libr::find_r_library().context("Failed to discover the R library from PATH")?;
-    arf_libr::get_r_home()
-        .map_err(anyhow::Error::from)
-        .context("Failed to determine R_HOME from PATH")
+fn resolve_path_r_home_with<F>(find_r_library: F) -> Result<PathBuf>
+where
+    F: FnOnce() -> arf_libr::RResult<PathBuf>,
+{
+    let library_path = find_r_library().context("Failed to discover the R library from PATH")?;
+    arf_libr::r_home_from_library_path(&library_path).with_context(|| {
+        format!(
+            "Failed to derive R_HOME from discovered R library: {}",
+            library_path.display()
+        )
+    })
 }
 
 /// Resolve the PATH-mode R_HOME only for callers that need to report it.
 pub(crate) fn resolve_path_r_home_for_report(report: &mut RSourceResolutionReport) {
+    resolve_path_r_home_for_report_with(report, arf_libr::find_r_library);
+}
+
+fn resolve_path_r_home_for_report_with<F>(report: &mut RSourceResolutionReport, find_r_library: F)
+where
+    F: FnOnce() -> arf_libr::RResult<PathBuf>,
+{
     if !matches!(report.status, RSourceStatus::Path) || report.r_home.is_some() {
         return;
     }
 
-    match resolve_path_r_home() {
+    match resolve_path_r_home_with(find_r_library) {
         Ok(r_home) => report.r_home = Some(r_home),
         Err(error) => report.diagnostics.push(format!(
             "Warning: Failed to determine R_HOME from PATH: {error}"
@@ -1117,6 +1130,30 @@ mod r_source_override_tests {
 
         assert!(matches!(report.status, RSourceStatus::Path));
         assert!(report.r_home.is_none());
+    }
+
+    #[test]
+    fn path_r_home_discovery_failure_is_reported_deterministically() {
+        let mut report = RSourceResolutionReport::from_status(
+            RSourceStatus::Path,
+            None,
+            RSourceOverrideState::Disabled,
+        );
+
+        resolve_path_r_home_for_report_with(&mut report, || {
+            Err(arf_libr::RError::LibraryNotFound(
+                "injected discovery failure".to_string(),
+            ))
+        });
+
+        assert!(report.r_home.is_none());
+        assert_eq!(
+            report.diagnostics,
+            vec![
+                "Warning: Failed to determine R_HOME from PATH: Failed to discover the R library from PATH"
+                    .to_string()
+            ]
+        );
     }
 
     #[test]

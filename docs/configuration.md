@@ -623,7 +623,7 @@ To ask arf which R installation it would use without starting R, run:
 arf r-home
 ```
 
-The command prints the resolved `R_HOME` path. If R is not installed or available in `PATH`, normal startup continues with R evaluation unavailable, while `arf r-home` fails because there is no path to report. Use `--json` for the source, override details, and any resolution warnings; it accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path.
+The command prints the resolved `R_HOME` path. If no R installation can be discovered, normal startup continues with R evaluation unavailable, while `arf r-home` fails because there is no path to report. Discovery uses the same shared library that arf would load, including platform-specific default installation paths. Use `--json` for the source, override details, and any resolution warnings; it accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path.
 
 ### rig Integration
 

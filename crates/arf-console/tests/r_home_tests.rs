@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use std::path::PathBuf;
 use std::process::Command;
 #[cfg(not(windows))]
@@ -7,21 +8,26 @@ use std::thread;
 #[cfg(not(windows))]
 use std::time::{Duration, Instant};
 
+#[cfg(not(windows))]
 struct RLessEnvironment {
     _temp: tempfile::TempDir,
     bin_dir: PathBuf,
     fake_r_home: PathBuf,
 }
 
+#[cfg(not(windows))]
 impl RLessEnvironment {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let bin_dir = temp.path().join("bin");
         std::fs::create_dir(&bin_dir).unwrap();
-        let fake_r_home = temp.path().join("fake-r-home");
-        let fake_r_library = arf_libr::r_library_path(&fake_r_home);
-        std::fs::create_dir_all(fake_r_library.parent().unwrap()).unwrap();
-        std::fs::write(fake_r_library, []).unwrap();
+        let fake_r_home = {
+            let fake_r_home = temp.path().join("fake-r-home");
+            let fake_r_library = arf_libr::r_library_path(&fake_r_home);
+            std::fs::create_dir_all(fake_r_library.parent().unwrap()).unwrap();
+            std::fs::write(fake_r_library, []).unwrap();
+            fake_r_home
+        };
 
         #[cfg(unix)]
         {
@@ -172,27 +178,4 @@ fn startup_survives_without_r_on_path() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("R evaluation will not be available"));
-}
-
-#[test]
-fn r_home_without_r_on_path_exits_nonzero_with_null_json_path() {
-    let environment = RLessEnvironment::new();
-    let output = environment
-        .command()
-        .args(["r-home", "--json", "--no-r-source-overrides"])
-        .output()
-        .unwrap();
-
-    assert!(!output.status.success());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(value["r_home"].is_null());
-    assert!(value["warnings"].as_array().unwrap().iter().any(|warning| {
-        warning
-            .as_str()
-            .unwrap()
-            .contains("Failed to determine R_HOME from PATH")
-    }));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Could not determine R_HOME from PATH")
-    );
 }
