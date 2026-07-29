@@ -2,10 +2,9 @@
 
 use crate::app::config_load::{load_config_collecting_warnings, load_config_or_warn};
 #[cfg(windows)]
-use crate::app::setup::source_r_profiles;
-use crate::app::setup::{
-    RSourceOverrideState, RSourceResolutionReport, create_session_id, setup_r,
-};
+use crate::app::r_profiles::source_r_profiles;
+use crate::app::session_id::create_session_id;
+use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, setup_r};
 use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::ipc;

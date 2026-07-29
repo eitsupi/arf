@@ -28,8 +28,9 @@ use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
 use app::r_home::run_r_home;
 #[cfg(windows)]
-use app::setup::source_r_profiles;
-use app::setup::{create_session_id, run_script, setup_r};
+use app::r_profiles::source_r_profiles;
+use app::session_id::create_session_id;
+use app::setup::{run_script, setup_r};
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, RArgsBuilder, resolve_headless_r_source};
 use config::ensure_directories;
