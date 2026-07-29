@@ -117,6 +117,7 @@ fn r_home_resolution_failure_exits_nonzero() {
     );
 }
 
+/// This covers the initialization-failure fallback, not PATH discovery.
 #[test]
 fn startup_survives_without_r_on_path() {
     let environment = RLessEnvironment::new();

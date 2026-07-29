@@ -330,11 +330,30 @@ fn setup_r_fallback(
     r_source: &RSource,
     override_state: RSourceOverrideState,
 ) -> Result<RSourceResolutionReport> {
+    setup_r_fallback_with(
+        r_source,
+        override_state,
+        external::rig::rig_available,
+        external::rig::resolve_version,
+    )
+}
+
+fn setup_r_fallback_with<FAvailable, FResolve>(
+    r_source: &RSource,
+    override_state: RSourceOverrideState,
+    rig_available: FAvailable,
+    resolve_version: FResolve,
+) -> Result<RSourceResolutionReport>
+where
+    FAvailable: Fn() -> bool,
+    FResolve:
+        Fn(&str) -> std::result::Result<external::rig::ResolvedVersion, external::rig::RigError>,
+{
     let resolved = match r_source {
         RSource::Mode(RSourceMode::Auto) => {
             // Auto mode: try rig if available, otherwise use PATH
-            if external::rig::rig_available() {
-                match external::rig::resolve_version("default") {
+            if rig_available() {
+                match resolve_version("default") {
                     Ok(resolved) => {
                         log::info!("Using rig default R version: {}", resolved.version);
                         ResolvedRSource {
@@ -368,13 +387,13 @@ fn setup_r_fallback(
         }
         RSource::Mode(RSourceMode::Rig) => {
             // Rig mode: require rig
-            if !external::rig::rig_available() {
+            if !rig_available() {
                 anyhow::bail!(
                     r#"r_source = "rig" but rig is not installed.
 Install rig from https://github.com/r-lib/rig or use "auto"."#
                 );
             }
-            match external::rig::resolve_version("default") {
+            match resolve_version("default") {
                 Ok(resolved) => {
                     log::info!("Using rig default R version: {}", resolved.version);
                     ResolvedRSource {
@@ -1068,6 +1087,34 @@ mod r_source_override_tests {
             None,
             RSourceOverrideState::Disabled,
         );
+        assert!(matches!(report.status, RSourceStatus::Path));
+        assert!(report.r_home.is_none());
+    }
+
+    #[test]
+    fn path_fallback_without_rig_reports_path_without_r_home() {
+        let report = setup_r_fallback_with(
+            &RSource::Mode(RSourceMode::Auto),
+            RSourceOverrideState::NotConfigured,
+            || false,
+            |_| panic!("rig's default version should not be resolved"),
+        )
+        .unwrap();
+
+        assert!(matches!(report.status, RSourceStatus::Path));
+        assert!(report.r_home.is_none());
+    }
+
+    #[test]
+    fn path_fallback_when_rig_default_resolution_fails_has_no_r_home() {
+        let report = setup_r_fallback_with(
+            &RSource::Mode(RSourceMode::Auto),
+            RSourceOverrideState::NotConfigured,
+            || true,
+            |_| Err(external::rig::RigError::NoDefaultVersion),
+        )
+        .unwrap();
+
         assert!(matches!(report.status, RSourceStatus::Path));
         assert!(report.r_home.is_none());
     }
