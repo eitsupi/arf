@@ -117,13 +117,13 @@ impl HeadlessProcess {
 
     /// Spawn `arf headless` with additional R flags and wait for IPC readiness.
     pub(crate) fn spawn_with_args(extra_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], None, None)
+        Self::spawn_inner(extra_args, &[], None, None)
     }
 
     /// Spawn `arf headless` with OS-string arguments.
     #[cfg(unix)]
     pub(crate) fn spawn_with_os_args(extra_args: &[&OsStr]) -> Result<Self, String> {
-        Self::spawn_inner_os(&[], extra_args, &[], None, None)
+        Self::spawn_inner_os(extra_args, &[], None, None)
     }
 
     /// Spawn `arf headless` in a specific working directory.
@@ -131,23 +131,12 @@ impl HeadlessProcess {
         extra_args: &[&str],
         current_dir: &Path,
     ) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], Some(current_dir), None)
-    }
-
-    /// Spawn `arf headless` with global flags placed before the subcommand.
-    pub(crate) fn spawn_with_pre_args(pre_args: &[&str]) -> Result<Self, String> {
-        Self::spawn_inner(pre_args, &[], &[], None, None)
+        Self::spawn_inner(extra_args, &[], Some(current_dir), None)
     }
 
     /// Spawn with a custom sessions directory (sets `ARF_IPC_SESSIONS_DIR`).
     pub(crate) fn spawn_with_sessions_dir(sessions_dir: &str) -> Result<Self, String> {
-        Self::spawn_inner(
-            &[],
-            &[],
-            &[("ARF_IPC_SESSIONS_DIR", sessions_dir)],
-            None,
-            None,
-        )
+        Self::spawn_inner(&[], &[("ARF_IPC_SESSIONS_DIR", sessions_dir)], None, None)
     }
 
     /// Spawn with Windows creation flags (e.g., CREATE_NEW_PROCESS_GROUP).
@@ -156,28 +145,20 @@ impl HeadlessProcess {
         extra_args: &[&str],
         flags: u32,
     ) -> Result<Self, String> {
-        Self::spawn_inner(&[], extra_args, &[], None, Some(flags))
+        Self::spawn_inner(extra_args, &[], None, Some(flags))
     }
 
     fn spawn_inner(
-        pre_subcommand_args: &[&str],
         extra_args: &[&str],
         env_overrides: &[(&str, &str)],
         current_dir: Option<&Path>,
         #[allow(unused)] creation_flags: Option<u32>,
     ) -> Result<Self, String> {
         let extra_args: Vec<&OsStr> = extra_args.iter().map(OsStr::new).collect();
-        Self::spawn_inner_os(
-            pre_subcommand_args,
-            &extra_args,
-            env_overrides,
-            current_dir,
-            creation_flags,
-        )
+        Self::spawn_inner_os(&extra_args, env_overrides, current_dir, creation_flags)
     }
 
     fn spawn_inner_os(
-        pre_subcommand_args: &[&str],
         extra_args: &[&OsStr],
         env_overrides: &[(&str, &str)],
         current_dir: Option<&Path>,
@@ -195,9 +176,6 @@ impl HeadlessProcess {
                 .any(|arg| *arg == OsStr::new("--log-file"));
 
         let mut cmd = Command::new(bin_path);
-        for arg in pre_subcommand_args {
-            cmd.arg(arg);
-        }
         cmd.arg("headless");
         for arg in extra_args {
             cmd.arg(arg);

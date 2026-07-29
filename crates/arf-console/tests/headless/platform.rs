@@ -1,4 +1,5 @@
 use super::support::*;
+use std::process::Command;
 
 #[cfg(windows)]
 #[test]
@@ -83,52 +84,30 @@ fn test_system_works() {
     );
 }
 
-/// Test that `--slave` (a global CLI flag) is accepted without crashing.
-///
-/// `--slave` is a global flag that must be placed before the subcommand
-/// (`arf --slave headless`). In headless mode it is currently ignored, so
-/// this test verifies that the flag does not prevent IPC from working.
+/// Test that an interactive-only top-level `--slave` flag is rejected before
+/// the headless subcommand instead of being silently ignored.
 #[test]
-fn test_headless_slave_flag() {
-    let process =
-        HeadlessProcess::spawn_with_pre_args(&["--slave"]).expect("Failed to spawn with --slave");
+fn test_top_level_slave_before_headless_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["--slave", "headless"])
+        .output()
+        .expect("Failed to run arf with --slave");
 
-    let result = process.ipc_eval("1 + 1").expect("eval should run");
-    assert!(
-        result.success,
-        "IPC eval should work with --slave: {}",
-        result.stderr
-    );
-    let json = parse_ipc_json(&result);
-    assert_eq!(
-        json["value"].as_str(),
-        Some("[1] 2"),
-        "should return result: {}",
-        result.stdout
-    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("'--slave' is not used by the 'headless' subcommand"));
 }
 
-/// Test that `--no-echo` (a global CLI flag) is accepted without crashing.
-///
-/// Like `--slave`, `--no-echo` must precede the subcommand. In headless mode
-/// it is currently ignored, so this test verifies that the flag does not
-/// prevent IPC from working.
+/// Test that an interactive-only top-level `--no-echo` flag is rejected before
+/// the headless subcommand instead of being silently ignored.
 #[test]
-fn test_headless_no_echo_flag() {
-    let process = HeadlessProcess::spawn_with_pre_args(&["--no-echo"])
-        .expect("Failed to spawn with --no-echo");
+fn test_top_level_no_echo_before_headless_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["--no-echo", "headless"])
+        .output()
+        .expect("Failed to run arf with --no-echo");
 
-    let result = process.ipc_eval("1 + 1").expect("eval should run");
-    assert!(
-        result.success,
-        "IPC eval should work with --no-echo: {}",
-        result.stderr
-    );
-    let json = parse_ipc_json(&result);
-    assert_eq!(
-        json["value"].as_str(),
-        Some("[1] 2"),
-        "should return result: {}",
-        result.stdout
-    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("'--no-echo' is not used by the 'headless' subcommand"));
 }

@@ -22,6 +22,8 @@ Options:
           Takes precedence over ARF_R_VERSION, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
           
           Config: startup.r_source
+          
+          [env: ARF_R_VERSION=]
 
       --r-home <R_HOME>
           Highest-priority R source: use this explicit R_HOME path
@@ -31,6 +33,8 @@ Options:
           Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
           
           Config: startup.r_source
+          
+          [env: ARF_R_HOME=]
 
       --no-r-source-overrides
           Disable experimental directory-level R source overrides

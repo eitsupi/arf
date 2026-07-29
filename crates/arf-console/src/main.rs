@@ -31,8 +31,9 @@ use app::r_home::run_r_home;
 use app::r_profiles::source_r_profiles;
 use app::session_id::create_session_id;
 use app::setup::{run_script, setup_r};
-use clap::{CommandFactory, Parser};
-use cli::{Cli, Commands, RArgsBuilder, resolve_headless_r_source};
+use clap::parser::ValueSource;
+use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
+use cli::{Cli, Commands, RArgsBuilder};
 use config::ensure_directories;
 use logging::init_logger;
 use pid_file::{
@@ -40,10 +41,6 @@ use pid_file::{
 };
 use repl::Repl;
 use std::process::ExitCode;
-
-fn no_r_source_overrides_enabled(top_level: bool, subcommand: bool) -> bool {
-    top_level || subcommand
-}
 
 fn main() -> ExitCode {
     match run() {
@@ -59,7 +56,10 @@ fn run() -> Result<()> {
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
     // detection that could miss global options before the subcommand.
-    let cli = Cli::parse();
+    let command = Cli::command();
+    let matches = command.clone().get_matches();
+    validate_top_level_scope(&command, &matches);
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     // Reject combinations of -f/--file or -e/--eval with a subcommand.
     // clap cannot enforce this via conflicts_with because subcommand fields are
@@ -83,6 +83,23 @@ fn run() -> Result<()> {
             .error(
                 clap::error::ErrorKind::ArgumentConflict,
                 format!("the argument '{flag}' cannot be used with subcommand '{subcommand}'"),
+            )
+            .exit();
+    }
+
+    if cli.command.is_none()
+        && !cli.with_ipc
+        && (cli.ipc_bind.is_some() || cli.ipc_pid_file.is_some())
+    {
+        let flag = if cli.ipc_bind.is_some() {
+            "--ipc-bind"
+        } else {
+            "--ipc-pid-file"
+        };
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                format!("the argument '{flag}' requires '--with-ipc'"),
             )
             .exit();
     }
@@ -123,10 +140,6 @@ fn run() -> Result<()> {
             return Ok(());
         }
         Some(Commands::Headless(args)) => {
-            let (r_home, r_version) = resolve_headless_r_source(
-                (cli.r_home.as_ref(), cli.r_version.as_ref()),
-                (args.r_home.as_ref(), args.r_version.as_ref()),
-            );
             let r_args_builder = RArgsBuilder {
                 vanilla: args.vanilla,
                 no_environ: args.no_environ,
@@ -141,8 +154,8 @@ fn run() -> Result<()> {
             };
             return run_headless(
                 args.config.as_ref(),
-                r_home.map(|path| path.as_path()),
-                r_version.map(String::as_str),
+                args.r_home.as_deref(),
+                args.r_version.as_deref(),
                 r_args_builder,
                 args.bind.as_deref(),
                 args.pid_file.as_deref(),
@@ -151,26 +164,15 @@ fn run() -> Result<()> {
                 args.log_file.as_deref(),
                 args.history_dir.as_deref(),
                 args.no_history,
-                no_r_source_overrides_enabled(
-                    cli.no_r_source_overrides,
-                    args.no_r_source_overrides,
-                ),
+                args.no_r_source_overrides,
             );
         }
         Some(Commands::RHome(args)) => {
-            let (r_home, r_version) = resolve_headless_r_source(
-                (cli.r_home.as_ref(), cli.r_version.as_ref()),
-                (args.r_home.as_ref(), args.r_version.as_ref()),
-            );
-            let config_path = args.config.as_ref().or(cli.config.as_ref());
             return run_r_home(
-                config_path.map(std::path::PathBuf::as_path),
-                r_home.map(std::path::PathBuf::as_path),
-                r_version.map(String::as_str),
-                no_r_source_overrides_enabled(
-                    cli.no_r_source_overrides,
-                    args.no_r_source_overrides,
-                ),
+                args.config.as_deref(),
+                args.r_home.as_deref(),
+                args.r_version.as_deref(),
+                args.no_r_source_overrides,
                 args.json,
             );
         }
@@ -414,21 +416,82 @@ fn run() -> Result<()> {
     repl_result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
+    let Some(subcommand_name) = matches.subcommand_name() else {
+        return;
+    };
 
-    #[test]
-    fn top_level_no_r_source_overrides_applies_to_headless() {
-        let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides", "headless"]).unwrap();
-        let top_level = cli.no_r_source_overrides;
-        let Some(Commands::Headless(args)) = cli.command else {
-            panic!("expected headless command");
+    let subcommand = command
+        .find_subcommand(subcommand_name)
+        .expect("parsed subcommand must exist")
+        .clone();
+    let subcommand_args: Vec<_> = subcommand.get_arguments().collect();
+
+    for arg in command.get_arguments() {
+        let Some(long) = arg.get_long() else {
+            continue;
         };
 
-        assert!(no_r_source_overrides_enabled(
-            top_level,
-            args.no_r_source_overrides
-        ));
+        // These checks have deliberately custom errors below and must retain
+        // their existing wording and ordering.
+        if matches!(arg.get_id().as_str(), "eval" | "file")
+            || matches!(subcommand_name, "history") && matches!(long, "config" | "history-dir")
+        {
+            continue;
+        }
+
+        if matches.value_source(arg.get_id().as_str()) != Some(ValueSource::CommandLine) {
+            continue;
+        }
+
+        let mut subcommand_command = subcommand.clone();
+        subcommand_command.set_bin_name(format!("arf {subcommand_name}"));
+
+        if let Some(subcommand_arg) = subcommand_args
+            .iter()
+            .find(|subcommand_arg| subcommand_arg.get_long() == Some(long))
+        {
+            let value_names = if matches!(
+                subcommand_arg.get_action(),
+                clap::ArgAction::SetTrue | clap::ArgAction::SetFalse
+            ) {
+                String::new()
+            } else {
+                subcommand_arg
+                    .get_value_names()
+                    .map(|names| {
+                        names
+                            .iter()
+                            .map(|name| format!("<{}>", name.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_default()
+            };
+            let corrected_form = if value_names.is_empty() {
+                format!("arf {subcommand_name} --{long}")
+            } else {
+                format!("arf {subcommand_name} --{long} {value_names}")
+            };
+
+            subcommand_command
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!(
+                        "'--{long}' was given before the '{subcommand_name}' subcommand, where it has no effect\n\n  tip: place it after the subcommand instead:\n       {corrected_form}"
+                    ),
+                )
+                .exit();
+        }
+
+        let console_form = format!("arf --{long}");
+        subcommand_command
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!(
+                    "'--{long}' is not used by the '{subcommand_name}' subcommand\n\n  tip: it applies to the interactive console, which takes no subcommand:\n       {console_form}"
+                ),
+            )
+            .exit();
     }
 }

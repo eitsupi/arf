@@ -23,7 +23,11 @@ pub(crate) struct HeadlessArgs {
     /// startup.r_source, which are not consulted at all when this is set.
     ///
     /// Config: startup.r_source
-    #[arg(long = "with-r-version", conflicts_with = "r_home")]
+    #[arg(
+        long = "with-r-version",
+        env = "ARF_R_VERSION",
+        conflicts_with = "r_home"
+    )]
     pub(crate) r_version: Option<String>,
 
     /// Highest-priority R source: use this explicit R_HOME path
@@ -34,7 +38,12 @@ pub(crate) struct HeadlessArgs {
     /// startup.r_source, which are not consulted at all when this is set.
     ///
     /// Config: startup.r_source
-    #[arg(long = "r-home", value_hint = ValueHint::DirPath, conflicts_with = "r_version")]
+    #[arg(
+        long = "r-home",
+        value_hint = ValueHint::DirPath,
+        env = "ARF_R_HOME",
+        conflicts_with = "r_version"
+    )]
     pub(crate) r_home: Option<PathBuf>,
 
     /// Disable experimental directory-level R source overrides

@@ -266,6 +266,170 @@ fn test_history_import_arf_requires_file() {
     );
 }
 
+fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(args)
+        .output()
+        .expect("Failed to run arf");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "scope errors should use clap's exit code: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for text in expected {
+        assert!(
+            stderr.contains(text),
+            "scope error should contain {text:?}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn test_r_home_before_headless_rejected_with_corrected_form() {
+    assert_top_level_scope_error(
+        &["--r-home", "/tmp", "headless"],
+        &[
+            "--r-home",
+            "before the 'headless' subcommand",
+            "arf headless --r-home <R_HOME>",
+        ],
+    );
+}
+
+#[test]
+fn test_no_banner_before_completions_rejected() {
+    assert_top_level_scope_error(
+        &["--no-banner", "completions", "bash"],
+        &[
+            "--no-banner",
+            "not used by the 'completions' subcommand",
+            "arf --no-banner",
+        ],
+    );
+}
+
+#[test]
+fn test_vanilla_before_headless_rejected() {
+    assert_top_level_scope_error(
+        &["--vanilla", "headless"],
+        &[
+            "--vanilla",
+            "before the 'headless' subcommand",
+            "arf headless --vanilla",
+        ],
+    );
+}
+
+#[test]
+fn test_quiet_before_headless_rejected() {
+    assert_top_level_scope_error(
+        &["--quiet", "headless"],
+        &[
+            "--quiet",
+            "before the 'headless' subcommand",
+            "arf headless --quiet",
+        ],
+    );
+}
+
+#[test]
+fn test_ipc_bind_before_headless_rejected() {
+    assert_top_level_scope_error(
+        &["--ipc-bind", "/tmp/x.sock", "headless"],
+        &[
+            "--ipc-bind",
+            "before the 'headless' subcommand",
+            "arf headless --ipc-bind <BIND>",
+        ],
+    );
+}
+
+#[test]
+fn test_top_level_config_is_consumed_by_history_export() {
+    use reedline::SqliteBackedHistory;
+    use tempfile::TempDir;
+
+    let history_dir = TempDir::new().expect("Failed to create history directory");
+    let r_db = history_dir.path().join("r.db");
+    drop(
+        SqliteBackedHistory::with_file(r_db, None, None)
+            .expect("Failed to create history database"),
+    );
+    let export_file = history_dir.path().join("export.db");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .env("ARF_HISTORY_DIR", history_dir.path())
+        .args([
+            "--config",
+            "x",
+            "history",
+            "export",
+            "--file",
+            export_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf history export");
+
+    assert!(
+        output.status.success(),
+        "top-level --config should be accepted by history: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_top_level_history_dir_is_consumed_by_history_import() {
+    use reedline::SqliteBackedHistory;
+    use tempfile::TempDir;
+
+    let temp = TempDir::new().expect("Failed to create temporary directory");
+    let source_file = temp.path().join("source.db");
+    drop(
+        SqliteBackedHistory::with_file(source_file.clone(), None, None)
+            .expect("Failed to create source history database"),
+    );
+    let target_dir = temp.path().join("target");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "--history-dir",
+            target_dir.to_str().unwrap(),
+            "history",
+            "import",
+            "--from",
+            "arf",
+            "--file",
+            source_file.to_str().unwrap(),
+            "--dry-run",
+        ])
+        .output()
+        .expect("Failed to run arf history import");
+
+    assert!(
+        output.status.success(),
+        "top-level --history-dir should be accepted by history: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_vanilla_without_subcommand_still_works() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["--vanilla", "-e", "1 + 1"])
+        .output()
+        .expect("Failed to run arf");
+
+    assert!(
+        output.status.success(),
+        "top-level --vanilla without a subcommand should work: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ============================================================================
 // Script Execution Mode Tests (-e flag)
 // ============================================================================

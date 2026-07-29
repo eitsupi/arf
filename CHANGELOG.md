@@ -28,6 +28,7 @@
 
 ### Fixed
 
+- Flags placed before a subcommand no longer get silently ignored; arf now reports the error and explains where the flag belongs.
 - Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived.
 - IPC requests containing incomplete R expressions are now rejected before they can enter the continuation prompt.
 
