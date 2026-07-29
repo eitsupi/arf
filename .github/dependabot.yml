@@ -28,3 +28,8 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      reedline-rusqlite:
+        patterns:
+          - "reedline"
+          - "rusqlite"
