@@ -55,6 +55,13 @@ pub struct RSourceArgs {
     pub no_r_source_overrides: bool,
 }
 
+/// R-compatible flags that let `arf` act as a drop-in replacement for the `R` binary for vscode-R
+/// and radian.
+///
+/// `--vanilla` is visible in short help because it is the composite flag a migrating user
+/// reaches for first. The individual initialization flags (`--no-environ`, `--no-site-file`, and
+/// `--no-init-file`) appear only in long help. The memory-tuning flags (`--max-connections`,
+/// `--max-ppsize`, `--min-nsize`, and `--min-vsize`) are hidden from both short and long help.
 #[derive(Args, Debug)]
 pub struct RCompatArgs {
     /// Start R in vanilla mode (no init files, no save/restore)

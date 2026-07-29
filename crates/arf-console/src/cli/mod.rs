@@ -54,8 +54,7 @@ pub struct Cli {
     #[arg(long)]
     pub no_banner: bool,
 
-    // R-compatible flags (passed to R, for vscode-R and radian compatibility)
-    // Hidden from short help (-h) but shown in long help (--help).
+    // R-compatible flags; see shared::RCompatArgs.
     #[command(flatten)]
     pub r_compat: shared::RCompatArgs,
 
