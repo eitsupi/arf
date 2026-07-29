@@ -1,6 +1,6 @@
 use crate::external::rig;
 use clap::builder::PossibleValuesParser;
-use clap::{Args, CommandFactory};
+use clap::{Args, Command, CommandFactory};
 use clap_complete::{Shell, generate};
 use std::io;
 
@@ -27,19 +27,7 @@ impl Cli {
 
         // Inject R version completions from rig if available
         if let Some(possible_values) = Self::get_r_version_completions() {
-            // Leak memory for 'static lifetime - acceptable since completions run once and exit
-            let leaked: &'static [String] = Box::leak(possible_values.into_boxed_slice());
-            let refs: Vec<&'static str> = leaked.iter().map(|s| s.as_str()).collect();
-            cmd = cmd.mut_arg("r_version", |arg| {
-                arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
-            });
-            for subcommand in ["headless", "r-home"] {
-                cmd = cmd.mut_subcommand(subcommand, |subcommand| {
-                    subcommand.mut_arg("r_version", |arg| {
-                        arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
-                    })
-                });
-            }
+            cmd = Self::with_r_version_possible_values(cmd, possible_values);
         }
 
         generate(shell, &mut cmd, "arf", &mut io::stdout());
@@ -74,6 +62,24 @@ impl Cli {
         Some(values)
     }
 
+    /// Apply possible R version values to every command that accepts an R version.
+    fn with_r_version_possible_values(mut cmd: Command, possible_values: Vec<String>) -> Command {
+        // Leak memory for 'static lifetime - acceptable since completions run once and exit
+        let leaked: &'static [String] = Box::leak(possible_values.into_boxed_slice());
+        let refs: Vec<&'static str> = leaked.iter().map(|s| s.as_str()).collect();
+        cmd = cmd.mut_arg("r_version", |arg| {
+            arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
+        });
+        for subcommand in ["headless", "r-home"] {
+            cmd = cmd.mut_subcommand(subcommand, |subcommand| {
+                subcommand.mut_arg("r_version", |arg| {
+                    arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
+                })
+            });
+        }
+        cmd
+    }
+
     /// Generate shell completions as a string for testing.
     #[cfg(test)]
     pub(super) fn generate_completions_string(shell: Shell) -> String {
@@ -94,5 +100,50 @@ impl Cli {
                 .clone();
         }
         cmd.render_long_help().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn r_version_possible_values_are_applied_to_all_commands() {
+        let possible_values = vec!["default".to_string(), "4.5.0".to_string()];
+        let cmd = Cli::with_r_version_possible_values(Cli::command(), possible_values);
+
+        let expected = vec!["default".to_string(), "4.5.0".to_string()];
+        let r_version_values = |command: &Command| {
+            command
+                .get_arguments()
+                .find(|arg| arg.get_id() == "r_version")
+                .expect("r_version argument should exist")
+                .get_possible_values()
+                .iter()
+                .map(|value| value.get_name().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(r_version_values(&cmd), expected);
+        for subcommand in ["headless", "r-home"] {
+            let subcommand = cmd
+                .get_subcommands()
+                .find(|candidate| candidate.get_name() == subcommand)
+                .expect("subcommand should exist");
+            assert_eq!(
+                r_version_values(subcommand),
+                expected,
+                "{subcommand} r_version should have possible values"
+            );
+        }
+
+        let eval = cmd
+            .get_arguments()
+            .find(|arg| arg.get_id() == "eval")
+            .expect("eval argument should exist");
+        assert!(
+            eval.get_possible_values().is_empty(),
+            "eval should not have possible values"
+        );
     }
 }
