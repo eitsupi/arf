@@ -400,7 +400,7 @@ mod tests {
     fn report(state: RSourceOverrideState) -> RSourceResolutionReport {
         RSourceResolutionReport {
             status: crate::config::RSourceStatus::Path,
-            r_home: "/tmp/r-home".into(),
+            r_home: Some("/tmp/r-home".into()),
             provider: None,
             file: None,
             key: None,

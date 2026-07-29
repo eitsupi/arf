@@ -2,7 +2,7 @@
 
 use crate::app::config_load::{load_config_collecting_warnings, load_config_or_warn};
 use crate::app::headless::HeadlessRSourceOverride;
-use crate::app::setup::resolve_r_source;
+use crate::app::setup::{resolve_path_r_home_for_report, resolve_r_source};
 #[cfg(test)]
 use crate::config::Config;
 use anyhow::Result;
@@ -11,7 +11,7 @@ use std::path::Path;
 
 #[derive(Debug, Serialize)]
 struct RHomeInfo {
-    r_home: String,
+    r_home: Option<String>,
     source: String,
     r_source_override: HeadlessRSourceOverride,
     warnings: Vec<String>,
@@ -32,7 +32,7 @@ pub(crate) fn run_r_home(
         load_config_or_warn(config_path.map(Path::to_path_buf).as_ref())
     };
 
-    let resolution = resolve_r_source(
+    let mut resolution = resolve_r_source(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
@@ -40,11 +40,34 @@ pub(crate) fn run_r_home(
         r_version,
         no_r_source_overrides,
     )?;
+    resolve_path_r_home_for_report(&mut resolution);
+
+    if resolution.r_home.is_none() {
+        let error = anyhow::anyhow!(
+            "Could not determine R_HOME from PATH; R may not be installed or available in PATH."
+        );
+        if json {
+            warnings.extend(resolution.diagnostics.iter().cloned());
+            let info = RHomeInfo {
+                r_home: None,
+                source: resolution.status.display(),
+                r_source_override: HeadlessRSourceOverride::from_report(&resolution),
+                warnings,
+            };
+            println!("{}", serde_json::to_string(&info)?);
+        } else {
+            resolution.emit_diagnostics();
+        }
+        return Err(error);
+    }
 
     if json {
         warnings.extend(resolution.diagnostics.iter().cloned());
         let info = RHomeInfo {
-            r_home: resolution.r_home.display().to_string(),
+            r_home: resolution
+                .r_home
+                .as_ref()
+                .map(|path| path.display().to_string()),
             source: resolution.status.display(),
             r_source_override: HeadlessRSourceOverride::from_report(&resolution),
             warnings,
@@ -52,7 +75,7 @@ pub(crate) fn run_r_home(
         println!("{}", serde_json::to_string(&info)?);
     } else {
         resolution.emit_diagnostics();
-        println!("{}", resolution.r_home.display());
+        println!("{}", resolution.r_home.as_ref().unwrap().display());
     }
 
     Ok(())
@@ -76,7 +99,10 @@ mod tests {
         )
         .unwrap();
         let value = serde_json::to_value(RHomeInfo {
-            r_home: resolution.r_home.display().to_string(),
+            r_home: resolution
+                .r_home
+                .as_ref()
+                .map(|path| path.display().to_string()),
             source: resolution.status.display(),
             r_source_override: HeadlessRSourceOverride::from_report(&resolution),
             warnings: Vec::new(),

@@ -135,7 +135,7 @@ impl RSourceOverrideState {
 #[derive(Debug, Clone)]
 pub(crate) struct RSourceResolutionReport {
     pub(crate) status: RSourceStatus,
-    pub(crate) r_home: PathBuf,
+    pub(crate) r_home: Option<PathBuf>,
     pub(crate) provider: Option<String>,
     pub(crate) file: Option<std::path::PathBuf>,
     pub(crate) key: Option<String>,
@@ -148,7 +148,7 @@ pub(crate) struct RSourceResolutionReport {
 impl RSourceResolutionReport {
     fn from_status(
         status: RSourceStatus,
-        r_home: PathBuf,
+        r_home: Option<PathBuf>,
         override_state: RSourceOverrideState,
     ) -> Self {
         Self {
@@ -172,7 +172,7 @@ impl RSourceResolutionReport {
     ) -> Self {
         Self {
             status,
-            r_home,
+            r_home: Some(r_home),
             provider: Some(info.provider),
             file: info.file,
             key: info.key,
@@ -231,7 +231,7 @@ pub(crate) fn resolve_r_source(
             RSourceStatus::ExplicitPath {
                 path: r_home.clone(),
             },
-            r_home,
+            Some(r_home),
             if no_r_source_overrides {
                 RSourceOverrideState::Disabled
             } else {
@@ -292,8 +292,16 @@ pub(crate) fn resolve_r_source(
 
 /// Apply a resolved R source to the process environment during startup.
 pub(crate) fn apply_r_source(resolution: &RSourceResolutionReport) -> Result<()> {
+    if matches!(resolution.status, RSourceStatus::Path) {
+        return Ok(());
+    }
+
+    let r_home = resolution
+        .r_home
+        .as_ref()
+        .context("Resolved R source has no R_HOME")?;
     // SAFETY: This is called single-threaded during startup, before R is initialized.
-    unsafe { std::env::set_var("R_HOME", &resolution.r_home) };
+    unsafe { std::env::set_var("R_HOME", r_home) };
     Ok(())
 }
 
@@ -334,23 +342,27 @@ fn setup_r_fallback(
                                 version: resolved.version,
                                 override_info: None,
                             },
-                            r_home: PathBuf::from(resolved.r_home),
+                            r_home: Some(PathBuf::from(resolved.r_home)),
                         }
                     }
                     Err(e) => {
                         log::debug!("Could not get rig default version: {}", e);
                         log::info!("Using R from PATH");
                         ResolvedRSource {
+                            // Do not discover or assign R_HOME here. R will discover it
+                            // during initialization, preserving PATH-mode startup behavior.
                             status: RSourceStatus::Path,
-                            r_home: resolve_path_r_home()?,
+                            r_home: None,
                         }
                     }
                 }
             } else {
                 log::info!("Using R from PATH (rig not available)");
                 ResolvedRSource {
+                    // Do not discover or assign R_HOME here. R will discover it
+                    // during initialization, preserving PATH-mode startup behavior.
                     status: RSourceStatus::Path,
-                    r_home: resolve_path_r_home()?,
+                    r_home: None,
                 }
             }
         }
@@ -370,7 +382,7 @@ Install rig from https://github.com/r-lib/rig or use "auto"."#
                             version: resolved.version,
                             override_info: None,
                         },
-                        r_home: PathBuf::from(resolved.r_home),
+                        r_home: Some(PathBuf::from(resolved.r_home)),
                     }
                 }
                 Err(e) => {
@@ -390,7 +402,7 @@ Install rig from https://github.com/r-lib/rig or use "auto"."#
             log::info!("Using R from explicit path: {}", path.display());
             ResolvedRSource {
                 status: RSourceStatus::ExplicitPath { path: path.clone() },
-                r_home: path.clone(),
+                r_home: Some(path.clone()),
             }
         }
     };
@@ -405,7 +417,7 @@ Install rig from https://github.com/r-lib/rig or use "auto"."#
 #[derive(Debug)]
 struct ResolvedRSource {
     status: RSourceStatus,
-    r_home: PathBuf,
+    r_home: Option<PathBuf>,
 }
 
 fn resolve_path_r_home() -> Result<PathBuf> {
@@ -413,6 +425,20 @@ fn resolve_path_r_home() -> Result<PathBuf> {
     arf_libr::get_r_home()
         .map_err(anyhow::Error::from)
         .context("Failed to determine R_HOME from PATH")
+}
+
+/// Resolve the PATH-mode R_HOME only for callers that need to report it.
+pub(crate) fn resolve_path_r_home_for_report(report: &mut RSourceResolutionReport) {
+    if !matches!(report.status, RSourceStatus::Path) || report.r_home.is_some() {
+        return;
+    }
+
+    match resolve_path_r_home() {
+        Ok(r_home) => report.r_home = Some(r_home),
+        Err(error) => report.diagnostics.push(format!(
+            "Warning: Failed to determine R_HOME from PATH: {error}"
+        )),
+    }
 }
 
 enum OverrideResolution {
@@ -649,6 +675,13 @@ where
                     requested_version: trimmed_version,
                     resolved_version: version.clone(),
                 };
+                let Some(r_home) = r_home else {
+                    diagnostics.push(
+                        "Warning: R source override resolved without an R_HOME; falling back to startup.r_source."
+                            .to_owned(),
+                    );
+                    return Some(OverrideResolution::Fallback { diagnostics });
+                };
                 return Some(OverrideResolution::Applied {
                     status: RSourceStatus::Rig {
                         version,
@@ -868,7 +901,7 @@ fn resolve_rig_resolution(resolved: external::rig::ResolvedVersion) -> Result<Re
             version: resolved.version,
             override_info: None,
         },
-        r_home: PathBuf::from(resolved.r_home),
+        r_home: Some(PathBuf::from(resolved.r_home)),
     })
 }
 
@@ -1024,7 +1057,39 @@ mod r_source_override_tests {
         )
         .unwrap();
 
-        assert_eq!(report.r_home, temp.path());
+        assert_eq!(report.r_home.as_deref(), Some(temp.path()));
+        assert_eq!(std::env::var_os("R_HOME"), original);
+    }
+
+    #[test]
+    fn path_resolution_leaves_r_home_for_r_initialization() {
+        let report = RSourceResolutionReport::from_status(
+            RSourceStatus::Path,
+            None,
+            RSourceOverrideState::Disabled,
+        );
+        assert!(matches!(report.status, RSourceStatus::Path));
+        assert!(report.r_home.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn apply_r_source_does_not_set_r_home_for_path_mode() {
+        let original = std::env::var_os("R_HOME");
+        let report = RSourceResolutionReport {
+            status: RSourceStatus::Path,
+            r_home: Some(PathBuf::from("/tmp/discovered-r-home")),
+            provider: None,
+            file: None,
+            key: None,
+            requested_version: None,
+            resolved_version: None,
+            diagnostics: Vec::new(),
+            override_state: RSourceOverrideState::NotConfigured,
+        };
+
+        apply_r_source(&report).unwrap();
+
         assert_eq!(std::env::var_os("R_HOME"), original);
     }
 
@@ -1042,7 +1107,7 @@ mod r_source_override_tests {
         )
         .unwrap();
 
-        assert_eq!(report.r_home, cli_path.path());
+        assert_eq!(report.r_home.as_deref(), Some(cli_path.path()));
         assert_eq!(report.override_state, RSourceOverrideState::ShadowedByCli);
         assert!(report.diagnostics.is_empty());
     }
@@ -1299,7 +1364,7 @@ mod r_source_override_tests {
                         version: versions[0].version.clone(),
                         override_info: None,
                     },
-                    r_home: PathBuf::from("/tmp/r-home"),
+                    r_home: Some(PathBuf::from("/tmp/r-home")),
                 })
             },
         )
@@ -1350,7 +1415,7 @@ mod r_source_override_tests {
                         version: versions[0].version.clone(),
                         override_info: None,
                     },
-                    r_home: PathBuf::from("/tmp/r-home"),
+                    r_home: Some(PathBuf::from("/tmp/r-home")),
                 })
             },
         )
@@ -1563,7 +1628,7 @@ mod r_source_override_tests {
                                 version: versions[0].version.clone(),
                                 override_info: None,
                             },
-                            r_home: PathBuf::from("/tmp/r-home"),
+                            r_home: Some(PathBuf::from("/tmp/r-home")),
                         })
                     },
                 )
@@ -1621,7 +1686,7 @@ mod r_source_override_tests {
                         version: versions[0].version.clone(),
                         override_info: None,
                     },
-                    r_home: PathBuf::from("/tmp/r-home"),
+                    r_home: Some(PathBuf::from("/tmp/r-home")),
                 })
             },
         )
