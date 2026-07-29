@@ -302,7 +302,7 @@ arf ipc list
 When no sessions are running, returns `{"sessions": []}` (exit 0).
 
 The `session_type` field is `"headless"` for sessions started with
-`arf headless --json` and `"interactive"` for sessions running an interactive
+`arf headless` and `"interactive"` for sessions running an interactive
 REPL. A `null` value means the session was created by an older arf that did not
 record its type. Clients must treat `null` as unknown and must not send
 `shutdown` to that session.

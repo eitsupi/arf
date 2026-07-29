@@ -11,7 +11,8 @@ pub(crate) enum IpcAction {
     /// List active arf sessions as JSON
     ///
     /// Returns a JSON object with a `sessions` array. Each entry contains
-    /// pid, r_version, socket_path, cwd, started_at, log_file, and history_session_id.
+    /// pid, r_version, socket_path, cwd, started_at, session_type, log_file,
+    /// and history_session_id.
     /// Returns `{"sessions": []}` when no sessions are running (exit 0).
     #[command(after_long_help = "\
 Examples:
