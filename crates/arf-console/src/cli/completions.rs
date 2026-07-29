@@ -31,8 +31,15 @@ impl Cli {
             let leaked: &'static [String] = Box::leak(possible_values.into_boxed_slice());
             let refs: Vec<&'static str> = leaked.iter().map(|s| s.as_str()).collect();
             cmd = cmd.mut_arg("r_version", |arg| {
-                arg.value_parser(PossibleValuesParser::new(refs))
+                arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
             });
+            for subcommand in ["headless", "r-home"] {
+                cmd = cmd.mut_subcommand(subcommand, |subcommand| {
+                    subcommand.mut_arg("r_version", |arg| {
+                        arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
+                    })
+                });
+            }
         }
 
         generate(shell, &mut cmd, "arf", &mut io::stdout());
