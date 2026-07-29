@@ -313,6 +313,64 @@ fn test_no_banner_before_completions_rejected() {
 }
 
 #[test]
+fn test_top_level_config_before_history_schema_rejected() {
+    assert_top_level_scope_error(
+        &["--config", "x", "history", "schema"],
+        &[
+            "--config",
+            "not used by the 'history schema' subcommand",
+            "arf --config",
+        ],
+    );
+}
+
+#[test]
+fn test_top_level_history_dir_before_history_schema_rejected() {
+    assert_top_level_scope_error(
+        &["--history-dir", "/tmp", "history", "schema"],
+        &[
+            "--history-dir",
+            "not used by the 'history schema' subcommand",
+            "arf --history-dir",
+        ],
+    );
+}
+
+#[test]
+fn test_top_level_config_before_config_check_rejected_with_nested_corrected_form() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["--config", "x", "config", "check"])
+        .output()
+        .expect("Failed to run arf config check");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Usage: arf config check")
+            && stderr.contains("before the 'config check' subcommand"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("arf config check --config <CONFIG>"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("arf --config"), "{stderr}");
+}
+
+#[test]
+fn test_top_level_no_banner_before_nested_ipc_rejected() {
+    assert_top_level_scope_error(
+        &["--no-banner", "ipc", "list"],
+        &[
+            "--no-banner",
+            "Usage: arf ipc list",
+            "not used by the 'ipc list' subcommand",
+            "arf --no-banner",
+        ],
+    );
+}
+
+#[test]
 fn test_vanilla_before_headless_rejected() {
     assert_top_level_scope_error(
         &["--vanilla", "headless"],

@@ -417,15 +417,30 @@ fn run() -> Result<()> {
 }
 
 fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
-    let Some(subcommand_name) = matches.subcommand_name() else {
+    if matches.subcommand_name().is_none() {
         return;
-    };
+    }
 
-    let subcommand = command
-        .find_subcommand(subcommand_name)
-        .expect("parsed subcommand must exist")
-        .clone();
-    let subcommand_args: Vec<_> = subcommand.get_arguments().collect();
+    let mut path = Vec::new();
+    let mut path_commands = Vec::new();
+    let mut current_command = command;
+    let mut current_matches = matches;
+
+    while let Some((subcommand_name, nested_matches)) = current_matches.subcommand() {
+        let subcommand = current_command
+            .find_subcommand(subcommand_name)
+            .expect("parsed subcommand must exist");
+        path.push(subcommand_name.to_owned());
+        path_commands.push(subcommand);
+        current_command = subcommand;
+        current_matches = nested_matches;
+    }
+
+    let subcommand_path = path.join(" ");
+    let final_subcommand = path_commands
+        .last()
+        .map(|subcommand| (*subcommand).clone())
+        .expect("parsed subcommand path must not be empty");
 
     for arg in command.get_arguments() {
         let Some(long) = arg.get_long() else {
@@ -435,7 +450,7 @@ fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
         // These checks have deliberately custom errors below and must retain
         // their existing wording and ordering.
         if matches!(arg.get_id().as_str(), "eval" | "file")
-            || matches!(subcommand_name, "history") && matches!(long, "config" | "history-dir")
+            || is_history_option_allowed(&path, long)
         {
             continue;
         }
@@ -444,13 +459,14 @@ fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
             continue;
         }
 
-        let mut subcommand_command = subcommand.clone();
-        subcommand_command.set_bin_name(format!("arf {subcommand_name}"));
+        let mut subcommand_command = final_subcommand.clone();
+        subcommand_command.set_bin_name(format!("arf {subcommand_path}"));
 
-        if let Some(subcommand_arg) = subcommand_args
-            .iter()
-            .find(|subcommand_arg| subcommand_arg.get_long() == Some(long))
-        {
+        if let Some(subcommand_arg) = path_commands.iter().rev().find_map(|subcommand| {
+            subcommand
+                .get_arguments()
+                .find(|subcommand_arg| subcommand_arg.get_long() == Some(long))
+        }) {
             let value_names = if matches!(
                 subcommand_arg.get_action(),
                 clap::ArgAction::SetTrue | clap::ArgAction::SetFalse
@@ -469,16 +485,16 @@ fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
                     .unwrap_or_default()
             };
             let corrected_form = if value_names.is_empty() {
-                format!("arf {subcommand_name} --{long}")
+                format!("arf {subcommand_path} --{long}")
             } else {
-                format!("arf {subcommand_name} --{long} {value_names}")
+                format!("arf {subcommand_path} --{long} {value_names}")
             };
 
             subcommand_command
                 .error(
                     clap::error::ErrorKind::ArgumentConflict,
                     format!(
-                        "'--{long}' was given before the '{subcommand_name}' subcommand, where it has no effect\n\n  tip: place it after the subcommand instead:\n       {corrected_form}"
+                        "'--{long}' was given before the '{subcommand_path}' subcommand, where it has no effect\n\n  tip: place it after the subcommand instead:\n       {corrected_form}"
                     ),
                 )
                 .exit();
@@ -489,9 +505,16 @@ fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
             .error(
                 clap::error::ErrorKind::ArgumentConflict,
                 format!(
-                    "'--{long}' is not used by the '{subcommand_name}' subcommand\n\n  tip: it applies to the interactive console, which takes no subcommand:\n       {console_form}"
+                    "'--{long}' is not used by the '{subcommand_path}' subcommand\n\n  tip: it applies to the interactive console, which takes no subcommand:\n       {console_form}"
                 ),
             )
             .exit();
     }
+}
+
+fn is_history_option_allowed(path: &[String], long: &str) -> bool {
+    matches!(long, "config" | "history-dir")
+        && path.len() == 2
+        && path[0] == "history"
+        && matches!(path[1].as_str(), "import" | "export")
 }
