@@ -449,19 +449,28 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_history_dir_rejects_empty_string() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
         assert!(result.is_err(), "empty --history-dir should be rejected");
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_normal_cli() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
         assert!(cli.no_r_source_overrides);
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_headless_cli() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "headless", "--no-r-source-overrides"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
@@ -470,7 +479,10 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_r_home_subcommand_has_its_own_resolution_flags() {
+        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
+        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from([
             "arf",
             "r-home",
