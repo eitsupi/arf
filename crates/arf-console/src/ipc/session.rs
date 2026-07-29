@@ -281,13 +281,11 @@ mod tests {
     #[serial]
     fn clear_session_history_id_preserves_session_type() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let previous_dir = std::env::var_os(ARF_IPC_SESSIONS_DIR);
-        unsafe { std::env::set_var(ARF_IPC_SESSIONS_DIR, temp_dir.path()) };
+        let _guard = crate::test_utils::lock_env_var(ARF_IPC_SESSIONS_DIR, temp_dir.path());
 
         let pid = std::process::id();
         let info = SessionInfo {
             pid,
-            session_type: Some(SessionType::Interactive),
             ..session_info(Some(SessionType::Interactive))
         };
         write_session(&info).unwrap();
@@ -299,10 +297,5 @@ mod tests {
         let cleared: SessionInfo = serde_json::from_str(&contents).unwrap();
         assert_eq!(cleared.history_session_id, None);
         assert_eq!(cleared.session_type, Some(SessionType::Interactive));
-
-        match previous_dir {
-            Some(value) => unsafe { std::env::set_var(ARF_IPC_SESSIONS_DIR, value) },
-            None => unsafe { std::env::remove_var(ARF_IPC_SESSIONS_DIR) },
-        }
     }
 }

@@ -3,6 +3,7 @@
 //! This module provides helpers for tests that need to coordinate
 //! access to process-global state like `current_dir`.
 
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -12,6 +13,9 @@ use std::sync::{Mutex, MutexGuard};
 /// change cwd must hold this lock to avoid interfering with each other
 /// during parallel test execution.
 static CWD_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Process-global mutex for tests that modify environment variables.
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 /// Acquire the cwd lock and save the current directory.
 ///
@@ -53,6 +57,41 @@ impl Drop for CwdGuard {
                     "CwdGuard: failed to restore original working directory {:?}: {}",
                     self.original, err
                 );
+            }
+        }
+    }
+}
+
+/// Set an environment variable while holding a lock and restore its original
+/// value when the returned guard is dropped.
+pub fn lock_env_var(name: &'static str, value: impl AsRef<OsStr>) -> EnvVarGuard {
+    let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let original = std::env::var_os(name);
+    // SAFETY: Tests serialize access to these process-global variables.
+    unsafe { std::env::set_var(name, value) };
+    EnvVarGuard {
+        _lock: lock,
+        name,
+        original,
+    }
+}
+
+/// RAII guard that holds the environment-variable mutex and restores the
+/// original value on drop.
+pub struct EnvVarGuard {
+    _lock: MutexGuard<'static, ()>,
+    name: &'static str,
+    original: Option<OsString>,
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: Tests serialize access to these process-global variables.
+        unsafe {
+            if let Some(value) = &self.original {
+                std::env::set_var(self.name, value);
+            } else {
+                std::env::remove_var(self.name);
             }
         }
     }
