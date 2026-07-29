@@ -144,6 +144,7 @@ pub fn start_server(
     bind: Option<&str>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: session::SessionType,
 ) -> std::io::Result<session::SessionInfo> {
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -157,7 +158,14 @@ pub fn start_server(
     // Start the server thread first; only update the receiver after
     // confirming that the server bound successfully, so a failed start
     // doesn't break an already-running server's channel.
-    let session = server::start_server(tx, bind, &started_at, log_file, history_session_id)?;
+    let session = server::start_server(
+        tx,
+        bind,
+        &started_at,
+        log_file,
+        history_session_id,
+        session_type,
+    )?;
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.

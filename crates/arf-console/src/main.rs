@@ -376,7 +376,12 @@ fn run() -> Result<()> {
     // fails, `clear_history_session_id()` is called to set it back to `null`.
     // In practice the window is negligibly short (milliseconds).
     if cli.with_ipc {
-        match ipc::start_server(cli.ipc_bind.as_deref(), None, session_id_raw) {
+        match ipc::start_server(
+            cli.ipc_bind.as_deref(),
+            None,
+            session_id_raw,
+            ipc::session::SessionType::Interactive,
+        ) {
             Ok(session) => {
                 log::info!("IPC server started on {}", session.socket_path);
                 if let Some(pid_path) = &cli.ipc_pid_file {

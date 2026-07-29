@@ -33,6 +33,10 @@ pub struct SessionInfo {
     pub r_version: Option<String>,
     pub cwd: String,
     pub started_at: String,
+    /// Whether this session is headless or interactive, or `None` for session
+    /// files written by an older arf that did not record this.
+    #[serde(default)]
+    pub session_type: Option<SessionType>,
     /// Log file path, or `None` if no log file is configured.
     #[serde(default)]
     pub log_file: Option<String>,
@@ -41,6 +45,13 @@ pub struct SessionInfo {
     /// database failed to open.
     #[serde(default)]
     pub history_session_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionType {
+    Headless,
+    Interactive,
 }
 
 /// Return the directory where session files are stored.
@@ -218,5 +229,80 @@ fn is_process_alive(pid: u32) -> bool {
                         .is_some_and(|f| f.trim_matches('"') == pid.to_string())
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    fn session_info(session_type: Option<SessionType>) -> SessionInfo {
+        SessionInfo {
+            pid: 12345,
+            socket_path: "/tmp/arf.sock".to_string(),
+            r_version: Some("4.4.1".to_string()),
+            cwd: "/tmp".to_string(),
+            started_at: "2026-01-01T00:00:00+00:00".to_string(),
+            session_type,
+            log_file: None,
+            history_session_id: Some(42),
+        }
+    }
+
+    #[test]
+    fn session_type_serializes_and_round_trips() {
+        let info = session_info(Some(SessionType::Headless));
+        let json = serde_json::to_value(&info).unwrap();
+
+        assert_eq!(json["session_type"], "headless");
+
+        let restored: SessionInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.session_type, Some(SessionType::Headless));
+    }
+
+    #[test]
+    fn legacy_session_without_session_type_deserializes_as_unknown() {
+        let json = r#"
+        {
+            "pid": 12345,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": "4.4.1",
+            "cwd": "/tmp",
+            "started_at": "2026-01-01T00:00:00+00:00"
+        }
+        "#;
+
+        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.session_type, None);
+    }
+
+    #[test]
+    #[serial]
+    fn clear_session_history_id_preserves_session_type() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let previous_dir = std::env::var_os(ARF_IPC_SESSIONS_DIR);
+        unsafe { std::env::set_var(ARF_IPC_SESSIONS_DIR, temp_dir.path()) };
+
+        let pid = std::process::id();
+        let info = SessionInfo {
+            pid,
+            session_type: Some(SessionType::Interactive),
+            ..session_info(Some(SessionType::Interactive))
+        };
+        write_session(&info).unwrap();
+
+        clear_session_history_id(pid);
+
+        let contents =
+            std::fs::read_to_string(temp_dir.path().join(format!("{pid}.json"))).unwrap();
+        let cleared: SessionInfo = serde_json::from_str(&contents).unwrap();
+        assert_eq!(cleared.history_session_id, None);
+        assert_eq!(cleared.session_type, Some(SessionType::Interactive));
+
+        match previous_dir {
+            Some(value) => unsafe { std::env::set_var(ARF_IPC_SESSIONS_DIR, value) },
+            None => unsafe { std::env::remove_var(ARF_IPC_SESSIONS_DIR) },
+        }
     }
 }
