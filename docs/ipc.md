@@ -180,7 +180,7 @@ arf ipc eval --pid 12345 'getwd()'
 
 **Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
 
-When the timeout fires, the IPC call returns an error, but the R evaluation continues and the session stays busy until it finishes.
+When the timeout fires, the server reports a JSON-RPC error as structured JSON on stderr and the client exits with code 4; this is not placed in the result object's `error` field, and the R evaluation continues so the session stays busy until it finishes.
 
 Example (silent eval, result captured in `value`):
 
