@@ -5,4 +5,6 @@ pub(crate) mod commands;
 pub(crate) mod config_load;
 pub(crate) mod headless;
 pub(crate) mod r_home;
+pub(crate) mod r_profiles;
+pub(crate) mod session_id;
 pub(crate) mod setup;

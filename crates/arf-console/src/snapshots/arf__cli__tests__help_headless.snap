@@ -1,0 +1,107 @@
+---
+source: crates/arf-console/src/cli/mod.rs
+expression: help
+---
+Run R with IPC server only (no interactive REPL)
+
+Starts R and an IPC server without the interactive console. Useful for AI agents that only need IPC access, or for CI environments where a terminal is not available. Exit with Ctrl+C or `arf ipc shutdown`.
+
+Usage: headless [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+          Path to configuration file
+
+      --with-r-version <R_VERSION>
+          Highest-priority R source: use this R version via rig
+          
+          Accepts a rig alias (e.g. "release"), "default", a rig-assigned name, a full version ("4.4.1"), a partial version ("4.4" or "4", matching the latest release in that series), or a version range in the style Cargo and npm use ("^4.4", ">=4.3, <5.0").
+          
+          Requires rig. Candidates are limited to R versions rig has installed (from `rig list --json`); the version string is never passed to rig.
+          
+          Takes precedence over ARF_R_VERSION, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+
+      --r-home <R_HOME>
+          Highest-priority R source: use this explicit R_HOME path
+          
+          Mutually exclusive with --with-r-version and ARF_R_VERSION.
+          
+          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+
+      --no-r-source-overrides
+          Disable experimental directory-level R source overrides
+          
+          This only disables r_source_overrides. An R source given by --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
+          
+          Config: [experimental].r_source_overrides
+
+      --ipc-bind <BIND>
+          Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted.
+          
+          Unix: filesystem path (e.g. /tmp/my-arf.sock) Windows: named pipe path (e.g. \\.\pipe\my-arf)
+
+      --ipc-pid-file <PID_FILE>
+          Write server PID to a file (removed on shutdown)
+
+      --quiet
+          Suppress status messages on stderr (IPC path, ready, shutdown)
+
+      --json
+          Print session info as JSON to stdout when ready
+          
+          Outputs a JSON object with pid, socket_path, r_version, etc. Implies --quiet (suppresses status messages on stderr). Pretty-printed when stdout is a terminal, compact when piped.
+
+      --log-file <LOG_FILE>
+          Redirect log output to a file instead of stderr
+
+      --vanilla
+          Start R in vanilla mode (no init files, no save/restore)
+
+      --no-environ
+          [R] Don't read the site and user environment files
+
+      --no-site-file
+          [R] Don't read the site-wide Rprofile
+
+      --no-init-file
+          [R] Don't read the user's .Rprofile
+
+      --history-dir <HISTORY_DIR>
+          Custom history directory (overrides default XDG location)
+          
+          History will be stored at `{dir}/r.db`.
+          
+          Config: history.dir
+          
+          [env: ARF_HISTORY_DIR=]
+
+      --no-history
+          Disable history (no history saved)
+          
+          Config: history.disabled
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  Start headless and evaluate R code:
+    $ arf headless &
+    # (wait for the server to be ready)
+    $ arf ipc eval '1 + 1'
+
+  CI usage with JSON output:
+    $ arf headless --json | jq -r .socket_path
+
+  Run with logging to a file:
+    $ arf headless --log-file arf.log --ipc-pid-file arf.pid
+
+  Use a custom socket path:
+    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
+    $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
+
+  Shut down a headless session:
+    $ arf ipc shutdown

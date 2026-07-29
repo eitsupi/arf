@@ -28,8 +28,9 @@ use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
 use app::r_home::run_r_home;
 #[cfg(windows)]
-use app::setup::source_r_profiles;
-use app::setup::{create_session_id, run_script, setup_r};
+use app::r_profiles::source_r_profiles;
+use app::session_id::create_session_id;
+use app::setup::{run_script, setup_r};
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, RArgsBuilder, resolve_headless_r_source};
 use config::ensure_directories;
@@ -70,12 +71,12 @@ fn run() -> Result<()> {
             "--file"
         };
         let subcommand = match &cli.command {
-            Some(Commands::Completions { .. }) => "completions",
-            Some(Commands::Config { .. }) => "config",
-            Some(Commands::History { .. }) => "history",
-            Some(Commands::Ipc { .. }) => "ipc",
-            Some(Commands::Headless { .. }) => "headless",
-            Some(Commands::RHome { .. }) => "r-home",
+            Some(Commands::Completions(_)) => "completions",
+            Some(Commands::Config(_)) => "config",
+            Some(Commands::History(_)) => "history",
+            Some(Commands::Ipc(_)) => "ipc",
+            Some(Commands::Headless(_)) => "headless",
+            Some(Commands::RHome(_)) => "r-home",
             None => unreachable!(),
         };
         Cli::command()
@@ -91,7 +92,7 @@ fn run() -> Result<()> {
     // In headless mode, also redirect stderr to the log file so that all
     // output (R device callbacks, eprintln!, etc.) is captured.
     let (log_file, is_headless) = match &cli.command {
-        Some(Commands::Headless { log_file, .. }) => (log_file.as_deref(), true),
+        Some(Commands::Headless(args)) => (args.log_file.as_deref(), true),
         _ => (None, false),
     };
     init_logger(log_file, is_headless);
@@ -103,90 +104,74 @@ fn run() -> Result<()> {
 
     // Handle subcommands first
     match &cli.command {
-        Some(Commands::Completions { shell }) => {
-            Cli::print_completions(*shell);
+        Some(Commands::Completions(args)) => {
+            Cli::print_completions(args.shell);
             return Ok(());
         }
-        Some(Commands::Config { action }) => {
-            return handle_config_command(action);
+        Some(Commands::Config(args)) => {
+            return handle_config_command(&args.action);
         }
-        Some(Commands::History { action }) => {
-            return handle_history_command(action, cli.config.as_ref(), cli.history_dir.as_ref());
+        Some(Commands::History(args)) => {
+            return handle_history_command(
+                &args.action,
+                cli.config.as_ref(),
+                cli.history_dir.as_ref(),
+            );
         }
-        Some(Commands::Ipc { action }) => {
-            handle_ipc_command(action);
+        Some(Commands::Ipc(args)) => {
+            handle_ipc_command(&args.action);
             return Ok(());
         }
-        Some(Commands::Headless {
-            config,
-            r_version,
-            r_home,
-            no_r_source_overrides,
-            bind,
-            pid_file,
-            quiet,
-            json,
-            log_file,
-            history_dir,
-            no_history,
-            vanilla,
-            no_environ,
-            no_site_file,
-            no_init_file,
-            max_connections,
-            max_ppsize,
-            min_nsize,
-            min_vsize,
-        }) => {
+        Some(Commands::Headless(args)) => {
             let (r_home, r_version) = resolve_headless_r_source(
                 (cli.r_home.as_ref(), cli.r_version.as_ref()),
-                (r_home.as_ref(), r_version.as_ref()),
+                (args.r_home.as_ref(), args.r_version.as_ref()),
             );
             let r_args_builder = RArgsBuilder {
-                vanilla: *vanilla,
-                no_environ: *no_environ,
-                no_site_file: *no_site_file,
-                no_init_file: *no_init_file,
+                vanilla: args.vanilla,
+                no_environ: args.no_environ,
+                no_site_file: args.no_site_file,
+                no_init_file: args.no_init_file,
                 save: false,
                 restore: false,
-                max_connections: *max_connections,
-                max_ppsize: *max_ppsize,
-                min_nsize: min_nsize.as_deref(),
-                min_vsize: min_vsize.as_deref(),
+                max_connections: args.max_connections,
+                max_ppsize: args.max_ppsize,
+                min_nsize: args.min_nsize.as_deref(),
+                min_vsize: args.min_vsize.as_deref(),
             };
             return run_headless(
-                config.as_ref(),
+                args.config.as_ref(),
                 r_home.map(|path| path.as_path()),
                 r_version.map(String::as_str),
                 r_args_builder,
-                bind.as_deref(),
-                pid_file.as_deref(),
-                *quiet,
-                *json,
-                log_file.as_deref(),
-                history_dir.as_deref(),
-                *no_history,
-                no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
+                args.bind.as_deref(),
+                args.pid_file.as_deref(),
+                args.quiet,
+                args.json,
+                args.log_file.as_deref(),
+                args.history_dir.as_deref(),
+                args.no_history,
+                no_r_source_overrides_enabled(
+                    cli.no_r_source_overrides,
+                    args.no_r_source_overrides,
+                ),
             );
         }
-        Some(Commands::RHome {
-            config,
-            r_version,
-            r_home,
-            no_r_source_overrides,
-            json,
-        }) => {
+        Some(Commands::RHome(args)) => {
             let (r_home, r_version) = resolve_headless_r_source(
                 (cli.r_home.as_ref(), cli.r_version.as_ref()),
-                (r_home.as_ref(), r_version.as_ref()),
+                (args.r_home.as_ref(), args.r_version.as_ref()),
             );
-            let config_path = config.as_ref().or(cli.config.as_ref());
+            let config_path = args.config.as_ref().or(cli.config.as_ref());
             return run_r_home(
                 config_path.map(std::path::PathBuf::as_path),
                 r_home.map(std::path::PathBuf::as_path),
                 r_version.map(String::as_str),
-                no_r_source_overrides_enabled(cli.no_r_source_overrides, *no_r_source_overrides),
-                *json,
+                no_r_source_overrides_enabled(
+                    cli.no_r_source_overrides,
+                    args.no_r_source_overrides,
+                ),
+                args.json,
             );
         }
         None => {}
@@ -437,17 +422,13 @@ mod tests {
     fn top_level_no_r_source_overrides_applies_to_headless() {
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides", "headless"]).unwrap();
         let top_level = cli.no_r_source_overrides;
-        let Some(Commands::Headless {
-            no_r_source_overrides,
-            ..
-        }) = cli.command
-        else {
+        let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
 
         assert!(no_r_source_overrides_enabled(
             top_level,
-            no_r_source_overrides
+            args.no_r_source_overrides
         ));
     }
 }
