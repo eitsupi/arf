@@ -49,9 +49,7 @@ fn r_lib_folder() -> &'static str {
 pub fn find_r_library() -> RResult<PathBuf> {
     // First, check R_HOME environment variable
     if let Ok(r_home) = env::var("R_HOME") {
-        let lib_path = PathBuf::from(&r_home)
-            .join(r_lib_folder())
-            .join(r_lib_name());
+        let lib_path = r_library_path(Path::new(&r_home));
         if lib_path.exists() {
             return Ok(lib_path);
         }
@@ -67,9 +65,7 @@ pub fn find_r_library() -> RResult<PathBuf> {
         && output.status.success()
     {
         let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let lib_path = PathBuf::from(&r_home)
-            .join(r_lib_folder())
-            .join(r_lib_name());
+        let lib_path = r_library_path(Path::new(&r_home));
         if lib_path.exists() {
             return Ok(lib_path);
         }
@@ -102,6 +98,11 @@ fn r_lib_name() -> &'static str {
 #[cfg(target_os = "windows")]
 fn r_lib_name() -> &'static str {
     "R.dll"
+}
+
+/// Return the R shared library path relative to an R_HOME directory.
+pub fn r_library_path(r_home: &Path) -> PathBuf {
+    r_home.join(r_lib_folder()).join(r_lib_name())
 }
 
 /// Get R_HOME from the system.

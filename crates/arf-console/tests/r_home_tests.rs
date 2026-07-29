@@ -13,24 +13,19 @@ impl RLessEnvironment {
         let bin_dir = temp.path().join("bin");
         std::fs::create_dir(&bin_dir).unwrap();
         let fake_r_home = temp.path().join("fake-r-home");
-        std::fs::create_dir_all(fake_r_home.join("lib")).unwrap();
-        std::fs::write(fake_r_home.join("lib/libR.so"), []).unwrap();
-
-        #[cfg(unix)]
-        let r_command = bin_dir.join("R");
-        #[cfg(windows)]
-        let r_command = bin_dir.join("R.cmd");
+        let fake_r_library = arf_libr::r_library_path(&fake_r_home);
+        std::fs::create_dir_all(fake_r_library.parent().unwrap()).unwrap();
+        std::fs::write(fake_r_library, []).unwrap();
 
         #[cfg(unix)]
         {
+            let r_command = bin_dir.join("R");
             std::fs::write(&r_command, "#!/bin/sh\nexit 1\n").unwrap();
             use std::os::unix::fs::PermissionsExt;
             let mut permissions = std::fs::metadata(&r_command).unwrap().permissions();
             permissions.set_mode(0o755);
             std::fs::set_permissions(&r_command, permissions).unwrap();
         }
-        #[cfg(windows)]
-        std::fs::write(&r_command, "@echo off\r\nexit /b 1\r\n").unwrap();
 
         Self {
             _temp: temp,
