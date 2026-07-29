@@ -175,10 +175,12 @@ arf ipc eval --pid 12345 'getwd()'
 |-----------|-------------|
 | `<CODE>` | R code to evaluate (required) |
 | `--visible` | Also show output in the session |
-| `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes) |
+| `--timeout <MS>` | Timeout in milliseconds (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
 **Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
+
+When the timeout fires, the IPC call returns an error, but the R evaluation continues and the session stays busy until it finishes.
 
 Example (silent eval, result captured in `value`):
 
