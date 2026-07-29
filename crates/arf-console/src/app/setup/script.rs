@@ -8,16 +8,16 @@ use std::fs;
 /// Run in script execution mode (non-interactive).
 pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     // Load configuration (from file or default)
-    let config = load_config_or_warn(cli.config.as_ref());
+    let config = load_config_or_warn(cli.r_source.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
     let resolution = super::setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
-        cli.r_home.as_deref(),
-        cli.r_version.as_deref(),
-        cli.no_r_source_overrides,
+        cli.r_source.r_home.as_deref(),
+        cli.r_source.r_version.as_deref(),
+        cli.r_source.no_r_source_overrides,
     )?;
     resolution.emit_diagnostics();
     if let Some(notice) = super::overrides::script_override_notice(&resolution) {

@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/src/cli.rs
+source: crates/arf-console/src/cli/mod.rs
 expression: help
 ---
 A cross-platform R console written in Rust
@@ -35,10 +35,16 @@ Options:
   -c, --config <CONFIG>
           Path to configuration file
 
-      --no-banner
-          Suppress the startup banner
+      --r-home <R_HOME>
+          Highest-priority R source: use this explicit R_HOME path
           
-          Config: show_banner
+          Mutually exclusive with --with-r-version and ARF_R_VERSION.
+          
+          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          
+          Config: startup.r_source
+          
+          [env: ARF_R_HOME=]
 
       --with-r-version <R_VERSION>
           Highest-priority R source: use this R version via rig
@@ -53,17 +59,6 @@ Options:
           
           [env: ARF_R_VERSION=]
 
-      --r-home <R_HOME>
-          Highest-priority R source: use this explicit R_HOME path
-          
-          Mutually exclusive with --with-r-version and ARF_R_VERSION.
-          
-          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
-          
-          Config: startup.r_source
-          
-          [env: ARF_R_HOME=]
-
       --no-r-source-overrides
           Disable experimental directory-level R source overrides
           
@@ -71,8 +66,22 @@ Options:
           
           Config: [experimental].r_source_overrides
 
+      --no-banner
+          Suppress the startup banner
+          
+          Config: show_banner
+
       --vanilla
           Start R in vanilla mode (no init files, no save/restore)
+
+      --no-environ
+          [R] Don't read the site and user environment files
+
+      --no-site-file
+          [R] Don't read the site-wide Rprofile
+
+      --no-init-file
+          [R] Don't read the user's .Rprofile
 
   -q, --quiet
           [R] Don't print R startup message
@@ -91,15 +100,6 @@ Options:
 
       --restore-data
           [R] Restore previously saved objects
-
-      --no-environ
-          [R] Don't read the site and user environment files
-
-      --no-site-file
-          [R] Don't read the site-wide Rprofile
-
-      --no-init-file
-          [R] Don't read the user's .Rprofile
 
       --no-echo
           [R] Don't echo input (no-op, arf controls its own echo)
@@ -122,7 +122,7 @@ Options:
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
           
-          R history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.
+          R history is stored at `{dir}/r.db`. The interactive console also stores shell history at `{dir}/shell.db`.
           
           Config: history.dir
           

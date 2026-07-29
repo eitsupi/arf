@@ -1,32 +1,9 @@
-use clap::{Args, ValueHint};
-use std::path::PathBuf;
+use clap::Args;
 
 #[derive(Args, Debug)]
 pub(crate) struct RHomeArgs {
-    /// Path to configuration file
-    #[arg(short, long, value_hint = ValueHint::FilePath)]
-    pub(crate) config: Option<PathBuf>,
-
-    /// Highest-priority R source: use this R version via rig
-    #[arg(
-        long = "with-r-version",
-        env = "ARF_R_VERSION",
-        conflicts_with = "r_home"
-    )]
-    pub(crate) r_version: Option<String>,
-
-    /// Highest-priority R source: use this explicit R_HOME path
-    #[arg(
-        long = "r-home",
-        value_hint = ValueHint::DirPath,
-        env = "ARF_R_HOME",
-        conflicts_with = "r_version"
-    )]
-    pub(crate) r_home: Option<PathBuf>,
-
-    /// Disable experimental directory-level R source overrides
-    #[arg(long = "no-r-source-overrides")]
-    pub(crate) no_r_source_overrides: bool,
+    #[command(flatten)]
+    pub(crate) r_source: super::shared::RSourceArgs,
 
     /// Print resolution details as JSON
     #[arg(long)]

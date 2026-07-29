@@ -13,7 +13,7 @@ use crate::config::{
 pub(crate) fn load_config_with_fallback(
     cli: &Cli,
 ) -> (Config, Option<std::path::PathBuf>, ConfigStatus) {
-    let (result, config_path) = if let Some(path) = &cli.config {
+    let (result, config_path) = if let Some(path) = &cli.r_source.config {
         (load_config_from_path(path), Some(path.clone()))
     } else {
         let default_path = config_file_path();
