@@ -38,6 +38,9 @@ _arf() {
             arf,ipc)
                 cmd="arf__subcmd__ipc"
                 ;;
+            arf,r-home)
+                cmd="arf__subcmd__r__subcmd__home"
+                ;;
             arf__subcmd__config,check)
                 cmd="arf__subcmd__config__subcmd__check"
                 ;;
@@ -73,6 +76,9 @@ _arf() {
                 ;;
             arf__subcmd__help,ipc)
                 cmd="arf__subcmd__help__subcmd__ipc"
+                ;;
+            arf__subcmd__help,r-home)
+                cmd="arf__subcmd__help__subcmd__r__subcmd__home"
                 ;;
             arf__subcmd__help__subcmd__config,check)
                 cmd="arf__subcmd__help__subcmd__config__subcmd__check"
@@ -180,7 +186,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --no-r-source-overrides --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --no-banner --with-r-version --r-home --no-r-source-overrides --vanilla --quiet --no-save --save --no-restore --no-restore-data --restore-data --no-environ --no-site-file --no-init-file --interactive --no-echo --slave --restore --verbose --encoding --max-connections --max-ppsize --min-nsize --min-vsize --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r-home help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -619,7 +625,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help)
-            opts="completions config history ipc headless help"
+            opts="completions config history ipc headless r-home help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -859,6 +865,20 @@ _arf() {
         arf__subcmd__help__subcmd__ipc__subcmd__shutdown)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__r__subcmd__home)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1291,6 +1311,61 @@ _arf() {
             case "${prev}" in
                 --pid)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__r__subcmd__home)
+            opts="-c -h --config --with-r-version --r-home --no-r-source-overrides --json --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                -c)
+                    local oldifs
+                    if [ -n "${IFS+x}" ]; then
+                        oldifs="$IFS"
+                    fi
+                    IFS=$'\n'
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    if [ -n "${oldifs+x}" ]; then
+                        IFS="$oldifs"
+                    fi
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o filenames
+                    fi
+                    return 0
+                    ;;
+                --with-r-version)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --r-home)
+                    COMPREPLY=()
+                    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+                        compopt -o plusdirs
+                    fi
                     return 0
                     ;;
                 *)

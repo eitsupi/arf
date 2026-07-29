@@ -36,7 +36,7 @@ struct HeadlessInfo {
 }
 
 #[derive(Debug, Serialize)]
-struct HeadlessRSourceOverride {
+pub(crate) struct HeadlessRSourceOverride {
     state: String,
     provider: Option<String>,
     file: Option<String>,
@@ -46,7 +46,7 @@ struct HeadlessRSourceOverride {
 }
 
 impl HeadlessRSourceOverride {
-    fn from_report(report: &RSourceResolutionReport) -> Self {
+    pub(crate) fn from_report(report: &RSourceResolutionReport) -> Self {
         let applied = report.override_state == RSourceOverrideState::Applied;
         Self {
             state: report.override_state.as_str().to_owned(),
@@ -400,6 +400,7 @@ mod tests {
     fn report(state: RSourceOverrideState) -> RSourceResolutionReport {
         RSourceResolutionReport {
             status: crate::config::RSourceStatus::Path,
+            r_home: "/tmp/r-home".into(),
             provider: None,
             file: None,
             key: None,

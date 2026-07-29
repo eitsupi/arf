@@ -83,6 +83,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'History management')
             [CompletionResult]::new('ipc', 'ipc', [CompletionResultType]::ParameterValue, 'Interact with a running arf session via IPC')
             [CompletionResult]::new('headless', 'headless', [CompletionResultType]::ParameterValue, 'Run R with IPC server only (no interactive REPL)')
+            [CompletionResult]::new('r-home', 'r-home', [CompletionResultType]::ParameterValue, 'Print the R_HOME path arf would use without starting R')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -292,12 +293,24 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'arf;r-home' {
+            [CompletionResult]::new('-c', '-c', [CompletionResultType]::ParameterName, 'Path to configuration file')
+            [CompletionResult]::new('--config', '--config', [CompletionResultType]::ParameterName, 'Path to configuration file')
+            [CompletionResult]::new('--with-r-version', '--with-r-version', [CompletionResultType]::ParameterName, 'Highest-priority R source: use this R version via rig')
+            [CompletionResult]::new('--r-home', '--r-home', [CompletionResultType]::ParameterName, 'Highest-priority R source: use this explicit R_HOME path')
+            [CompletionResult]::new('--no-r-source-overrides', '--no-r-source-overrides', [CompletionResultType]::ParameterName, 'Disable experimental directory-level R source overrides')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print resolution details as JSON')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            break
+        }
         'arf;help' {
             [CompletionResult]::new('completions', 'completions', [CompletionResultType]::ParameterValue, 'Generate shell completion scripts')
             [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'Configuration management')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'History management')
             [CompletionResult]::new('ipc', 'ipc', [CompletionResultType]::ParameterValue, 'Interact with a running arf session via IPC')
             [CompletionResult]::new('headless', 'headless', [CompletionResultType]::ParameterValue, 'Run R with IPC server only (no interactive REPL)')
+            [CompletionResult]::new('r-home', 'r-home', [CompletionResultType]::ParameterValue, 'Print the R_HOME path arf would use without starting R')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -358,6 +371,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;headless' {
+            break
+        }
+        'arf;help;r-home' {
             break
         }
         'arf;help;help' {

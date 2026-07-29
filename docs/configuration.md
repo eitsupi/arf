@@ -617,6 +617,14 @@ arf --with-r-version 4.5
 
 These options are mutually exclusive.
 
+To ask arf which R installation it would use without starting R, run:
+
+```bash
+arf r-home
+```
+
+The command prints the resolved `R_HOME` path. Use `--json` for the source, override details, and any resolution warnings; it accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path.
+
 ### rig Integration
 
 When using rig via `r_source = "auto"` with rig installed or `r_source = "rig"`, arf uses rig's default version. The `--with-r-version` flag accepts an explicit specification: `--with-r-version default` selects rig's default, while another specification selects the matching installed version. You can change the default with:
@@ -900,7 +908,7 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single `arf.toml` configuration file that arf loaded, either from `--config` or from the XDG global config path: `r_source_overrides` is the ordered provider list, and `startup.r_source` is its configuration-level fallback. The providers may consult project-local files such as `rproject.toml` and `.r-version`; those files are not separate arf configuration files. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
 
-For `headless`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair. If either option is provided on the subcommand, the complete subcommand pair is used and the top-level pair is ignored; otherwise, the complete top-level pair is used. The top-level pair may come from the CLI or its environment variables.
+For `headless` and `r-home`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair. If either option is provided on the subcommand, the complete subcommand pair is used and the top-level pair is ignored; otherwise, the complete top-level pair is used. The top-level pair may come from the CLI or its environment variables.
 
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|
