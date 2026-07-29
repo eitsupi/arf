@@ -125,15 +125,15 @@ mod tests {
         };
 
         assert_eq!(r_version_values(&cmd), expected);
-        for subcommand in ["headless", "r-home"] {
+        for subcommand_name in ["headless", "r-home"] {
             let subcommand = cmd
                 .get_subcommands()
-                .find(|candidate| candidate.get_name() == subcommand)
+                .find(|candidate| candidate.get_name() == subcommand_name)
                 .expect("subcommand should exist");
             assert_eq!(
                 r_version_values(subcommand),
                 expected,
-                "{subcommand} r_version should have possible values"
+                "{subcommand_name} r_version should have possible values"
             );
         }
 
