@@ -4,7 +4,9 @@
 
 ### Added
 
-- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order (a plain-text `.r-version` file is one option among these). [rv](https://a2-ai.github.io/rv-docs/) pins the version in `rproject.toml`:
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order.
+
+  [rv](https://a2-ai.github.io/rv-docs/) pins the version in `rproject.toml`:
 
   ```toml
   [project]
