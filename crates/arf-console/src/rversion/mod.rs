@@ -15,7 +15,7 @@ use std::path::Path;
 pub enum VersionSpec {
     /// Numeric components pin the precision supplied by the caller.
     Digits(Vec<u64>),
-    /// A semantic-version requirement.
+    /// A version range requirement.
     Range(VersionReq),
     /// A named version selector that requires caller-specific handling.
     Named(String),
@@ -26,7 +26,7 @@ pub enum VersionSpec {
 pub enum VersionSpecParseError {
     /// The specification is empty.
     Empty,
-    /// The specification is not a valid numeric prefix, name, or semver requirement.
+    /// The specification is not a valid numeric prefix, name, or version range requirement.
     Invalid,
 }
 
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn semver_ranges_are_parsed_and_applied() {
+    fn version_ranges_are_parsed_and_applied() {
         let installed = versions(&["4.3.9", "4.4.0", "4.4.5", "4.5.0", "5.0.0"]);
 
         let caret = VersionSpec::parse("^4.4").unwrap();
