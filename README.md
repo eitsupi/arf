@@ -25,7 +25,7 @@
 
 - Single binary with no runtime dependencies
 - Cross-platform: Linux, macOS, and Windows
-- [rig](https://github.com/r-lib/rig) integration — switch R versions with `--with-r-version` or `:switch` within a session
+- [rig](https://github.com/r-lib/rig) integration — switch R versions with `--with-r-version` or `:switch` within a session; experimental per-directory selection via `experimental.r_source_overrides`
 - Vi and Emacs editing modes
 - Multiline editing with proper indentation
 - Auto-matching brackets and quotes (with smart skip-over)
@@ -258,6 +258,20 @@ See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 ## Experimental Features
 
 Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` table and its subtables (e.g. `[experimental.prompt_spinner]`).
+
+### R Source Overrides
+
+Select an R version per directory or project with `experimental.r_source_overrides`. **Disabled by default.** It can read a `.r-version` file or [rv](https://a2-ai.github.io/rv-docs/)'s `rproject.toml`; only the current directory is searched, and only R versions rig has already installed can be selected.
+
+```toml
+[experimental]
+r_source_overrides = [
+  { type = "version-file", file = ".r-version" },
+  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+]
+```
+
+See [R Source Overrides configuration](docs/configuration.md#r-source-overrides) for provider options and resolution details.
 
 ### Spinner
 

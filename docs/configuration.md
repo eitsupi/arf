@@ -837,7 +837,7 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
 | `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
 
-For example, rv stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
+For example, [rv](https://a2-ai.github.io/rv-docs/) stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
 
 ```toml
 [experimental]
