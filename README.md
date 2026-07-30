@@ -25,7 +25,7 @@
 
 - Single binary with no runtime dependencies
 - Cross-platform: Linux, macOS, and Windows
-- [rig](https://github.com/r-lib/rig) integration — switch R versions with `--with-r-version` or `:switch` within a session; experimental per-directory selection via `experimental.r_source_overrides`
+- R version selection via [rig](https://github.com/r-lib/rig) (switch within a session, or experimental per-directory auto-switching)
 - Vi and Emacs editing modes
 - Multiline editing with proper indentation
 - Auto-matching brackets and quotes (with smart skip-over)
