@@ -291,6 +291,7 @@ arf ipc list
 #       "socket_path": "/run/user/1000/arf/12345.sock",
 #       "cwd": "/workspace",
 #       "started_at": "2026-03-22T10:00:00+09:00",
+#       "session_type": "headless",
 #       "log_file": null,
 #       "history_session_id": 1742601600000000000
 #     }
@@ -299,6 +300,12 @@ arf ipc list
 ```
 
 When no sessions are running, returns `{"sessions": []}` (exit 0).
+
+The `session_type` field is `"headless"` for sessions started with
+`arf headless` and `"interactive"` for sessions running an interactive
+REPL. A `null` value means the session was created by an older arf that did not
+record its type. Clients must treat `null` as unknown and must not send
+`shutdown` to that session.
 
 ### `arf ipc history` — Query Command History
 

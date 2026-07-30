@@ -10,7 +10,7 @@ use crate::ipc::protocol::{
     INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
     METHOD_NOT_FOUND, PARSE_ERROR, ShutdownResult, UserInputParams,
 };
-use crate::ipc::session::{SessionInfo, remove_session, write_session};
+use crate::ipc::session::{SessionInfo, SessionType, remove_session, write_session};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -42,6 +42,7 @@ pub fn start_server(
     started_at: &str,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: SessionType,
 ) -> std::io::Result<SessionInfo> {
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
@@ -216,6 +217,7 @@ pub fn start_server(
         r_version,
         cwd,
         started_at: started_at.to_string(),
+        session_type: Some(session_type),
         log_file,
         history_session_id,
     };

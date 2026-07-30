@@ -244,7 +244,12 @@ pub fn process_meta_command(
         "ipc" => {
             let subcmd = parts.get(1).copied().unwrap_or("status");
             match subcmd {
-                "start" => match crate::ipc::start_server(None, None, history_session_id) {
+                "start" => match crate::ipc::start_server(
+                    None,
+                    None,
+                    history_session_id,
+                    crate::ipc::session::SessionType::Interactive,
+                ) {
                     Ok(session) => {
                         arf_println!("IPC server started: {}", session.socket_path)
                     }

@@ -8,7 +8,7 @@ use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, setup_r};
 use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::ipc;
-use crate::ipc::session::SessionInfo;
+use crate::ipc::session::{SessionInfo, SessionType};
 use crate::pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
 };
@@ -220,7 +220,7 @@ pub(crate) fn run_headless(
             .display()
             .to_string()
     });
-    let session = ipc::start_server(bind, log_file_str, session_id_raw)
+    let session = ipc::start_server(bind, log_file_str, session_id_raw, SessionType::Headless)
         .context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
