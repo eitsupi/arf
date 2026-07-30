@@ -13,14 +13,14 @@
   r_version = "4.4"
   ```
 
-  The open [Tidyup 9](https://github.com/tidyverse/tidyups/pull/31) draft proposes a different shape in `rproj.toml`:
+  The open [Tidyup 9](https://github.com/tidyverse/tidyups/pull/31) draft proposes `rproj.toml`, with a different key and a Cargo-style version range in place of a plain version. Both forms are supported:
 
   ```toml
   [r]
   version = ">= 4.1.0, < 4.5.0"
   ```
 
-  Neither looks widely adopted enough to hardcode, so arf reads both through configuration instead — a `toml-key` entry takes the filename and key path from you, and multiple entries can be checked at once, Cargo-style version ranges included:
+  Neither looks widely adopted enough to hardcode, so arf reads both through configuration instead: a `toml-key` entry takes the filename and key path from you, and several can be listed at once.
 
   ```toml
   [experimental]
