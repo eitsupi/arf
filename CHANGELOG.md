@@ -20,7 +20,7 @@
   version = ">= 4.1.0, < 4.5.0"
   ```
 
-  Neither convention has settled yet, so arf does not bet on either — a `toml-key` entry takes the filename and key path from you, and multiple entries can be checked at once, Cargo-style version ranges included:
+  Neither looks widely adopted enough to hardcode, so arf reads both through configuration instead — a `toml-key` entry takes the filename and key path from you, and multiple entries can be checked at once, Cargo-style version ranges included:
 
   ```toml
   [experimental]
