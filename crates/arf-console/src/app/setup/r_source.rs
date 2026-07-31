@@ -2,7 +2,9 @@
 
 use super::overrides::{OverrideResolution, setup_r_via_overrides};
 use super::rig::{ResolvedRSource, resolve_r_home_from_path, setup_r_via_rig};
-use crate::config::{RSource, RSourceMode, RSourceOverride, RSourceOverrideInfo, RSourceStatus};
+use crate::config::{
+    RSource, RSourceMode, RSourceOverride, RSourceOverrideInfo, RSourceStatus, mask_home_path,
+};
 use crate::external;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -127,7 +129,7 @@ impl RSourceResolutionReport {
         let block = self
             .diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.message.as_str())
+            .map(display_message)
             .collect::<Vec<_>>()
             .join("\n");
         eprintln!("{block}");
@@ -143,6 +145,15 @@ impl RSourceResolutionReport {
             resolved_version: self.resolved_version.clone()?,
         })
     }
+}
+
+fn display_message(diagnostic: &RSourceDiagnostic) -> String {
+    let Some(path) = diagnostic.path.as_ref() else {
+        return diagnostic.message.clone();
+    };
+
+    let raw_path = path.display().to_string();
+    diagnostic.message.replace(&raw_path, &mask_home_path(path))
 }
 
 /// Resolve R and return a report without changing the process environment.
@@ -446,6 +457,42 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_message_masks_its_own_path_and_leaves_pathless_messages_unchanged() {
+        let home = dirs::home_dir().expect("test requires a home directory");
+        let path = home.join("arf").join("broken.toml");
+        let diagnostic = RSourceDiagnostic {
+            code: "config.parse_failed",
+            severity: "warning",
+            message: format!(
+                r#"Failed to load config from {}: TOML parse error"#,
+                path.display()
+            ),
+            path: Some(path.clone()),
+        };
+        let pathless = RSourceDiagnostic {
+            code: "r_discovery.failed",
+            severity: "warning",
+            message: r#"R automatic discovery failed."#.to_owned(),
+            path: None,
+        };
+
+        // Assert the masking took effect rather than comparing against
+        // `mask_home_path` again, which would also pass if it stopped masking.
+        let masked = display_message(&diagnostic);
+        assert!(
+            masked.starts_with("Failed to load config from ~"),
+            "{masked}"
+        );
+        assert!(!masked.contains(&home.display().to_string()), "{masked}");
+        assert!(
+            masked.ends_with("broken.toml: TOML parse error"),
+            "{masked}"
+        );
+
+        assert_eq!(display_message(&pathless), pathless.message);
+    }
 
     #[test]
     fn explicit_rig_mode_reports_command_failure_without_install_guidance() {

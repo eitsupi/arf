@@ -196,6 +196,10 @@ fn resolve_found_emits_descriptor_with_target() {
         temp.path(),
     );
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
+    insta::assert_snapshot!(
+        "resolve_found_emits_descriptor_with_target",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -343,6 +347,10 @@ r_version = "4.4.2"
     );
     assert_eq!(value["selected_by"]["source"]["format"], "toml");
     assert_eq!(value["selected_by"]["source"]["key"], "project.r_version");
+    insta::assert_snapshot!(
+        "resolve_project_file_version_request_reports_toml_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -384,6 +392,10 @@ r_source = { path = "fallback-r-home" }
     );
     assert_eq!(value["selected_by"]["source"]["format"], "text");
     assert!(value["selected_by"]["source"]["key"].is_null());
+    insta::assert_snapshot!(
+        "resolve_project_file_version_request_reports_text_source",
+        normalize_descriptor(&value)
+    );
 }
 
 /// Project configuration is a hint that may fall back, while an explicit
@@ -471,6 +483,10 @@ fn resolve_environment_version_reports_environment_source() {
         "environment_variable"
     );
     assert_eq!(value["selected_by"]["source"]["name"], "ARF_R_VERSION");
+    insta::assert_snapshot!(
+        "resolve_environment_version_reports_environment_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -497,6 +513,10 @@ fn resolve_without_config_reports_built_in_default_source() {
     assert!(value["selected_by"]["source"]["path"].is_null());
     assert!(value["selected_by"]["source"]["format"].is_null());
     assert!(value["selected_by"]["source"]["key"].is_null());
+    insta::assert_snapshot!(
+        "resolve_without_config_reports_built_in_default_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -518,6 +538,8 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], false);
     assert!(value["target"].is_null());
+    assert!(value.as_object().unwrap().contains_key("provider"));
+    assert!(value["provider"].is_null());
     let diagnostic = value["diagnostics"]
         .as_array()
         .unwrap()
@@ -530,6 +552,10 @@ fn resolve_not_found_is_successful_false_descriptor() {
     insta::assert_snapshot!(
         diagnostic["message"].as_str().unwrap(),
         @"R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery."
+    );
+    insta::assert_snapshot!(
+        "resolve_not_found_is_successful_false_descriptor",
+        normalize_descriptor(&value)
     );
 }
 
@@ -548,6 +574,7 @@ fn resolve_explicit_r_home_still_works_with_no_r_auto_discovery() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], true);
     assert_descriptor_path(&value, &value["target"]["r_home"], &environment.fake_r_home);
+    assert_eq!(value["provider"], "explicit_path");
     assert_eq!(value["selected_by"]["kind"], "r_home");
 }
 
@@ -578,6 +605,10 @@ fn resolve_broken_config_falls_back_with_diagnostic() {
             .unwrap()
             .iter()
             .any(|diagnostic| diagnostic["code"] == "config.parse_failed")
+    );
+    insta::assert_snapshot!(
+        "resolve_broken_config_falls_back_with_diagnostic",
+        normalize_descriptor(&value)
     );
 }
 
@@ -674,6 +705,10 @@ fn resolve_rig_alias_is_accepted_before_version_spec_validation() {
         "command_line_argument"
     );
     assert_eq!(value["selected_by"]["source"]["name"], "--with-r-version");
+    insta::assert_snapshot!(
+        "resolve_rig_alias_is_accepted_before_version_spec_validation",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -792,6 +827,145 @@ fn assert_selected_by_nullable_fields_are_present(value: &serde_json::Value) {
             source.contains_key(field),
             "missing selected_by.source.{field}"
         );
+    }
+}
+
+fn normalize_descriptor(value: &serde_json::Value) -> String {
+    let mut normalized = value.clone();
+    let descriptor = normalized.as_object_mut().unwrap();
+
+    replace_non_null(descriptor.get_mut("cwd"), "<cwd>");
+    if let Some(resolver) = descriptor
+        .get_mut("resolver")
+        .and_then(|resolver| resolver.as_object_mut())
+    {
+        replace_non_null(resolver.get_mut("version"), "<arf-version>");
+    }
+
+    if let Some(target) = descriptor
+        .get_mut("target")
+        .and_then(|target| target.as_object_mut())
+    {
+        replace_non_null(target.get_mut("r_home"), "<r-home>");
+        replace_non_null(target.get_mut("r_binary"), "<r-binary>");
+        // The fake rig fixture used by every snapshot with a resolved version
+        // always reports 4.4.2, so retaining that value pins the fixture's
+        // deterministic version selection.
+    }
+
+    if let Some(selected_by) = descriptor
+        .get_mut("selected_by")
+        .and_then(|selected_by| selected_by.as_object_mut())
+    {
+        replace_non_null(
+            selected_by.get_mut("requested_r_home"),
+            "<requested-r-home>",
+        );
+        if let Some(source) = selected_by
+            .get_mut("source")
+            .and_then(|source| source.as_object_mut())
+        {
+            replace_non_null(source.get_mut("path"), "<source-path>");
+        }
+    }
+
+    if let Some(diagnostics) = descriptor
+        .get_mut("diagnostics")
+        .and_then(|diagnostics| diagnostics.as_array_mut())
+    {
+        for diagnostic in diagnostics {
+            if let Some(diagnostic) = diagnostic.as_object_mut() {
+                // A message that names a path names the diagnostic's own path,
+                // so substitute that exact string. Recognizing paths by their
+                // syntax instead cannot be made reliable: a pattern that ends a
+                // Windows path at the wrong character produces a snapshot that
+                // differs from the one committed on Unix, and drive letters,
+                // `~`, UNC prefixes and spaces in paths each break it
+                // differently.
+                let path = diagnostic
+                    .get("path")
+                    .and_then(|path| path.as_str())
+                    .map(str::to_owned);
+                let message = diagnostic
+                    .get("message")
+                    .and_then(|message| message.as_str())
+                    .map(str::to_owned);
+                if let (Some(path), Some(message)) = (path.as_deref(), message) {
+                    diagnostic.insert(
+                        "message".to_owned(),
+                        serde_json::Value::String(message.replace(path, "<path>")),
+                    );
+                }
+                replace_non_null(diagnostic.get_mut("path"), "<diagnostic-path>");
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&normalized).unwrap()
+}
+
+/// The descriptor snapshots are shared across platforms, so normalizing a
+/// diagnostic must not depend on how the platform spells a path. Windows CI is
+/// the only place a regression here would surface, so exercise the shapes it
+/// produces directly.
+#[test]
+fn normalize_descriptor_handles_paths_from_any_platform() {
+    for path in [
+        r"/tmp/.tmpABC/broken.toml",
+        r"C:\Users\runner\AppData\Local\Temp\.tmpABC\broken.toml",
+        r"\\server\share\broken.toml",
+        r"C:\Program Files\arf config\broken.toml",
+    ] {
+        let value = serde_json::json!({
+            "diagnostics": [{
+                "code": "config.parse_failed",
+                "severity": "warning",
+                "message": format!("Failed to load config from {path}: TOML parse error"),
+                "path": path,
+            }],
+        });
+        let normalized = normalize_descriptor(&value);
+        assert!(
+            normalized.contains(r"<path>: TOML parse error"),
+            "path {path} normalized to: {normalized}"
+        );
+        assert!(!normalized.contains("broken.toml"), "leaked {path}");
+    }
+
+    let absolute_path = r"C:\Users\runner\AppData\Local\Temp\.tmpABC\broken.toml";
+    let home_relative_path = r"~\AppData\Local\Temp\.tmpABC\broken.toml";
+    let value = serde_json::json!({
+        "diagnostics": [{
+            "code": "config.parse_failed",
+            "severity": "warning",
+            "message": format!("Failed to load config from {home_relative_path}: TOML parse error"),
+            "path": absolute_path,
+        }],
+    });
+    // Normalization can only substitute a spelling it is given, so it depends on
+    // the producer using the same one in both fields. Pin that dependency: when
+    // they disagree, the message keeps a path the snapshot cannot absorb, and the
+    // snapshot turns platform-specific. This is why a diagnostic is built with
+    // the raw path and masked only when rendered for a person. Windows is where
+    // divergence would show, because its temporary directories sit under the
+    // user profile and Unix ones do not.
+    let normalized: serde_json::Value =
+        serde_json::from_str(&normalize_descriptor(&value)).unwrap();
+    assert_eq!(
+        normalized["diagnostics"][0]["message"],
+        serde_json::Value::String(format!(
+            "Failed to load config from {home_relative_path}: TOML parse error"
+        )),
+        "expected the mismatched spelling to survive, so this test keeps \
+         documenting why the two fields must agree"
+    );
+}
+
+fn replace_non_null(value: Option<&mut serde_json::Value>, placeholder: &str) {
+    if let Some(value) = value
+        && !value.is_null()
+    {
+        *value = serde_json::Value::String(placeholder.to_owned());
     }
 }
 
