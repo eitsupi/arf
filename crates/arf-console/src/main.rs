@@ -27,14 +27,14 @@ use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::load_config_with_fallback;
 use app::headless::run_headless;
-use app::r_home::run_r_home;
 #[cfg(windows)]
 use app::r_profiles::source_r_profiles;
+use app::resolve::{RSourceOrigin, ResolveCommandError, print_error, run_resolve};
 use app::session_id::create_session_id;
 use app::setup::{run_script, setup_r};
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
-use cli::{Cli, Commands, RArgsBuilder};
+use cli::{Cli, Commands, RArgsBuilder, RCommand};
 use config::ensure_directories;
 use logging::init_logger;
 use pid_file::{
@@ -47,6 +47,10 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            if let Some(resolve_error) = e.downcast_ref::<ResolveCommandError>() {
+                print_error(resolve_error);
+                return ExitCode::from(4);
+            }
             eprintln!("Error: {:#}", e);
             ExitCode::FAILURE
         }
@@ -77,7 +81,7 @@ fn run() -> Result<()> {
             Some(Commands::History(_)) => "history",
             Some(Commands::Ipc(_)) => "ipc",
             Some(Commands::Headless(_)) => "headless",
-            Some(Commands::RHome(_)) => "r-home",
+            Some(Commands::R(_)) => "r",
             None => unreachable!(),
         };
         Cli::command()
@@ -168,14 +172,17 @@ fn run() -> Result<()> {
                 args.r_source.no_r_source_overrides,
             );
         }
-        Some(Commands::RHome(args)) => {
-            return run_r_home(
-                args.r_source.config.as_deref(),
-                args.r_source.r_home.as_deref(),
-                args.r_source.r_version.as_deref(),
-                args.r_source.no_r_source_overrides,
-                args.json,
-            );
+        Some(Commands::R(args)) => {
+            let RCommand::Resolve(resolve_args) = &args.command;
+            let origin = r_source_origin(&matches);
+            return run_resolve(
+                resolve_args.r_source.config.as_deref(),
+                resolve_args.r_source.r_home.as_deref(),
+                resolve_args.r_source.r_version.as_deref(),
+                origin,
+                resolve_args.r_source.no_r_source_overrides,
+            )
+            .map_err(|error| anyhow::Error::new(ResolveCommandError::new(error.to_string())));
         }
         None => {}
     }
@@ -420,6 +427,24 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+fn r_source_origin(matches: &ArgMatches) -> Option<RSourceOrigin> {
+    let resolve_matches = matches
+        .subcommand_matches("r")
+        .and_then(|matches| matches.subcommand_matches("resolve"))?;
+
+    if resolve_matches.value_source("r_home") == Some(ValueSource::CommandLine)
+        || resolve_matches.value_source("r_version") == Some(ValueSource::CommandLine)
+    {
+        Some(RSourceOrigin::Cli)
+    } else if resolve_matches.value_source("r_home") == Some(ValueSource::EnvVariable)
+        || resolve_matches.value_source("r_version") == Some(ValueSource::EnvVariable)
+    {
+        Some(RSourceOrigin::Environment)
+    } else {
+        None
+    }
 }
 
 fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {

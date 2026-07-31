@@ -48,14 +48,8 @@ impl RLessEnvironment {
 
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
-        // Built per platform rather than extended in place, so the binding
-        // never needs `mut` on targets where the extension is compiled out.
         #[cfg(unix)]
-        let path_entries = vec![
-            self.bin_dir.clone(),
-            PathBuf::from("/usr/bin"),
-            PathBuf::from("/bin"),
-        ];
+        let path_entries = vec![self.bin_dir.clone()];
         #[cfg(not(unix))]
         let path_entries = vec![self.bin_dir.clone()];
         command
@@ -74,72 +68,93 @@ impl RLessEnvironment {
 }
 
 #[test]
-fn plain_r_home_output_is_exactly_the_resolved_path() {
+fn resolve_found_emits_descriptor_with_target() {
     let temp = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["r-home", "--r-home"])
+        .args(["r", "resolve", "--r-home"])
         .arg(temp.path())
         .output()
         .unwrap();
 
-    assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        format!("{}\n", temp.path().display())
-    );
-    assert!(String::from_utf8(output.stderr).unwrap().is_empty());
-}
-
-#[test]
-fn json_r_home_output_has_resolution_details() {
-    let temp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["r-home", "--json", "--r-home"])
-        .arg(temp.path())
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["r_home"], temp.path().display().to_string());
-    assert_eq!(value["source"], format!("path ({})", temp.path().display()));
-    assert_eq!(value["r_source_override"]["state"], "shadowed_by_cli");
-    for field in [
-        "provider",
-        "file",
-        "key",
-        "requested_version",
-        "resolved_version",
-    ] {
-        assert!(value["r_source_override"][field].is_null(), "{field}");
-    }
-    assert!(value["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["resolved"], true);
+    assert_eq!(value["target"]["r_home"], temp.path().display().to_string());
+    assert!(value["target"]["r_binary"].is_null());
+    assert!(value["target"]["resolved_version"].is_null());
+    assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
+    assert_eq!(value["selected_by"]["origin"], "cli");
+    assert!(value["diagnostics"].as_array().unwrap().is_empty());
 }
 
 #[test]
-fn r_home_resolution_failure_exits_nonzero() {
-    let temp = tempfile::tempdir().unwrap();
-    let missing = temp.path().join("missing-r-home");
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["r-home", "--r-home"])
-        .arg(missing)
+fn resolve_not_found_is_successful_false_descriptor() {
+    let environment = RLessEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--no-r-source-overrides"])
         .output()
         .unwrap();
 
-    assert!(!output.status.success());
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    if value["resolved"] != false {
+        eprintln!("skipping unresolved discovery assertion because a built-in R was found");
+        return;
+    }
+    assert_eq!(value["resolved"], false);
+    assert!(value["target"].is_null());
+    assert!(value["diagnostics"].is_array());
+}
+
+#[test]
+fn resolve_broken_config_falls_back_with_diagnostic() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("broken.toml");
+    std::fs::write(&config, "not valid = [toml").unwrap();
+    let r_home = temp.path().join("r-home");
+    std::fs::create_dir(&r_home).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--config"])
+        .arg(&config)
+        .args(["--r-home"])
+        .arg(&r_home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["resolved"], true);
+    assert_eq!(value["target"]["r_home"], r_home.display().to_string());
     assert!(
-        String::from_utf8(output.stderr)
+        value["diagnostics"]
+            .as_array()
             .unwrap()
-            .contains("R_HOME path does not exist")
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "config.parse_failed")
     );
 }
 
-/// This covers the initialization-failure fallback, not PATH discovery.
-// Not run on Windows: crossterm's event reader opens CONIN$ and waits for
-// console input there, so a child stdin connected to Stdio::null() cannot
-// deliver EOF and the standalone REPL never terminates. Startup without a
-// usable R is therefore unverified on Windows until redirected-input handling
-// is fixed separately.
+#[test]
+fn resolve_environment_source_reports_environment_origin() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve"])
+        .env("ARF_R_HOME", temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
+    assert_eq!(value["selected_by"]["origin"], "environment");
+}
+
+/// This covers initialization-failure fallback, not PATH discovery.
 #[test]
 #[cfg(not(windows))]
 fn startup_survives_without_r_on_path() {

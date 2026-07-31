@@ -6,13 +6,14 @@ mod headless;
 mod history;
 mod ipc;
 mod r_args;
-mod r_home;
+mod resolve;
 mod shared;
 
 pub(crate) use config::ConfigAction;
 pub(crate) use history::{HistoryAction, ImportSource};
 pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
+pub(crate) use resolve::RCommand;
 
 use clap::{Parser, Subcommand, ValueHint};
 #[cfg(test)]
@@ -242,8 +243,8 @@ Examples:
   Shut down a headless session:
     $ arf ipc shutdown")]
     Headless(headless::HeadlessArgs),
-    /// Print the R_HOME path arf would use without starting R
-    RHome(r_home::RHomeArgs),
+    /// R source resolution commands
+    R(resolve::RArgs),
 }
 
 #[cfg(test)]
@@ -393,29 +394,29 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_r_home_subcommand_has_its_own_resolution_flags() {
+    fn test_r_resolve_subcommand_has_its_own_resolution_flags() {
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from([
             "arf",
-            "r-home",
+            "r",
+            "resolve",
             "--r-home",
             "/tmp/r-home",
             "--no-r-source-overrides",
             "--config",
             "/tmp/arf.toml",
-            "--json",
         ])
         .unwrap();
 
-        let Some(Commands::RHome(args)) = cli.command else {
-            panic!("expected r-home command");
+        let Some(Commands::R(args)) = cli.command else {
+            panic!("expected r command");
         };
+        let RCommand::Resolve(args) = args.command;
 
         assert_eq!(args.r_source.config, Some(PathBuf::from("/tmp/arf.toml")));
         assert_eq!(args.r_source.r_home, Some(PathBuf::from("/tmp/r-home")));
         assert!(args.r_source.no_r_source_overrides);
-        assert!(args.json);
         assert!(args.r_source.r_version.is_none());
     }
 
@@ -501,10 +502,11 @@ mod tests {
         drop(_r_version);
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
-        let cli = Cli::try_parse_from(["arf", "r-home"]).unwrap();
-        let Some(Commands::RHome(args)) = cli.command else {
-            panic!("expected r-home command");
+        let cli = Cli::try_parse_from(["arf", "r", "resolve"]).unwrap();
+        let Some(Commands::R(args)) = cli.command else {
+            panic!("expected r command");
         };
+        let RCommand::Resolve(args) = args.command;
         assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
     }
 
@@ -517,7 +519,7 @@ mod tests {
 
         let _r_home = EnvVarGuard::unset("ARF_R_HOME");
         let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
-        assert!(Cli::try_parse_from(["arf", "r-home", "--r-home", "/cli"]).is_err());
+        assert!(Cli::try_parse_from(["arf", "r", "resolve", "--r-home", "/cli"]).is_err());
     }
 
     #[test]

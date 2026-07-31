@@ -297,7 +297,7 @@ fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
 }
 
 #[test]
-fn test_r_home_before_headless_rejected_with_corrected_form() {
+fn test_r_source_flag_before_headless_rejected_with_corrected_form() {
     assert_top_level_scope_error(
         &["--r-home", "/tmp", "headless"],
         &[

@@ -70,13 +70,18 @@ impl Cli {
         cmd = cmd.mut_arg("r_version", |arg| {
             arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
         });
-        for subcommand in ["headless", "r-home"] {
-            cmd = cmd.mut_subcommand(subcommand, |subcommand| {
+        cmd = cmd.mut_subcommand("headless", |subcommand| {
+            subcommand.mut_arg("r_version", |arg| {
+                arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
+            })
+        });
+        cmd = cmd.mut_subcommand("r", |subcommand| {
+            subcommand.mut_subcommand("resolve", |subcommand| {
                 subcommand.mut_arg("r_version", |arg| {
                     arg.value_parser(PossibleValuesParser::new(refs.iter().copied()))
                 })
-            });
-        }
+            })
+        });
         cmd
     }
 
@@ -125,17 +130,21 @@ mod tests {
         };
 
         assert_eq!(r_version_values(&cmd), expected);
-        for subcommand_name in ["headless", "r-home"] {
-            let subcommand = cmd
-                .get_subcommands()
-                .find(|candidate| candidate.get_name() == subcommand_name)
-                .expect("subcommand should exist");
-            assert_eq!(
-                r_version_values(subcommand),
-                expected,
-                "{subcommand_name} r_version should have possible values"
-            );
-        }
+        let subcommand = cmd
+            .get_subcommands()
+            .find(|candidate| candidate.get_name() == "headless")
+            .expect("subcommand should exist");
+        assert_eq!(r_version_values(subcommand), expected);
+
+        let r_command = cmd
+            .get_subcommands()
+            .find(|candidate| candidate.get_name() == "r")
+            .expect("r subcommand should exist");
+        let resolve_command = r_command
+            .get_subcommands()
+            .find(|candidate| candidate.get_name() == "resolve")
+            .expect("resolve subcommand should exist");
+        assert_eq!(r_version_values(resolve_command), expected);
 
         let eval = cmd
             .get_arguments()

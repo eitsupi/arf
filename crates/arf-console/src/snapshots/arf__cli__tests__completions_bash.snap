@@ -38,8 +38,8 @@ _arf() {
             arf,ipc)
                 cmd="arf__subcmd__ipc"
                 ;;
-            arf,r-home)
-                cmd="arf__subcmd__r__subcmd__home"
+            arf,r)
+                cmd="arf__subcmd__r"
                 ;;
             arf__subcmd__config,check)
                 cmd="arf__subcmd__config__subcmd__check"
@@ -77,8 +77,8 @@ _arf() {
             arf__subcmd__help,ipc)
                 cmd="arf__subcmd__help__subcmd__ipc"
                 ;;
-            arf__subcmd__help,r-home)
-                cmd="arf__subcmd__help__subcmd__r__subcmd__home"
+            arf__subcmd__help,r)
+                cmd="arf__subcmd__help__subcmd__r"
                 ;;
             arf__subcmd__help__subcmd__config,check)
                 cmd="arf__subcmd__help__subcmd__config__subcmd__check"
@@ -112,6 +112,9 @@ _arf() {
                 ;;
             arf__subcmd__help__subcmd__ipc,shutdown)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__shutdown"
+                ;;
+            arf__subcmd__help__subcmd__r,resolve)
+                cmd="arf__subcmd__help__subcmd__r__subcmd__resolve"
                 ;;
             arf__subcmd__history,export)
                 cmd="arf__subcmd__history__subcmd__export"
@@ -179,6 +182,18 @@ _arf() {
             arf__subcmd__ipc__subcmd__help,shutdown)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__shutdown"
                 ;;
+            arf__subcmd__r,help)
+                cmd="arf__subcmd__r__subcmd__help"
+                ;;
+            arf__subcmd__r,resolve)
+                cmd="arf__subcmd__r__subcmd__resolve"
+                ;;
+            arf__subcmd__r__subcmd__help,help)
+                cmd="arf__subcmd__r__subcmd__help__subcmd__help"
+                ;;
+            arf__subcmd__r__subcmd__help,resolve)
+                cmd="arf__subcmd__r__subcmd__help__subcmd__resolve"
+                ;;
             *)
                 ;;
         esac
@@ -186,7 +201,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --r-home --with-r-version --no-r-source-overrides --no-banner --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --quiet --no-save --save --no-restore --no-restore-data --restore-data --interactive --no-echo --slave --restore --verbose --encoding --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r-home help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --r-home --with-r-version --no-r-source-overrides --no-banner --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --quiet --no-save --save --no-restore --no-restore-data --restore-data --interactive --no-echo --slave --restore --verbose --encoding --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -625,7 +640,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help)
-            opts="completions config history ipc headless r-home help"
+            opts="completions config history ipc headless r help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -876,9 +891,23 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__subcmd__help__subcmd__r__subcmd__home)
-            opts=""
+        arf__subcmd__help__subcmd__r)
+            opts="resolve"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__r__subcmd__resolve)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1320,9 +1349,65 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        arf__subcmd__r__subcmd__home)
-            opts="-c -h --config --r-home --with-r-version --no-r-source-overrides --json --help"
+        arf__subcmd__r)
+            opts="-h --help resolve help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__r__subcmd__help)
+            opts="resolve help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__r__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__r__subcmd__help__subcmd__resolve)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__r__subcmd__resolve)
+            opts="-c -h --config --r-home --with-r-version --no-r-source-overrides --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
