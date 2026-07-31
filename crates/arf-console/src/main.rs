@@ -12,6 +12,7 @@ mod highlighter;
 mod history;
 mod ipc;
 mod logging;
+mod output;
 mod pager;
 mod pid_file;
 pub(crate) mod r_parser;

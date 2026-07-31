@@ -8,6 +8,7 @@
 
 use crate::ipc::protocol::JsonRpcResponse;
 use crate::ipc::session::{find_session, list_sessions};
+use crate::output::{self, write_json};
 use anyhow::{Context, Result};
 
 /// Default transport timeout for client-side socket reads (5 minutes).
@@ -31,21 +32,16 @@ const EXIT_PROTOCOL: i32 = 4;
 
 // ── Output helpers ───────────────────────────────────────────────────
 
-/// Serialize a JSON value to a string, using pretty-printing when the
-/// given stream is a terminal.
-fn format_json(value: &serde_json::Value, is_tty: bool) -> String {
-    if is_tty {
-        serde_json::to_string_pretty(value).expect("format_json: serialization failed")
-    } else {
-        serde_json::to_string(value).expect("format_json: serialization failed")
+fn print_json_or_exit(value: &serde_json::Value) {
+    if let Err(error) = output::print_json(value) {
+        exit_error(
+            EXIT_CLIENT,
+            "OUTPUT_ERROR",
+            &format!("Failed to write JSON output: {error:#}"),
+            None,
+            None,
+        );
     }
-}
-
-/// Print a JSON value to stdout. Pretty-prints when stdout is a
-/// terminal, compact when piped.
-fn print_json(value: &serde_json::Value) {
-    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    println!("{}", format_json(value, is_tty));
 }
 
 /// Print a structured error to stderr as JSON and exit with the given code.
@@ -77,8 +73,17 @@ fn exit_error(
             "data": data,
         }
     });
-    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
-    eprintln!("{}", format_json(&error, is_tty));
+    let pretty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let write_result = {
+        let mut stderr = std::io::stderr().lock();
+        write_json(&mut stderr, &error, pretty).and_then(|_| {
+            use std::io::Write;
+            writeln!(stderr).context("Failed to write JSON newline")
+        })
+    };
+    if let Err(write_error) = write_result {
+        eprintln!("Error writing JSON error: {write_error:#}");
+    }
     std::process::exit(exit_code);
 }
 
@@ -146,7 +151,7 @@ fn handle_response(response: JsonRpcResponse) {
     }
 
     match response.result {
-        Some(result) => print_json(&result),
+        Some(result) => print_json_or_exit(&result),
         None => {
             // JSON-RPC 2.0 requires exactly one of `result` or `error` to be
             // present. Reaching here indicates a server-side bug.
@@ -183,7 +188,7 @@ pub fn cmd_list() {
         })
         .collect();
 
-    print_json(&serde_json::json!({ "sessions": sessions_json }));
+    print_json_or_exit(&serde_json::json!({ "sessions": sessions_json }));
 }
 
 /// Resolve a session or exit with a structured JSON error.
