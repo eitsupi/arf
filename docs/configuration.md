@@ -620,10 +620,80 @@ These options are mutually exclusive.
 To ask arf which R installation it would use without starting R, run:
 
 ```bash
-arf r-home
+arf r resolve
 ```
 
-The command prints the resolved `R_HOME` path. If no R installation can be discovered, normal startup continues with R evaluation unavailable, while `arf r-home` fails because there is no path to report. Discovery uses the same shared library that arf would load, including platform-specific default installation paths. Use `--json` for the source, override details, and any resolution warnings; it accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path.
+`arf r resolve` accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path. It always emits JSON; there is no `--json` flag. Output is pretty-printed when stdout is a terminal and compact when piped, so consumers do not need a format flag. For example:
+
+```json
+{
+  "schema_version": 1,
+  "resolved": true,
+  "cwd": "/project",
+  "target": {
+    "r_home": "/opt/R/4.5.2/lib/R",
+    "r_binary": "/opt/R/4.5.2/lib/R/bin/R",
+    "resolved_version": "4.5.2"
+  },
+  "resolver": { "name": "arf", "version": "0.4.4" },
+  "selected_by": {
+    "kind": "version_request",
+    "requested_r_home": null,
+    "requested_version": "4.4",
+    "source": {
+      "kind": "project_file",
+      "name": null,
+      "path": "/project/rproject.toml",
+      "format": "toml",
+      "key": "project.r_version"
+    }
+  },
+  "provider": "rig",
+  "diagnostics": []
+}
+```
+
+Every key is always present. A value is `null` when it does not apply, so consumers can rely on the key set being stable. `resolved` is `false` and `target` is `null` exactly when no R installation could be found. That is not an error: the command still exits 0, because normal arf startup also continues in that state with R evaluation unavailable.
+
+`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation; current values are `rig`, `path`, and `explicit_path`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
+
+`selected_by` separates what was matched from where that condition came from. Its `kind` values are:
+
+| Value | Meaning |
+|-------|---------|
+| `r_home` | An explicit R_HOME path was selected. |
+| `version_request` | A requested R version was selected, from the command line, environment, or a project file. |
+| `default` | No explicit request selected the R source; configuration or the built-in default was used. |
+
+The `source.kind` values identify the origin of that condition:
+
+| Value | Meaning |
+|-------|---------|
+| `command_line_argument` | `--r-home` or `--with-r-version`. |
+| `environment_variable` | `ARF_R_HOME` or `ARF_R_VERSION`. |
+| `project_file` | A project file, with its path, format, and optional key. |
+| `configuration_file` | The loaded `arf.toml`, with its path, format, and key. |
+| `built_in_default` | arf's built-in default when no configuration file setting applies. |
+
+Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `name`, `path`, `format`, and `key` fields remain present in every descriptor.
+
+`diagnostics` is a list of `{code, severity, message, path}` objects. Codes are an open enum: clients must not reject unknown codes, and the set may grow. `message` is for display only and must not be used for machine classification. The codes currently produced are:
+
+| Code | Meaning |
+|------|---------|
+| `config.read_failed` | The configuration file could not be read. |
+| `config.parse_failed` | The configuration file could not be parsed. |
+| `r_discovery.failed` | No R could be discovered from PATH or the default installation paths. This accompanies `resolved: false`. |
+| `r_source_override.provider_unsupported` | An R source override provider is unsupported. |
+| `r_source_override.value_invalid` | An R source override value is invalid. |
+| `r_source_override.fallback` | R source overrides fell back to the configured startup source. |
+| `r_source_override.resolution_failed` | An R source override could not be resolved. |
+| `r_source_override.rig_unavailable` | rig was unavailable while evaluating an override. |
+| `r_source_override.version_not_installed` | A requested override version is not installed. |
+
+Resolution mirrors normal startup rather than being stricter. A configuration file that fails to load still falls back to defaults and exits 0 with a diagnostic, and a version merely suggested by a project file does the same. A version requested explicitly on the command line is an error, because startup refuses to continue in that case too. Reporting a different R than arf would actually use would defeat the purpose of the command.
+
+Exit codes match `arf ipc`: `0` means success, including `resolved: false`; `2` means invalid invocation; and `4` means internal failure. Errors are JSON on stderr in the same shape used by `arf ipc`.
 
 ### rig Integration
 
@@ -908,13 +978,13 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single `arf.toml` configuration file that arf loaded, either from `--config` or from the XDG global config path: `r_source_overrides` is the ordered provider list, and `startup.r_source` is its configuration-level fallback. The providers may consult project-local files such as `rproject.toml` and `.r-version`; those files are not separate arf configuration files. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
 
-For `headless` and `r-home`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R`, not `arf --r-home /opt/R headless`. Placing them before the subcommand is an error that names the corrected form, because the value would otherwise be silently dropped. `ARF_R_HOME` and `ARF_R_VERSION` need no placement — the subcommands read them directly.
+For `headless` and `r resolve`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R` or `arf r resolve --r-home /opt/R`, not `arf --r-home /opt/R headless` or `arf --r-home /opt/R r resolve`. Placing them before the subcommand is an error that names the corrected form; placing `--r-home` between `r` and `resolve` is an unexpected argument. `ARF_R_HOME` and `ARF_R_VERSION` need no placement — the subcommands read them directly.
 
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|
 | 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
 | 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
-| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. The interactive console, `headless` and `r-home` each read these variables for themselves. |
+| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. The interactive console, `headless` and `r resolve` each read these variables for themselves. |
 | 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A provider's project-local file may be absent or fail to resolve; those cases fall through to the next provider and then to tier 5. |
 | 5 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
 | 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
@@ -927,7 +997,7 @@ Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`)
 >
 > `r_source_overrides` and `ARF_R_HOME` / `ARF_R_VERSION` select R independently of PATH, so arf's R can silently diverge from the editor's. That breaks integrations assuming a shared installation, because installed packages and library paths are resolved against the editor's R.
 >
-> Consider leaving both disabled in an IDE-integrated workflow. If you enable them, keep the selection in sync with the editor, or have the editor launch arf with `--r-home` pointing at its own R.
+> In an IDE-integrated workflow, prefer having the editor ask `arf r resolve` which R arf would use. Otherwise, consider leaving both disabled; if you enable them, keep the selection in sync with the editor, or have the editor launch arf with `--r-home` pointing at its own R.
 
 ## Other CLI Options
 
