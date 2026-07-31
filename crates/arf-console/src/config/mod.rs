@@ -208,7 +208,7 @@ pub(crate) fn load_config_from_path_with_provenance(
         .get("startup")
         .and_then(|startup| startup.get("r_source"))
         .is_some();
-    let config = Config::deserialize(document).map_err(|e| ConfigLoadError::Parse {
+    let config = toml::from_str::<Config>(&content).map_err(|e| ConfigLoadError::Parse {
         source: e,
         path: path.to_path_buf(),
     })?;
@@ -968,6 +968,28 @@ show_banner = false
             msg.contains("bad.toml"),
             "Error should mention the file path: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_load_config_from_path_type_error_includes_location() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid-type.toml");
+        std::fs::write(
+            &path,
+            r#"
+[editor]
+mode = 42
+"#,
+        )
+        .unwrap();
+
+        let error = load_config_from_path(&path).expect_err("invalid config type should fail");
+        let message = error.to_string();
+
+        assert!(
+            message.contains("line 3, column 8"),
+            "Type error should include source location: {message}"
         );
     }
 
