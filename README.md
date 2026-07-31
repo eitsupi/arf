@@ -273,6 +273,8 @@ r_source_overrides = [
 
 See [R Source Overrides configuration](docs/configuration.md#r-source-overrides) for provider options and resolution details.
 
+An external tool can ask arf which R it would use, without starting R, with the experimental [`arf r resolve`](docs/r-resolve.md) command.
+
 ### Spinner
 
 Displays an animated spinner at the start of the line while R is evaluating code. **Disabled by default.**

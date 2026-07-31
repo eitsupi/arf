@@ -74,6 +74,8 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 
 All keys are always present. `r_version`, `log_file`, and `history_session_id` may be `null`. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
+The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
+
 Output is pretty-printed when stdout is a terminal, compact when piped. This is useful in CI scripts:
 
 ```sh
