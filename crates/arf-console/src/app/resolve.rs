@@ -5,6 +5,7 @@ use crate::app::setup::{
     RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
 };
 use crate::config::RSourceStatus;
+use crate::external::rig::RigError;
 use crate::output::{print_json, write_json};
 use anyhow::Result;
 use serde::Serialize;
@@ -188,7 +189,6 @@ pub(crate) fn run_resolve(
     r_source_origin: Option<RSourceOrigin>,
     no_r_source_overrides: bool,
 ) -> Result<()> {
-    validate_r_version(r_version)?;
     let cwd = std::env::current_dir().map_err(|error| {
         ResolveCommandError::internal(format!(
             "Failed to determine the current directory: {error}"
@@ -206,13 +206,7 @@ pub(crate) fn run_resolve(
         r_version,
         no_r_source_overrides,
     )
-    .map_err(|error| {
-        if r_home.is_some() || r_version.is_some() {
-            ResolveCommandError::invalid_invocation(error.to_string())
-        } else {
-            ResolveCommandError::internal(error.to_string())
-        }
-    })?;
+    .map_err(|error| classify_resolution_error(error, r_home))?;
     resolve_path_r_home_for_report(&mut resolution);
 
     let descriptor = descriptor(
@@ -227,22 +221,22 @@ pub(crate) fn run_resolve(
     Ok(())
 }
 
-fn validate_r_version(r_version: Option<&str>) -> Result<(), ResolveCommandError> {
-    let Some(r_version) = r_version else {
-        return Ok(());
+fn classify_resolution_error(error: anyhow::Error, r_home: Option<&Path>) -> ResolveCommandError {
+    let invalid_invocation = match error.downcast_ref::<RigError>() {
+        Some(
+            RigError::NoVersionsInstalled
+            | RigError::NoDefaultVersion
+            | RigError::VersionNotFound(_),
+        ) => true,
+        Some(RigError::CommandFailed(_) | RigError::ParseError(_)) => false,
+        None => r_home.is_some_and(|path| !path.exists()),
     };
 
-    if r_version.eq_ignore_ascii_case("default") {
-        return Ok(());
+    if invalid_invocation {
+        ResolveCommandError::invalid_invocation(error.to_string())
+    } else {
+        ResolveCommandError::internal(error.to_string())
     }
-
-    crate::rversion::VersionSpec::parse(r_version)
-        .map(|_| ())
-        .map_err(|_| {
-            ResolveCommandError::invalid_invocation(format!(
-                "Invalid R version specification '{r_version}'"
-            ))
-        })
 }
 
 fn descriptor(
@@ -319,27 +313,35 @@ fn selected_by(
     } else {
         None
     };
-    let path = resolution.file.as_ref().map(|path| {
-        if path.is_absolute() {
-            path.clone()
-        } else {
-            cwd.join(path)
-        }
-        .display()
-        .to_string()
-    });
+    let path = match kind {
+        "explicit_r_home" => r_home.map(|path| display_path(cwd, path)),
+        "r_source_override" => resolution.file.as_ref().map(|path| display_path(cwd, path)),
+        _ => None,
+    };
+
+    let requested_version = match kind {
+        "explicit_r_version" => r_version.map(str::to_owned),
+        "r_source_override" => resolution.requested_version.clone(),
+        _ => None,
+    };
 
     SelectedBy {
         kind,
         origin,
         override_descriptor,
         path,
-        requested_version: if kind == "r_source_override" {
-            resolution.requested_version.clone()
-        } else {
-            None
-        },
+        requested_version,
     }
+}
+
+fn display_path(cwd: &Path, path: &Path) -> String {
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        cwd.join(path)
+    }
+    .display()
+    .to_string()
 }
 
 fn provider(status: &RSourceStatus) -> String {
@@ -460,6 +462,7 @@ mod tests {
 
         assert_eq!(value["selected_by"]["kind"], "explicit_r_version");
         assert_eq!(value["selected_by"]["origin"], "cli");
+        assert_eq!(value["selected_by"]["requested_version"], "4.4.1");
         assert_eq!(value["target"]["resolved_version"], "4.4.1");
     }
 

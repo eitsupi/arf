@@ -15,6 +15,76 @@ struct RLessEnvironment {
     fake_r_home: PathBuf,
 }
 
+#[cfg(unix)]
+struct FakeRigEnvironment {
+    _temp: tempfile::TempDir,
+    bin_dir: PathBuf,
+    fake_r_home: PathBuf,
+    rig: PathBuf,
+    r: PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeRigEnvironment {
+    fn new() -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let bin_dir = temp.path().join("bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+        let fake_r_home = temp.path().join("fallback-r-home");
+        std::fs::create_dir(&fake_r_home).unwrap();
+
+        let r = bin_dir.join("R");
+        write_executable(
+            &r,
+            r#"#!/bin/sh
+if [ "$1" = "RHOME" ]; then
+    printf '%s\n' "$FAKE_R_HOME"
+    exit 0
+fi
+exit 1
+"#,
+        );
+
+        let rig = bin_dir.join("rig");
+        write_executable(
+            &rig,
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "list" ]; then printf '%s\n' '[{"name":"4.4.2","default":true,"version":"4.4.2","aliases":["my-proj"],"path":"/fake/R/4.4.2","binary":"R"} ]'; exit 0; fi
+exit 1
+"#,
+        );
+
+        Self {
+            _temp: temp,
+            bin_dir,
+            fake_r_home,
+            rig,
+            r,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
+        command
+            .env("PATH", &self.bin_dir)
+            .env("FAKE_R_HOME", &self.fake_r_home)
+            .env_remove("R_HOME")
+            .env_remove("ARF_R_HOME")
+            .env_remove("ARF_R_VERSION");
+        command
+    }
+}
+
+#[cfg(unix)]
+fn write_executable(path: &std::path::Path, contents: &str) {
+    std::fs::write(path, contents).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).unwrap();
+}
+
 #[cfg(not(windows))]
 impl RLessEnvironment {
     fn new() -> Self {
@@ -92,6 +162,10 @@ fn resolve_found_emits_descriptor_with_target() {
     assert!(value["target"]["resolved_version"].is_null());
     assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
     assert_eq!(value["selected_by"]["origin"], "cli");
+    assert_eq!(
+        value["selected_by"]["path"],
+        temp.path().display().to_string()
+    );
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
 }
 
@@ -103,9 +177,13 @@ fn write_uninstalled_project_override_fixture() -> tempfile::TempDir {
 r_source_overrides = [
   { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
 ]
+
+[startup]
+r_source = { path = "fallback-r-home" }
 "#,
     )
     .unwrap();
+    std::fs::create_dir(temp.path().join("fallback-r-home")).unwrap();
     // R 3.x ended at 3.6.3, so 3.99.99 can never collide with a real release.
     std::fs::write(
         temp.path().join("rproject.toml"),
@@ -118,10 +196,13 @@ r_version = "3.99.99"
 }
 
 #[test]
+#[cfg(unix)]
 fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
     let temp = write_uninstalled_project_override_fixture();
+    let environment = FakeRigEnvironment::new();
 
-    let fallback_output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let fallback_output = environment
+        .command()
         .args([
             "r",
             "resolve",
@@ -130,8 +211,6 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
             "--no-r-source-overrides",
         ])
         .current_dir(temp.path())
-        .env_remove("ARF_R_HOME")
-        .env_remove("ARF_R_VERSION")
         .output()
         .unwrap();
 
@@ -144,11 +223,10 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
         serde_json::from_slice(&fallback_output.stdout).unwrap();
     assert_eq!(fallback_value["resolved"], true);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = environment
+        .command()
         .args(["r", "resolve", "--config", "arf.toml"])
         .current_dir(temp.path())
-        .env_remove("ARF_R_HOME")
-        .env_remove("ARF_R_VERSION")
         .output()
         .unwrap();
 
@@ -174,14 +252,15 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
 /// Project configuration is a hint that may fall back, while an explicit
 /// user request must fail when the requested R version is not installed.
 #[test]
+#[cfg(unix)]
 fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
     let temp = write_uninstalled_project_override_fixture();
+    let environment = FakeRigEnvironment::new();
 
-    let project_hint = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let project_hint = environment
+        .command()
         .args(["r", "resolve", "--config", "arf.toml"])
         .current_dir(temp.path())
-        .env_remove("ARF_R_HOME")
-        .env_remove("ARF_R_VERSION")
         .output()
         .unwrap();
     assert!(
@@ -197,7 +276,8 @@ fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
         "startup_r_source"
     );
 
-    let explicit_request = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let explicit_request = environment
+        .command()
         .args([
             "r",
             "resolve",
@@ -207,8 +287,6 @@ fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
             "3.99.99",
         ])
         .current_dir(temp.path())
-        .env_remove("ARF_R_HOME")
-        .env_remove("ARF_R_VERSION")
         .output()
         .unwrap();
     assert_structured_resolve_error(&explicit_request, "INVALID_PARAMS");
@@ -216,10 +294,12 @@ fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
 }
 
 #[test]
+#[cfg(unix)]
 fn resolve_environment_version_is_invalid_invocation() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let environment = FakeRigEnvironment::new();
+    let output = environment
+        .command()
         .args(["r", "resolve"])
-        .env_remove("ARF_R_HOME")
         .env("ARF_R_VERSION", "3.99.99")
         .output()
         .unwrap();
@@ -240,6 +320,12 @@ fn resolve_not_found_is_successful_false_descriptor() {
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     if value["resolved"] != false {
+        // This test silently no-ops (skips verification) when R is found in the environment.
+        // The root cause is that R_LIB_PATHS in crates/arf-libr/src/sys/discovery.rs is a
+        // hardcoded constant with no injection point; restricting PATH does not prevent it
+        // from being picked up. Integration tests spawn the real binary as a child process,
+        // so Rust closure-based dependency injection cannot help here. Making this deterministic
+        // requires a production-code mechanism to disable the default path search.
         eprintln!("skipping unresolved discovery assertion because a built-in R was found");
         return;
     }
@@ -294,8 +380,11 @@ fn resolve_environment_source_reports_environment_origin() {
 }
 
 #[test]
+#[cfg(unix)]
 fn resolve_invalid_version_is_invalid_invocation() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let environment = FakeRigEnvironment::new();
+    let output = environment
+        .command()
         .args(["r", "resolve", "--with-r-version", "not-a-version"])
         .output()
         .unwrap();
@@ -307,29 +396,11 @@ fn resolve_invalid_version_is_invalid_invocation() {
 #[test]
 #[cfg(unix)]
 fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
-    let temp = tempfile::tempdir().unwrap();
-    let bin_dir = temp.path().join("bin");
-    std::fs::create_dir(&bin_dir).unwrap();
-    let rig = bin_dir.join("rig");
-    std::fs::write(
-        &rig,
-        r##"#!/bin/sh
-if [ "$1" = "--version" ]; then exit 0; fi
-if [ "$1" = "list" ]; then printf '%s\n' '[{"name":"4.4.2","default":true,"version":"4.4.2","aliases":[],"path":"/opt/R/4.4.2","binary":"/opt/R/4.4.2/bin/R"}]'; exit 0; fi
-exit 1
-"##,
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(&rig).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&rig, permissions).unwrap();
+    let environment = FakeRigEnvironment::new();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = environment
+        .command()
         .args(["r", "resolve", "--with-r-version", "3.99.99"])
-        .env("PATH", &bin_dir)
-        .env_remove("ARF_R_HOME")
-        .env_remove("ARF_R_VERSION")
         .output()
         .unwrap();
 
@@ -342,6 +413,76 @@ exit 1
             .unwrap()
             .contains("3.99.99")
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_rig_alias_is_accepted_before_version_spec_validation() {
+    let environment = FakeRigEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--with-r-version", "my-proj"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["target"]["resolved_version"], "4.4.2");
+    assert_eq!(value["selected_by"]["requested_version"], "my-proj");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_malformed_rig_output_is_internal_error() {
+    let environment = FakeRigEnvironment::new();
+    std::fs::write(
+        &environment.rig,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "list" ]; then printf '%s\n' 'not json'; exit 0; fi
+exit 1
+"#,
+    )
+    .unwrap();
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--with-r-version", "4.4.2"])
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INTERNAL_ERROR");
+    assert_eq!(output.status.code(), Some(4));
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_r_binary_failure_is_internal_error() {
+    let environment = FakeRigEnvironment::new();
+    std::fs::write(&environment.r, "#!/bin/sh\nexit 1\n").unwrap();
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--with-r-version", "4.4.2"])
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INTERNAL_ERROR");
+    assert_eq!(output.status.code(), Some(4));
+}
+
+#[test]
+fn resolve_missing_r_home_returns_invalid_params_exit_code() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing_r_home = temp.path().join("missing-r-home");
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--r-home"])
+        .arg(missing_r_home)
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INVALID_PARAMS");
+    assert_eq!(output.status.code(), Some(2));
 }
 
 fn assert_structured_resolve_error(output: &std::process::Output, code: &str) {

@@ -71,9 +71,8 @@ pub(super) fn setup_r_via_rig(version_spec: &str) -> Result<ResolvedRSource> {
 
     match external::rig::resolve_version(version_spec) {
         Ok(resolved) => resolve_rig_resolution(resolved),
-        Err(e) => {
-            anyhow::bail!("Failed to resolve R version '{}': {}", version_spec, e);
-        }
+        Err(error) => Err(anyhow::Error::new(error)
+            .context(format!("Failed to resolve R version '{version_spec}'"))),
     }
 }
 
