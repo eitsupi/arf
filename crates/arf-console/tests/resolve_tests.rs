@@ -931,6 +931,34 @@ fn normalize_descriptor_handles_paths_from_any_platform() {
         );
         assert!(!normalized.contains("broken.toml"), "leaked {path}");
     }
+
+    let absolute_path = r"C:\Users\runner\AppData\Local\Temp\.tmpABC\broken.toml";
+    let home_relative_path = r"~\AppData\Local\Temp\.tmpABC\broken.toml";
+    let value = serde_json::json!({
+        "diagnostics": [{
+            "code": "config.parse_failed",
+            "severity": "warning",
+            "message": format!("Failed to load config from {home_relative_path}: TOML parse error"),
+            "path": absolute_path,
+        }],
+    });
+    // Normalization can only substitute a spelling it is given, so it depends on
+    // the producer using the same one in both fields. Pin that dependency: when
+    // they disagree, the message keeps a path the snapshot cannot absorb, and the
+    // snapshot turns platform-specific. This is why a diagnostic is built with
+    // the raw path and masked only when rendered for a person. Windows is where
+    // divergence would show, because its temporary directories sit under the
+    // user profile and Unix ones do not.
+    let normalized: serde_json::Value =
+        serde_json::from_str(&normalize_descriptor(&value)).unwrap();
+    assert_eq!(
+        normalized["diagnostics"][0]["message"],
+        serde_json::Value::String(format!(
+            "Failed to load config from {home_relative_path}: TOML parse error"
+        )),
+        "expected the mismatched spelling to survive, so this test keeps \
+         documenting why the two fields must agree"
+    );
 }
 
 fn replace_non_null(value: Option<&mut serde_json::Value>, placeholder: &str) {

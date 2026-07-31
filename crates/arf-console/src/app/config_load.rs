@@ -150,7 +150,7 @@ pub(crate) fn load_config_collecting_diagnostics(
                 code,
                 message: format!(
                     "Failed to load config from {}: {}. Using default configuration.",
-                    mask_home_path(&path),
+                    path.display(),
                     message
                 ),
                 path,
