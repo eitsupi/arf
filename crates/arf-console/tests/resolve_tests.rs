@@ -873,30 +873,64 @@ fn normalize_descriptor(value: &serde_json::Value) -> String {
         .get_mut("diagnostics")
         .and_then(|diagnostics| diagnostics.as_array_mut())
     {
-        let absolute_path_regex =
-            regex::Regex::new(r#"(?i)(?:[a-z]:[\\/][^\s,;!?\"']+|/(?:[^/\s]+/)+[^/\s,:;!?\"']+)"#)
-                .unwrap();
         for diagnostic in diagnostics {
             if let Some(diagnostic) = diagnostic.as_object_mut() {
-                replace_non_null(diagnostic.get_mut("path"), "<diagnostic-path>");
+                // A message that names a path names the diagnostic's own path,
+                // so substitute that exact string. Recognizing paths by their
+                // syntax instead cannot be made reliable: a pattern that ends a
+                // Windows path at the wrong character produces a snapshot that
+                // differs from the one committed on Unix, and drive letters,
+                // `~`, UNC prefixes and spaces in paths each break it
+                // differently.
+                let path = diagnostic
+                    .get("path")
+                    .and_then(|path| path.as_str())
+                    .map(str::to_owned);
                 let message = diagnostic
-                    .get_mut("message")
+                    .get("message")
                     .and_then(|message| message.as_str())
                     .map(str::to_owned);
-                if let Some(message) = message {
-                    let normalized_message = absolute_path_regex
-                        .replace_all(&message, "<path>")
-                        .into_owned();
+                if let (Some(path), Some(message)) = (path.as_deref(), message) {
                     diagnostic.insert(
                         "message".to_owned(),
-                        serde_json::Value::String(normalized_message),
+                        serde_json::Value::String(message.replace(path, "<path>")),
                     );
                 }
+                replace_non_null(diagnostic.get_mut("path"), "<diagnostic-path>");
             }
         }
     }
 
     serde_json::to_string_pretty(&normalized).unwrap()
+}
+
+/// The descriptor snapshots are shared across platforms, so normalizing a
+/// diagnostic must not depend on how the platform spells a path. Windows CI is
+/// the only place a regression here would surface, so exercise the shapes it
+/// produces directly.
+#[test]
+fn normalize_descriptor_handles_paths_from_any_platform() {
+    for path in [
+        r"/tmp/.tmpABC/broken.toml",
+        r"C:\Users\runner\AppData\Local\Temp\.tmpABC\broken.toml",
+        r"\\server\share\broken.toml",
+        r"C:\Program Files\arf config\broken.toml",
+    ] {
+        let value = serde_json::json!({
+            "diagnostics": [{
+                "code": "config.parse_failed",
+                "severity": "warning",
+                "message": format!("Failed to load config from {path}: TOML parse error"),
+                "path": path,
+            }],
+        });
+        let normalized = normalize_descriptor(&value);
+        assert!(
+            normalized.contains(r"<path>: TOML parse error"),
+            "path {path} normalized to: {normalized}"
+        );
+        assert!(!normalized.contains("broken.toml"), "leaked {path}");
+    }
 }
 
 fn replace_non_null(value: Option<&mut serde_json::Value>, placeholder: &str) {
