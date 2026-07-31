@@ -4,20 +4,41 @@
 
 ### Added
 
-- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look, in priority order. A `version-file` entry reads a plain text file containing just the version — for example, following the same convention as `.python-version` or `.ruby-version`, a file named `.r-version` containing:
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default.
+  It is opt-in through `experimental.r_source_overrides` in the `arf.toml` config.
 
-  ```
-  4.4
+  For example, the following configuration looks for two TOML files named `rproject.toml` and `rproj.toml` in the current directory, in order:
+
+  ```toml
+  [experimental]
+  r_source_overrides = [
+    { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+    { type = "toml-key", file = "rproj.toml", key = "r.version" },
+  ]
   ```
 
-  A `toml-key` entry reads a value out of a TOML file — for example rv's `rproject.toml`:
+  If arf finds an R version defined in one of these files, it will select a matching version from the list of versions installed by rig and start that R.
+  If none of them yields a matching version, arf falls back to the R selected by `startup.r_source`.
+
+  The first of the two, `rproject.toml`, is used by [rv](https://a2-ai.github.io/rv-docs/).
+  It looks like this:
 
   ```toml
   [project]
   r_version = "4.4"
   ```
 
-  is read by `{ type = "toml-key", file = "rproject.toml", key = "project.r_version" }`. Only the current directory is searched, and only R versions rig has already installed can be selected.
+  The second, `rproj.toml`, is a draft proposal from [Tidyup 9](https://github.com/tidyverse/tidyups/pull/31).
+  Unlike rv's `rproject.toml`, it also supports Cargo-style version ranges:
+
+  ```toml
+  [r]
+  version = ">= 4.1.0, < 4.5.0"
+  ```
+
+  For now, it seems neither of these formats is widely adopted, so arf introduces a generic `toml-key` type that allows us to specify the filename and key path and supports Cargo-style version ranges.
+  Of course, we can also support other TOML files with different names and keys for specifying the R version.
+
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
 - `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4`. Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
 - `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown.

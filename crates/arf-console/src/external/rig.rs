@@ -497,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn semver_ranges_select_the_newest_matching_version() {
+    fn version_ranges_select_the_newest_matching_version() {
         let versions = vec![
             rig_version("4.3.9", false, "4.3.9", &[]),
             rig_version("4.4.0", false, "4.4.0", &[]),

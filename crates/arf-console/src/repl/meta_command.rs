@@ -971,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_meta_command_switch_force_accepts_spaced_semver_range() {
+    fn test_process_meta_command_switch_force_accepts_spaced_version_range() {
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
