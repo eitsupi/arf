@@ -31,6 +31,10 @@ pub struct SessionInfo {
     pub pid: u32,
     pub socket_path: String,
     pub r_version: Option<String>,
+    /// R installation path selected by arf at startup, or `None` if no R was resolved.
+    /// The field is absent in session files written by older arf versions.
+    #[serde(default)]
+    pub r_home: Option<String>,
     pub cwd: String,
     pub started_at: String,
     /// Whether this session is headless or interactive, or `None` for session
@@ -242,6 +246,7 @@ mod tests {
             pid: 12345,
             socket_path: "/tmp/arf.sock".to_string(),
             r_version: Some("4.4.1".to_string()),
+            r_home: None,
             cwd: "/tmp".to_string(),
             started_at: "2026-01-01T00:00:00+00:00".to_string(),
             session_type,
@@ -252,13 +257,16 @@ mod tests {
 
     #[test]
     fn session_type_serializes_and_round_trips() {
-        let info = session_info(Some(SessionType::Headless));
+        let mut info = session_info(Some(SessionType::Headless));
+        info.r_home = Some("/opt/R/4.4.1/lib/R".to_string());
         let json = serde_json::to_value(&info).unwrap();
 
         assert_eq!(json["session_type"], "headless");
+        assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
 
         let restored: SessionInfo = serde_json::from_value(json).unwrap();
         assert_eq!(restored.session_type, Some(SessionType::Headless));
+        assert_eq!(restored.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
     }
 
     #[test]
@@ -275,6 +283,22 @@ mod tests {
 
         let info: SessionInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.session_type, None);
+    }
+
+    #[test]
+    fn legacy_session_without_r_home_deserializes_as_unknown() {
+        let json = r#"
+        {
+            "pid": 12345,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": "4.4.1",
+            "cwd": "/tmp",
+            "started_at": "2026-01-01T00:00:00+00:00"
+        }
+        "#;
+
+        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.r_home, None);
     }
 
     #[test]

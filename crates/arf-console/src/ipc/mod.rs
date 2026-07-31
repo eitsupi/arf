@@ -142,6 +142,7 @@ pub fn break_signal() -> Arc<AtomicBool> {
 /// default PID-based path.
 pub fn start_server(
     bind: Option<&str>,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
     session_type: session::SessionType,
@@ -162,6 +163,7 @@ pub fn start_server(
         tx,
         bind,
         &started_at,
+        r_home,
         log_file,
         history_session_id,
         session_type,
@@ -589,6 +591,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
         pid: std::process::id(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
+        r_home: meta.r_home.clone(),
         socket_path: meta.socket_path.clone(),
         started_at: meta.started_at.clone(),
         log_file: meta.log_file.clone(),
@@ -605,6 +608,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
 struct SessionMeta {
     socket_path: String,
     started_at: String,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
 }
@@ -809,12 +813,14 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
 pub(in crate::ipc) fn set_session_meta(
     socket_path: String,
     started_at: String,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
 ) {
     let meta = SessionMeta {
         socket_path,
         started_at,
+        r_home,
         log_file,
         history_session_id,
     };
@@ -837,6 +843,7 @@ fn current_session_meta() -> SessionMeta {
         None => SessionMeta {
             socket_path: "<uninitialized_socket_path>".to_string(),
             started_at: "<uninitialized_started_at>".to_string(),
+            r_home: None,
             log_file: None,
             history_session_id: None,
         },

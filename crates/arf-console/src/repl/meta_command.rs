@@ -45,6 +45,7 @@ pub fn process_meta_command(
     r_source_status: &RSourceStatus,
     dir_stack: &mut Vec<PathBuf>,
     history_session_id: Option<i64>,
+    r_home: Option<&std::path::Path>,
 ) -> Option<MetaCommandResult> {
     let trimmed = input.trim();
     if !trimmed.starts_with(':') {
@@ -246,6 +247,7 @@ pub fn process_meta_command(
             match subcmd {
                 "start" => match crate::ipc::start_server(
                     None,
+                    r_home.map(|path| path.display().to_string()),
                     None,
                     history_session_id,
                     crate::ipc::session::SessionType::Interactive,
@@ -547,6 +549,7 @@ mod tests {
             shell_history_path,
             status,
             &mut dir_stack,
+            None,
             None,
         )
     }
@@ -859,6 +862,7 @@ mod tests {
             &status,
             &mut dir_stack,
             None,
+            None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
     }
@@ -879,6 +883,7 @@ mod tests {
             &status,
             &mut dir_stack,
             None,
+            None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
         assert_eq!(dir_stack.len(), 1);
@@ -890,6 +895,7 @@ mod tests {
             &None,
             &status,
             &mut dir_stack,
+            None,
             None,
         );
         assert!(matches!(result, Some(MetaCommandResult::Handled)));

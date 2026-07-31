@@ -56,6 +56,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
   "pid": 12345,
   "socket_path": "/run/user/1000/arf/12345.sock",
   "r_version": "4.4.2",
+  "r_home": "/opt/R/4.4.2/lib/R",
   "cwd": "/workspace",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
@@ -72,7 +73,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `log_file`, and `history_session_id` may be `null`. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, `log_file`, and `history_session_id` may be `null`. `r_home` is the R installation the session is using, or `null` when the session has no R. A session started by an older arf may omit `r_home`; clients should treat that as unknown. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 
@@ -253,6 +254,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "pid": 12345,
   "os": "linux",
   "arch": "x86_64",
+  "r_home": "/opt/R/4.4.2/lib/R",
   "socket_path": "/run/user/1000/arf/12345.sock",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
@@ -261,6 +263,11 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "hint": null
 }
 ```
+
+All top-level keys are always present. `r_home` is the R installation the session is using, or
+`null` when the session has no R. The `r` object contains information collected by evaluating R
+and may be `null` while R is busy or unavailable. `arch` is the architecture of the arf process,
+not the R installation.
 
 When R is idle, the `r` field contains session details (other top-level fields omitted for brevity):
 
@@ -293,6 +300,7 @@ arf ipc list
 #     {
 #       "pid": 12345,
 #       "r_version": "4.4.1",
+#       "r_home": "/opt/R/4.4.1/lib/R",
 #       "socket_path": "/run/user/1000/arf/12345.sock",
 #       "cwd": "/workspace",
 #       "started_at": "2026-03-22T10:00:00+09:00",
@@ -311,6 +319,11 @@ The `session_type` field is `"headless"` for sessions started with
 REPL. A `null` value means the session was created by an older arf that did not
 record its type. Clients must treat `null` as unknown and must not send
 `shutdown` to that session.
+
+The `r_home` field is the R installation the session is using, or `null` when the
+session has no R. A session started by an older arf omits this field; clients
+should treat its absence as unknown. `r_version`, `r_home`, `session_type`,
+`log_file`, and `history_session_id` may be `null` in current session files.
 
 ### `arf ipc history` — Query Command History
 

@@ -275,6 +275,7 @@ fn run() -> Result<()> {
         cli.r_source.no_r_source_overrides,
     )?;
     resolution.emit_diagnostics();
+    let r_home = resolution.r_home.clone();
     let r_source_status = resolution.status;
     log::debug!("R source status: {:?}", r_source_status);
 
@@ -394,6 +395,7 @@ fn run() -> Result<()> {
     if cli.with_ipc {
         match ipc::start_server(
             cli.ipc_bind.as_deref(),
+            r_home.as_ref().map(|path| path.display().to_string()),
             None,
             session_id_raw,
             ipc::session::SessionType::Interactive,
@@ -421,6 +423,7 @@ fn run() -> Result<()> {
         config_path,
         config_status,
         r_source_status,
+        r_home,
         session_id,
     )?;
     let repl_result = repl.run();

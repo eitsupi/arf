@@ -19,7 +19,7 @@ use serde::Serialize;
 /// JSON output for `arf headless --json`.
 ///
 /// Contains session connection info and any warnings collected during startup.
-/// All keys are always present in the JSON output; `r_version`, `log_file`,
+/// All keys are always present in the JSON output; `r_version`, `r_home`, `log_file`,
 /// and `history_session_id` may be `null`. `warnings` is an array that may be
 /// empty.
 #[derive(Debug, Serialize)]
@@ -27,6 +27,7 @@ struct HeadlessInfo {
     pid: u32,
     socket_path: String,
     r_version: Option<String>,
+    r_home: Option<String>,
     cwd: String,
     started_at: String,
     log_file: Option<String>,
@@ -78,6 +79,7 @@ impl HeadlessInfo {
             pid: session.pid,
             socket_path: session.socket_path.clone(),
             r_version,
+            r_home: session.r_home.clone(),
             cwd: session.cwd.clone(),
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
@@ -226,8 +228,18 @@ pub(crate) fn run_headless(
             .display()
             .to_string()
     });
-    let session = ipc::start_server(bind, log_file_str, session_id_raw, SessionType::Headless)
-        .context("Failed to start IPC server")?;
+    let r_home_str = resolution
+        .r_home
+        .as_ref()
+        .map(|path| path.display().to_string());
+    let session = ipc::start_server(
+        bind,
+        r_home_str,
+        log_file_str,
+        session_id_raw,
+        SessionType::Headless,
+    )
+    .context("Failed to start IPC server")?;
     if !quiet {
         eprintln!("IPC server listening on: {}", session.socket_path);
     }
@@ -431,6 +443,29 @@ mod tests {
             assert!(value.get("requested_version").is_some());
             assert!(value.get("resolved_version").is_some());
         }
+    }
+
+    #[test]
+    fn headless_json_includes_r_home_from_session() {
+        let session = SessionInfo {
+            pid: 12345,
+            socket_path: "/tmp/arf.sock".to_string(),
+            r_version: Some("4.4.1".to_string()),
+            r_home: Some("/opt/R/4.4.1/lib/R".to_string()),
+            cwd: "/tmp".to_string(),
+            started_at: "2026-01-01T00:00:00+00:00".to_string(),
+            session_type: Some(SessionType::Headless),
+            log_file: None,
+            history_session_id: None,
+        };
+
+        let output = HeadlessInfo::from_session(
+            &session,
+            Vec::new(),
+            &report(RSourceOverrideState::NotConfigured),
+        );
+        let json = serde_json::to_value(output).unwrap();
+        assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
     }
 
     #[test]
