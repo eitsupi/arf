@@ -316,11 +316,15 @@ fn run() -> Result<()> {
 
     // Initialize R with CLI-specified flags
     log::info!("Initializing R...");
+    // Note the directory before initializing: on Unix, profiles run inside
+    // initialization and may call setwd(), which would move the base a
+    // relative R_HOME has to be resolved against.
+    let pre_init_dir = std::env::current_dir().ok();
     let (r_initialized, r_home) = unsafe {
         match arf_libr::initialize_r_with_args(&r_args_refs) {
             Ok(()) => {
                 log::info!("R initialized successfully");
-                (true, capture_runtime_r_home())
+                (true, capture_runtime_r_home(pre_init_dir.as_deref()))
             }
             Err(e) => {
                 eprintln!("Warning: Failed to initialize R: {}", e);
@@ -444,7 +448,10 @@ fn run() -> Result<()> {
 /// This is intentionally called only after successful R initialization. The
 /// startup resolution report is a prediction, while `R.home()` is a fact from
 /// the runtime that is actually in use.
-fn capture_runtime_r_home() -> Option<PathBuf> {
+///
+/// `base_dir` is the working directory from before initialization, used to
+/// resolve a relative R_HOME. See [`absolutize_runtime_r_home`].
+fn capture_runtime_r_home(base_dir: Option<&std::path::Path>) -> Option<PathBuf> {
     let r_home = match unsafe { arf_harp::eval_r_to_string(r#"base::R.home()"#) } {
         Ok(Some(r_home)) => r_home,
         Ok(None) => {
@@ -457,16 +464,39 @@ fn capture_runtime_r_home() -> Option<PathBuf> {
         }
     };
 
-    let r_home = PathBuf::from(r_home);
+    absolutize_runtime_r_home(PathBuf::from(r_home), base_dir)
+}
+
+/// Resolve a relative R_HOME against the directory R started in.
+///
+/// R stores whatever R_HOME string it was given, so `R.home()` can be
+/// relative. The base has to be the working directory from before
+/// initialization: a `.Rprofile` runs during initialization on Unix and may
+/// call `setwd()`, and resolving against the directory afterwards would name a
+/// different location than the one R loaded from. Without a base, a relative
+/// path is dropped rather than guessed at.
+///
+/// Paths are joined, never canonicalized: resolving symlinks would report an
+/// R_HOME other than the one in use. `arf r resolve` joins for the same reason.
+///
+/// In practice R fails to initialize with a relative R_HOME, so this is
+/// defensive. It is kept because arf does not reject relative input either: an
+/// explicit `--r-home` is returned unchanged when the path has no `bin/R`.
+fn absolutize_runtime_r_home(
+    r_home: PathBuf,
+    base_dir: Option<&std::path::Path>,
+) -> Option<PathBuf> {
     if r_home.is_absolute() {
-        Some(r_home)
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => Some(cwd.join(r_home)),
-            Err(error) => {
-                log::warn!("Could not make R.home() absolute: {error}");
-                None
-            }
+        return Some(r_home);
+    }
+    match base_dir {
+        Some(base) => Some(base.join(r_home)),
+        None => {
+            log::warn!(
+                "Could not make R.home() absolute: the directory R started in is unknown ({})",
+                r_home.display()
+            );
+            None
         }
     }
 }
@@ -590,4 +620,41 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
         && path.len() == 2
         && path[0] == "history"
         && matches!(path[1].as_str(), "import" | "export")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::absolutize_runtime_r_home;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn absolute_runtime_r_home_is_left_alone() {
+        let r_home = PathBuf::from(if cfg!(windows) {
+            r"C:\opt\R\lib\R"
+        } else {
+            r"/opt/R/lib/R"
+        });
+        assert_eq!(
+            absolutize_runtime_r_home(r_home.clone(), Some(Path::new("/elsewhere"))),
+            Some(r_home)
+        );
+    }
+
+    #[test]
+    fn relative_runtime_r_home_resolves_against_the_startup_directory() {
+        // The point of taking the base as an argument: a setwd() during
+        // initialization cannot influence the result.
+        assert_eq!(
+            absolutize_runtime_r_home(PathBuf::from("lib/R"), Some(Path::new("/start"))),
+            Some(PathBuf::from("/start/lib/R"))
+        );
+    }
+
+    #[test]
+    fn relative_runtime_r_home_without_a_base_is_dropped() {
+        assert_eq!(
+            absolutize_runtime_r_home(PathBuf::from("lib/R"), None),
+            None
+        );
+    }
 }

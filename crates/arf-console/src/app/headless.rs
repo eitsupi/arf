@@ -158,11 +158,14 @@ pub(crate) fn run_headless(
     let r_args = r_args_builder.build();
     let r_args_refs: Vec<&str> = r_args.iter().map(|s| s.as_str()).collect();
 
-    // Initialize R
+    // Initialize R. Note the directory beforehand: profiles run inside
+    // initialization on Unix and may call setwd(), which would move the base a
+    // relative R_HOME has to be resolved against.
+    let pre_init_dir = std::env::current_dir().ok();
     unsafe {
         arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
     }
-    let r_home = crate::capture_runtime_r_home();
+    let r_home = crate::capture_runtime_r_home(pre_init_dir.as_deref());
 
     // Source R profile files (Windows only)
     #[cfg(windows)]
