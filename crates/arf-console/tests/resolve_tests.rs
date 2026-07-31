@@ -518,6 +518,8 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], false);
     assert!(value["target"].is_null());
+    assert!(value.as_object().unwrap().contains_key("provider"));
+    assert!(value["provider"].is_null());
     let diagnostic = value["diagnostics"]
         .as_array()
         .unwrap()
@@ -548,6 +550,7 @@ fn resolve_explicit_r_home_still_works_with_no_r_auto_discovery() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], true);
     assert_descriptor_path(&value, &value["target"]["r_home"], &environment.fake_r_home);
+    assert_eq!(value["provider"], "explicit_path");
     assert_eq!(value["selected_by"]["kind"], "r_home");
 }
 

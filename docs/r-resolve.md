@@ -47,9 +47,9 @@ arf r resolve
 
 ## JSON Descriptor
 
-Every key is always present. A value is `null` when it does not apply, so consumers can rely on the key set being stable. `resolved` is `false` and `target` is `null` exactly when no R installation could be found. That is not an error: the command still exits 0, because normal arf startup also continues in that state with R evaluation unavailable.
+Every key is always present. A value is `null` when it does not apply, so consumers can rely on the key set being stable. `resolved` is `false`, and `target` and `provider` are `null`, exactly when no R installation could be found. That is not an error: the command still exits 0, because normal arf startup also continues in that state with R evaluation unavailable.
 
-`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation; current values are `rig`, `path`, and `explicit_path`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
+`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation and is `null` when nothing was located; current values are `rig`, `path`, and `explicit_path`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
 
 ### `selected_by` and `source`
 

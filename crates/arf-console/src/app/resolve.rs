@@ -83,7 +83,7 @@ struct ResolveDescriptor {
     target: Option<Target>,
     resolver: Resolver,
     selected_by: SelectedBy,
-    provider: String,
+    provider: Option<String>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -254,6 +254,7 @@ fn descriptor(
             resolved_version: resolved_version(resolution),
         }
     });
+    let resolved = target.is_some();
 
     let selected_by = selected_by(
         cwd,
@@ -271,7 +272,7 @@ fn descriptor(
 
     ResolveDescriptor {
         schema_version: 1,
-        resolved: target.is_some(),
+        resolved,
         cwd: cwd.display().to_string(),
         target,
         resolver: Resolver {
@@ -279,7 +280,7 @@ fn descriptor(
             version: env!("CARGO_PKG_VERSION"),
         },
         selected_by,
-        provider: provider(&resolution.status),
+        provider: resolved.then(|| provider(&resolution.status)),
         diagnostics,
     }
 }
