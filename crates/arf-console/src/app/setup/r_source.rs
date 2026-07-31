@@ -328,11 +328,26 @@ where
         }
         RSource::Mode(RSourceMode::Rig) => {
             // Rig mode: require rig
-            if rig_available().is_err() {
-                anyhow::bail!(
-                    r#"r_source = "rig" but rig is not installed.
+            match rig_available() {
+                Ok(()) => {}
+                Err(external::rig::RigError::NotInstalled) => {
+                    anyhow::bail!(
+                        r#"r_source = "rig" but rig is not installed.
 Install rig from https://github.com/r-lib/rig or use "auto"."#
-                );
+                    );
+                }
+                Err(external::rig::RigError::CommandFailed(reason)) => {
+                    anyhow::bail!(
+                        r#"r_source = "rig" but rig is installed and could not be run: {reason}.
+Fix the rig installation or use "auto"."#
+                    );
+                }
+                Err(error) => {
+                    anyhow::bail!(
+                        r#"r_source = "rig" but rig availability could not be checked: {error}.
+Fix the rig installation or use "auto"."#
+                    );
+                }
             }
             match resolve_version("default") {
                 Ok(resolved) => {
@@ -409,5 +424,29 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
             format!("Warning: Failed to determine R_HOME from PATH: {error}"),
             None,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_rig_mode_reports_command_failure_without_install_guidance() {
+        let result = setup_r_fallback_with(
+            &RSource::Mode(RSourceMode::Rig),
+            RSourceOverrideState::NotConfigured,
+            || {
+                Err(external::rig::RigError::CommandFailed(
+                    "permission denied".to_string(),
+                ))
+            },
+            |_| panic!("rig's default version should not be resolved"),
+        );
+
+        let error = result.expect_err("rig command failure should reject explicit rig mode");
+        let message = error.to_string();
+        assert!(message.contains("permission denied"));
+        assert!(!message.contains("Install rig"));
     }
 }

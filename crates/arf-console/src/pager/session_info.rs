@@ -116,26 +116,37 @@ fn generate_info_lines(
     lines.push(String::new());
 
     // rig status
-    if rig::rig_available().is_ok() {
-        let mut rig_line = "rig:            installed".to_string();
-        if let Ok(versions) = rig::list_versions()
-            && !versions.is_empty()
-        {
-            let version_list: Vec<_> = versions
-                .iter()
-                .map(|v| {
-                    if v.default {
-                        format!("{}*", v.name)
-                    } else {
-                        v.name.clone()
-                    }
-                })
-                .collect();
-            rig_line.push_str(&format!(" ({})", version_list.join(", ")));
+    match rig::rig_available() {
+        Ok(()) => {
+            let mut rig_line = "rig:            installed".to_string();
+            if let Ok(versions) = rig::list_versions()
+                && !versions.is_empty()
+            {
+                let version_list: Vec<_> = versions
+                    .iter()
+                    .map(|v| {
+                        if v.default {
+                            format!("{}*", v.name)
+                        } else {
+                            v.name.clone()
+                        }
+                    })
+                    .collect();
+                rig_line.push_str(&format!(" ({})", version_list.join(", ")));
+            }
+            lines.push(rig_line);
         }
-        lines.push(rig_line);
-    } else {
-        lines.push("rig:            not installed".to_string());
+        Err(rig::RigError::NotInstalled) => {
+            lines.push("rig:            not installed".to_string());
+        }
+        Err(rig::RigError::CommandFailed(reason)) => {
+            lines.push(format!(
+                "rig:            installed but unavailable ({reason})"
+            ));
+        }
+        Err(error) => {
+            lines.push(format!("rig:            unavailable ({error})"));
+        }
     }
 
     // Air (formatter) status

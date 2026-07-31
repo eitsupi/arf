@@ -183,9 +183,14 @@ fn resolve_relative_r_home_uses_one_absolute_path_representation() {
 
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let expected = r_home.display().to_string();
-    assert_eq!(value["target"]["r_home"], expected);
-    assert_eq!(value["selected_by"]["path"], expected);
+    let target_r_home = value["target"]["r_home"].as_str().unwrap();
+    let selected_path = value["selected_by"]["path"].as_str().unwrap();
+    let cwd = value["cwd"].as_str().unwrap();
+    let expected = std::path::Path::new(cwd).join("rh");
+
+    assert_eq!(target_r_home, selected_path);
+    assert!(std::path::Path::new(target_r_home).is_absolute());
+    assert_eq!(target_r_home, expected.display().to_string());
 }
 
 #[cfg(unix)]

@@ -235,11 +235,9 @@ where
             continue;
         }
 
-        let rig_is_available = rig_available_cache
-            .get_or_insert_with(&rig_available)
-            .is_ok();
-        if !rig_is_available {
-            diagnostics.push(rig_unavailable_warning());
+        let rig_availability = rig_available_cache.get_or_insert_with(&rig_available);
+        if let Err(error) = rig_availability {
+            diagnostics.push(rig_unavailable_warning(error));
             return Some(OverrideResolution::Fallback { diagnostics });
         }
 
@@ -410,12 +408,21 @@ fn override_location(source: &RSourceOverride) -> String {
     }
 }
 
-fn rig_unavailable_warning() -> RSourceDiagnostic {
-    warning(
-        "r_source_override.rig_unavailable",
-        "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source.",
-        None,
-    )
+fn rig_unavailable_warning(error: &external::rig::RigError) -> RSourceDiagnostic {
+    let message = match error {
+        external::rig::RigError::NotInstalled => {
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+                .to_string()
+        }
+        external::rig::RigError::CommandFailed(reason) => format!(
+            "Warning: rig is installed but could not be run, so the R source override cannot be resolved: {reason}.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+        ),
+        error => format!(
+            "Warning: rig availability could not be checked ({error}), so the R source override cannot be resolved.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+        ),
+    };
+
+    warning("r_source_override.rig_unavailable", message, None)
 }
 
 fn fallback_warning() -> RSourceDiagnostic {
@@ -792,9 +799,36 @@ mod r_source_override_tests {
     #[test]
     fn rig_unavailable_warning_explains_fallback() {
         assert_eq!(
-            rig_unavailable_warning().message,
+            rig_unavailable_warning(&external::rig::RigError::NotInstalled).message,
             "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
         );
+    }
+
+    #[test]
+    fn command_failed_rig_warning_preserves_reason_without_install_guidance() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = Path::new("project.r-version").to_path_buf();
+        std::fs::write(temp.path().join(&file), "4.4.2\n").unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::VersionFile { file }],
+            Some(temp.path()),
+            || {
+                Err(external::rig::RigError::CommandFailed(
+                    "permission denied".to_string(),
+                ))
+            },
+            || panic!("rig versions should not be listed after availability fails"),
+            |_, _| panic!("R version should not be resolved after availability fails"),
+        )
+        .expect("an existing override should produce a fallback");
+
+        let OverrideResolution::Fallback { diagnostics } = result else {
+            panic!("a failed rig command should fall back to startup.r_source");
+        };
+        let message = diagnostic_text(&diagnostics);
+        assert!(message.contains("permission denied"));
+        assert!(!message.contains("Install rig"));
     }
 
     #[test]
