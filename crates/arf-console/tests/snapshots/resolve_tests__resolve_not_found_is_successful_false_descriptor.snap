@@ -1,0 +1,35 @@
+---
+source: crates/arf-console/tests/resolve_tests.rs
+expression: normalize_descriptor(&value)
+---
+{
+  "cwd": "<cwd>",
+  "diagnostics": [
+    {
+      "code": "r_discovery.failed",
+      "message": "R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery.",
+      "path": null,
+      "severity": "warning"
+    }
+  ],
+  "provider": null,
+  "resolved": false,
+  "resolver": {
+    "name": "arf",
+    "version": "<arf-version>"
+  },
+  "schema_version": 1,
+  "selected_by": {
+    "kind": "default",
+    "requested_r_home": null,
+    "requested_version": null,
+    "source": {
+      "format": null,
+      "key": null,
+      "kind": "built_in_default",
+      "name": null,
+      "path": null
+    }
+  },
+  "target": null
+}

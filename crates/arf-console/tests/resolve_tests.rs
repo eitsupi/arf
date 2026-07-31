@@ -196,6 +196,10 @@ fn resolve_found_emits_descriptor_with_target() {
         temp.path(),
     );
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
+    insta::assert_snapshot!(
+        "resolve_found_emits_descriptor_with_target",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -343,6 +347,10 @@ r_version = "4.4.2"
     );
     assert_eq!(value["selected_by"]["source"]["format"], "toml");
     assert_eq!(value["selected_by"]["source"]["key"], "project.r_version");
+    insta::assert_snapshot!(
+        "resolve_project_file_version_request_reports_toml_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -384,6 +392,10 @@ r_source = { path = "fallback-r-home" }
     );
     assert_eq!(value["selected_by"]["source"]["format"], "text");
     assert!(value["selected_by"]["source"]["key"].is_null());
+    insta::assert_snapshot!(
+        "resolve_project_file_version_request_reports_text_source",
+        normalize_descriptor(&value)
+    );
 }
 
 /// Project configuration is a hint that may fall back, while an explicit
@@ -471,6 +483,10 @@ fn resolve_environment_version_reports_environment_source() {
         "environment_variable"
     );
     assert_eq!(value["selected_by"]["source"]["name"], "ARF_R_VERSION");
+    insta::assert_snapshot!(
+        "resolve_environment_version_reports_environment_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -497,6 +513,10 @@ fn resolve_without_config_reports_built_in_default_source() {
     assert!(value["selected_by"]["source"]["path"].is_null());
     assert!(value["selected_by"]["source"]["format"].is_null());
     assert!(value["selected_by"]["source"]["key"].is_null());
+    insta::assert_snapshot!(
+        "resolve_without_config_reports_built_in_default_source",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -532,6 +552,10 @@ fn resolve_not_found_is_successful_false_descriptor() {
     insta::assert_snapshot!(
         diagnostic["message"].as_str().unwrap(),
         @"R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery."
+    );
+    insta::assert_snapshot!(
+        "resolve_not_found_is_successful_false_descriptor",
+        normalize_descriptor(&value)
     );
 }
 
@@ -581,6 +605,10 @@ fn resolve_broken_config_falls_back_with_diagnostic() {
             .unwrap()
             .iter()
             .any(|diagnostic| diagnostic["code"] == "config.parse_failed")
+    );
+    insta::assert_snapshot!(
+        "resolve_broken_config_falls_back_with_diagnostic",
+        normalize_descriptor(&value)
     );
 }
 
@@ -677,6 +705,10 @@ fn resolve_rig_alias_is_accepted_before_version_spec_validation() {
         "command_line_argument"
     );
     assert_eq!(value["selected_by"]["source"]["name"], "--with-r-version");
+    insta::assert_snapshot!(
+        "resolve_rig_alias_is_accepted_before_version_spec_validation",
+        normalize_descriptor(&value)
+    );
 }
 
 #[test]
@@ -795,6 +827,83 @@ fn assert_selected_by_nullable_fields_are_present(value: &serde_json::Value) {
             source.contains_key(field),
             "missing selected_by.source.{field}"
         );
+    }
+}
+
+fn normalize_descriptor(value: &serde_json::Value) -> String {
+    let mut normalized = value.clone();
+    let descriptor = normalized.as_object_mut().unwrap();
+
+    replace_non_null(descriptor.get_mut("cwd"), "<cwd>");
+    if let Some(resolver) = descriptor
+        .get_mut("resolver")
+        .and_then(|resolver| resolver.as_object_mut())
+    {
+        replace_non_null(resolver.get_mut("version"), "<arf-version>");
+    }
+
+    if let Some(target) = descriptor
+        .get_mut("target")
+        .and_then(|target| target.as_object_mut())
+    {
+        replace_non_null(target.get_mut("r_home"), "<r-home>");
+        replace_non_null(target.get_mut("r_binary"), "<r-binary>");
+        // The fake rig fixture used by every snapshot with a resolved version
+        // always reports 4.4.2, so retaining that value pins the fixture's
+        // deterministic version selection.
+    }
+
+    if let Some(selected_by) = descriptor
+        .get_mut("selected_by")
+        .and_then(|selected_by| selected_by.as_object_mut())
+    {
+        replace_non_null(
+            selected_by.get_mut("requested_r_home"),
+            "<requested-r-home>",
+        );
+        if let Some(source) = selected_by
+            .get_mut("source")
+            .and_then(|source| source.as_object_mut())
+        {
+            replace_non_null(source.get_mut("path"), "<source-path>");
+        }
+    }
+
+    if let Some(diagnostics) = descriptor
+        .get_mut("diagnostics")
+        .and_then(|diagnostics| diagnostics.as_array_mut())
+    {
+        let absolute_path_regex =
+            regex::Regex::new(r#"(?i)(?:[a-z]:[\\/][^\s,;!?\"']+|/(?:[^/\s]+/)+[^/\s,:;!?\"']+)"#)
+                .unwrap();
+        for diagnostic in diagnostics {
+            if let Some(diagnostic) = diagnostic.as_object_mut() {
+                replace_non_null(diagnostic.get_mut("path"), "<diagnostic-path>");
+                let message = diagnostic
+                    .get_mut("message")
+                    .and_then(|message| message.as_str())
+                    .map(str::to_owned);
+                if let Some(message) = message {
+                    let normalized_message = absolute_path_regex
+                        .replace_all(&message, "<path>")
+                        .into_owned();
+                    diagnostic.insert(
+                        "message".to_owned(),
+                        serde_json::Value::String(normalized_message),
+                    );
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&normalized).unwrap()
+}
+
+fn replace_non_null(value: Option<&mut serde_json::Value>, placeholder: &str) {
+    if let Some(value) = value
+        && !value.is_null()
+    {
+        *value = serde_json::Value::String(placeholder.to_owned());
     }
 }
 

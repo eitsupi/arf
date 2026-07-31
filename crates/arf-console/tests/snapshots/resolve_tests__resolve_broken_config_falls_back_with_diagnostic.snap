@@ -1,0 +1,39 @@
+---
+source: crates/arf-console/tests/resolve_tests.rs
+expression: normalize_descriptor(&value)
+---
+{
+  "cwd": "<cwd>",
+  "diagnostics": [
+    {
+      "code": "config.parse_failed",
+      "message": "Failed to load config from <path>: TOML parse error at line 1, column 5\n  |\n1 | not valid = [toml\n  |     ^\nkey with no value, expected `=`\n. Using default configuration.",
+      "path": "<diagnostic-path>",
+      "severity": "warning"
+    }
+  ],
+  "provider": "explicit_path",
+  "resolved": true,
+  "resolver": {
+    "name": "arf",
+    "version": "<arf-version>"
+  },
+  "schema_version": 1,
+  "selected_by": {
+    "kind": "r_home",
+    "requested_r_home": "<requested-r-home>",
+    "requested_version": null,
+    "source": {
+      "format": null,
+      "key": null,
+      "kind": "command_line_argument",
+      "name": "--r-home",
+      "path": null
+    }
+  },
+  "target": {
+    "r_binary": null,
+    "r_home": "<r-home>",
+    "resolved_version": null
+  }
+}
