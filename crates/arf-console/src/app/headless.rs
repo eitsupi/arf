@@ -9,6 +9,7 @@ use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::ipc;
 use crate::ipc::session::{SessionInfo, SessionType};
+use crate::output::write_json;
 use crate::pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
 };
@@ -258,19 +259,15 @@ pub(crate) fn run_headless(
     if json {
         // Output session info as JSON to stdout
         let output = HeadlessInfo::from_session(&session, warnings, &resolution);
-        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-        let json_str = if is_tty {
-            serde_json::to_string_pretty(&output)
-        } else {
-            serde_json::to_string(&output)
-        }
-        .context("Failed to serialize session info")?;
         // Use writeln + flush instead of println to ensure the JSON is
         // delivered immediately when stdout is piped (non-TTY). This is the
         // readiness signal for CI scripts waiting on the output.
         use std::io::Write;
+        let pretty = std::io::IsTerminal::is_terminal(&std::io::stdout());
         let mut stdout = std::io::stdout().lock();
-        writeln!(stdout, "{json_str}").context("Failed to write session info to stdout")?;
+        write_json(&mut stdout, &output, pretty)
+            .context("Failed to write session info to stdout")?;
+        writeln!(stdout).context("Failed to write session info to stdout")?;
         stdout
             .flush()
             .context("Failed to flush session info to stdout")?;
