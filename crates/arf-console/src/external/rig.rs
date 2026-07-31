@@ -36,12 +36,29 @@ pub struct ResolvedVersion {
 }
 
 /// Check if rig is available in PATH.
-pub fn rig_available() -> bool {
-    Command::new("rig")
+pub fn rig_available() -> Result<(), RigError> {
+    let output = Command::new("rig")
         .arg("--version")
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                RigError::NotInstalled
+            } else {
+                RigError::CommandFailed(error.to_string())
+            }
+        })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let message = if stderr.is_empty() {
+            format!("exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        Err(RigError::CommandFailed(message))
+    }
 }
 
 /// List all installed R versions via rig.

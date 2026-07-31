@@ -74,7 +74,7 @@ pub fn confirm_action(prompt: &str) -> bool {
 pub fn restart_process(version: Option<&str>) {
     // If a version is specified, validate it using rig before restarting
     if let Some(ver) = version {
-        if !rig::rig_available() {
+        if rig::rig_available().is_err() {
             arf_eprintln!("Error: rig is not installed. Cannot switch R versions.");
             arf_eprintln!("Install rig from https://github.com/r-lib/rig");
             return;

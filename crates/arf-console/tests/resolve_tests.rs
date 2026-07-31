@@ -499,6 +499,29 @@ exit 1
 
 #[test]
 #[cfg(unix)]
+fn resolve_failing_rig_is_internal_error() {
+    let environment = FakeRigEnvironment::new();
+    write_executable(&environment.rig, "#!/bin/sh\nexit 1\n");
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--with-r-version", "4.4.2"])
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INTERNAL_ERROR");
+    assert_eq!(output.status.code(), Some(4));
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Failed to run rig while checking whether it is available")
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn resolve_r_binary_failure_is_internal_error() {
     let environment = FakeRigEnvironment::new();
     std::fs::write(&environment.r, "#!/bin/sh\nexit 1\n").unwrap();

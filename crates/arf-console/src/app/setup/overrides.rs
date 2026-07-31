@@ -53,7 +53,7 @@ fn setup_r_via_overrides_with<FAvailable, FList, FResolve>(
     resolve_selected_rig_version: FResolve,
 ) -> Option<OverrideResolution>
 where
-    FAvailable: Fn() -> bool,
+    FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
     FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
     FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<ResolvedRSource>,
 {
@@ -235,7 +235,9 @@ where
             continue;
         }
 
-        let rig_is_available = *rig_available_cache.get_or_insert_with(&rig_available);
+        let rig_is_available = rig_available_cache
+            .get_or_insert_with(&rig_available)
+            .is_ok();
         if !rig_is_available {
             diagnostics.push(rig_unavailable_warning());
             return Some(OverrideResolution::Fallback { diagnostics });
@@ -525,7 +527,7 @@ mod r_source_override_tests {
         let report = setup_r_fallback_with(
             &RSource::Mode(RSourceMode::Auto),
             RSourceOverrideState::NotConfigured,
-            || false,
+            || Err(external::rig::RigError::NotInstalled),
             |_| panic!("rig's default version should not be resolved"),
         )
         .unwrap();
@@ -539,7 +541,7 @@ mod r_source_override_tests {
         let report = setup_r_fallback_with(
             &RSource::Mode(RSourceMode::Auto),
             RSourceOverrideState::NotConfigured,
-            || true,
+            || Ok(()),
             |_| Err(external::rig::RigError::NoDefaultVersion),
         )
         .unwrap();
@@ -868,7 +870,7 @@ mod r_source_override_tests {
                 },
             ],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |selected, versions| {
                 assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -932,7 +934,7 @@ mod r_source_override_tests {
                 file: file.to_path_buf(),
             }],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |selected, versions| {
                 assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -1004,7 +1006,7 @@ mod r_source_override_tests {
                 file: "project.r-version".into(),
             }],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |_, _| panic!("version resolution should not be attempted"),
         )
@@ -1145,7 +1147,7 @@ mod r_source_override_tests {
                 let result = setup_r_via_overrides_with(
                     &overrides,
                     Some(temp.path()),
-                    || true,
+                    || Ok(()),
                     || Ok(vec![rig_version("4.4.2")]),
                     |selected, versions| {
                         assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -1204,7 +1206,7 @@ mod r_source_override_tests {
             Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
-                true
+                Ok(())
             },
             move || {
                 list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
@@ -1248,7 +1250,7 @@ mod r_source_override_tests {
             Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
-                true
+                Ok(())
             },
             move || {
                 list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);

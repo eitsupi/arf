@@ -116,7 +116,7 @@ fn generate_info_lines(
     lines.push(String::new());
 
     // rig status
-    if rig::rig_available() {
+    if rig::rig_available().is_ok() {
         let mut rig_line = "rig:            installed".to_string();
         if let Ok(versions) = rig::list_versions()
             && !versions.is_empty()

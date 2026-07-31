@@ -286,14 +286,14 @@ pub(super) fn setup_r_fallback_with<FAvailable, FResolve>(
     resolve_version: FResolve,
 ) -> Result<RSourceResolutionReport>
 where
-    FAvailable: Fn() -> bool,
+    FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
     FResolve:
         Fn(&str) -> std::result::Result<external::rig::ResolvedVersion, external::rig::RigError>,
 {
     let resolved = match r_source {
         RSource::Mode(RSourceMode::Auto) => {
             // Auto mode: try rig if available, otherwise use PATH
-            if rig_available() {
+            if rig_available().is_ok() {
                 match resolve_version("default") {
                     Ok(resolved) => {
                         log::info!("Using rig default R version: {}", resolved.version);
@@ -328,7 +328,7 @@ where
         }
         RSource::Mode(RSourceMode::Rig) => {
             // Rig mode: require rig
-            if !rig_available() {
+            if rig_available().is_err() {
                 anyhow::bail!(
                     r#"r_source = "rig" but rig is not installed.
 Install rig from https://github.com/r-lib/rig or use "auto"."#

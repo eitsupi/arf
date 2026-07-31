@@ -37,7 +37,7 @@ impl Cli {
     ///
     /// Returns None if rig is unavailable or has no versions installed.
     fn get_r_version_completions() -> Option<Vec<String>> {
-        if !rig::rig_available() {
+        if rig::rig_available().is_err() {
             return None;
         }
 
