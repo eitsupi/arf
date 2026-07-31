@@ -160,10 +160,19 @@ fn resolve_found_emits_descriptor_with_target() {
     assert_eq!(value["target"]["r_home"], temp.path().display().to_string());
     assert!(value["target"]["r_binary"].is_null());
     assert!(value["target"]["resolved_version"].is_null());
-    assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
-    assert_eq!(value["selected_by"]["origin"], "cli");
+    assert_eq!(value["selected_by"]["kind"], "r_home");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_version"].is_null());
     assert_eq!(
-        value["selected_by"]["path"],
+        value["selected_by"]["source"]["kind"],
+        "command_line_argument"
+    );
+    assert_eq!(value["selected_by"]["source"]["name"], "--r-home");
+    assert!(value["selected_by"]["source"]["path"].is_null());
+    assert!(value["selected_by"]["source"]["format"].is_null());
+    assert!(value["selected_by"]["source"]["key"].is_null());
+    assert_eq!(
+        value["selected_by"]["requested_r_home"],
         temp.path().display().to_string()
     );
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
@@ -184,7 +193,7 @@ fn resolve_relative_r_home_uses_one_absolute_path_representation() {
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let target_r_home = value["target"]["r_home"].as_str().unwrap();
-    let selected_path = value["selected_by"]["path"].as_str().unwrap();
+    let selected_path = value["selected_by"]["requested_r_home"].as_str().unwrap();
     let cwd = value["cwd"].as_str().unwrap();
     let expected = std::path::Path::new(cwd).join("rh");
 
@@ -262,8 +271,18 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
         value["target"]["r_home"],
         fallback_value["target"]["r_home"]
     );
-    assert_eq!(value["selected_by"]["kind"], "startup_r_source");
-    assert_ne!(value["selected_by"]["kind"], "r_source_override");
+    assert_eq!(value["selected_by"]["kind"], "default");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert!(value["selected_by"]["requested_version"].is_null());
+    assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
+    assert!(value["selected_by"]["source"]["name"].is_null());
+    assert_eq!(
+        value["selected_by"]["source"]["path"],
+        temp.path().join("arf.toml").display().to_string()
+    );
+    assert_eq!(value["selected_by"]["source"]["format"], "toml");
+    assert_eq!(value["selected_by"]["source"]["key"], "startup.r_source");
 
     let diagnostic = value["diagnostics"]
         .as_array()
@@ -272,6 +291,82 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
         .find(|diagnostic| diagnostic["code"] == "r_source_override.version_not_installed")
         .expect("missing uninstalled-version override diagnostic");
     assert_eq!(diagnostic["path"], "rproject.toml");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_project_file_version_request_reports_toml_source() {
+    let temp = write_uninstalled_project_override_fixture();
+    std::fs::write(
+        temp.path().join("rproject.toml"),
+        r#"[project]
+r_version = "4.4.2"
+"#,
+    )
+    .unwrap();
+    let environment = FakeRigEnvironment::new();
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--config", "arf.toml"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "version_request");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert_eq!(value["selected_by"]["requested_version"], "4.4.2");
+    assert_eq!(value["selected_by"]["source"]["kind"], "project_file");
+    assert!(value["selected_by"]["source"]["name"].is_null());
+    assert_eq!(
+        value["selected_by"]["source"]["path"],
+        temp.path().join("rproject.toml").display().to_string()
+    );
+    assert_eq!(value["selected_by"]["source"]["format"], "toml");
+    assert_eq!(value["selected_by"]["source"]["key"], "project.r_version");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_project_file_version_request_reports_text_source() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("arf.toml"),
+        r#"[experimental]
+r_source_overrides = [{ type = "version-file", file = ".r-version" }]
+
+[startup]
+r_source = { path = "fallback-r-home" }
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir(temp.path().join("fallback-r-home")).unwrap();
+    std::fs::write(temp.path().join(".r-version"), "4.4.2\n").unwrap();
+    let environment = FakeRigEnvironment::new();
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--config", "arf.toml"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "version_request");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert_eq!(value["selected_by"]["source"]["kind"], "project_file");
+    assert!(value["selected_by"]["source"]["name"].is_null());
+    assert_eq!(
+        value["selected_by"]["source"]["path"],
+        temp.path().join(".r-version").display().to_string()
+    );
+    assert_eq!(value["selected_by"]["source"]["format"], "text");
+    assert!(value["selected_by"]["source"]["key"].is_null());
 }
 
 /// Project configuration is a hint that may fall back, while an explicit
@@ -296,9 +391,13 @@ fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
     let project_hint_value: serde_json::Value =
         serde_json::from_slice(&project_hint.stdout).unwrap();
     assert_eq!(project_hint_value["resolved"], true);
+    assert_eq!(project_hint_value["selected_by"]["kind"], "default");
+    assert_selected_by_nullable_fields_are_present(&project_hint_value);
+    assert!(project_hint_value["selected_by"]["requested_r_home"].is_null());
+    assert!(project_hint_value["selected_by"]["requested_version"].is_null());
     assert_eq!(
-        project_hint_value["selected_by"]["kind"],
-        "startup_r_source"
+        project_hint_value["selected_by"]["source"]["kind"],
+        "configuration_file"
     );
 
     let explicit_request = environment
@@ -331,6 +430,56 @@ fn resolve_environment_version_is_invalid_invocation() {
 
     assert_structured_resolve_error(&output, "INVALID_PARAMS");
     assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_environment_version_reports_environment_source() {
+    let environment = FakeRigEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve"])
+        .env("ARF_R_VERSION", "4.4.2")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "version_request");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert_eq!(value["selected_by"]["requested_version"], "4.4.2");
+    assert_eq!(
+        value["selected_by"]["source"]["kind"],
+        "environment_variable"
+    );
+    assert_eq!(value["selected_by"]["source"]["name"], "ARF_R_VERSION");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_without_config_reports_built_in_default_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let environment = FakeRigEnvironment::new();
+    let missing_config = temp.path().join("missing-arf.toml");
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--config"])
+        .arg(missing_config)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "default");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert!(value["selected_by"]["requested_version"].is_null());
+    assert_eq!(value["selected_by"]["source"]["kind"], "built_in_default");
+    assert!(value["selected_by"]["source"]["name"].is_null());
+    assert!(value["selected_by"]["source"]["path"].is_null());
+    assert!(value["selected_by"]["source"]["format"].is_null());
+    assert!(value["selected_by"]["source"]["key"].is_null());
 }
 
 #[test]
@@ -401,8 +550,14 @@ fn resolve_environment_source_reports_environment_origin() {
 
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
-    assert_eq!(value["selected_by"]["origin"], "environment");
+    assert_eq!(value["selected_by"]["kind"], "r_home");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_version"].is_null());
+    assert_eq!(
+        value["selected_by"]["source"]["kind"],
+        "environment_variable"
+    );
+    assert_eq!(value["selected_by"]["source"]["name"], "ARF_R_HOME");
 }
 
 #[test]
@@ -468,7 +623,15 @@ fn resolve_rig_alias_is_accepted_before_version_spec_validation() {
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["target"]["resolved_version"], "4.4.2");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
     assert_eq!(value["selected_by"]["requested_version"], "my-proj");
+    assert_eq!(value["selected_by"]["kind"], "version_request");
+    assert_eq!(
+        value["selected_by"]["source"]["kind"],
+        "command_line_argument"
+    );
+    assert_eq!(value["selected_by"]["source"]["name"], "--with-r-version");
 }
 
 #[test]
@@ -570,6 +733,24 @@ fn assert_structured_resolve_error(output: &std::process::Output, code: &str) {
     assert!(error["message"].is_string());
     assert!(error["hint"].is_null());
     assert!(error["data"].is_null());
+}
+
+fn assert_selected_by_nullable_fields_are_present(value: &serde_json::Value) {
+    let selected_by = value["selected_by"].as_object().unwrap();
+    for field in ["requested_r_home", "requested_version"] {
+        assert!(
+            selected_by.contains_key(field),
+            "missing selected_by.{field}"
+        );
+    }
+
+    let source = selected_by["source"].as_object().unwrap();
+    for field in ["name", "path", "format", "key"] {
+        assert!(
+            source.contains_key(field),
+            "missing selected_by.source.{field}"
+        );
+    }
 }
 
 /// This covers initialization-failure fallback, not PATH discovery.

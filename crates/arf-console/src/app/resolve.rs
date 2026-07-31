@@ -4,11 +4,12 @@ use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnost
 use crate::app::setup::{
     RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
 };
-use crate::config::RSourceStatus;
+use crate::config::{RSourceStatus, config_file_path};
 use crate::external::rig::RigError;
 use crate::output::{print_json, write_json};
 use anyhow::Result;
 use serde::Serialize;
+use std::fs;
 use std::io::Write;
 use std::path::Path;
 
@@ -17,15 +18,6 @@ use std::path::Path;
 pub(crate) enum RSourceOrigin {
     Cli,
     Environment,
-}
-
-impl RSourceOrigin {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Cli => "cli",
-            Self::Environment => "environment",
-        }
-    }
 }
 
 /// A stable diagnostic attached to a resolve descriptor.
@@ -48,22 +40,24 @@ struct Target {
     resolved_version: Option<String>,
 }
 
+/// The provenance kind is an open enum. Clients must accept unknown values.
 #[derive(Debug, Serialize)]
-struct OverrideDescriptor {
-    #[serde(rename = "type")]
-    descriptor_type: String,
-    file: Option<String>,
+struct SelectionSource {
+    kind: &'static str,
+    name: Option<&'static str>,
+    path: Option<String>,
+    format: Option<&'static str>,
     key: Option<String>,
 }
 
+/// The selection condition kind is an open enum. Clients must accept unknown
+/// values so arf can add more selection conditions without breaking clients.
 #[derive(Debug, Serialize)]
 struct SelectedBy {
     kind: &'static str,
-    origin: &'static str,
-    #[serde(rename = "override")]
-    override_descriptor: Option<OverrideDescriptor>,
-    path: Option<String>,
+    requested_r_home: Option<String>,
     requested_version: Option<String>,
+    source: SelectionSource,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,6 +74,8 @@ struct Resolver {
 /// additive and does not require a bump. Clients should accept unknown fields
 /// and enum values, and reject schema versions above the highest supported
 /// version. `resolver.version` identifies arf and is not a schema version.
+/// All keys are always present in the JSON output; nullable descriptor fields
+/// are emitted as `null` when they do not apply.
 #[derive(Debug, Serialize)]
 struct ResolveDescriptor {
     schema_version: u32,
@@ -196,7 +192,13 @@ pub(crate) fn run_resolve(
     })?;
     let mut config_warnings = Vec::new();
     let config_path_buf = config_path.map(Path::to_path_buf);
+    let effective_config_path = config_path_buf
+        .clone()
+        .or_else(config_file_path)
+        .map(|path| normalize_path(&cwd, &path));
     let config = load_config_collecting_diagnostics(config_path_buf.as_ref(), &mut config_warnings);
+    let loaded_config_path =
+        loaded_startup_source_config(effective_config_path.as_deref(), &config_warnings);
 
     let mut resolution = resolve_r_source(
         &config.startup.r_source,
@@ -216,6 +218,7 @@ pub(crate) fn run_resolve(
         r_home,
         r_version,
         r_source_origin,
+        loaded_config_path.as_deref(),
     );
     print_json(&descriptor).map_err(|error| ResolveCommandError::internal(format!("{error:#}")))?;
     Ok(())
@@ -247,6 +250,7 @@ fn descriptor(
     r_home: Option<&Path>,
     r_version: Option<&str>,
     r_source_origin: Option<RSourceOrigin>,
+    loaded_config_path: Option<&Path>,
 ) -> ResolveDescriptor {
     let target = resolution.r_home.as_ref().map(|r_home| {
         let r_home = normalize_path(cwd, r_home);
@@ -257,7 +261,14 @@ fn descriptor(
         }
     });
 
-    let selected_by = selected_by(cwd, resolution, r_home, r_version, r_source_origin);
+    let selected_by = selected_by(
+        cwd,
+        resolution,
+        r_home,
+        r_version,
+        r_source_origin,
+        loaded_config_path,
+    );
     let diagnostics = config_warnings
         .iter()
         .map(config_diagnostic)
@@ -285,57 +296,107 @@ fn selected_by(
     r_home: Option<&Path>,
     r_version: Option<&str>,
     r_source_origin: Option<RSourceOrigin>,
+    loaded_config_path: Option<&Path>,
 ) -> SelectedBy {
-    let (kind, origin) = if r_home.is_some() {
-        (
-            "explicit_r_home",
-            r_source_origin.unwrap_or(RSourceOrigin::Cli).as_str(),
-        )
-    } else if r_version.is_some() {
-        (
-            "explicit_r_version",
-            r_source_origin.unwrap_or(RSourceOrigin::Cli).as_str(),
-        )
-    } else if resolution.override_state == crate::app::setup::RSourceOverrideState::Applied {
-        ("r_source_override", "config")
-    } else {
-        ("startup_r_source", "config")
-    };
+    if let Some(r_home) = r_home {
+        let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
+            RSourceOrigin::Cli => ("command_line_argument", "--r-home"),
+            RSourceOrigin::Environment => ("environment_variable", "ARF_R_HOME"),
+        };
+        return SelectedBy {
+            kind: "r_home",
+            requested_r_home: Some(display_path(cwd, r_home)),
+            requested_version: None,
+            source: SelectionSource {
+                kind: source_kind,
+                name: Some(source_name),
+                path: None,
+                format: None,
+                key: None,
+            },
+        };
+    }
 
-    let override_descriptor = if kind == "r_source_override" {
-        Some(OverrideDescriptor {
-            descriptor_type: resolution
-                .provider
-                .clone()
-                .unwrap_or_else(|| "unknown".to_owned()),
-            file: resolution
-                .file
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            key: resolution.key.clone(),
-        })
-    } else {
-        None
-    };
-    let path = match kind {
-        "explicit_r_home" => r_home.map(|path| display_path(cwd, path)),
-        "r_source_override" => resolution.file.as_ref().map(|path| display_path(cwd, path)),
-        _ => None,
-    };
+    if let Some(r_version) = r_version {
+        let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
+            RSourceOrigin::Cli => ("command_line_argument", "--with-r-version"),
+            RSourceOrigin::Environment => ("environment_variable", "ARF_R_VERSION"),
+        };
+        return SelectedBy {
+            kind: "version_request",
+            requested_r_home: None,
+            requested_version: Some(r_version.to_owned()),
+            source: SelectionSource {
+                kind: source_kind,
+                name: Some(source_name),
+                path: None,
+                format: None,
+                key: None,
+            },
+        };
+    }
 
-    let requested_version = match kind {
-        "explicit_r_version" => r_version.map(str::to_owned),
-        "r_source_override" => resolution.requested_version.clone(),
-        _ => None,
+    if resolution.override_state == crate::app::setup::RSourceOverrideState::Applied {
+        let format = match resolution.provider.as_deref() {
+            Some("version-file") => Some("text"),
+            Some("toml-key") => Some("toml"),
+            _ => None,
+        };
+        return SelectedBy {
+            kind: "version_request",
+            requested_r_home: None,
+            requested_version: resolution.requested_version.clone(),
+            source: SelectionSource {
+                kind: "project_file",
+                name: None,
+                path: resolution.file.as_ref().map(|path| display_path(cwd, path)),
+                format,
+                key: resolution.key.clone(),
+            },
+        };
+    }
+
+    let source = if let Some(path) = loaded_config_path {
+        SelectionSource {
+            kind: "configuration_file",
+            name: None,
+            path: Some(display_path(cwd, path)),
+            format: Some("toml"),
+            key: Some("startup.r_source".to_owned()),
+        }
+    } else {
+        SelectionSource {
+            kind: "built_in_default",
+            name: None,
+            path: None,
+            format: None,
+            key: None,
+        }
     };
 
     SelectedBy {
-        kind,
-        origin,
-        override_descriptor,
-        path,
-        requested_version,
+        kind: "default",
+        requested_r_home: None,
+        requested_version: None,
+        source,
     }
+}
+
+fn loaded_startup_source_config(
+    config_path: Option<&Path>,
+    config_warnings: &[ConfigLoadWarning],
+) -> Option<std::path::PathBuf> {
+    if !config_warnings.is_empty() {
+        return None;
+    }
+
+    let config_path = config_path?;
+    let content = fs::read_to_string(config_path).ok()?;
+    let document = toml::from_str::<toml::Value>(&content).ok()?;
+    document
+        .get("startup")
+        .and_then(|startup| startup.get("r_source"))
+        .map(|_| config_path.to_owned())
 }
 
 fn display_path(cwd: &Path, path: &Path) -> String {
@@ -433,6 +494,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
         .unwrap();
 
@@ -463,11 +525,16 @@ mod tests {
             None,
             Some("4.4.1"),
             Some(RSourceOrigin::Cli),
+            None,
         ))
         .unwrap();
 
-        assert_eq!(value["selected_by"]["kind"], "explicit_r_version");
-        assert_eq!(value["selected_by"]["origin"], "cli");
+        assert_eq!(value["selected_by"]["kind"], "version_request");
+        assert_eq!(
+            value["selected_by"]["source"]["kind"],
+            "command_line_argument"
+        );
+        assert_eq!(value["selected_by"]["source"]["name"], "--with-r-version");
         assert_eq!(value["selected_by"]["requested_version"], "4.4.1");
         assert_eq!(value["target"]["resolved_version"], "4.4.1");
     }
