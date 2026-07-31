@@ -162,6 +162,7 @@ pub(crate) fn run_headless(
     unsafe {
         arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
     }
+    let r_home = crate::capture_runtime_r_home();
 
     // Source R profile files (Windows only)
     #[cfg(windows)]
@@ -228,10 +229,7 @@ pub(crate) fn run_headless(
             .display()
             .to_string()
     });
-    let r_home_str = resolution
-        .r_home
-        .as_ref()
-        .map(|path| path.display().to_string());
+    let r_home_str = r_home.map(|path| path.display().to_string());
     let session = ipc::start_server(
         bind,
         r_home_str,
@@ -447,7 +445,7 @@ mod tests {
 
     #[test]
     fn headless_json_includes_r_home_from_session() {
-        let session = SessionInfo {
+        let mut session = SessionInfo {
             pid: 12345,
             socket_path: "/tmp/arf.sock".to_string(),
             r_version: Some("4.4.1".to_string()),
@@ -466,6 +464,15 @@ mod tests {
         );
         let json = serde_json::to_value(output).unwrap();
         assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+
+        session.r_home = None;
+        let output = HeadlessInfo::from_session(
+            &session,
+            Vec::new(),
+            &report(RSourceOverrideState::NotConfigured),
+        );
+        let json = serde_json::to_value(output).unwrap();
+        assert!(json["r_home"].is_null());
     }
 
     #[test]

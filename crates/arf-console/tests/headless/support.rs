@@ -120,6 +120,14 @@ impl HeadlessProcess {
         Self::spawn_inner(extra_args, &[], None, None)
     }
 
+    /// Spawn `arf headless` with additional environment variables.
+    pub(crate) fn spawn_with_args_and_env(
+        extra_args: &[&str],
+        env_overrides: &[(&str, &str)],
+    ) -> Result<Self, String> {
+        Self::spawn_inner(extra_args, env_overrides, None, None)
+    }
+
     /// Spawn `arf headless` with OS-string arguments.
     #[cfg(unix)]
     pub(crate) fn spawn_with_os_args(extra_args: &[&OsStr]) -> Result<Self, String> {

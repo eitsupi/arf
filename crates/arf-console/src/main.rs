@@ -41,6 +41,7 @@ use pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
 };
 use repl::Repl;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -275,7 +276,6 @@ fn run() -> Result<()> {
         cli.r_source.no_r_source_overrides,
     )?;
     resolution.emit_diagnostics();
-    let r_home = resolution.r_home.clone();
     let r_source_status = resolution.status;
     log::debug!("R source status: {:?}", r_source_status);
 
@@ -316,18 +316,17 @@ fn run() -> Result<()> {
 
     // Initialize R with CLI-specified flags
     log::info!("Initializing R...");
-    #[allow(unused_variables)]
-    let r_initialized = unsafe {
+    let (r_initialized, r_home) = unsafe {
         match arf_libr::initialize_r_with_args(&r_args_refs) {
             Ok(()) => {
                 log::info!("R initialized successfully");
-                true
+                (true, capture_runtime_r_home())
             }
             Err(e) => {
                 eprintln!("Warning: Failed to initialize R: {}", e);
                 eprintln!("R evaluation will not be available.");
                 eprintln!("Make sure R is installed and R_HOME is set correctly.\n");
-                false
+                (false, None)
             }
         }
     };
@@ -438,6 +437,38 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+/// Capture the R_HOME reported by the initialized R runtime.
+///
+/// This is intentionally called only after successful R initialization. The
+/// startup resolution report is a prediction, while `R.home()` is a fact from
+/// the runtime that is actually in use.
+fn capture_runtime_r_home() -> Option<PathBuf> {
+    let r_home = match unsafe { arf_harp::eval_r_to_string(r#"base::R.home()"#) } {
+        Ok(Some(r_home)) => r_home,
+        Ok(None) => {
+            log::warn!("R.home() returned NULL after R initialization");
+            return None;
+        }
+        Err(error) => {
+            log::warn!("Could not evaluate R.home() after R initialization: {error}");
+            return None;
+        }
+    };
+
+    let r_home = PathBuf::from(r_home);
+    if r_home.is_absolute() {
+        Some(r_home)
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => Some(cwd.join(r_home)),
+            Err(error) => {
+                log::warn!("Could not make R.home() absolute: {error}");
+                None
+            }
+        }
+    }
 }
 
 fn r_source_origin(matches: &ArgMatches) -> Option<RSourceOrigin> {

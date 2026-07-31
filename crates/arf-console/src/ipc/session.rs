@@ -31,7 +31,7 @@ pub struct SessionInfo {
     pub pid: u32,
     pub socket_path: String,
     pub r_version: Option<String>,
-    /// R installation path selected by arf at startup, or `None` if no R was resolved.
+    /// R installation path reported by the running R at startup, or `None` if R is unavailable.
     /// The field is absent in session files written by older arf versions.
     #[serde(default)]
     pub r_home: Option<String>,

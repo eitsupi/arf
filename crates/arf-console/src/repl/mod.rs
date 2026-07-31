@@ -224,7 +224,7 @@ pub struct Repl {
     config_status: ConfigStatus,
     /// How R was resolved at startup (determines if :switch is available).
     r_source_status: RSourceStatus,
-    /// R_HOME selected by arf at startup, if one was resolved.
+    /// R_HOME reported by the running R at startup, if R initialized successfully.
     r_home: Option<std::path::PathBuf>,
     r_initialized: bool,
     prompt_formatter: PromptFormatter,

@@ -4,4 +4,5 @@ mod history;
 mod lifecycle_flags;
 mod output_encoding;
 mod platform;
+mod r_home;
 mod support;
