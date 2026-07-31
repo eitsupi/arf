@@ -419,11 +419,27 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 
     match resolve_path_r_home_with(find_r_library) {
         Ok(r_home) => report.r_home = Some(r_home),
-        Err(error) => report.diagnostics.push(warning(
-            "r_discovery.failed",
-            format!("Warning: Failed to determine R_HOME from PATH: {error}"),
-            None,
-        )),
+        Err(error) => {
+            // When discovery is disabled the cause already explains itself, so
+            // report it alone: the surrounding context describes a PATH search
+            // that never ran. Take the payload rather than the `RError`
+            // display, whose "not found at:" wording would read as a path.
+            let disabled_message = arf_libr::is_r_auto_discovery_disabled()
+                .then(
+                    || match error.root_cause().downcast_ref::<arf_libr::RError>() {
+                        Some(arf_libr::RError::LibraryNotFound(message)) => Some(message.clone()),
+                        _ => None,
+                    },
+                )
+                .flatten();
+            let message = match disabled_message {
+                Some(cause) => format!("Warning: {cause}"),
+                None => format!("Warning: Failed to determine R_HOME from PATH: {error}"),
+            };
+            report
+                .diagnostics
+                .push(warning("r_discovery.failed", message, None));
+        }
     }
 }
 

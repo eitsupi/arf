@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 struct RLessEnvironment {
     _temp: tempfile::TempDir,
     bin_dir: PathBuf,
+    home_dir: PathBuf,
     fake_r_home: PathBuf,
 }
 
@@ -91,6 +92,8 @@ impl RLessEnvironment {
         let temp = tempfile::tempdir().unwrap();
         let bin_dir = temp.path().join("bin");
         std::fs::create_dir(&bin_dir).unwrap();
+        let home_dir = temp.path().join("home");
+        std::fs::create_dir(&home_dir).unwrap();
         let fake_r_home = {
             let fake_r_home = temp.path().join("fake-r-home");
             let fake_r_library = arf_libr::r_library_path(&fake_r_home);
@@ -118,10 +121,22 @@ exit 1
         Self {
             _temp: temp,
             bin_dir,
+            home_dir,
             fake_r_home,
         }
     }
 
+    /// Build a command that sees neither an R installation nor the developer's
+    /// own configuration.
+    ///
+    /// Pointing `HOME` at an empty directory and clearing the XDG variables
+    /// isolates the global `arf.toml`, which `dirs::config_dir()` resolves from
+    /// `$XDG_CONFIG_HOME` or `$HOME` depending on the platform. Without this, a
+    /// developer or CI image that configures `startup.r_source` would resolve an
+    /// R installation and make these tests environment-dependent. The
+    /// configuration cannot be isolated with `--config` here, because arf
+    /// rejects that flag when it appears before a subcommand and this helper
+    /// does not know which subcommand the caller will add.
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
         #[cfg(unix)]
@@ -132,6 +147,10 @@ exit 1
             .env_remove("R_HOME")
             .env_remove("ARF_R_HOME")
             .env_remove("ARF_R_VERSION")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_CACHE_HOME")
+            .env("HOME", &self.home_dir)
             .env("PATH", std::env::join_paths(path_entries).unwrap());
         command
     }
@@ -486,25 +505,50 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let environment = RLessEnvironment::new();
     let output = environment
         .command()
-        .args(["r", "resolve", "--no-r-source-overrides"])
+        .args([
+            "r",
+            "resolve",
+            "--no-r-auto-discovery",
+            "--no-r-source-overrides",
+        ])
         .output()
         .unwrap();
 
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    if value["resolved"] != false {
-        // This test silently no-ops (skips verification) when R is found in the environment.
-        // The root cause is that R_LIB_PATHS in crates/arf-libr/src/sys/discovery.rs is a
-        // hardcoded constant with no injection point; restricting PATH does not prevent it
-        // from being picked up. Integration tests spawn the real binary as a child process,
-        // so Rust closure-based dependency injection cannot help here. Making this deterministic
-        // requires a production-code mechanism to disable the default path search.
-        eprintln!("skipping unresolved discovery assertion because a built-in R was found");
-        return;
-    }
     assert_eq!(value["resolved"], false);
     assert!(value["target"].is_null());
-    assert!(value["diagnostics"].is_array());
+    let diagnostic = value["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "r_discovery.failed")
+        .expect("expected an r_discovery.failed diagnostic");
+    // Snapshot the whole message rather than checking a substring, which still
+    // passes when the message is wrapped in text describing a different
+    // failure, such as a missing path or a PATH search that never ran.
+    insta::assert_snapshot!(
+        diagnostic["message"].as_str().unwrap(),
+        @"R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery."
+    );
+}
+
+#[test]
+#[cfg(not(windows))]
+fn resolve_explicit_r_home_still_works_with_no_r_auto_discovery() {
+    let environment = RLessEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--no-r-auto-discovery", "--r-home"])
+        .arg(&environment.fake_r_home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["resolved"], true);
+    assert_descriptor_path(&value, &value["target"]["r_home"], &environment.fake_r_home);
+    assert_eq!(value["selected_by"]["kind"], "r_home");
 }
 
 #[test]

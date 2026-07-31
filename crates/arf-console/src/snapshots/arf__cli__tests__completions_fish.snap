@@ -4,7 +4,7 @@ expression: completions
 ---
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_arf_global_optspecs
-    string join \n e/eval= f/file= reprex auto-format c/config= r-home= with-r-version= no-r-source-overrides no-banner vanilla no-environ no-site-file no-init-file max-connections= max-ppsize= min-nsize= min-vsize= q/quiet no-save save no-restore no-restore-data restore-data interactive no-echo slave restore verbose encoding= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history with-ipc ipc-bind= ipc-pid-file= no-auto-match no-completion history-dir= no-history h/help V/version
+    string join \n e/eval= f/file= reprex auto-format c/config= r-home= with-r-version= no-r-source-overrides no-r-auto-discovery no-banner vanilla no-environ no-site-file no-init-file max-connections= max-ppsize= min-nsize= min-vsize= q/quiet no-save save no-restore no-restore-data restore-data interactive no-echo slave restore verbose encoding= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history with-ipc ipc-bind= ipc-pid-file= no-auto-match no-completion history-dir= no-history h/help V/version
 end
 
 function __fish_arf_needs_command
@@ -48,6 +48,7 @@ complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history 
 complete -c arf -n "__fish_arf_needs_command" -l reprex -d 'Enable reprex mode (no prompt, output prefixed with #>)'
 complete -c arf -n "__fish_arf_needs_command" -l auto-format -d 'Enable auto-formatting of R code in reprex mode (requires Air CLI)'
 complete -c arf -n "__fish_arf_needs_command" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
+complete -c arf -n "__fish_arf_needs_command" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_needs_command" -l no-banner -d 'Suppress the startup banner'
 complete -c arf -n "__fish_arf_needs_command" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
 complete -c arf -n "__fish_arf_needs_command" -l no-environ -d '[R] Don\'t read the site and user environment files'
@@ -162,6 +163,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l min-nsize -d '[R] S
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l quiet -d 'Suppress status messages on stderr (IPC path, ready, shutdown)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l json -d 'Print session info as JSON to stdout when ready'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'
@@ -177,6 +179,7 @@ complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_fr
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
+complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from help" -f -a "resolve" -d 'Resolve the R installation arf would use without starting R'
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'

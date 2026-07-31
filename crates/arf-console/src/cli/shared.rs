@@ -53,6 +53,13 @@ pub struct RSourceArgs {
     /// Config: [experimental].r_source_overrides
     #[arg(long = "no-r-source-overrides")]
     pub no_r_source_overrides: bool,
+
+    /// Test-support flag for reproducing a machine with no R installed
+    ///
+    /// Integration tests spawn the real binary as a child process, so no in-process injection
+    /// point works. Using this normally breaks the fidelity of `arf r resolve`, so it is hidden.
+    #[arg(long = "no-r-auto-discovery", hide = true)]
+    pub no_r_auto_discovery: bool,
 }
 
 /// R-compatible flags that let `arf` act as a drop-in replacement for the `R` binary for vscode-R
