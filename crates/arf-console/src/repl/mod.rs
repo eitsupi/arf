@@ -224,6 +224,8 @@ pub struct Repl {
     config_status: ConfigStatus,
     /// How R was resolved at startup (determines if :switch is available).
     r_source_status: RSourceStatus,
+    /// R_HOME reported by the running R at startup, if R initialized successfully.
+    r_home: Option<std::path::PathBuf>,
     r_initialized: bool,
     prompt_formatter: PromptFormatter,
     /// Session ID for history isolation (shared across R and shell history).
@@ -243,6 +245,7 @@ impl Repl {
         config_path: Option<std::path::PathBuf>,
         config_status: ConfigStatus,
         r_source_status: RSourceStatus,
+        r_home: Option<std::path::PathBuf>,
         session_id: Option<HistorySessionId>,
     ) -> Result<Self> {
         // Check if R is initialized
@@ -261,6 +264,7 @@ impl Repl {
             config_path,
             config_status,
             r_source_status,
+            r_home,
             r_initialized,
             prompt_formatter,
             session_id,
@@ -552,6 +556,7 @@ impl Repl {
                 r_history_path,
                 shell_history_path,
                 r_source_status: self.r_source_status.clone(),
+                r_home: self.r_home.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
@@ -771,6 +776,7 @@ impl Repl {
                         &self.r_source_status,
                         &mut dir_stack,
                         history_session_id,
+                        self.r_home.as_deref(),
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.

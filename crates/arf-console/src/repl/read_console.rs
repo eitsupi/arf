@@ -242,6 +242,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         &state.r_source_status,
                         &mut state.dir_stack,
                         state.history_session_id.map(i64::from),
+                        state.r_home.as_deref(),
                     ) {
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.

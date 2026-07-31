@@ -40,6 +40,7 @@ pub fn start_server(
     tx: mpsc::Sender<IpcRequest>,
     bind: Option<&str>,
     started_at: &str,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
     session_type: SessionType,
@@ -128,6 +129,7 @@ pub fn start_server(
 
     let path = socket_path.clone();
     let started_at_owned = started_at.to_string();
+    let r_home_clone = r_home.clone();
     let log_file_clone = log_file.clone();
     let history_session_id_clone = history_session_id;
     let cancel_token = CancellationToken::new();
@@ -149,6 +151,7 @@ pub fn start_server(
                 if let Err(e) = run_server(
                     &path,
                     &started_at_owned,
+                    r_home_clone,
                     log_file_clone,
                     history_session_id_clone,
                     tx,
@@ -215,6 +218,7 @@ pub fn start_server(
         pid,
         socket_path: socket_path.clone(),
         r_version,
+        r_home,
         cwd,
         started_at: started_at.to_string(),
         session_type: Some(session_type),
@@ -411,9 +415,11 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<(Str
 
 /// Run the actual server loop.
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 async fn run_server(
     socket_path: &str,
     started_at: &str,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
     tx: mpsc::Sender<IpcRequest>,
@@ -447,6 +453,7 @@ async fn run_server(
             super::set_session_meta(
                 socket_path.to_string(),
                 started_at.to_string(),
+                r_home,
                 log_file,
                 history_session_id,
             );
@@ -490,9 +497,11 @@ async fn run_server(
 }
 
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 async fn run_server(
     socket_path: &str,
     started_at: &str,
+    r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
     tx: mpsc::Sender<IpcRequest>,
@@ -512,6 +521,7 @@ async fn run_server(
             super::set_session_meta(
                 socket_path.to_string(),
                 started_at.to_string(),
+                r_home,
                 log_file,
                 history_session_id,
             );

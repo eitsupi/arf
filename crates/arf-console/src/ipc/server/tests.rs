@@ -166,6 +166,7 @@ fn test_session_result_includes_log_file() {
     super::super::set_session_meta(
         "/tmp/test.sock".to_string(),
         "2026-01-01T00:00:00+00:00".to_string(),
+        Some("/opt/R/4.4.1/lib/R".to_string()),
         Some("/tmp/arf.log".to_string()),
         None,
     );
@@ -176,6 +177,7 @@ fn test_session_result_includes_log_file() {
     super::super::set_session_meta(
         "/tmp/test.sock".to_string(),
         "2026-01-01T00:00:00+00:00".to_string(),
+        None,
         None,
         None,
     );
@@ -194,6 +196,39 @@ fn test_session_result_includes_log_file() {
     );
 }
 
+/// Tests that `r_home` in `SessionResult` reflects what was passed to
+/// `set_session_meta`.
+#[test]
+#[serial_test::serial]
+fn test_session_result_includes_r_home() {
+    super::super::set_session_meta(
+        "/tmp/test.sock".to_string(),
+        "2026-01-01T00:00:00+00:00".to_string(),
+        Some("/opt/R/4.4.1/lib/R".to_string()),
+        None,
+        None,
+    );
+    let result = super::super::collect_session_result(false, "test");
+    assert_eq!(result.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
+
+    let json = serde_json::to_value(&result).unwrap();
+    assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+
+    super::super::set_session_meta(
+        "/tmp/test.sock".to_string(),
+        "2026-01-01T00:00:00+00:00".to_string(),
+        None,
+        None,
+        None,
+    );
+    let result = super::super::collect_session_result(false, "test");
+    assert_eq!(result.r_home, None);
+
+    let json = serde_json::to_value(&result).unwrap();
+    assert!(json.get("r_home").is_some());
+    assert!(json["r_home"].is_null());
+}
+
 /// Tests that `history_session_id` in `SessionResult` reflects what was passed to
 /// `set_session_meta`.
 #[test]
@@ -204,6 +239,7 @@ fn test_session_result_includes_history_session_id() {
     super::super::set_session_meta(
         "/tmp/test.sock".to_string(),
         "2026-01-01T00:00:00+00:00".to_string(),
+        None,
         None,
         Some(session_id),
     );
@@ -218,6 +254,7 @@ fn test_session_result_includes_history_session_id() {
     super::super::set_session_meta(
         "/tmp/test.sock".to_string(),
         "2026-01-01T00:00:00+00:00".to_string(),
+        None,
         None,
         None,
     );

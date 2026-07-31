@@ -70,6 +70,8 @@ pub struct ReplState {
     pub shell_history_path: Option<PathBuf>,
     /// How R was resolved at startup (for :info display and :switch gating).
     pub r_source_status: RSourceStatus,
+    /// R_HOME reported by the running R at startup, if R initialized successfully.
+    pub r_home: Option<PathBuf>,
     /// Configuration for the sponge-like "forget failed commands" feature.
     pub forget_config: HistoryForgetConfig,
     /// Queue for the sponge feature (tracks commands to potentially delete).

@@ -141,6 +141,8 @@ pub struct SessionResult {
     pub pid: u32,
     pub os: String,
     pub arch: String,
+    /// R installation path selected by arf at startup, or `null` if no R was resolved.
+    pub r_home: Option<String>,
     pub socket_path: String,
     pub started_at: String,
     /// Log file path, or `null` if no log file is configured and output is sent to stderr.

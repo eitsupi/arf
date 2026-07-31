@@ -184,13 +184,18 @@ fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {
 
 /// Evaluate R code and return the result as an optional String.
 ///
-/// This is an internal helper that handles the common pattern of:
+/// This shared helper handles the common pattern of:
 /// parsing R code, evaluating it via `R_ToplevelExec`, and extracting
 /// a character string result.
 ///
 /// Returns `Ok(Some(text))` if evaluation produces a character result,
 /// `Ok(None)` if the result is `NULL`, or `Err` on failure.
-unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
+///
+/// # Safety
+///
+/// R must already be initialized and the caller must ensure that evaluation
+/// happens on R's thread.
+pub unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
     let lib = r_library()?;
     let mut protect = RProtect::new();
 
