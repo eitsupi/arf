@@ -518,18 +518,18 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], false);
     assert!(value["target"].is_null());
-    assert!(
-        value["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|diagnostic| {
-                diagnostic["code"] == "r_discovery.failed"
-                    && diagnostic["message"]
-                        .as_str()
-                        .unwrap()
-                        .contains("R automatic discovery is disabled")
-            })
+    let diagnostic = value["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "r_discovery.failed")
+        .expect("expected an r_discovery.failed diagnostic");
+    // Snapshot the whole message rather than checking a substring, which still
+    // passes when the message is wrapped in text describing a different
+    // failure, such as a missing path or a PATH search that never ran.
+    insta::assert_snapshot!(
+        diagnostic["message"].as_str().unwrap(),
+        @"R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery."
     );
 }
 
