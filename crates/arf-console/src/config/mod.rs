@@ -57,6 +57,13 @@ pub enum ConfigLoadError {
     },
 }
 
+/// Configuration metadata collected while loading the file contents.
+#[derive(Debug)]
+pub(crate) struct ConfigLoadProvenance {
+    pub(crate) path: PathBuf,
+    pub(crate) startup_r_source_present: bool,
+}
+
 impl std::fmt::Display for ConfigLoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -176,9 +183,16 @@ pub fn load_config() -> Result<Config, ConfigLoadError> {
 /// Returns `Ok(Config::default())` if the file does not exist.
 /// Returns `Err` if the file exists but cannot be read or parsed.
 pub fn load_config_from_path(path: &std::path::Path) -> Result<Config, ConfigLoadError> {
+    load_config_from_path_with_provenance(path).map(|(config, _)| config)
+}
+
+/// Load configuration and report metadata from the same file read.
+pub(crate) fn load_config_from_path_with_provenance(
+    path: &std::path::Path,
+) -> Result<(Config, Option<ConfigLoadProvenance>), ConfigLoadError> {
     if !path.exists() {
         log::warn!("Config file not found: {:?}", path);
-        return Ok(Config::default());
+        return Ok((Config::default(), None));
     }
 
     let content = fs::read_to_string(path).map_err(|e| ConfigLoadError::Read {
@@ -186,10 +200,26 @@ pub fn load_config_from_path(path: &std::path::Path) -> Result<Config, ConfigLoa
         path: path.to_path_buf(),
     })?;
 
-    toml::from_str(&content).map_err(|e| ConfigLoadError::Parse {
+    let document = toml::from_str::<toml::Value>(&content).map_err(|e| ConfigLoadError::Parse {
         source: e,
         path: path.to_path_buf(),
-    })
+    })?;
+    let startup_r_source_present = document
+        .get("startup")
+        .and_then(|startup| startup.get("r_source"))
+        .is_some();
+    let config = Config::deserialize(document).map_err(|e| ConfigLoadError::Parse {
+        source: e,
+        path: path.to_path_buf(),
+    })?;
+
+    Ok((
+        config,
+        Some(ConfigLoadProvenance {
+            path: path.to_path_buf(),
+            startup_r_source_present,
+        }),
+    ))
 }
 
 /// Generate default configuration as a TOML string with comments.

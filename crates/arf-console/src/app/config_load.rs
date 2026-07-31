@@ -2,8 +2,8 @@
 
 use crate::cli::Cli;
 use crate::config::{
-    Config, ConfigLoadError, ConfigStatus, config_file_path, load_config, load_config_from_path,
-    mask_home_path,
+    Config, ConfigLoadError, ConfigLoadProvenance, ConfigStatus, config_file_path, load_config,
+    load_config_from_path, load_config_from_path_with_provenance, mask_home_path,
 };
 
 /// A config load warning with stable machine-readable classification.
@@ -127,15 +127,16 @@ pub(crate) fn load_config_collecting_warnings(
 pub(crate) fn load_config_collecting_diagnostics(
     config_path: Option<&std::path::PathBuf>,
     warnings: &mut Vec<ConfigLoadWarning>,
-) -> Config {
-    let result = if let Some(path) = config_path {
-        load_config_from_path(path)
+) -> (Config, Option<ConfigLoadProvenance>) {
+    let path = config_path.cloned().or_else(config_file_path);
+    let result = if let Some(path) = path.as_deref() {
+        load_config_from_path_with_provenance(path)
     } else {
-        load_config()
+        Ok((Config::default(), None))
     };
 
     match result {
-        Ok(config) => config,
+        Ok((config, provenance)) => (config, provenance),
         Err(error) => {
             let (code, path, message) = match error {
                 ConfigLoadError::Read { path, source } => {
@@ -154,7 +155,7 @@ pub(crate) fn load_config_collecting_diagnostics(
                 ),
                 path,
             });
-            Config::default()
+            (Config::default(), None)
         }
     }
 }

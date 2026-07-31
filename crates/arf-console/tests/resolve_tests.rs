@@ -157,7 +157,7 @@ fn resolve_found_emits_descriptor_with_target() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["resolved"], true);
-    assert_eq!(value["target"]["r_home"], temp.path().display().to_string());
+    assert_descriptor_path(&value, &value["target"]["r_home"], temp.path());
     assert!(value["target"]["r_binary"].is_null());
     assert!(value["target"]["resolved_version"].is_null());
     assert_eq!(value["selected_by"]["kind"], "r_home");
@@ -171,9 +171,10 @@ fn resolve_found_emits_descriptor_with_target() {
     assert!(value["selected_by"]["source"]["path"].is_null());
     assert!(value["selected_by"]["source"]["format"].is_null());
     assert!(value["selected_by"]["source"]["key"].is_null());
-    assert_eq!(
-        value["selected_by"]["requested_r_home"],
-        temp.path().display().to_string()
+    assert_descriptor_path(
+        &value,
+        &value["selected_by"]["requested_r_home"],
+        temp.path(),
     );
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
 }
@@ -194,12 +195,10 @@ fn resolve_relative_r_home_uses_one_absolute_path_representation() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let target_r_home = value["target"]["r_home"].as_str().unwrap();
     let selected_path = value["selected_by"]["requested_r_home"].as_str().unwrap();
-    let cwd = value["cwd"].as_str().unwrap();
-    let expected = std::path::Path::new(cwd).join("rh");
-
     assert_eq!(target_r_home, selected_path);
     assert!(std::path::Path::new(target_r_home).is_absolute());
-    assert_eq!(target_r_home, expected.display().to_string());
+    assert_descriptor_path(&value, &value["target"]["r_home"], "rh");
+    assert_descriptor_path(&value, &value["selected_by"]["requested_r_home"], "rh");
 }
 
 #[cfg(unix)]
@@ -277,10 +276,7 @@ fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
     assert!(value["selected_by"]["requested_version"].is_null());
     assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
     assert!(value["selected_by"]["source"]["name"].is_null());
-    assert_eq!(
-        value["selected_by"]["source"]["path"],
-        temp.path().join("arf.toml").display().to_string()
-    );
+    assert_descriptor_path(&value, &value["selected_by"]["source"]["path"], "arf.toml");
     assert_eq!(value["selected_by"]["source"]["format"], "toml");
     assert_eq!(value["selected_by"]["source"]["key"], "startup.r_source");
 
@@ -321,9 +317,10 @@ r_version = "4.4.2"
     assert_eq!(value["selected_by"]["requested_version"], "4.4.2");
     assert_eq!(value["selected_by"]["source"]["kind"], "project_file");
     assert!(value["selected_by"]["source"]["name"].is_null());
-    assert_eq!(
-        value["selected_by"]["source"]["path"],
-        temp.path().join("rproject.toml").display().to_string()
+    assert_descriptor_path(
+        &value,
+        &value["selected_by"]["source"]["path"],
+        "rproject.toml",
     );
     assert_eq!(value["selected_by"]["source"]["format"], "toml");
     assert_eq!(value["selected_by"]["source"]["key"], "project.r_version");
@@ -361,9 +358,10 @@ r_source = { path = "fallback-r-home" }
     assert!(value["selected_by"]["requested_r_home"].is_null());
     assert_eq!(value["selected_by"]["source"]["kind"], "project_file");
     assert!(value["selected_by"]["source"]["name"].is_null());
-    assert_eq!(
-        value["selected_by"]["source"]["path"],
-        temp.path().join(".r-version").display().to_string()
+    assert_descriptor_path(
+        &value,
+        &value["selected_by"]["source"]["path"],
+        ".r-version",
     );
     assert_eq!(value["selected_by"]["source"]["format"], "text");
     assert!(value["selected_by"]["source"]["key"].is_null());
@@ -529,7 +527,7 @@ fn resolve_broken_config_falls_back_with_diagnostic() {
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["resolved"], true);
-    assert_eq!(value["target"]["r_home"], r_home.display().to_string());
+    assert_descriptor_path(&value, &value["target"]["r_home"], &r_home);
     assert!(
         value["diagnostics"]
             .as_array()
@@ -751,6 +749,30 @@ fn assert_selected_by_nullable_fields_are_present(value: &serde_json::Value) {
             "missing selected_by.source.{field}"
         );
     }
+}
+
+/// Assert a descriptor path using its `cwd` for relative expected paths.
+///
+/// On macOS, `getcwd` resolves the `/var` symlink to `/private/var`, while
+/// paths returned by `tempfile` may still contain `/var`. Cwd-derived paths
+/// must therefore be compared against the descriptor's `cwd`, not directly
+/// against a path returned by `tempfile`.
+fn assert_descriptor_path(
+    value: &serde_json::Value,
+    actual: &serde_json::Value,
+    expected_path: impl AsRef<std::path::Path>,
+) {
+    let cwd = std::path::Path::new(value["cwd"].as_str().unwrap());
+    let expected_path = expected_path.as_ref();
+    let expected = if expected_path.is_absolute() {
+        expected_path.to_owned()
+    } else {
+        cwd.join(expected_path)
+    };
+    assert_eq!(
+        actual,
+        &serde_json::Value::String(expected.display().to_string())
+    );
 }
 
 /// This covers initialization-failure fallback, not PATH discovery.

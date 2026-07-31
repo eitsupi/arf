@@ -4,12 +4,11 @@ use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnost
 use crate::app::setup::{
     RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
 };
-use crate::config::{RSourceStatus, config_file_path};
+use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use crate::external::rig::RigError;
 use crate::output::{print_json, write_json};
 use anyhow::Result;
 use serde::Serialize;
-use std::fs;
 use std::io::Write;
 use std::path::Path;
 
@@ -192,13 +191,8 @@ pub(crate) fn run_resolve(
     })?;
     let mut config_warnings = Vec::new();
     let config_path_buf = config_path.map(Path::to_path_buf);
-    let effective_config_path = config_path_buf
-        .clone()
-        .or_else(config_file_path)
-        .map(|path| normalize_path(&cwd, &path));
-    let config = load_config_collecting_diagnostics(config_path_buf.as_ref(), &mut config_warnings);
-    let loaded_config_path =
-        loaded_startup_source_config(effective_config_path.as_deref(), &config_warnings);
+    let (config, loaded_config) =
+        load_config_collecting_diagnostics(config_path_buf.as_ref(), &mut config_warnings);
 
     let mut resolution = resolve_r_source(
         &config.startup.r_source,
@@ -218,7 +212,7 @@ pub(crate) fn run_resolve(
         r_home,
         r_version,
         r_source_origin,
-        loaded_config_path.as_deref(),
+        loaded_config.as_ref(),
     );
     print_json(&descriptor).map_err(|error| ResolveCommandError::internal(format!("{error:#}")))?;
     Ok(())
@@ -250,7 +244,7 @@ fn descriptor(
     r_home: Option<&Path>,
     r_version: Option<&str>,
     r_source_origin: Option<RSourceOrigin>,
-    loaded_config_path: Option<&Path>,
+    loaded_config: Option<&ConfigLoadProvenance>,
 ) -> ResolveDescriptor {
     let target = resolution.r_home.as_ref().map(|r_home| {
         let r_home = normalize_path(cwd, r_home);
@@ -267,7 +261,7 @@ fn descriptor(
         r_home,
         r_version,
         r_source_origin,
-        loaded_config_path,
+        loaded_config,
     );
     let diagnostics = config_warnings
         .iter()
@@ -296,7 +290,7 @@ fn selected_by(
     r_home: Option<&Path>,
     r_version: Option<&str>,
     r_source_origin: Option<RSourceOrigin>,
-    loaded_config_path: Option<&Path>,
+    loaded_config: Option<&ConfigLoadProvenance>,
 ) -> SelectedBy {
     if let Some(r_home) = r_home {
         let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
@@ -356,11 +350,13 @@ fn selected_by(
         };
     }
 
-    let source = if let Some(path) = loaded_config_path {
+    let source = if let Some(loaded_config) = loaded_config
+        && loaded_config.startup_r_source_present
+    {
         SelectionSource {
             kind: "configuration_file",
             name: None,
-            path: Some(display_path(cwd, path)),
+            path: Some(display_path(cwd, &loaded_config.path)),
             format: Some("toml"),
             key: Some("startup.r_source".to_owned()),
         }
@@ -380,23 +376,6 @@ fn selected_by(
         requested_version: None,
         source,
     }
-}
-
-fn loaded_startup_source_config(
-    config_path: Option<&Path>,
-    config_warnings: &[ConfigLoadWarning],
-) -> Option<std::path::PathBuf> {
-    if !config_warnings.is_empty() {
-        return None;
-    }
-
-    let config_path = config_path?;
-    let content = fs::read_to_string(config_path).ok()?;
-    let document = toml::from_str::<toml::Value>(&content).ok()?;
-    document
-        .get("startup")
-        .and_then(|startup| startup.get("r_source"))
-        .map(|_| config_path.to_owned())
 }
 
 fn display_path(cwd: &Path, path: &Path) -> String {
