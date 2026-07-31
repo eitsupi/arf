@@ -32,7 +32,13 @@ impl RLessEnvironment {
         #[cfg(unix)]
         {
             let r_command = bin_dir.join("R");
-            std::fs::write(&r_command, "#!/bin/sh\nexit 1\n").unwrap();
+            std::fs::write(
+                &r_command,
+                r#"#!/bin/sh
+exit 1
+"#,
+            )
+            .unwrap();
             use std::os::unix::fs::PermissionsExt;
             let mut permissions = std::fs::metadata(&r_command).unwrap().permissions();
             permissions.set_mode(0o755);
@@ -87,6 +93,139 @@ fn resolve_found_emits_descriptor_with_target() {
     assert_eq!(value["selected_by"]["kind"], "explicit_r_home");
     assert_eq!(value["selected_by"]["origin"], "cli");
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
+}
+
+fn write_uninstalled_project_override_fixture() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("arf.toml"),
+        r#"[experimental]
+r_source_overrides = [
+  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+]
+"#,
+    )
+    .unwrap();
+    // R 3.x ended at 3.6.3, so 3.99.99 can never collide with a real release.
+    std::fs::write(
+        temp.path().join("rproject.toml"),
+        r#"[project]
+r_version = "3.99.99"
+"#,
+    )
+    .unwrap();
+    temp
+}
+
+#[test]
+fn resolve_uninstalled_project_override_falls_back_to_startup_source() {
+    let temp = write_uninstalled_project_override_fixture();
+
+    let fallback_output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "r",
+            "resolve",
+            "--config",
+            "arf.toml",
+            "--no-r-source-overrides",
+        ])
+        .current_dir(temp.path())
+        .env_remove("ARF_R_HOME")
+        .env_remove("ARF_R_VERSION")
+        .output()
+        .unwrap();
+
+    assert!(
+        fallback_output.status.success(),
+        "stderr: {:?}",
+        fallback_output.stderr
+    );
+    let fallback_value: serde_json::Value =
+        serde_json::from_slice(&fallback_output.stdout).unwrap();
+    assert_eq!(fallback_value["resolved"], true);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--config", "arf.toml"])
+        .current_dir(temp.path())
+        .env_remove("ARF_R_HOME")
+        .env_remove("ARF_R_VERSION")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["resolved"], true);
+    assert_eq!(
+        value["target"]["r_home"],
+        fallback_value["target"]["r_home"]
+    );
+    assert_eq!(value["selected_by"]["kind"], "startup_r_source");
+    assert_ne!(value["selected_by"]["kind"], "r_source_override");
+
+    let diagnostic = value["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "r_source_override.version_not_installed")
+        .expect("missing uninstalled-version override diagnostic");
+    assert_eq!(diagnostic["path"], "rproject.toml");
+}
+
+/// Project configuration is a hint that may fall back, while an explicit
+/// user request must fail when the requested R version is not installed.
+#[test]
+fn resolve_project_hint_and_explicit_version_have_different_outcomes() {
+    let temp = write_uninstalled_project_override_fixture();
+
+    let project_hint = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--config", "arf.toml"])
+        .current_dir(temp.path())
+        .env_remove("ARF_R_HOME")
+        .env_remove("ARF_R_VERSION")
+        .output()
+        .unwrap();
+    assert!(
+        project_hint.status.success(),
+        "stderr: {:?}",
+        project_hint.stderr
+    );
+    let project_hint_value: serde_json::Value =
+        serde_json::from_slice(&project_hint.stdout).unwrap();
+    assert_eq!(project_hint_value["resolved"], true);
+    assert_eq!(
+        project_hint_value["selected_by"]["kind"],
+        "startup_r_source"
+    );
+
+    let explicit_request = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args([
+            "r",
+            "resolve",
+            "--config",
+            "arf.toml",
+            "--with-r-version",
+            "3.99.99",
+        ])
+        .current_dir(temp.path())
+        .env_remove("ARF_R_HOME")
+        .env_remove("ARF_R_VERSION")
+        .output()
+        .unwrap();
+    assert_structured_resolve_error(&explicit_request, "INVALID_PARAMS");
+    assert_eq!(explicit_request.status.code(), Some(2));
+}
+
+#[test]
+fn resolve_environment_version_is_invalid_invocation() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve"])
+        .env_remove("ARF_R_HOME")
+        .env("ARF_R_VERSION", "3.99.99")
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INVALID_PARAMS");
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]
@@ -174,7 +313,11 @@ fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
     let rig = bin_dir.join("rig");
     std::fs::write(
         &rig,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nif [ \"$1\" = \"list\" ]; then printf '%s\\n' '[{\"name\":\"4.4.2\",\"default\":true,\"version\":\"4.4.2\",\"aliases\":[],\"path\":\"/opt/R/4.4.2\",\"binary\":\"/opt/R/4.4.2/bin/R\"}]'; exit 0; fi\nexit 1\n",
+        r##"#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "list" ]; then printf '%s\n' '[{"name":"4.4.2","default":true,"version":"4.4.2","aliases":[],"path":"/opt/R/4.4.2","binary":"/opt/R/4.4.2/bin/R"}]'; exit 0; fi
+exit 1
+"##,
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -183,7 +326,7 @@ fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
     std::fs::set_permissions(&rig, permissions).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["r", "resolve", "--with-r-version", "4.9.9"])
+        .args(["r", "resolve", "--with-r-version", "3.99.99"])
         .env("PATH", &bin_dir)
         .env_remove("ARF_R_HOME")
         .env_remove("ARF_R_VERSION")
@@ -197,7 +340,7 @@ fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
         error["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("4.9.9")
+            .contains("3.99.99")
     );
 }
 
