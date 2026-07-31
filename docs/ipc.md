@@ -73,7 +73,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, `log_file`, and `history_session_id` may be `null`. `r_home` is the R installation the session is using, or `null` when the session has no R. A session started by an older arf may omit `r_home`; clients should treat that as unknown. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, `log_file`, and `history_session_id` may be `null`. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 
@@ -320,10 +320,14 @@ REPL. A `null` value means the session was created by an older arf that did not
 record its type. Clients must treat `null` as unknown and must not send
 `shutdown` to that session.
 
-The `r_home` field is the R installation the session is using, or `null` when the
-session has no R. A session started by an older arf omits this field; clients
-should treat its absence as unknown. `r_version`, `r_home`, `session_type`,
-`log_file`, and `history_session_id` may be `null` in current session files.
+The `r_home` field is the R installation the session is using. A `null` value
+means either that the session has no R, or that it was created by an older arf
+that did not record the path: a session file written before this field existed
+is listed with `r_home` set to `null`, like any other unset field. Clients must
+treat `null` as unknown and must not assume an R installation is available.
+
+`r_version`, `r_home`, `session_type`, `log_file`, and `history_session_id` may
+all be `null`.
 
 ### `arf ipc history` — Query Command History
 

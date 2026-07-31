@@ -299,6 +299,14 @@ mod tests {
 
         let info: SessionInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.r_home, None);
+
+        // Listing such a session reports `r_home` as null rather than omitting
+        // it, so a client sees one shape whether the path is unknown because
+        // the session predates the field or because the session has no R. Both
+        // mean the same thing to a caller: no R installation to rely on.
+        let listed = serde_json::to_value(&info).unwrap();
+        assert!(listed.as_object().unwrap().contains_key("r_home"));
+        assert!(listed["r_home"].is_null());
     }
 
     #[test]
