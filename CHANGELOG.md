@@ -4,7 +4,8 @@
 
 ### Added
 
-- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default. It is opt-in through `experimental.r_source_overrides`, which lists where to look.
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default.
+  It is opt-in through `experimental.r_source_overrides` in the `arf.toml` config.
 
   For example, the following configuration looks for two TOML files named `rproject.toml` and `rproj.toml` in the current directory, in order:
 
@@ -16,16 +17,19 @@
   ]
   ```
 
-  The `rproject.toml` file is used by [rv](https://a2-ai.github.io/rv-docs/).
-  Looks like this:
+  If arf finds an R version defined in one of these files, it will select a matching version from the list of versions installed by rig and start that R.
+  If none of them yields a matching version, arf falls back to the R selected by `startup.r_source`.
+
+  The first of the two, `rproject.toml`, is used by [rv](https://a2-ai.github.io/rv-docs/).
+  It looks like this:
 
   ```toml
   [project]
   r_version = "4.4"
   ```
 
-  The `rproj.toml` file is a draft proposal from [Tidyup 9](https://github.com/tidyverse/tidyups/pull/31).
-  Differs from `rproject.toml` used by rv, this one supports Cargo-style version ranges as well:
+  The second, `rproj.toml`, is a draft proposal from [Tidyup 9](https://github.com/tidyverse/tidyups/pull/31).
+  Unlike rv's `rproject.toml`, it also supports Cargo-style version ranges:
 
   ```toml
   [r]
