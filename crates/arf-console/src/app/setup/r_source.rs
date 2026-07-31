@@ -419,11 +419,19 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 
     match resolve_path_r_home_with(find_r_library) {
         Ok(r_home) => report.r_home = Some(r_home),
-        Err(error) => report.diagnostics.push(warning(
-            "r_discovery.failed",
-            format!("Warning: Failed to determine R_HOME from PATH: {error}"),
-            None,
-        )),
+        Err(error) => {
+            // When discovery is disabled the root cause already says so. The
+            // surrounding context mentions a PATH search that never ran, so
+            // report only the cause to avoid misdirecting the user.
+            let message = if arf_libr::is_r_auto_discovery_disabled() {
+                format!("Warning: {}", error.root_cause())
+            } else {
+                format!("Warning: Failed to determine R_HOME from PATH: {error}")
+            };
+            report
+                .diagnostics
+                .push(warning("r_discovery.failed", message, None));
+        }
     }
 }
 

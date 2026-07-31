@@ -2,6 +2,19 @@ use crate::error::{RError, RResult};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static R_AUTO_DISCOVERY_DISABLED: AtomicBool = AtomicBool::new(false);
+
+/// Set whether automatic R discovery is disabled for this process.
+pub fn set_r_auto_discovery_disabled(disabled: bool) {
+    R_AUTO_DISCOVERY_DISABLED.store(disabled, Ordering::Relaxed);
+}
+
+/// Return whether automatic R discovery is disabled for this process.
+pub fn is_r_auto_discovery_disabled() -> bool {
+    R_AUTO_DISCOVERY_DISABLED.load(Ordering::Relaxed)
+}
 
 /// Default R library paths by platform.
 #[cfg(target_os = "linux")]
@@ -55,6 +68,10 @@ pub fn find_r_library() -> RResult<PathBuf> {
         }
     }
 
+    if is_r_auto_discovery_disabled() {
+        return Err(RError::LibraryNotFound(no_r_auto_discovery_message()));
+    }
+
     // Try to get R_HOME from R itself
     #[cfg(unix)]
     let r_cmd = "R";
@@ -82,6 +99,11 @@ pub fn find_r_library() -> RResult<PathBuf> {
     Err(RError::LibraryNotFound(
         "Could not find R library. Please set R_HOME or ensure R is in PATH.".to_string(),
     ))
+}
+
+fn no_r_auto_discovery_message() -> String {
+    "R automatic discovery is disabled. Set R_HOME, pass --r-home, or remove --no-r-auto-discovery."
+        .to_string()
 }
 
 /// Get the R library filename for the current platform.
@@ -124,6 +146,10 @@ pub fn get_r_home() -> RResult<PathBuf> {
     // Check environment variable first
     if let Ok(r_home) = env::var("R_HOME") {
         return Ok(PathBuf::from(r_home));
+    }
+
+    if is_r_auto_discovery_disabled() {
+        return Err(RError::LibraryNotFound(no_r_auto_discovery_message()));
     }
 
     // Try to get from R command

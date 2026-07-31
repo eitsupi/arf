@@ -65,6 +65,15 @@ fn run() -> Result<()> {
     let matches = command.clone().get_matches();
     validate_top_level_scope(&command, &matches);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let no_r_auto_discovery = match &cli.command {
+        Some(Commands::Headless(args)) => args.r_source.no_r_auto_discovery,
+        Some(Commands::R(args)) => {
+            let RCommand::Resolve(resolve_args) = &args.command;
+            resolve_args.r_source.no_r_auto_discovery
+        }
+        _ => cli.r_source.no_r_auto_discovery,
+    };
+    arf_libr::set_r_auto_discovery_disabled(no_r_auto_discovery);
 
     // Reject combinations of -f/--file or -e/--eval with a subcommand.
     // clap cannot enforce this via conflicts_with because subcommand fields are

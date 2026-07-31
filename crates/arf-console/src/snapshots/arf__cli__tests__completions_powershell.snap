@@ -50,6 +50,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--reprex', '--reprex', [CompletionResultType]::ParameterName, 'Enable reprex mode (no prompt, output prefixed with #>)')
             [CompletionResult]::new('--auto-format', '--auto-format', [CompletionResultType]::ParameterName, 'Enable auto-formatting of R code in reprex mode (requires Air CLI)')
             [CompletionResult]::new('--no-r-source-overrides', '--no-r-source-overrides', [CompletionResultType]::ParameterName, 'Disable experimental directory-level R source overrides')
+            [CompletionResult]::new('--no-r-auto-discovery', '--no-r-auto-discovery', [CompletionResultType]::ParameterName, 'Test-support flag for reproducing a machine with no R installed')
             [CompletionResult]::new('--no-banner', '--no-banner', [CompletionResultType]::ParameterName, 'Suppress the startup banner')
             [CompletionResult]::new('--vanilla', '--vanilla', [CompletionResultType]::ParameterName, 'Start R in vanilla mode (no init files, no save/restore)')
             [CompletionResult]::new('--no-environ', '--no-environ', [CompletionResultType]::ParameterName, '[R] Don''t read the site and user environment files')
@@ -282,6 +283,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--min-vsize', '--min-vsize', [CompletionResultType]::ParameterName, '[R] Set vector heap minimum to N bytes; ''4M'' = 4 MegaB')
             [CompletionResult]::new('--history-dir', '--history-dir', [CompletionResultType]::ParameterName, 'Custom history directory (overrides default XDG location)')
             [CompletionResult]::new('--no-r-source-overrides', '--no-r-source-overrides', [CompletionResultType]::ParameterName, 'Disable experimental directory-level R source overrides')
+            [CompletionResult]::new('--no-r-auto-discovery', '--no-r-auto-discovery', [CompletionResultType]::ParameterName, 'Test-support flag for reproducing a machine with no R installed')
             [CompletionResult]::new('--quiet', '--quiet', [CompletionResultType]::ParameterName, 'Suppress status messages on stderr (IPC path, ready, shutdown)')
             [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print session info as JSON to stdout when ready')
             [CompletionResult]::new('--vanilla', '--vanilla', [CompletionResultType]::ParameterName, 'Start R in vanilla mode (no init files, no save/restore)')
@@ -306,6 +308,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--r-home', '--r-home', [CompletionResultType]::ParameterName, 'Highest-priority R source: use this explicit R_HOME path')
             [CompletionResult]::new('--with-r-version', '--with-r-version', [CompletionResultType]::ParameterName, 'Highest-priority R source: use this R version via rig')
             [CompletionResult]::new('--no-r-source-overrides', '--no-r-source-overrides', [CompletionResultType]::ParameterName, 'Disable experimental directory-level R source overrides')
+            [CompletionResult]::new('--no-r-auto-discovery', '--no-r-auto-discovery', [CompletionResultType]::ParameterName, 'Test-support flag for reproducing a machine with no R installed')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break

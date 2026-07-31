@@ -486,25 +486,45 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let environment = RLessEnvironment::new();
     let output = environment
         .command()
-        .args(["r", "resolve", "--no-r-source-overrides"])
+        .args(["r", "resolve", "--no-r-auto-discovery"])
         .output()
         .unwrap();
 
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    if value["resolved"] != false {
-        // This test silently no-ops (skips verification) when R is found in the environment.
-        // The root cause is that R_LIB_PATHS in crates/arf-libr/src/sys/discovery.rs is a
-        // hardcoded constant with no injection point; restricting PATH does not prevent it
-        // from being picked up. Integration tests spawn the real binary as a child process,
-        // so Rust closure-based dependency injection cannot help here. Making this deterministic
-        // requires a production-code mechanism to disable the default path search.
-        eprintln!("skipping unresolved discovery assertion because a built-in R was found");
-        return;
-    }
     assert_eq!(value["resolved"], false);
     assert!(value["target"].is_null());
-    assert!(value["diagnostics"].is_array());
+    assert!(
+        value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["code"] == "r_discovery.failed"
+                    && diagnostic["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("R automatic discovery is disabled")
+            })
+    );
+}
+
+#[test]
+#[cfg(not(windows))]
+fn resolve_explicit_r_home_still_works_with_no_r_auto_discovery() {
+    let environment = RLessEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--no-r-auto-discovery", "--r-home"])
+        .arg(&environment.fake_r_home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["resolved"], true);
+    assert_descriptor_path(&value, &value["target"]["r_home"], &environment.fake_r_home);
+    assert_eq!(value["selected_by"]["kind"], "r_home");
 }
 
 #[test]

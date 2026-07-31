@@ -44,6 +44,7 @@ _arf() {
 '--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
 '--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
+'--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '--no-banner[Suppress the startup banner]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
 '--no-environ[\[R\] Don'\''t read the site and user environment files]' \
@@ -358,6 +359,7 @@ _arguments "${_arguments_options[@]}" : \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
+'--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
 '--json[Print session info as JSON to stdout when ready]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \
@@ -390,6 +392,7 @@ _arguments "${_arguments_options[@]}" : \
 '(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
 '(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
+'--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0

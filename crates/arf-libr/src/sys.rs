@@ -13,7 +13,8 @@ pub use askpass::askpass_handler_code;
 #[cfg(unix)]
 pub use discovery::ensure_ld_library_path_with_pre_exec;
 pub use discovery::{
-    ensure_ld_library_path, find_r_library, get_r_home, r_home_from_library_path, r_library_path,
+    ensure_ld_library_path, find_r_library, get_r_home, is_r_auto_discovery_disabled,
+    r_home_from_library_path, r_library_path, set_r_auto_discovery_disabled,
 };
 pub use error_state::{
     command_had_error, global_error_handler_code, mark_error_condition,
