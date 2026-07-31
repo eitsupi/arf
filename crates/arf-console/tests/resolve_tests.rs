@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 struct RLessEnvironment {
     _temp: tempfile::TempDir,
     bin_dir: PathBuf,
+    home_dir: PathBuf,
     fake_r_home: PathBuf,
 }
 
@@ -91,6 +92,8 @@ impl RLessEnvironment {
         let temp = tempfile::tempdir().unwrap();
         let bin_dir = temp.path().join("bin");
         std::fs::create_dir(&bin_dir).unwrap();
+        let home_dir = temp.path().join("home");
+        std::fs::create_dir(&home_dir).unwrap();
         let fake_r_home = {
             let fake_r_home = temp.path().join("fake-r-home");
             let fake_r_library = arf_libr::r_library_path(&fake_r_home);
@@ -118,10 +121,22 @@ exit 1
         Self {
             _temp: temp,
             bin_dir,
+            home_dir,
             fake_r_home,
         }
     }
 
+    /// Build a command that sees neither an R installation nor the developer's
+    /// own configuration.
+    ///
+    /// Pointing `HOME` at an empty directory and clearing the XDG variables
+    /// isolates the global `arf.toml`, which `dirs::config_dir()` resolves from
+    /// `$XDG_CONFIG_HOME` or `$HOME` depending on the platform. Without this, a
+    /// developer or CI image that configures `startup.r_source` would resolve an
+    /// R installation and make these tests environment-dependent. The
+    /// configuration cannot be isolated with `--config` here, because arf
+    /// rejects that flag when it appears before a subcommand and this helper
+    /// does not know which subcommand the caller will add.
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
         #[cfg(unix)]
@@ -132,6 +147,10 @@ exit 1
             .env_remove("R_HOME")
             .env_remove("ARF_R_HOME")
             .env_remove("ARF_R_VERSION")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_CACHE_HOME")
+            .env("HOME", &self.home_dir)
             .env("PATH", std::env::join_paths(path_entries).unwrap());
         command
     }
@@ -486,7 +505,12 @@ fn resolve_not_found_is_successful_false_descriptor() {
     let environment = RLessEnvironment::new();
     let output = environment
         .command()
-        .args(["r", "resolve", "--no-r-auto-discovery"])
+        .args([
+            "r",
+            "resolve",
+            "--no-r-auto-discovery",
+            "--no-r-source-overrides",
+        ])
         .output()
         .unwrap();
 
