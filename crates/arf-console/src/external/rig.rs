@@ -286,6 +286,8 @@ fn parse_version(s: &str) -> Option<semver::Version> {
 /// Errors that can occur when interacting with rig.
 #[derive(Debug, Clone)]
 pub enum RigError {
+    /// rig is not installed or unavailable in PATH.
+    NotInstalled,
     /// rig command failed to execute.
     CommandFailed(String),
     /// Failed to parse rig output.
@@ -301,6 +303,7 @@ pub enum RigError {
 impl std::fmt::Display for RigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RigError::NotInstalled => write!(f, "rig is not installed or unavailable"),
             RigError::CommandFailed(msg) => write!(f, "rig command failed: {}", msg),
             RigError::ParseError(msg) => write!(f, "failed to parse rig output: {}", msg),
             RigError::NoVersionsInstalled => write!(f, "no R versions installed via rig"),

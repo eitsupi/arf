@@ -63,9 +63,11 @@ pub(super) fn resolve_r_home_from_path(path: &std::path::Path) -> Result<std::pa
 /// Resolve R via rig with a specific version (used for CLI --with-r-version).
 pub(super) fn setup_r_via_rig(version_spec: &str) -> Result<ResolvedRSource> {
     if !external::rig::rig_available() {
-        anyhow::bail!(
-            "--with-r-version requires rig to be installed.\n\
-             Install rig from https://github.com/r-lib/rig"
+        return Err(
+            anyhow::Error::new(external::rig::RigError::NotInstalled).context(
+                "--with-r-version requires rig to be installed.\n\
+             Install rig from https://github.com/r-lib/rig",
+            ),
         );
     }
 

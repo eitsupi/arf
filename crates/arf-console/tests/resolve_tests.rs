@@ -169,6 +169,26 @@ fn resolve_found_emits_descriptor_with_target() {
     assert!(value["diagnostics"].as_array().unwrap().is_empty());
 }
 
+#[test]
+fn resolve_relative_r_home_uses_one_absolute_path_representation() {
+    let temp = tempfile::tempdir().unwrap();
+    let r_home = temp.path().join("rh");
+    std::fs::create_dir(&r_home).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--r-home", "rh"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected = r_home.display().to_string();
+    assert_eq!(value["target"]["r_home"], expected);
+    assert_eq!(value["selected_by"]["path"], expected);
+}
+
+#[cfg(unix)]
 fn write_uninstalled_project_override_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -414,6 +434,20 @@ fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
             .unwrap()
             .contains("3.99.99")
     );
+}
+
+#[test]
+#[cfg(not(windows))]
+fn resolve_version_without_rig_is_invalid_invocation() {
+    let environment = RLessEnvironment::new();
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--with-r-version", "4.5.2"])
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INVALID_PARAMS");
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]

@@ -224,7 +224,8 @@ pub(crate) fn run_resolve(
 fn classify_resolution_error(error: anyhow::Error, r_home: Option<&Path>) -> ResolveCommandError {
     let invalid_invocation = match error.downcast_ref::<RigError>() {
         Some(
-            RigError::NoVersionsInstalled
+            RigError::NotInstalled
+            | RigError::NoVersionsInstalled
             | RigError::NoDefaultVersion
             | RigError::VersionNotFound(_),
         ) => true,
@@ -247,10 +248,13 @@ fn descriptor(
     r_version: Option<&str>,
     r_source_origin: Option<RSourceOrigin>,
 ) -> ResolveDescriptor {
-    let target = resolution.r_home.as_ref().map(|r_home| Target {
-        r_home: r_home.display().to_string(),
-        r_binary: find_r_binary(r_home),
-        resolved_version: resolved_version(resolution),
+    let target = resolution.r_home.as_ref().map(|r_home| {
+        let r_home = normalize_path(cwd, r_home);
+        Target {
+            r_home: r_home.display().to_string(),
+            r_binary: find_r_binary(&r_home),
+            resolved_version: resolved_version(resolution),
+        }
     });
 
     let selected_by = selected_by(cwd, resolution, r_home, r_version, r_source_origin);
@@ -335,13 +339,15 @@ fn selected_by(
 }
 
 fn display_path(cwd: &Path, path: &Path) -> String {
+    normalize_path(cwd, path).display().to_string()
+}
+
+fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
     if path.is_absolute() {
         path.to_owned()
     } else {
         cwd.join(path)
     }
-    .display()
-    .to_string()
 }
 
 fn provider(status: &RSourceStatus) -> String {
