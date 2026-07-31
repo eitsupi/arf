@@ -309,6 +309,7 @@ fn resolve_environment_version_is_invalid_invocation() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn resolve_not_found_is_successful_false_descriptor() {
     let environment = RLessEnvironment::new();
     let output = environment
