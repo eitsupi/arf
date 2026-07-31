@@ -32,8 +32,9 @@ pub(crate) fn print_json<T>(value: &T) -> Result<()>
 where
     T: Serialize + ?Sized,
 {
-    let pretty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    let mut stdout = std::io::stdout().lock();
+    let stdout = std::io::stdout();
+    let pretty = std::io::IsTerminal::is_terminal(&stdout);
+    let mut stdout = stdout.lock();
     write_json(&mut stdout, value, pretty)?;
     writeln!(stdout).context("Failed to write JSON newline")?;
     Ok(())

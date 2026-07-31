@@ -267,7 +267,7 @@ pub(crate) fn run_headless(
         let mut stdout = std::io::stdout().lock();
         write_json(&mut stdout, &output, pretty)
             .context("Failed to write session info to stdout")?;
-        writeln!(stdout).context("Failed to write session info to stdout")?;
+        writeln!(stdout).context("Failed to write session info newline to stdout")?;
         stdout
             .flush()
             .context("Failed to flush session info to stdout")?;
