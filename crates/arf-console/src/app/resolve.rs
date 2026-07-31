@@ -217,7 +217,7 @@ pub(crate) fn run_resolve(
         r_version,
         r_source_origin,
     );
-    print_json(&descriptor).map_err(|error| ResolveCommandError::internal(error.to_string()))?;
+    print_json(&descriptor).map_err(|error| ResolveCommandError::internal(format!("{error:#}")))?;
     Ok(())
 }
 
@@ -233,9 +233,9 @@ fn classify_resolution_error(error: anyhow::Error, r_home: Option<&Path>) -> Res
     };
 
     if invalid_invocation {
-        ResolveCommandError::invalid_invocation(error.to_string())
+        ResolveCommandError::invalid_invocation(format!("{error:#}"))
     } else {
-        ResolveCommandError::internal(error.to_string())
+        ResolveCommandError::internal(format!("{error:#}"))
     }
 }
 

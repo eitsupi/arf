@@ -453,6 +453,13 @@ exit 1
 
     assert_structured_resolve_error(&output, "INTERNAL_ERROR");
     assert_eq!(output.status.code(), Some(4));
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("failed to parse rig output")
+    );
 }
 
 #[test]
@@ -469,6 +476,13 @@ fn resolve_r_binary_failure_is_internal_error() {
 
     assert_structured_resolve_error(&output, "INTERNAL_ERROR");
     assert_eq!(output.status.code(), Some(4));
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("RHOME failed")
+    );
 }
 
 #[test]
