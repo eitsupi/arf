@@ -49,7 +49,7 @@ fn main() -> ExitCode {
         Err(e) => {
             if let Some(resolve_error) = e.downcast_ref::<ResolveCommandError>() {
                 print_error(resolve_error);
-                return ExitCode::from(4);
+                return ExitCode::from(resolve_error.exit_code());
             }
             eprintln!("Error: {:#}", e);
             ExitCode::FAILURE
@@ -181,8 +181,7 @@ fn run() -> Result<()> {
                 resolve_args.r_source.r_version.as_deref(),
                 origin,
                 resolve_args.r_source.no_r_source_overrides,
-            )
-            .map_err(|error| anyhow::Error::new(ResolveCommandError::new(error.to_string())));
+            );
         }
         None => {}
     }

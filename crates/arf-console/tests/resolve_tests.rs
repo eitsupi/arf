@@ -154,6 +154,63 @@ fn resolve_environment_source_reports_environment_origin() {
     assert_eq!(value["selected_by"]["origin"], "environment");
 }
 
+#[test]
+fn resolve_invalid_version_is_invalid_invocation() {
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--with-r-version", "not-a-version"])
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INVALID_PARAMS");
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_valid_but_uninstalled_version_is_invalid_invocation() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin_dir = temp.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    let rig = bin_dir.join("rig");
+    std::fs::write(
+        &rig,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nif [ \"$1\" = \"list\" ]; then printf '%s\\n' '[{\"name\":\"4.4.2\",\"default\":true,\"version\":\"4.4.2\",\"aliases\":[],\"path\":\"/opt/R/4.4.2\",\"binary\":\"/opt/R/4.4.2/bin/R\"}]'; exit 0; fi\nexit 1\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(&rig).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&rig, permissions).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        .args(["r", "resolve", "--with-r-version", "4.9.9"])
+        .env("PATH", &bin_dir)
+        .env_remove("ARF_R_HOME")
+        .env_remove("ARF_R_VERSION")
+        .output()
+        .unwrap();
+
+    assert_structured_resolve_error(&output, "INVALID_PARAMS");
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("4.9.9")
+    );
+}
+
+fn assert_structured_resolve_error(output: &std::process::Output, code: &str) {
+    assert!(output.stdout.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let error = value["error"].as_object().unwrap();
+    assert_eq!(error["code"], code);
+    assert!(error["message"].is_string());
+    assert!(error["hint"].is_null());
+    assert!(error["data"].is_null());
+}
+
 /// This covers initialization-failure fallback, not PATH discovery.
 #[test]
 #[cfg(not(windows))]

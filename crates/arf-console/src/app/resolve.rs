@@ -2,11 +2,11 @@
 
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
 use crate::app::setup::{
-    RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
+    RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
 };
 use crate::config::RSourceStatus;
 use crate::output::{print_json, write_json};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
@@ -96,18 +96,47 @@ struct ResolveDescriptor {
 /// queries still return exit code zero.
 #[derive(Debug)]
 pub(crate) struct ResolveCommandError {
+    kind: ResolveCommandErrorKind,
     message: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ResolveCommandErrorKind {
+    InvalidInvocation,
+    Internal,
+}
+
 impl ResolveCommandError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
+    fn invalid_invocation(message: impl Into<String>) -> Self {
         Self {
+            kind: ResolveCommandErrorKind::InvalidInvocation,
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            kind: ResolveCommandErrorKind::Internal,
             message: message.into(),
         }
     }
 
     pub(crate) fn message(&self) -> &str {
         &self.message
+    }
+
+    pub(crate) fn exit_code(&self) -> u8 {
+        match self.kind {
+            ResolveCommandErrorKind::InvalidInvocation => 2,
+            ResolveCommandErrorKind::Internal => 4,
+        }
+    }
+
+    fn code(&self) -> &'static str {
+        match self.kind {
+            ResolveCommandErrorKind::InvalidInvocation => "INVALID_PARAMS",
+            ResolveCommandErrorKind::Internal => "INTERNAL_ERROR",
+        }
     }
 }
 
@@ -121,7 +150,15 @@ impl std::error::Error for ResolveCommandError {}
 
 #[derive(Debug, Serialize)]
 struct ResolveError<'a> {
-    error: &'a str,
+    error: ResolveErrorDetails<'a>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResolveErrorDetails<'a> {
+    code: &'static str,
+    message: &'a str,
+    hint: Option<&'static str>,
+    data: Option<&'a serde_json::Value>,
 }
 
 /// Print a resolve failure as JSON on stderr.
@@ -131,7 +168,12 @@ pub(crate) fn print_error(error: &ResolveCommandError) {
     let _ = write_json(
         &mut stderr,
         &ResolveError {
-            error: error.message(),
+            error: ResolveErrorDetails {
+                code: error.code(),
+                message: error.message(),
+                hint: None,
+                data: None,
+            },
         },
         false,
     );
@@ -146,7 +188,12 @@ pub(crate) fn run_resolve(
     r_source_origin: Option<RSourceOrigin>,
     no_r_source_overrides: bool,
 ) -> Result<()> {
-    let cwd = std::env::current_dir().context("Failed to determine the current directory")?;
+    validate_r_version(r_version)?;
+    let cwd = std::env::current_dir().map_err(|error| {
+        ResolveCommandError::internal(format!(
+            "Failed to determine the current directory: {error}"
+        ))
+    })?;
     let mut config_warnings = Vec::new();
     let config_path_buf = config_path.map(Path::to_path_buf);
     let config = load_config_collecting_diagnostics(config_path_buf.as_ref(), &mut config_warnings);
@@ -159,7 +206,13 @@ pub(crate) fn run_resolve(
         r_version,
         no_r_source_overrides,
     )
-    .map_err(|error| ResolveCommandError::new(error.to_string()))?;
+    .map_err(|error| {
+        if r_home.is_some() || r_version.is_some() {
+            ResolveCommandError::invalid_invocation(error.to_string())
+        } else {
+            ResolveCommandError::internal(error.to_string())
+        }
+    })?;
     resolve_path_r_home_for_report(&mut resolution);
 
     let descriptor = descriptor(
@@ -170,8 +223,26 @@ pub(crate) fn run_resolve(
         r_version,
         r_source_origin,
     );
-    print_json(&descriptor).map_err(|error| ResolveCommandError::new(error.to_string()))?;
+    print_json(&descriptor).map_err(|error| ResolveCommandError::internal(error.to_string()))?;
     Ok(())
+}
+
+fn validate_r_version(r_version: Option<&str>) -> Result<(), ResolveCommandError> {
+    let Some(r_version) = r_version else {
+        return Ok(());
+    };
+
+    if r_version.eq_ignore_ascii_case("default") {
+        return Ok(());
+    }
+
+    crate::rversion::VersionSpec::parse(r_version)
+        .map(|_| ())
+        .map_err(|_| {
+            ResolveCommandError::invalid_invocation(format!(
+                "Invalid R version specification '{r_version}'"
+            ))
+        })
 }
 
 fn descriptor(
@@ -192,12 +263,7 @@ fn descriptor(
     let diagnostics = config_warnings
         .iter()
         .map(config_diagnostic)
-        .chain(
-            resolution
-                .diagnostics
-                .iter()
-                .map(|message| resolution_diagnostic(message, resolution)),
-        )
+        .chain(resolution.diagnostics.iter().map(resolution_diagnostic))
         .collect();
 
     ResolveDescriptor {
@@ -318,34 +384,17 @@ fn config_diagnostic(warning: &ConfigLoadWarning) -> Diagnostic {
     }
 }
 
-fn resolution_diagnostic(message: &str, resolution: &RSourceResolutionReport) -> Diagnostic {
-    let lower = message.to_ascii_lowercase();
-    let code = if lower.contains("rig is not installed") {
-        "r_source_override.rig_unavailable"
-    } else if lower.contains("not installed") || lower.contains("no installed r version") {
-        "r_source_override.version_not_installed"
-    } else if lower.contains("unsupported") || lower.contains("not implemented") {
-        "r_source_override.provider_unsupported"
-    } else if lower.contains("failed to determine r_home")
-        || lower.contains("failed to discover")
-        || lower.contains("failed to derive r_home")
-    {
-        "r_discovery.failed"
-    } else if lower.contains("falling back") || lower.contains("trying the next") {
-        "r_source_override.fallback"
-    } else {
-        "r_source_override.value_invalid"
-    };
-
+fn resolution_diagnostic(diagnostic: &RSourceDiagnostic) -> Diagnostic {
     Diagnostic {
-        code: code.to_owned(),
-        severity: "warning",
-        message: message
+        code: diagnostic.code.to_owned(),
+        severity: diagnostic.severity,
+        message: diagnostic
+            .message
             .strip_prefix("Warning: ")
-            .unwrap_or(message)
+            .unwrap_or(&diagnostic.message)
             .to_owned(),
-        path: resolution
-            .file
+        path: diagnostic
+            .path
             .as_ref()
             .map(|path| path.display().to_string()),
     }
@@ -412,5 +461,32 @@ mod tests {
         assert_eq!(value["selected_by"]["kind"], "explicit_r_version");
         assert_eq!(value["selected_by"]["origin"], "cli");
         assert_eq!(value["target"]["resolved_version"], "4.4.1");
+    }
+
+    #[test]
+    fn resolution_diagnostic_uses_assigned_code_not_message_wording() {
+        let first = RSourceDiagnostic {
+            code: "r_source_override.value_invalid",
+            severity: "warning",
+            message: "Warning: original wording".to_owned(),
+            path: None,
+        };
+        let second = RSourceDiagnostic {
+            message: "Warning: completely different wording".to_owned(),
+            ..first.clone()
+        };
+
+        assert_eq!(
+            resolution_diagnostic(&first).code,
+            "r_source_override.value_invalid"
+        );
+        assert_eq!(
+            resolution_diagnostic(&second).code,
+            "r_source_override.value_invalid"
+        );
+        assert_eq!(
+            resolution_diagnostic(&second).message,
+            "completely different wording"
+        );
     }
 }

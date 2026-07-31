@@ -137,7 +137,12 @@ pub(crate) fn run_headless(
         no_r_source_overrides,
     )?;
     if json {
-        warnings.extend(resolution.diagnostics.iter().cloned());
+        warnings.extend(
+            resolution
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.clone()),
+        );
     } else {
         resolution.emit_diagnostics();
     }

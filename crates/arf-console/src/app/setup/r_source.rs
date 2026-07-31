@@ -45,6 +45,28 @@ impl RSourceOverrideState {
     }
 }
 
+/// A warning produced while resolving an R source.
+#[derive(Debug, Clone)]
+pub(crate) struct RSourceDiagnostic {
+    pub(crate) code: &'static str,
+    pub(crate) severity: &'static str,
+    pub(crate) message: String,
+    pub(crate) path: Option<PathBuf>,
+}
+
+pub(super) fn warning(
+    code: &'static str,
+    message: impl Into<String>,
+    path: Option<PathBuf>,
+) -> RSourceDiagnostic {
+    RSourceDiagnostic {
+        code,
+        severity: "warning",
+        message: message.into(),
+        path,
+    }
+}
+
 /// The result of resolving the configured R source and any directory override.
 #[derive(Debug, Clone)]
 pub(crate) struct RSourceResolutionReport {
@@ -55,7 +77,7 @@ pub(crate) struct RSourceResolutionReport {
     pub(crate) key: Option<String>,
     pub(crate) requested_version: Option<String>,
     pub(crate) resolved_version: Option<String>,
-    pub(crate) diagnostics: Vec<String>,
+    pub(crate) diagnostics: Vec<RSourceDiagnostic>,
     pub(crate) override_state: RSourceOverrideState,
 }
 
@@ -82,7 +104,7 @@ impl RSourceResolutionReport {
         status: RSourceStatus,
         r_home: PathBuf,
         info: RSourceOverrideInfo,
-        diagnostics: Vec<String>,
+        diagnostics: Vec<RSourceDiagnostic>,
     ) -> Self {
         Self {
             status,
@@ -102,7 +124,12 @@ impl RSourceResolutionReport {
         if self.diagnostics.is_empty() {
             return;
         }
-        let block = self.diagnostics.join("\n");
+        let block = self
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         eprintln!("{block}");
         log::warn!("{block}");
     }
@@ -377,8 +404,10 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 
     match resolve_path_r_home_with(find_r_library) {
         Ok(r_home) => report.r_home = Some(r_home),
-        Err(error) => report.diagnostics.push(format!(
-            "Warning: Failed to determine R_HOME from PATH: {error}"
+        Err(error) => report.diagnostics.push(warning(
+            "r_discovery.failed",
+            format!("Warning: Failed to determine R_HOME from PATH: {error}"),
+            None,
         )),
     }
 }
