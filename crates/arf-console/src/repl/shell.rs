@@ -1,6 +1,6 @@
 //! Shell command execution and process management.
 
-use crate::external::rig;
+use crate::external::rig::{self, RigError};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
@@ -74,9 +74,10 @@ pub fn confirm_action(prompt: &str) -> bool {
 pub fn restart_process(version: Option<&str>) {
     // If a version is specified, validate it using rig before restarting
     if let Some(ver) = version {
-        if !rig::rig_available() {
-            arf_eprintln!("Error: rig is not installed. Cannot switch R versions.");
-            arf_eprintln!("Install rig from https://github.com/r-lib/rig");
+        if let Err(message) = validate_rig_for_switch_with(rig::rig_available) {
+            for line in message.lines() {
+                arf_eprintln!("{}", line);
+            }
             return;
         }
 
@@ -170,6 +171,23 @@ pub fn restart_process(version: Option<&str>) {
     }
 }
 
+fn validate_rig_for_switch_with<FAvailable>(rig_available: FAvailable) -> Result<(), String>
+where
+    FAvailable: FnOnce() -> Result<(), RigError>,
+{
+    rig_available().map_err(|error| match error {
+        RigError::NotInstalled => {
+            "Error: rig is not installed. Cannot switch R versions.\nInstall rig from https://github.com/r-lib/rig".to_string()
+        }
+        RigError::CommandFailed(reason) => format!(
+            "Error: rig is installed but failed while checking availability: {reason}\nCannot switch R versions until rig is working."
+        ),
+        error => format!(
+            "Error: Could not check whether rig is available: {error}\nCannot switch R versions until rig is working."
+        ),
+    })
+}
+
 /// Filter out --with-r-version and its value from command-line arguments.
 fn filter_r_version_args(args: Vec<String>) -> Vec<String> {
     let mut result = Vec::new();
@@ -196,4 +214,20 @@ fn filter_r_version_args(args: Vec<String>) -> Vec<String> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_failed_rig_switch_error_preserves_reason_without_install_guidance() {
+        let error = validate_rig_for_switch_with(|| {
+            Err(RigError::CommandFailed("permission denied".to_string()))
+        })
+        .expect_err("a failed rig command should reject switching");
+
+        assert!(error.contains("permission denied"));
+        assert!(!error.contains("Install rig"));
+    }
 }

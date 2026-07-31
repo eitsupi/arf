@@ -335,7 +335,7 @@ impl MetaCommandCompleter {
         partial: &str,
     ) -> Vec<Suggestion> {
         // Check if rig is available
-        if !rig::rig_available() {
+        if rig::rig_available().is_err() {
             return vec![];
         }
 

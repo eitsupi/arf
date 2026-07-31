@@ -1,6 +1,6 @@
 //! Directory-level R source overrides.
 
-use super::r_source::RSourceResolutionReport;
+use super::r_source::{RSourceDiagnostic, RSourceResolutionReport, warning};
 use super::rig::{ResolvedRSource, setup_r_via_selected_rig_version};
 use crate::config::{RSourceOverride, RSourceOverrideInfo, RSourceStatus};
 use crate::external;
@@ -13,10 +13,10 @@ pub(super) enum OverrideResolution {
         status: Box<RSourceStatus>,
         r_home: PathBuf,
         info: RSourceOverrideInfo,
-        diagnostics: Vec<String>,
+        diagnostics: Vec<RSourceDiagnostic>,
     },
     Fallback {
-        diagnostics: Vec<String>,
+        diagnostics: Vec<RSourceDiagnostic>,
     },
 }
 
@@ -53,7 +53,7 @@ fn setup_r_via_overrides_with<FAvailable, FList, FResolve>(
     resolve_selected_rig_version: FResolve,
 ) -> Option<OverrideResolution>
 where
-    FAvailable: Fn() -> bool,
+    FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
     FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
     FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<ResolvedRSource>,
 {
@@ -68,8 +68,12 @@ where
         let version = match source {
             RSourceOverride::Pixi => {
                 evaluated_provider = true;
-                diagnostics.push(format!(
-                    "Warning: R source override provider '{provider}' is not implemented; trying the next R source override."
+                diagnostics.push(warning(
+                    "r_source_override.provider_unsupported",
+                    format!(
+                        "Warning: R source override provider '{provider}' is not implemented; trying the next R source override."
+                    ),
+                    None,
                 ));
                 continue;
             }
@@ -83,9 +87,13 @@ where
                     Ok(path) => path,
                     Err(error) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                            "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
-                            file.display()
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
                         ));
                         continue;
                     }
@@ -101,10 +109,14 @@ where
                     }
                     Err(error) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                        "Warning: Failed to read R version override file {}: {error}; trying the next R source override.",
-                        file.display()
-                    ));
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to read R version override file {}: {error}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
                         continue;
                     }
                 }
@@ -119,9 +131,13 @@ where
                     Ok(path) => path,
                     Err(error) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                            "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
-                            file.display()
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
                         ));
                         continue;
                     }
@@ -140,28 +156,40 @@ where
                         | rversion::TomlKeyError::NotString(_),
                     ) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                        "Warning: {}:{} does not contain the configured R version key; trying the next R source override.",
-                        file.display(),
-                        key
-                    ));
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: {}:{} does not contain the configured R version key; trying the next R source override.",
+                                file.display(),
+                                key
+                            ),
+                            Some(file.clone()),
+                        ));
                         continue;
                     }
                     Err(rversion::TomlKeyError::Parse(_)) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                        "Warning: Failed to parse R source override file {}; trying the next R source override.",
-                        file.display()
-                    ));
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to parse R source override file {}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
                         continue;
                     }
                     Err(error) => {
                         evaluated_provider = true;
-                        diagnostics.push(format!(
-                        "Warning: Failed to read R version from TOML key '{}' in {}: {error}; trying the next R source override.",
-                        key,
-                        file.display()
-                    ));
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to read R version from TOML key '{}' in {}: {error}; trying the next R source override.",
+                                key,
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
                         continue;
                     }
                 }
@@ -172,32 +200,44 @@ where
         let spec = match rversion::VersionSpec::parse(&trimmed_version) {
             Ok(spec) => spec,
             Err(rversion::VersionSpecParseError::Empty) => {
-                diagnostics.push(format!(
-                    "Warning: {} contains an empty R version specification; trying the next R source override.",
-                    override_location(source)
+                diagnostics.push(warning(
+                    "r_source_override.value_invalid",
+                    format!(
+                        "Warning: {} contains an empty R version specification; trying the next R source override.",
+                        override_location(source)
+                    ),
+                    override_file(source),
                 ));
                 continue;
             }
             Err(rversion::VersionSpecParseError::Invalid) => {
-                diagnostics.push(format!(
-                    "Warning: {} contains an R version specification that could not be parsed; trying the next R source override.",
-                    override_location(source)
+                diagnostics.push(warning(
+                    "r_source_override.value_invalid",
+                    format!(
+                        "Warning: {} contains an R version specification that could not be parsed; trying the next R source override.",
+                        override_location(source)
+                    ),
+                    override_file(source),
                 ));
                 continue;
             }
         };
 
         if let rversion::VersionSpec::Named(name) = &spec {
-            diagnostics.push(format!(
-                "Warning: R version \"{name}\" from {} is unsupported in the R source override path; trying the next R source override.",
-                override_location(source)
+            diagnostics.push(warning(
+                "r_source_override.provider_unsupported",
+                format!(
+                    "Warning: R version \"{name}\" from {} is unsupported in the R source override path; trying the next R source override.",
+                    override_location(source)
+                ),
+                override_file(source),
             ));
             continue;
         }
 
-        let rig_is_available = *rig_available_cache.get_or_insert_with(&rig_available);
-        if !rig_is_available {
-            diagnostics.push(rig_unavailable_warning());
+        let rig_availability = rig_available_cache.get_or_insert_with(&rig_available);
+        if let Err(error) = rig_availability {
+            diagnostics.push(rig_unavailable_warning(error));
             return Some(OverrideResolution::Fallback { diagnostics });
         }
 
@@ -207,9 +247,13 @@ where
             match list_versions() {
                 Ok(versions) => installed_versions_cache.insert(versions),
                 Err(error) => {
-                    diagnostics.push(format!(
-                        "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
-                        override_location(source)
+                    diagnostics.push(warning(
+                        "r_source_override.fallback",
+                        format!(
+                            "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
+                            override_location(source)
+                        ),
+                        override_file(source),
                     ));
                     return Some(OverrideResolution::Fallback { diagnostics });
                 }
@@ -226,6 +270,7 @@ where
                 &override_location(source),
                 &trimmed_version,
                 &spec,
+                override_file(source),
             ));
             continue;
         };
@@ -243,10 +288,11 @@ where
                     resolved_version: version.clone(),
                 };
                 let Some(r_home) = r_home else {
-                    diagnostics.push(
-                        "Warning: R source override resolved without an R_HOME; falling back to startup.r_source."
-                            .to_owned(),
-                    );
+                    diagnostics.push(warning(
+                        "r_source_override.fallback",
+                        "Warning: R source override resolved without an R_HOME; falling back to startup.r_source.",
+                        override_file(source),
+                    ));
                     return Some(OverrideResolution::Fallback { diagnostics });
                 };
                 return Some(OverrideResolution::Applied {
@@ -261,17 +307,25 @@ where
                 });
             }
             Ok(status) => {
-                diagnostics.push(format!(
-                    "Warning: R source override {} resolved to an unsupported R source status ({status:?}); falling back to startup.r_source.",
-                    override_location(source)
+                diagnostics.push(warning(
+                    "r_source_override.provider_unsupported",
+                    format!(
+                        "Warning: R source override {} resolved to an unsupported R source status ({status:?}); falling back to startup.r_source.",
+                        override_location(source)
+                    ),
+                    override_file(source),
                 ));
                 return Some(OverrideResolution::Fallback { diagnostics });
             }
             Err(error) => {
-                diagnostics.push(format!(
-                    "Warning: Failed to use R version \"{}\" from {}: {error}; trying the next R source override.",
-                    trimmed_version,
-                    override_location(source)
+                diagnostics.push(warning(
+                    "r_source_override.resolution_failed",
+                    format!(
+                        "Warning: Failed to use R version \"{}\" from {}: {error}; trying the next R source override.",
+                        trimmed_version,
+                        override_location(source)
+                    ),
+                    override_file(source),
                 ));
                 continue;
             }
@@ -305,10 +359,14 @@ fn is_bare_filename(file: &Path) -> bool {
     !(bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
-fn invalid_override_file_warning(provider: &str, file: &Path) -> String {
-    format!(
-        "Warning: R source override provider '{provider}' has invalid file '{}'; file must be a bare filename; trying the next R source override.",
-        file.display()
+fn invalid_override_file_warning(provider: &str, file: &Path) -> RSourceDiagnostic {
+    warning(
+        "r_source_override.value_invalid",
+        format!(
+            "Warning: R source override provider '{provider}' has invalid file '{}'; file must be a bare filename; trying the next R source override.",
+            file.display()
+        ),
+        Some(file.to_path_buf()),
     )
 }
 
@@ -350,13 +408,29 @@ fn override_location(source: &RSourceOverride) -> String {
     }
 }
 
-fn rig_unavailable_warning() -> String {
-    "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
-        .to_owned()
+fn rig_unavailable_warning(error: &external::rig::RigError) -> RSourceDiagnostic {
+    let message = match error {
+        external::rig::RigError::NotInstalled => {
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+                .to_string()
+        }
+        external::rig::RigError::CommandFailed(reason) => format!(
+            "Warning: rig is installed but could not be run, so the R source override cannot be resolved: {reason}.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+        ),
+        error => format!(
+            "Warning: rig availability could not be checked ({error}), so the R source override cannot be resolved.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+        ),
+    };
+
+    warning("r_source_override.rig_unavailable", message, None)
 }
 
-fn fallback_warning() -> String {
-    "Warning: All R source overrides failed.\n         Falling back to startup.r_source.".to_owned()
+fn fallback_warning() -> RSourceDiagnostic {
+    warning(
+        "r_source_override.fallback",
+        "Warning: All R source overrides failed.\n         Falling back to startup.r_source.",
+        None,
+    )
 }
 
 fn not_installed_warning(
@@ -364,8 +438,9 @@ fn not_installed_warning(
     location: &str,
     version: &str,
     spec: &rversion::VersionSpec,
-) -> String {
-    if spec.is_concrete_version() {
+    path: Option<PathBuf>,
+) -> RSourceDiagnostic {
+    let message = if spec.is_concrete_version() {
         format!(
             "Warning: R source override provider '{provider}' at {location} requested R version \"{version}\", which is not installed.\n         Install it with rig add {version}, then restart arf.\n         Trying the next R source override."
         )
@@ -373,7 +448,8 @@ fn not_installed_warning(
         format!(
             "Warning: R source override provider '{provider}' at {location} has no installed R version matching specification \"{version}\".\n         Install a matching R version with rig, then restart arf.\n         Trying the next R source override."
         )
-    }
+    };
+    warning("r_source_override.version_not_installed", message, path)
 }
 
 #[cfg(test)]
@@ -389,6 +465,14 @@ mod r_source_override_tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn diagnostic_text(diagnostics: &[RSourceDiagnostic]) -> String {
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     fn path_source(path: &Path) -> RSource {
         RSource::Path {
@@ -450,7 +534,7 @@ mod r_source_override_tests {
         let report = setup_r_fallback_with(
             &RSource::Mode(RSourceMode::Auto),
             RSourceOverrideState::NotConfigured,
-            || false,
+            || Err(external::rig::RigError::NotInstalled),
             |_| panic!("rig's default version should not be resolved"),
         )
         .unwrap();
@@ -464,7 +548,7 @@ mod r_source_override_tests {
         let report = setup_r_fallback_with(
             &RSource::Mode(RSourceMode::Auto),
             RSourceOverrideState::NotConfigured,
-            || true,
+            || Ok(()),
             |_| Err(external::rig::RigError::NoDefaultVersion),
         )
         .unwrap();
@@ -488,12 +572,11 @@ mod r_source_override_tests {
         });
 
         assert!(report.r_home.is_none());
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics[0].code, "r_discovery.failed");
         assert_eq!(
-            report.diagnostics,
-            vec![
-                "Warning: Failed to determine R_HOME from PATH: Failed to discover the R library from PATH"
-                    .to_string()
-            ]
+            report.diagnostics[0].message,
+            "Warning: Failed to determine R_HOME from PATH: Failed to discover the R library from PATH"
         );
     }
 
@@ -601,7 +684,7 @@ mod r_source_override_tests {
         .unwrap();
 
         assert_eq!(report.override_state, RSourceOverrideState::Failed);
-        assert!(report.diagnostics[0].contains("pixi"));
+        assert!(report.diagnostics[0].message.contains("pixi"));
     }
 
     #[test]
@@ -679,8 +762,17 @@ mod r_source_override_tests {
 
         assert_eq!(report.override_state, RSourceOverrideState::Failed);
         assert_eq!(report.diagnostics.len(), 2);
-        assert!(report.diagnostics[0].contains("pixi"));
-        assert!(report.diagnostics[1].contains("Falling back to startup.r_source"));
+        assert_eq!(
+            report.diagnostics[0].code,
+            "r_source_override.provider_unsupported"
+        );
+        assert_eq!(report.diagnostics[1].code, "r_source_override.fallback");
+        assert!(report.diagnostics[0].message.contains("pixi"));
+        assert!(
+            report.diagnostics[1]
+                .message
+                .contains("Falling back to startup.r_source")
+        );
     }
 
     #[test]
@@ -707,9 +799,36 @@ mod r_source_override_tests {
     #[test]
     fn rig_unavailable_warning_explains_fallback() {
         assert_eq!(
-            rig_unavailable_warning(),
+            rig_unavailable_warning(&external::rig::RigError::NotInstalled).message,
             "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
         );
+    }
+
+    #[test]
+    fn command_failed_rig_warning_preserves_reason_without_install_guidance() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = Path::new("project.r-version").to_path_buf();
+        std::fs::write(temp.path().join(&file), "4.4.2\n").unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::VersionFile { file }],
+            Some(temp.path()),
+            || {
+                Err(external::rig::RigError::CommandFailed(
+                    "permission denied".to_string(),
+                ))
+            },
+            || panic!("rig versions should not be listed after availability fails"),
+            |_, _| panic!("R version should not be resolved after availability fails"),
+        )
+        .expect("an existing override should produce a fallback");
+
+        let OverrideResolution::Fallback { diagnostics } = result else {
+            panic!("a failed rig command should fall back to startup.r_source");
+        };
+        let message = diagnostic_text(&diagnostics);
+        assert!(message.contains("permission denied"));
+        assert!(!message.contains("Install rig"));
     }
 
     #[test]
@@ -720,13 +839,19 @@ mod r_source_override_tests {
             "rproject.toml:project.r_version",
             ">=4.3, <5.0",
             &spec,
+            Some(PathBuf::from("rproject.toml")),
         );
 
-        assert!(warning.contains("Install a matching R version with rig"));
-        assert!(!warning.contains("rig add"));
-        assert!(warning.contains("toml-key"));
-        assert!(warning.contains("rproject.toml:project.r_version"));
-        assert!(!warning.contains("Falling back to startup.r_source"));
+        assert_eq!(warning.code, "r_source_override.version_not_installed");
+        assert!(
+            warning
+                .message
+                .contains("Install a matching R version with rig")
+        );
+        assert!(!warning.message.contains("rig add"));
+        assert!(warning.message.contains("toml-key"));
+        assert!(warning.message.contains("rproject.toml:project.r_version"));
+        assert!(!warning.message.contains("Falling back to startup.r_source"));
     }
 
     #[test]
@@ -779,7 +904,7 @@ mod r_source_override_tests {
                 },
             ],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |selected, versions| {
                 assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -806,9 +931,21 @@ mod r_source_override_tests {
                 assert_eq!(info.file, Some(second_file));
                 assert_eq!(info.resolved_version, "4.4.2");
                 assert_eq!(diagnostics.len(), 1);
-                assert!(diagnostics[0].contains("4.3.0"));
-                assert!(diagnostics[0].contains("Trying the next R source override"));
-                assert!(!diagnostics[0].contains("Falling back to startup.r_source"));
+                assert_eq!(
+                    diagnostics[0].code,
+                    "r_source_override.version_not_installed"
+                );
+                assert!(diagnostics[0].message.contains("4.3.0"));
+                assert!(
+                    diagnostics[0]
+                        .message
+                        .contains("Trying the next R source override")
+                );
+                assert!(
+                    !diagnostics[0]
+                        .message
+                        .contains("Falling back to startup.r_source")
+                );
             }
             OverrideResolution::Fallback { .. } => {
                 panic!("the installed provider should be applied")
@@ -831,7 +968,7 @@ mod r_source_override_tests {
                 file: file.to_path_buf(),
             }],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |selected, versions| {
                 assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -878,7 +1015,7 @@ mod r_source_override_tests {
 
         match result {
             OverrideResolution::Fallback { diagnostics } => {
-                let diagnostics = diagnostics.join("\n");
+                let diagnostics = diagnostic_text(&diagnostics);
                 assert!(diagnostics.contains("exceeds 256 bytes"));
                 assert!(!diagnostics.contains(&marker));
             }
@@ -903,7 +1040,7 @@ mod r_source_override_tests {
                 file: "project.r-version".into(),
             }],
             Some(temp.path()),
-            || true,
+            || Ok(()),
             || Ok(vec![rig_version("4.4.2")]),
             |_, _| panic!("version resolution should not be attempted"),
         )
@@ -911,7 +1048,7 @@ mod r_source_override_tests {
 
         match result {
             OverrideResolution::Fallback { diagnostics } => {
-                let diagnostics = diagnostics.join("\n");
+                let diagnostics = diagnostic_text(&diagnostics);
                 assert!(!diagnostics.contains(private_contents));
             }
             OverrideResolution::Applied { .. } => {
@@ -954,7 +1091,7 @@ mod r_source_override_tests {
 
             match result {
                 OverrideResolution::Fallback { diagnostics } => {
-                    let diagnostics = diagnostics.join("\n");
+                    let diagnostics = diagnostic_text(&diagnostics);
                     assert!(!diagnostics.contains(marker));
                     assert!(diagnostics.contains("could not be parsed"));
                 }
@@ -989,7 +1126,7 @@ mod r_source_override_tests {
 
         match result {
             OverrideResolution::Fallback { diagnostics } => {
-                let diagnostics = diagnostics.join("\n");
+                let diagnostics = diagnostic_text(&diagnostics);
                 assert!(diagnostics.contains(
                     "Warning: Failed to parse R source override file rproject.toml; trying the next R source override."
                 ));
@@ -1044,7 +1181,7 @@ mod r_source_override_tests {
                 let result = setup_r_via_overrides_with(
                     &overrides,
                     Some(temp.path()),
-                    || true,
+                    || Ok(()),
                     || Ok(vec![rig_version("4.4.2")]),
                     |selected, versions| {
                         assert_eq!(selected, &semver::Version::new(4, 4, 2));
@@ -1065,7 +1202,12 @@ mod r_source_override_tests {
                     } => {
                         assert_eq!(info.file, Some(valid_file));
                         assert_eq!(diagnostics.len(), 1);
-                        assert!(diagnostics[0].contains("file must be a bare filename"));
+                        assert_eq!(diagnostics[0].code, "r_source_override.value_invalid");
+                        assert!(
+                            diagnostics[0]
+                                .message
+                                .contains("file must be a bare filename")
+                        );
                     }
                     OverrideResolution::Fallback { .. } => {
                         panic!("the valid provider should be applied")
@@ -1098,7 +1240,7 @@ mod r_source_override_tests {
             Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
-                true
+                Ok(())
             },
             move || {
                 list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);
@@ -1142,7 +1284,7 @@ mod r_source_override_tests {
             Some(temp.path()),
             move || {
                 rig_available_calls_for_closure.fetch_add(1, Ordering::Relaxed);
-                true
+                Ok(())
             },
             move || {
                 list_versions_calls_for_closure.fetch_add(1, Ordering::Relaxed);

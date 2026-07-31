@@ -36,12 +36,29 @@ pub struct ResolvedVersion {
 }
 
 /// Check if rig is available in PATH.
-pub fn rig_available() -> bool {
-    Command::new("rig")
+pub fn rig_available() -> Result<(), RigError> {
+    let output = Command::new("rig")
         .arg("--version")
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                RigError::NotInstalled
+            } else {
+                RigError::CommandFailed(error.to_string())
+            }
+        })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let message = if stderr.is_empty() {
+            format!("exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        Err(RigError::CommandFailed(message))
+    }
 }
 
 /// List all installed R versions via rig.
@@ -286,6 +303,8 @@ fn parse_version(s: &str) -> Option<semver::Version> {
 /// Errors that can occur when interacting with rig.
 #[derive(Debug, Clone)]
 pub enum RigError {
+    /// rig is not installed or unavailable in PATH.
+    NotInstalled,
     /// rig command failed to execute.
     CommandFailed(String),
     /// Failed to parse rig output.
@@ -301,6 +320,7 @@ pub enum RigError {
 impl std::fmt::Display for RigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RigError::NotInstalled => write!(f, "rig is not installed or unavailable"),
             RigError::CommandFailed(msg) => write!(f, "rig command failed: {}", msg),
             RigError::ParseError(msg) => write!(f, "failed to parse rig output: {}", msg),
             RigError::NoVersionsInstalled => write!(f, "no R versions installed via rig"),
