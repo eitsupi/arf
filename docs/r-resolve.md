@@ -15,7 +15,7 @@ To ask arf which R installation it would use without starting R, run:
 arf r resolve
 ```
 
-`arf r resolve` accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path. It always emits JSON; there is no `--json` flag. Output is pretty-printed when stdout is a terminal and compact when piped, so consumers do not need a format flag. For example:
+`arf r resolve` accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path. On success it always emits JSON; there is no `--json` flag. Output is pretty-printed when stdout is a terminal and compact when piped, so consumers do not need a format flag. For example:
 
 ```json
 {
@@ -31,7 +31,7 @@ arf r resolve
   "selected_by": {
     "kind": "version_request",
     "requested_r_home": null,
-    "requested_version": "4.4",
+    "requested_version": "4.5",
     "source": {
       "kind": "project_file",
       "name": null,
@@ -91,8 +91,10 @@ Both enum sets may grow, so clients must accept unknown values. The source field
 
 ## Resolution Behavior
 
-Resolution mirrors normal startup rather than being stricter. A configuration file that fails to load still falls back to defaults and exits 0 with a diagnostic, and a version merely suggested by a project file does the same. A version requested explicitly on the command line is an error, because startup refuses to continue in that case too. Reporting a different R than arf would actually use would defeat the purpose of the command.
+Resolution mirrors normal startup rather than being stricter. A configuration file that fails to load still falls back to defaults and exits 0 with a diagnostic, and a version request that a project file merely suggests does the same when it cannot be satisfied. A version requested explicitly on the command line or through `ARF_R_HOME` / `ARF_R_VERSION` is an error when it cannot be satisfied, because startup refuses to continue in that case too. Requests that resolve successfully behave the same way whatever their source. Reporting a different R than arf would actually use would defeat the purpose of the command.
 
 ## Exit Codes
 
-Exit codes match `arf ipc`: `0` means success, including `resolved: false`; `2` means invalid invocation; and `4` means internal failure. Errors are JSON on stderr in the same shape used by `arf ipc`.
+Exit codes match `arf ipc`: `0` means success, including `resolved: false`; `2` means invalid invocation; and `4` means internal failure.
+
+Errors raised after the arguments parse successfully are JSON on stderr, in the same shape used by `arf ipc`. Argument-parsing failures — an unknown flag, a missing value, or `--r-home` combined with `--with-r-version` — are reported by the argument parser as plain text and also exit `2`, so a client that needs to distinguish them must tolerate a non-JSON stderr at that exit code.

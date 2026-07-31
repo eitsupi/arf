@@ -42,7 +42,7 @@
 - `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
 - `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4`. Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
 - `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown.
-- **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON.
+- **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON on success.
 
 ### Changed
 
