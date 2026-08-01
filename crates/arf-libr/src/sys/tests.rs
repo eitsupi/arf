@@ -207,6 +207,55 @@ fn r_home_from_library_path_rejects_other_files() {
 }
 
 #[test]
+fn r_home_from_rhome_output_extracts_path_after_warning() {
+    let output = r"WARNING: ignoring environment value of R_HOME
+/opt/R/4.0.5/lib/R
+";
+    assert_eq!(
+        r_home_from_rhome_output(output),
+        Some(r"/opt/R/4.0.5/lib/R".to_string())
+    );
+}
+
+#[test]
+fn r_home_from_rhome_output_handles_normal_output() {
+    assert_eq!(
+        r_home_from_rhome_output(
+            r"/opt/R/4.0.5/lib/R
+"
+        ),
+        Some(r"/opt/R/4.0.5/lib/R".to_string())
+    );
+}
+
+#[test]
+fn r_home_from_rhome_output_rejects_empty_output() {
+    assert_eq!(r_home_from_rhome_output(""), None);
+    assert_eq!(
+        r_home_from_rhome_output(
+            r" 
+	 "
+        ),
+        None
+    );
+    assert_eq!(
+        r_home_from_rhome_output(
+            r"WARNING: ignoring environment value of R_HOME
+"
+        ),
+        None
+    );
+}
+
+#[test]
+fn r_home_from_rhome_output_handles_missing_trailing_newline() {
+    assert_eq!(
+        r_home_from_rhome_output(r"/opt/R/4.0.5/lib/R"),
+        Some(r"/opt/R/4.0.5/lib/R".to_string())
+    );
+}
+
+#[test]
 fn test_parse_var_from_wrapper_script_quoted() {
     // Single-quoted values
     let script = "R_DOC_DIR='/usr/share/doc/R'\nexport R_DOC_DIR\n";

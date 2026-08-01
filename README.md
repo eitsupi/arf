@@ -161,6 +161,9 @@ arf extends R with `:` prefixed meta commands:
 | `:quit`, `:exit` | Exit arf |
 
 > [!NOTE]
+> `:switch` keeps the R-related environment variables you set before starting arf, apart from `R_HOME` and `LD_LIBRARY_PATH`, which are always removed. `:restart` leaves the environment untouched. See [Switching and Restarting](docs/configuration.md#switching-and-restarting) for details.
+
+> [!NOTE]
 > **Experimental:** Enable the `experimental.shell_semicolon_shortcut` option to switch to shell mode by pressing `;` at an empty prompt — no `:shell` or Enter required (similar to Julia REPL behavior).
 
 ## Configuration

@@ -6,6 +6,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static R_AUTO_DISCOVERY_DISABLED: AtomicBool = AtomicBool::new(false);
 
+/// Extract R_HOME from the output of `R RHOME`.
+///
+/// R's wrapper script prints its warnings to stdout rather than stderr, so
+/// the path can be preceded by lines such as `WARNING: ignoring environment
+/// value of R_HOME`. Take the last non-empty line, which is the path itself.
+///
+/// Warning lines are skipped explicitly as well, so output carrying no path
+/// at all yields `None` instead of a warning masquerading as one. That check
+/// only matches R's untranslated wording; the last-line rule is what makes
+/// this correct in general.
+pub fn r_home_from_rhome_output(output: &str) -> Option<String> {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("WARNING:"))
+        .map(str::to_owned)
+}
+
 /// Set whether automatic R discovery is disabled for this process.
 pub fn set_r_auto_discovery_disabled(disabled: bool) {
     R_AUTO_DISCOVERY_DISABLED.store(disabled, Ordering::Relaxed);
@@ -80,8 +99,8 @@ pub fn find_r_library() -> RResult<PathBuf> {
 
     if let Ok(output) = Command::new(r_cmd).args(["RHOME"]).output()
         && output.status.success()
+        && let Some(r_home) = r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
     {
-        let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let lib_path = r_library_path(Path::new(&r_home));
         if lib_path.exists() {
             return Ok(lib_path);
@@ -159,8 +178,14 @@ pub fn get_r_home() -> RResult<PathBuf> {
         .map_err(|e| RError::LibraryNotFound(format!("Failed to run R RHOME: {}", e)))?;
 
     if output.status.success() {
-        let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(PathBuf::from(r_home))
+        r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                RError::LibraryNotFound(
+                    "R RHOME succeeded but printed no usable path. Is R installed correctly?"
+                        .to_string(),
+                )
+            })
     } else {
         Err(RError::LibraryNotFound(
             "R RHOME failed. Is R installed and in PATH?".to_string(),
