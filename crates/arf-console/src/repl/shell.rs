@@ -90,20 +90,22 @@ const R_VERSION_ENV_VARS: &[&str] = &[
     "R_INCLUDE_DIR",
 ];
 
-/// Environment variables that are always removed before a version switch.
-/// arf sets both of these before the `ensure_ld_library_path`-triggered re-exec,
-/// so the startup snapshot taken after that re-exec cannot distinguish arf's
-/// values from values supplied by the user. Any variable set in that pre-exec
-/// phase belongs here too rather than being restored from the snapshot.
-/// `R_HOME` must also be removed so that restoring the old installation cannot
-/// conflict with `--with-r-version`.
+/// Environment variables removed before a version switch whatever the startup
+/// snapshot holds.
 ///
-/// TODO: Now that the startup snapshot carrier is forwarded through both the
-/// `ensure_ld_library_path` re-exec and a restart, these two variables could
-/// follow the same restore-or-remove rule as everything else in
-/// `R_VERSION_ENV_VARS`, and a `LD_LIBRARY_PATH` the user set for unrelated
-/// libraries would survive a switch instead of being dropped. Dropping this
-/// special case is a behavior change and is deliberately left for later.
+/// `R_HOME` is removed because restoring the old installation would fight the
+/// version the switch asked for. `LD_LIBRARY_PATH` is removed to keep the
+/// behaviour it has had until now.
+///
+/// The snapshot could tell arf's own values from the user's for both of these:
+/// it is carried through the `ensure_ld_library_path` re-exec as well as
+/// through a restart, so it is no longer rebuilt from an environment arf had
+/// already written to.
+///
+/// TODO: Let these two follow the same restore-or-remove rule as the rest of
+/// `R_VERSION_ENV_VARS`, so a `LD_LIBRARY_PATH` the user set for unrelated
+/// libraries survives a switch instead of being dropped. That changes what
+/// users observe, so it belongs in a change of its own.
 const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
 
 #[derive(Default)]

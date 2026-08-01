@@ -1,4 +1,12 @@
 //! Regression tests for interactive process behavior.
+//!
+//! TODO: Two paths through `:switch` are missing here because reaching them
+//! needs rig and a second R version, which CI does not install: a `:restart`
+//! before a `:switch`, and the same again with `LD_LIBRARY_PATH` first emptied
+//! of the R library directory so the restart re-execs a second time. Both once
+//! carried the previous version's library paths into the new session, and both
+//! are verified by hand today. They belong in a job that installs rig and two R
+//! versions, kept out of the ordinary test run.
 
 mod common;
 
