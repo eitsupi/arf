@@ -178,8 +178,14 @@ pub fn get_r_home() -> RResult<PathBuf> {
         .map_err(|e| RError::LibraryNotFound(format!("Failed to run R RHOME: {}", e)))?;
 
     if output.status.success() {
-        let r_home = r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout));
-        Ok(PathBuf::from(r_home.unwrap_or_default()))
+        r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                RError::LibraryNotFound(
+                    "R RHOME succeeded but printed no usable path. Is R installed correctly?"
+                        .to_string(),
+                )
+            })
     } else {
         Err(RError::LibraryNotFound(
             "R RHOME failed. Is R installed and in PATH?".to_string(),
