@@ -62,7 +62,8 @@ const STARTUP_ENV_VARS: &[&str] = &[
     "R_INCLUDE_DIR",
     "R_SYSTEM_ABI",
 ];
-/// Carries the startup snapshot to the process a restart execs into.
+/// Carries the startup snapshot across a restart or the
+/// `ensure_ld_library_path` re-exec.
 ///
 /// The leading underscore marks it as arf's own and keeps it clear of ordinary
 /// names; it does not stop anyone from setting it. What guards the snapshot is
@@ -497,8 +498,9 @@ fn run() -> Result<()> {
     repl_result
 }
 
-/// Capture the environment inherited by arf before R initialization can add
-/// any R-specific variables.
+/// Read the startup environment snapshot before R initialization can add any
+/// R-specific variables, using the carrier forwarded through a prior re-exec
+/// when present and otherwise capturing the current environment.
 fn capture_startup_env() {
     // SAFETY: run() calls this at the start of process initialization, before
     // arf starts any threads or initializes R, so changing the process

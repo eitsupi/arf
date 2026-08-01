@@ -93,17 +93,14 @@ const R_VERSION_ENV_VARS: &[&str] = &[
 /// Environment variables removed before a version switch whatever the startup
 /// snapshot holds.
 ///
-/// `R_HOME` is removed because restoring the old installation would fight the
-/// version the switch asked for. `LD_LIBRARY_PATH` is removed to keep the
-/// behaviour it has had until now.
+/// `R_HOME` is removed because arf always sets it from the R version it
+/// resolved, so any inherited value is meaningless and restoring it would be
+/// wrong. `LD_LIBRARY_PATH` is removed to preserve the behaviour it has had
+/// until now, even though the startup snapshot preserves the user's intent
+/// when they set it themselves.
 ///
-/// The snapshot could tell arf's own values from the user's for both of these:
-/// it is carried through the `ensure_ld_library_path` re-exec as well as
-/// through a restart, so it is no longer rebuilt from an environment arf had
-/// already written to.
-///
-/// TODO: Let these two follow the same restore-or-remove rule as the rest of
-/// `R_VERSION_ENV_VARS`, so a `LD_LIBRARY_PATH` the user set for unrelated
+/// TODO: Let `LD_LIBRARY_PATH` follow the same restore-or-remove rule as the
+/// rest of `R_VERSION_ENV_VARS`, so a value the user set for unrelated
 /// libraries survives a switch instead of being dropped. That changes what
 /// users observe, so it belongs in a change of its own.
 const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
@@ -118,9 +115,10 @@ struct EnvChanges {
 ///
 /// The startup snapshot is injected so this policy can be tested without
 /// depending on the process environment. Variables in
-/// `ALWAYS_REMOVE_ENV_VARS` are always removed because their startup values
-/// may have been set by arf itself before the re-exec that captures the
-/// startup snapshot.
+/// `ALWAYS_REMOVE_ENV_VARS` are always removed for their distinct policies:
+/// `R_HOME` is always set by arf from the resolved R version, while
+/// `LD_LIBRARY_PATH` remains removed to preserve current behaviour even though
+/// the carrier preserves a user-set startup value across re-execs.
 fn env_changes_for_switch<F>(version: Option<&str>, mut startup_value: F) -> EnvChanges
 where
     F: FnMut(&str) -> Option<OsString>,
