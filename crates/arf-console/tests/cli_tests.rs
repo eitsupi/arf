@@ -514,6 +514,31 @@ fn test_eval_basic() {
     assert!(stdout.contains("[1] 2"), "Should output [1] 2: {}", stdout);
 }
 
+/// Test that a mismatched R_HOME does not prevent startup or evaluation.
+#[test]
+#[cfg(unix)]
+fn test_eval_with_mismatched_r_home() {
+    let output = sanitized_arf_command()
+        .env("R_HOME", r"/tmp/arf-test-nonexistent-r-4.0.5")
+        .args(["-e", r#"1 + 1"#])
+        .output()
+        .expect("Failed to run arf -e with mismatched R_HOME");
+
+    assert!(
+        output.status.success(),
+        "arf -e should succeed with a mismatched R_HOME: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[1] 2"),
+        "R should evaluate an expression with a mismatched R_HOME: {}",
+        stdout
+    );
+}
+
 /// Test multiple expressions with -e flag.
 #[test]
 fn test_eval_multiple_expressions() {
