@@ -2,9 +2,11 @@
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-08-01
+
 ### Added
 
-- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default.
+- **Experimental:** arf can now read the R version a project has pinned and start that version instead of the configured default (#271, #288).
   It is opt-in through `experimental.r_source_overrides` in the `arf.toml` config.
 
   For example, the following configuration looks for two TOML files named `rproject.toml` and `rproj.toml` in the current directory, in order:
@@ -39,22 +41,22 @@
   For now, it seems neither of these formats is widely adopted, so arf introduces a generic `toml-key` type that allows us to specify the filename and key path and supports Cargo-style version ranges.
   Of course, we can also support other TOML files with different names and keys for specifying the R version.
 
-- `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables.
-- `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4`. Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
-- `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown.
-- `arf ipc session`, `arf ipc list`, and `arf headless --json` now report `r_home`, the R installation the session is using, so an editor can use the same R instead of discovering one for itself. Sessions started by an older arf omit it, which clients should treat as unknown.
-- **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON on success.
+- `ARF_R_HOME` and `ARF_R_VERSION` can now select the R installation through environment variables (#271).
+- `--with-r-version` and `:switch` now accept version ranges (`^4.4`, `~4.4`, `>=4.3, <5.0`, `*`) in addition to exact and partial version numbers such as `4.4.2` and `4.4` (#271). Range operators come from the convention Cargo and npm use; R's own version numbers are plain `major.minor.patch` releases, so prerelease identifiers and build metadata are rejected.
+- `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown (#283).
+- `arf ipc session`, `arf ipc list`, and `arf headless --json` now report `r_home`, the R installation the session is using, so an editor can use the same R instead of discovering one for itself. Sessions started by an older arf omit it, which clients should treat as unknown (#294).
+- **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON on success (#290, #291, #293).
 
 ### Changed
 
-- Partial version numbers passed to `--with-r-version` and `:switch` (e.g. `4.4`) now match only that release series (`4.4.x`) instead of any version starting with the same text.
+- Partial version numbers passed to `--with-r-version` and `:switch` (e.g. `4.4`) now match only that release series (`4.4.x`) instead of any version starting with the same text (#271).
 
 ### Fixed
 
-- arf could fail to start a different R version when `R_HOME` was set in the environment to point at another R installation.
-- Switching R versions with `:switch` no longer leaves stale `.libPaths()` entries from the previous R version, including after a `:restart`. R-related variables you set before starting arf are kept, apart from `R_HOME` and `LD_LIBRARY_PATH`, which are always removed. `:restart` still leaves the environment untouched.
-- Flags placed before a subcommand no longer get silently ignored; arf now reports the error and explains where the flag belongs.
-- Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived.
+- arf could fail to start a different R version when `R_HOME` was set in the environment to point at another R installation (#295).
+- Switching R versions with `:switch` no longer leaves stale `.libPaths()` entries from the previous R version, including after a `:restart`. R-related variables you set before starting arf are kept, apart from `R_HOME` and `LD_LIBRARY_PATH`, which are always removed. `:restart` still leaves the environment untouched (#295).
+- Flags placed before a subcommand no longer get silently ignored; arf now reports the error and explains where the flag belongs (#275).
+- Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived (#268).
 - IPC requests containing incomplete R expressions are now rejected before they can enter the continuation prompt.
 
 ## [0.4.4] - 2026-07-26

@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "arf-console"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "arf-libr",
  "insta",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -1568,7 +1568,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r-vignette-to-md"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "htmd",
 ]
@@ -1684,9 +1684,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9220c6cca64ee4a1590cbca66962dae9e6290bdfe89262f8cadeaf624b36f8ec"
+checksum = "76c4cde9afc9d1458c1c5c54f2a29a8e8acae078b6fe9650be824236e7c4ddcc"
 dependencies = [
  "rd-ast",
  "rd2qmd-mdast",
@@ -1698,9 +1698,9 @@ dependencies = [
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e61854dfdd6601bb77080abbada03b259980497bd4305fe17e8075838bdf3e"
+checksum = "3069aab7f4fe35981f750c2145f367c35427559bcb03cd65b665f6b9a8954005"
 dependencies = [
  "serde",
 ]
