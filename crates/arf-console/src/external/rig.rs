@@ -283,7 +283,8 @@ fn get_r_home_from_binary(binary_path: &str) -> Result<String, RigError> {
         )));
     }
 
-    let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let r_home = arf_libr::r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
+        .unwrap_or_default();
     if r_home.is_empty() {
         return Err(RigError::CommandFailed(format!(
             "{} RHOME returned empty result",

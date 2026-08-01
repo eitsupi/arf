@@ -33,7 +33,8 @@ pub(super) fn resolve_r_home_from_path(path: &std::path::Path) -> Result<std::pa
             anyhow::bail!("{} RHOME failed: {}", r_binary.display(), stderr);
         }
 
-        let r_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let r_home = arf_libr::r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
+            .unwrap_or_default();
         if r_home.is_empty() {
             anyhow::bail!("{} RHOME returned empty result", r_binary.display());
         }
