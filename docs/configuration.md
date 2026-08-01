@@ -637,6 +637,20 @@ Rig selectors are separate from version specifications:
 
 `--with-r-version` and `:switch` try these selectors before interpreting the value as a version specification, in the order listed above. R source overrides never consult them and always interpret the value as a version specification. This matters when a rig alias or name looks like a version number: if an installation is named `4.4`, then `--with-r-version 4.4` selects that installation by name, while `4.4` in an override file selects the newest installed `4.4.x` release, which may be a different installation.
 
+### Switching and Restarting
+
+`:switch <version>` and `:restart` both restart arf, but they differ in how they treat the environment:
+
+- `:switch <version>` restores the startup values of `R_LIBS_USER`, `R_LIBS_SITE`, `R_DOC_DIR`, `R_SHARE_DIR`, `R_INCLUDE_DIR`, and `R_SYSTEM_ABI`, if they were present when arf started. If one was absent at startup, arf removes it before restarting so the new R can compute it. `R_HOME` and `LD_LIBRARY_PATH` are always removed: arf may set them while preparing its R runtime, making their startup values indistinguishable from values you set yourself, and restoring `R_HOME` could conflict with the requested `--with-r-version`. This preserves other values explicitly supplied by the user while preventing values introduced by R or the session from leaking into the new version. If any variables are affected, arf prints their names but never their values, for example:
+
+  ```text
+  # [arf] Environment variables for the R version switch: restored: R_LIBS_USER; removed: R_HOME, LD_LIBRARY_PATH
+  ```
+
+  For values that should persist across R version switches, prefer `~/.Renviron` over shell environment variables. R reads that file afresh for each version, so its `${VAR-'default'}` handling can calculate paths for the selected installation instead of carrying one exact shell value across versions.
+
+- `:restart` restarts the same version and clears none of these variables, so user-set values and anything set during the session with `Sys.setenv()` carry over.
+
 ## History Configuration
 
 ### Configuration

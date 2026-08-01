@@ -1,6 +1,7 @@
 //! Shell command execution and process management.
 
 use crate::external::rig::{self, RigError};
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
@@ -65,69 +66,124 @@ pub fn confirm_action(prompt: &str) -> bool {
     }
 }
 
-/// Environment variables to clear when switching R versions via `:switch`.
+/// Environment variables whose R-specific values must not leak across `:switch`.
 ///
-/// Each of these can hold a value scoped to the R installation that was
-/// running before the switch, so it must not survive into the new process:
-/// if it did, the new process would see an "already configured" variable and
-/// skip recomputing it for the new R version (for example, `.libPaths()`
-/// would keep pointing at the old version's library directories).
+/// Values inherited at arf startup are restored for all variables except the
+/// names in `ALWAYS_REMOVE_ENV_VARS`. Values absent at startup are removed so
+/// that the new R process can compute them afresh.
+/// The comments record where each value comes from when the user did not
+/// supply one, which is what makes it version-specific.
 const R_VERSION_ENV_VARS: &[&str] = &[
-    // Clear the old R installation selected by the `bin/R` wrapper script.
+    // Always removed, whatever its origin; see `ALWAYS_REMOVE_ENV_VARS`.
     "R_HOME",
-    // Clear the old version's library path from the dynamic linker environment.
+    // Always removed, whatever its origin; see `ALWAYS_REMOVE_ENV_VARS`.
     "LD_LIBRARY_PATH",
-    // Clear the user library path read from the old R_HOME/etc/Renviron.
+    // Read from the old R_HOME/etc/Renviron.
     "R_LIBS_USER",
-    // Clear the site library path read from the old R_HOME/etc/Renviron.
     "R_LIBS_SITE",
-    // Clear the documentation directory set by the old R_HOME/bin/R wrapper.
-    "R_DOC_DIR",
-    // Clear the shared-data directory set by the old R_HOME/bin/R wrapper.
-    "R_SHARE_DIR",
-    // Clear the include directory set by the old R_HOME/bin/R wrapper.
-    "R_INCLUDE_DIR",
-    // Clear the ABI value read from the old R_HOME/etc/Renviron.
     "R_SYSTEM_ABI",
+    // Set from the old R_HOME/bin/R wrapper script.
+    "R_DOC_DIR",
+    "R_SHARE_DIR",
+    "R_INCLUDE_DIR",
 ];
 
-/// Return the environment variables that should be cleared before restarting.
+/// Environment variables that are always removed before a version switch.
+/// arf sets both of these before the `ensure_ld_library_path`-triggered re-exec,
+/// so the startup snapshot taken after that re-exec cannot distinguish arf's
+/// values from values supplied by the user. Any variable set in that pre-exec
+/// phase belongs here too rather than being restored from the snapshot.
+/// `R_HOME` must also be removed so that restoring the old installation cannot
+/// conflict with `--with-r-version`.
+const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
+
+#[derive(Default)]
+struct EnvChanges {
+    restored: Vec<(&'static str, OsString)>,
+    removed: Vec<&'static str>,
+}
+
+/// Return the environment changes needed before restarting.
 ///
-/// Switching to a new `version` must drop any version-specific state left
-/// behind by the previous R installation, so the new process recomputes it
-/// from scratch. Restarting with the same version (`version` is `None`)
-/// should leave the environment untouched, preserving user configuration and
-/// any values set via `Sys.setenv()` during the session.
-fn env_vars_to_clear(version: Option<&str>) -> &'static [&'static str] {
-    if version.is_some() {
-        R_VERSION_ENV_VARS
-    } else {
-        &[]
+/// The startup snapshot is injected so this policy can be tested without
+/// depending on the process environment. Variables in
+/// `ALWAYS_REMOVE_ENV_VARS` are always removed because their startup values
+/// may have been set by arf itself before the re-exec that captures the
+/// startup snapshot.
+fn env_changes_for_switch<F>(version: Option<&str>, mut startup_value: F) -> EnvChanges
+where
+    F: FnMut(&str) -> Option<OsString>,
+{
+    let mut changes = EnvChanges::default();
+
+    if version.is_none() {
+        return changes;
     }
+
+    for &var in R_VERSION_ENV_VARS {
+        if ALWAYS_REMOVE_ENV_VARS.contains(&var) {
+            changes.removed.push(var);
+        } else if let Some(value) = startup_value(var) {
+            changes.restored.push((var, value));
+        } else {
+            changes.removed.push(var);
+        }
+    }
+
+    changes
 }
 
-/// Filter `vars` down to the ones that are currently set, according to `is_set`.
-///
-/// `is_set` is injected (rather than calling `std::env::var_os` directly) so
-/// this can be tested without depending on the real process environment.
-fn present_env_vars<'a>(vars: &[&'a str], mut is_set: impl FnMut(&str) -> bool) -> Vec<&'a str> {
-    vars.iter().copied().filter(|var| is_set(var)).collect()
-}
-
-/// Build the command used to restart the process, with `vars` removed from
-/// its environment.
+/// Build the command used to restart the process with the requested changes.
 ///
 /// Using `Command::env_remove()` (rather than mutating the current process's
 /// own environment before spawning/exec'ing) keeps this scoped to the child:
 /// on the non-Unix spawn path the parent process stays alive after this call
 /// returns, so mutating its environment directly would leak into it.
-fn build_restart_command(exe: &std::path::Path, args: &[String], vars: &[&str]) -> Command {
+fn build_restart_command(exe: &std::path::Path, args: &[String], changes: &EnvChanges) -> Command {
     let mut cmd = Command::new(exe);
     cmd.args(args);
-    for var in vars {
+    for (var, value) in &changes.restored {
+        cmd.env(var, value);
+    }
+    for var in &changes.removed {
         cmd.env_remove(var);
     }
     cmd
+}
+
+/// Print the environment changes that will affect the restarted process.
+fn print_env_changes(changes: &EnvChanges) {
+    let removed: Vec<&str> = changes
+        .removed
+        .iter()
+        .copied()
+        .filter(|var| std::env::var_os(var).is_some())
+        .collect();
+
+    if changes.restored.is_empty() && removed.is_empty() {
+        return;
+    }
+
+    let mut details = Vec::new();
+    if !changes.restored.is_empty() {
+        details.push(format!(
+            "restored: {}",
+            changes
+                .restored
+                .iter()
+                .map(|(var, _)| *var)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !removed.is_empty() {
+        details.push(format!("removed: {}", removed.join(", ")));
+    }
+
+    arf_println!(
+        "Environment variables for the R version switch: {}",
+        details.join("; ")
+    );
 }
 
 /// Restart the process, optionally with a new R version.
@@ -183,21 +239,15 @@ pub fn restart_process(version: Option<&str>) {
         args.push(v.to_string());
     }
 
-    let vars_to_clear = env_vars_to_clear(version);
-    let present_vars = present_env_vars(vars_to_clear, |var| std::env::var_os(var).is_some());
-    if !present_vars.is_empty() {
-        arf_println!(
-            "Clearing version-specific environment variables: {}",
-            present_vars.join(", ")
-        );
-    }
+    let changes = env_changes_for_switch(version, crate::startup_env_value);
+    print_env_changes(&changes);
 
     // Build the command
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
 
-        let mut cmd = build_restart_command(&exe, &args, &present_vars);
+        let mut cmd = build_restart_command(&exe, &args, &changes);
 
         // exec() replaces the current process - this should not return
         let err = cmd.exec();
@@ -211,7 +261,7 @@ pub fn restart_process(version: Option<&str>) {
         // wait for the child and then exit with its status code. This keeps the
         // parent alive to hold the terminal session, preventing the shell from
         // reclaiming control.
-        match build_restart_command(&exe, &args, &present_vars)
+        match build_restart_command(&exe, &args, &changes)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -280,6 +330,7 @@ fn filter_r_version_args(args: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
 
     #[test]
     fn command_failed_rig_switch_error_preserves_reason_without_install_guidance() {
@@ -293,41 +344,63 @@ mod tests {
     }
 
     #[test]
-    fn env_vars_to_clear_only_returns_version_vars_for_switches() {
-        assert_eq!(env_vars_to_clear(Some(r"4.0")), R_VERSION_ENV_VARS);
-        assert!(env_vars_to_clear(None).is_empty());
-    }
+    fn build_restart_command_restores_a_startup_value() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| {
+            (var == "R_LIBS_USER").then(|| OsString::from(r"/user/r/library"))
+        });
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
 
-    #[test]
-    fn present_env_vars_keeps_only_set_variables() {
-        let vars = ["R_HOME", "R_LIBS_USER", "R_SYSTEM_ABI"];
-
-        let present = present_env_vars(&vars, |var| var != "R_LIBS_USER");
-
-        assert_eq!(present, vec!["R_HOME", "R_SYSTEM_ABI"]);
-    }
-
-    #[test]
-    fn build_restart_command_marks_requested_variables_for_removal() {
-        let args = vec![r"--with-r-version".to_string(), r"4.0".to_string()];
-        let cmd = build_restart_command(
-            std::path::Path::new(r"arf"),
-            &args,
-            &["R_HOME", "R_LIBS_USER"],
-        );
-
-        let removed_vars: Vec<&str> = cmd
+        let restored = cmd
             .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(key, _)| key.to_str().unwrap())
-            .collect();
-
-        assert_eq!(removed_vars, vec!["R_HOME", "R_LIBS_USER"]);
+            .find(|(key, _)| *key == OsStr::new(r"R_LIBS_USER"))
+            .map(|(_, value)| value);
+        assert_eq!(restored, Some(Some(OsStr::new(r"/user/r/library"))));
     }
 
     #[test]
-    fn build_restart_command_keeps_environment_overrides_empty_without_vars() {
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], env_vars_to_clear(None));
+    fn build_restart_command_removes_a_variable_absent_from_snapshot() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |_| None);
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+
+        assert!(
+            cmd.get_envs()
+                .any(|(key, value)| key == OsStr::new(r"R_HOME") && value.is_none())
+        );
+    }
+
+    #[test]
+    fn build_restart_command_always_removes_ld_library_path() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| {
+            (var == "LD_LIBRARY_PATH").then(|| OsString::from(r"/old/r/lib"))
+        });
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+
+        assert!(
+            cmd.get_envs()
+                .any(|(key, value)| key == OsStr::new(r"LD_LIBRARY_PATH") && value.is_none())
+        );
+    }
+
+    #[test]
+    fn build_restart_command_always_removes_r_home_from_snapshot() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| {
+            (var == "R_HOME").then(|| OsString::from(r"/old/r"))
+        });
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+
+        assert!(
+            cmd.get_envs()
+                .any(|(key, value)| key == OsStr::new(r"R_HOME") && value.is_none())
+        );
+        assert!(!changes.restored.iter().any(|(key, _)| *key == "R_HOME"));
+    }
+
+    #[test]
+    fn version_none_registers_no_environment_changes() {
+        let changes = env_changes_for_switch(None, |_| {
+            panic!("restart without a version must not inspect the startup snapshot")
+        });
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
 
         assert!(cmd.get_envs().next().is_none());
     }

@@ -51,7 +51,7 @@
 
 ### Fixed
 
-- Switching R versions with `:switch` no longer leaves stale `.libPaths()` entries from the previous R version.
+- Switching R versions with `:switch` no longer leaves stale `.libPaths()` entries from the previous R version. R-related variables you set yourself before starting arf are preserved across the switch except `R_HOME`, which is always removed so the requested R installation can be selected safely.
 - Flags placed before a subcommand no longer get silently ignored; arf now reports the error and explains where the flag belongs.
 - Commands sent with `arf ipc send` are now recorded in the history database, so they can be recalled with Ctrl+R, the history browser, and the up arrow like typed commands. Previously they were echoed and evaluated but only saved in some cases, depending on when the request arrived.
 - IPC requests containing incomplete R expressions are now rejected before they can enter the continuation prompt.

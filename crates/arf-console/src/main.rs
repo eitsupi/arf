@@ -41,8 +41,24 @@ use pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
 };
 use repl::Repl;
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::OnceLock;
+
+const STARTUP_ENV_VARS: &[&str] = &[
+    "R_HOME",
+    "LD_LIBRARY_PATH",
+    "R_LIBS_USER",
+    "R_LIBS_SITE",
+    "R_DOC_DIR",
+    "R_SHARE_DIR",
+    "R_INCLUDE_DIR",
+    "R_SYSTEM_ABI",
+];
+
+static STARTUP_ENV: OnceLock<HashMap<String, OsString>> = OnceLock::new();
 
 fn main() -> ExitCode {
     match run() {
@@ -59,6 +75,8 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
+    capture_startup_env();
+
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
     // detection that could miss global options before the subcommand.
@@ -441,6 +459,21 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+/// Capture the environment inherited by arf before R initialization can add
+/// any R-specific variables.
+fn capture_startup_env() {
+    let snapshot = STARTUP_ENV_VARS
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| ((*name).to_string(), value)))
+        .collect();
+    let _ = STARTUP_ENV.set(snapshot);
+}
+
+/// Return the value of a variable from the environment inherited at startup.
+pub(crate) fn startup_env_value(name: &str) -> Option<OsString> {
+    STARTUP_ENV.get()?.get(name).cloned()
 }
 
 /// Capture the R_HOME reported by the initialized R runtime.
