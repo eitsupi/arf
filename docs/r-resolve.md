@@ -27,7 +27,7 @@ arf r resolve
     "r_binary": "/opt/R/4.5.2/lib/R/bin/R",
     "resolved_version": "4.5.2"
   },
-  "resolver": { "name": "arf", "version": "0.4.4" },
+  "resolver": { "name": "arf", "version": "0.4.5" },
   "selected_by": {
     "kind": "version_request",
     "requested_r_home": null,
