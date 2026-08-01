@@ -52,6 +52,7 @@ const STARTUP_ENV_VARS: &[&str] = &[
     "LD_LIBRARY_PATH",
     "R_LIBS_USER",
     "R_LIBS_SITE",
+    "R_LIBS",
     "R_DOC_DIR",
     "R_SHARE_DIR",
     "R_INCLUDE_DIR",

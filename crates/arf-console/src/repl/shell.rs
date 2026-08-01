@@ -81,6 +81,8 @@ const R_VERSION_ENV_VARS: &[&str] = &[
     // Read from the old R_HOME/etc/Renviron.
     "R_LIBS_USER",
     "R_LIBS_SITE",
+    // Not set by R itself; may be supplied by the user or the session.
+    "R_LIBS",
     "R_SYSTEM_ABI",
     // Set from the old R_HOME/bin/R wrapper script.
     "R_DOC_DIR",
@@ -358,13 +360,27 @@ mod tests {
     }
 
     #[test]
-    fn build_restart_command_removes_a_variable_absent_from_snapshot() {
+    fn build_restart_command_restores_r_libs_from_startup_snapshot() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| {
+            (var == "R_LIBS").then(|| OsString::from(r"/user/r/libs"))
+        });
+        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+
+        let restored = cmd
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(r"R_LIBS"))
+            .map(|(_, value)| value);
+        assert_eq!(restored, Some(Some(OsStr::new(r"/user/r/libs"))));
+    }
+
+    #[test]
+    fn build_restart_command_removes_r_libs_absent_from_snapshot() {
         let changes = env_changes_for_switch(Some(r"4.0"), |_| None);
         let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
 
         assert!(
             cmd.get_envs()
-                .any(|(key, value)| key == OsStr::new(r"R_HOME") && value.is_none())
+                .any(|(key, value)| key == OsStr::new(r"R_LIBS") && value.is_none())
         );
     }
 
