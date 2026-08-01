@@ -9,8 +9,26 @@ use common::Terminal;
 #[test]
 #[cfg(unix)]
 fn test_pty_restart_preserves_session_environment() {
-    let mut terminal = Terminal::spawn_with_args(&["--no-auto-match", "--no-completion"])
-        .expect("Failed to spawn arf");
+    // This test waits for the restarted session's startup banner, so it needs
+    // an isolated config that forces `show_banner = true`: `spawn_with_args`
+    // does not isolate the process from the user's real config file, and if
+    // the user has `startup.show_banner = false` there, the banner never
+    // appears and the wait below times out even though the restart itself
+    // worked correctly.
+    let config_dir = tempfile::tempdir().expect("Should create a temp config dir");
+    let config_path = config_dir.path().join("arf.toml");
+    std::fs::write(&config_path, "[startup]\nshow_banner = true\n")
+        .expect("Should write the temp config file");
+
+    let mut terminal = Terminal::spawn_with_args(&[
+        "--no-auto-match",
+        "--no-completion",
+        "--config",
+        config_path
+            .to_str()
+            .expect("Config path should be valid UTF-8"),
+    ])
+    .expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
