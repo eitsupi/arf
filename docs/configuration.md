@@ -641,7 +641,7 @@ Rig selectors are separate from version specifications:
 
 `:switch <version>` and `:restart` both restart arf, but they differ in how they treat the environment:
 
-- `:switch <version>` restores the startup values of `R_LIBS_USER`, `R_LIBS_SITE`, `R_LIBS`, `R_DOC_DIR`, `R_SHARE_DIR`, `R_INCLUDE_DIR`, and `R_SYSTEM_ABI`, if they were present when arf started. If one was absent at startup, arf removes it before restarting so the new R can compute it. `R_HOME` and `LD_LIBRARY_PATH` are always removed: arf may set them while preparing its R runtime, making their startup values indistinguishable from values you set yourself, and restoring `R_HOME` could conflict with the requested `--with-r-version`. This preserves other values explicitly supplied by the user while preventing values introduced by R or the session from leaking into the new version. If any variables are affected, arf prints their names but never their values, for example:
+- `:switch <version>` uses arf's original pre-initialization startup snapshot. It restores the startup values of `R_LIBS_USER`, `R_LIBS_SITE`, `R_LIBS`, `R_DOC_DIR`, `R_SHARE_DIR`, `R_INCLUDE_DIR`, and `R_SYSTEM_ABI`, if they were present when arf first started; if one was absent, arf removes it before restarting so the new R can compute it. The snapshot remains available across restarts. `R_HOME` is always removed because arf sets it from the resolved R version, so an inherited value is not meaningful. `LD_LIBRARY_PATH` is also always removed to preserve current behavior, even when it had a user-set value at startup; restoring that value is a future improvement. These rules prevent values introduced by R or the session from leaking into the new version while preserving the other startup values. If any variables are affected, arf prints their names but never their values, for example:
 
   ```text
   # [arf] Environment variables for the R version switch: restored: R_LIBS_USER; removed: R_HOME, LD_LIBRARY_PATH
@@ -649,7 +649,7 @@ Rig selectors are separate from version specifications:
 
   For values that should persist across R version switches, prefer `~/.Renviron` over shell environment variables. R reads that file afresh for each version, so its `${VAR-'default'}` handling can calculate paths for the selected installation instead of carrying one exact shell value across versions.
 
-- `:restart` restarts the same version and clears none of these variables, so user-set values and anything set during the session with `Sys.setenv()` carry over.
+- `:restart` relaunches the same version without touching environment variables, so user-set values and anything set during the session with `Sys.setenv()` carry over.
 
 ## History Configuration
 
