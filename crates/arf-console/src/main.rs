@@ -317,16 +317,37 @@ fn run() -> Result<()> {
     // On Unix, the pre-exec hook restores the terminal mode before exec so the
     // replacement process starts with the original mode. If exec fails (rare),
     // re-install the guard to re-disable echo for the rest of startup.
+    //
+    // A re-exec here inherits this process's environment, so the startup
+    // snapshot carrier is set just before the call and removed right after it
+    // returns. That way it only survives into the exec'd process when a
+    // re-exec actually happens; if the path was already correct (no re-exec)
+    // or the call failed, the carrier never lingers where R or a child
+    // process could see it. Without this, a re-exec here would compute a
+    // fresh snapshot instead of forwarding the one captured at the very start
+    // of this process, silently overwriting it with whatever R changed the
+    // variables to during the session.
     #[cfg(unix)]
-    if let Err(e) =
-        arf_libr::ensure_ld_library_path_with_pre_exec(console_mode::restore_original_input_mode)
     {
-        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
-        // Drop old guard before calling install(): assignment evaluates the RHS
-        // first (capturing and disabling echo), then drops the old guard, which
-        // would call restore and re-enable echo. Explicit drop avoids that.
-        drop(_console_mode_guard);
-        _console_mode_guard = console_mode::ConsoleModeGuard::install();
+        // SAFETY: This runs during single-threaded startup, before any other
+        // threads are spawned and before R is initialized, so mutating the
+        // process environment here cannot race with a concurrent read.
+        unsafe { std::env::set_var(STARTUP_ENV_CARRIER, startup_env_carrier()) };
+        if let Err(e) = arf_libr::ensure_ld_library_path_with_pre_exec(
+            console_mode::restore_original_input_mode,
+        ) {
+            log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+            // Drop old guard before calling install(): assignment evaluates the RHS
+            // first (capturing and disabling echo), then drops the old guard, which
+            // would call restore and re-enable echo. Explicit drop avoids that.
+            drop(_console_mode_guard);
+            _console_mode_guard = console_mode::ConsoleModeGuard::install();
+        }
+        // Reaching this line means no re-exec happened (or it failed), so the
+        // carrier must not stay set for the rest of this process's lifetime.
+        //
+        // SAFETY: same single-threaded, pre-R-init context as above.
+        unsafe { std::env::remove_var(STARTUP_ENV_CARRIER) };
     }
     #[cfg(not(unix))]
     if let Err(e) = arf_libr::ensure_ld_library_path() {

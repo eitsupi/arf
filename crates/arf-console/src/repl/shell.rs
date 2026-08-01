@@ -98,13 +98,12 @@ const R_VERSION_ENV_VARS: &[&str] = &[
 /// `R_HOME` must also be removed so that restoring the old installation cannot
 /// conflict with `--with-r-version`.
 ///
-/// TODO: Drop this special case once the startup snapshot is carried through
-/// the `ensure_ld_library_path` re-exec as well, the way it already is through
-/// a restart. With the original snapshot intact there too, these two can follow
-/// the same restore-or-remove rule as everything else, and a `LD_LIBRARY_PATH`
-/// the user set for unrelated libraries would survive a switch instead of being
-/// dropped. Both re-exec paths have to start carrying it in the same change:
-/// doing one of them alone brings the misclassification straight back.
+/// TODO: Now that the startup snapshot carrier is forwarded through both the
+/// `ensure_ld_library_path` re-exec and a restart, these two variables could
+/// follow the same restore-or-remove rule as everything else in
+/// `R_VERSION_ENV_VARS`, and a `LD_LIBRARY_PATH` the user set for unrelated
+/// libraries would survive a switch instead of being dropped. Dropping this
+/// special case is a behavior change and is deliberately left for later.
 const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
 
 #[derive(Default)]
