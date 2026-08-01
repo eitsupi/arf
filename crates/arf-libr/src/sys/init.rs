@@ -5,7 +5,10 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::sync::atomic::Ordering;
 
-use super::discovery::{find_r_library, get_r_home, set_r_path_vars_from_wrapper};
+use super::discovery::{
+    find_r_library, get_r_home, r_home_from_library_path, r_library_path,
+    set_r_path_vars_from_wrapper,
+};
 #[cfg(windows)]
 use super::interrupt::R_DEFERRED_INTERRUPT_FLAG;
 use super::interrupt::R_INTERRUPT_FLAG;
@@ -56,10 +59,12 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
     let lib_path = find_r_library()?;
     init_r_library(&lib_path)?;
 
-    // Set R_HOME if not already set
-    if env::var("R_HOME").is_err()
-        && let Ok(r_home) = get_r_home()
-    {
+    // R may have found the library through PATH after an invalid R_HOME was
+    // inherited from the environment. Make R_HOME match the library we are
+    // about to initialize so R can load its system Renviron and base package.
+    let r_home_is_valid = env::var_os("R_HOME")
+        .is_some_and(|r_home| r_library_path(std::path::Path::new(&r_home)).exists());
+    if !r_home_is_valid && let Some(r_home) = r_home_from_library_path(&lib_path) {
         // SAFETY: We're in single-threaded initialization
         unsafe { env::set_var("R_HOME", &r_home) };
     }

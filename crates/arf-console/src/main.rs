@@ -630,7 +630,7 @@ fn decode_os_string(encoded: &str) -> Result<OsString, String> {
             .chunks_exact(2)
             .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<_>>();
-        return Ok(OsString::from_wide(&wide));
+        Ok(OsString::from_wide(&wide))
     }
 
     #[cfg(not(any(unix, windows)))]
