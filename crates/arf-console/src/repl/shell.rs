@@ -97,6 +97,14 @@ const R_VERSION_ENV_VARS: &[&str] = &[
 /// phase belongs here too rather than being restored from the snapshot.
 /// `R_HOME` must also be removed so that restoring the old installation cannot
 /// conflict with `--with-r-version`.
+///
+/// TODO: Drop this special case once the startup snapshot is carried through
+/// the `ensure_ld_library_path` re-exec as well, the way it already is through
+/// a restart. With the original snapshot intact there too, these two can follow
+/// the same restore-or-remove rule as everything else, and a `LD_LIBRARY_PATH`
+/// the user set for unrelated libraries would survive a switch instead of being
+/// dropped. Both re-exec paths have to start carrying it in the same change:
+/// doing one of them alone brings the misclassification straight back.
 const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
 
 #[derive(Default)]
@@ -141,9 +149,15 @@ where
 /// own environment before spawning/exec'ing) keeps this scoped to the child:
 /// on the non-Unix spawn path the parent process stays alive after this call
 /// returns, so mutating its environment directly would leak into it.
-fn build_restart_command(exe: &std::path::Path, args: &[String], changes: &EnvChanges) -> Command {
+fn build_restart_command(
+    exe: &std::path::Path,
+    args: &[String],
+    changes: &EnvChanges,
+    startup_env_carrier: &str,
+) -> Command {
     let mut cmd = Command::new(exe);
     cmd.args(args);
+    cmd.env(crate::STARTUP_ENV_CARRIER, startup_env_carrier);
     for (var, value) in &changes.restored {
         cmd.env(var, value);
     }
@@ -243,13 +257,14 @@ pub fn restart_process(version: Option<&str>) {
 
     let changes = env_changes_for_switch(version, crate::startup_env_value);
     print_env_changes(&changes);
+    let startup_env_carrier = crate::startup_env_carrier();
 
     // Build the command
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
 
-        let mut cmd = build_restart_command(&exe, &args, &changes);
+        let mut cmd = build_restart_command(&exe, &args, &changes, &startup_env_carrier);
 
         // exec() replaces the current process - this should not return
         let err = cmd.exec();
@@ -263,7 +278,7 @@ pub fn restart_process(version: Option<&str>) {
         // wait for the child and then exit with its status code. This keeps the
         // parent alive to hold the terminal session, preventing the shell from
         // reclaiming control.
-        match build_restart_command(&exe, &args, &changes)
+        match build_restart_command(&exe, &args, &changes, &startup_env_carrier)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -334,6 +349,8 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
 
+    const TEST_STARTUP_ENV_CARRIER: &str = r#"{"version":1,"variables":{}}"#;
+
     #[test]
     fn command_failed_rig_switch_error_preserves_reason_without_install_guidance() {
         let error = validate_rig_for_switch_with(|| {
@@ -350,7 +367,12 @@ mod tests {
         let changes = env_changes_for_switch(Some(r"4.0"), |var| {
             (var == "R_LIBS_USER").then(|| OsString::from(r"/user/r/library"))
         });
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
         let restored = cmd
             .get_envs()
@@ -364,7 +386,12 @@ mod tests {
         let changes = env_changes_for_switch(Some(r"4.0"), |var| {
             (var == "R_LIBS").then(|| OsString::from(r"/user/r/libs"))
         });
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
         let restored = cmd
             .get_envs()
@@ -376,7 +403,12 @@ mod tests {
     #[test]
     fn build_restart_command_removes_r_libs_absent_from_snapshot() {
         let changes = env_changes_for_switch(Some(r"4.0"), |_| None);
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
         assert!(
             cmd.get_envs()
@@ -389,7 +421,12 @@ mod tests {
         let changes = env_changes_for_switch(Some(r"4.0"), |var| {
             (var == "LD_LIBRARY_PATH").then(|| OsString::from(r"/old/r/lib"))
         });
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
         assert!(
             cmd.get_envs()
@@ -402,7 +439,12 @@ mod tests {
         let changes = env_changes_for_switch(Some(r"4.0"), |var| {
             (var == "R_HOME").then(|| OsString::from(r"/old/r"))
         });
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
         assert!(
             cmd.get_envs()
@@ -416,8 +458,38 @@ mod tests {
         let changes = env_changes_for_switch(None, |_| {
             panic!("restart without a version must not inspect the startup snapshot")
         });
-        let cmd = build_restart_command(std::path::Path::new(r"arf"), &[], &changes);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
 
-        assert!(cmd.get_envs().next().is_none());
+        assert!(changes.restored.is_empty());
+        assert!(changes.removed.is_empty());
+        assert_eq!(
+            cmd.get_envs()
+                .find(|(key, _)| *key == OsStr::new(crate::STARTUP_ENV_CARRIER))
+                .map(|(_, value)| value),
+            Some(Some(OsStr::new(TEST_STARTUP_ENV_CARRIER)))
+        );
+    }
+
+    #[test]
+    fn build_restart_command_sets_carrier_for_switch() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |_| None);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
+
+        assert_eq!(
+            cmd.get_envs()
+                .find(|(key, _)| *key == OsStr::new(crate::STARTUP_ENV_CARRIER))
+                .map(|(_, value)| value),
+            Some(Some(OsStr::new(TEST_STARTUP_ENV_CARRIER)))
+        );
     }
 }
