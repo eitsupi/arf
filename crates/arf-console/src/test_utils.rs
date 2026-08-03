@@ -9,6 +9,16 @@
 //! waiting for the second, while another holds the second while waiting for
 //! the first. Use `lock_env_and_cwd()` to enforce this order structurally, and
 //! never acquire either lock separately while already holding the other.
+//!
+//! Known limitation: these locks cover the environment access a test performs
+//! itself, not every read that happens underneath it. `tempfile::tempdir()`,
+//! for instance, reaches `std::env::temp_dir()`, which reads `TMPDIR` on Unix,
+//! and that read is not serialized against a concurrent `set_var` elsewhere.
+//! Closing that hole would mean holding the environment lock across every
+//! temporary-directory creation in the suite, which would serialize almost all
+//! of it. The remaining risk is left uncovered deliberately; a test runner that
+//! gives each test its own process removes it outright, which is the direction
+//! being pursued separately.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
