@@ -313,7 +313,8 @@ mod tests {
     #[serial]
     fn clear_session_history_id_preserves_session_type() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _guard = crate::test_utils::lock_env_var(ARF_IPC_SESSIONS_DIR, temp_dir.path());
+        let mut guard = crate::test_utils::lock_env();
+        guard.set(ARF_IPC_SESSIONS_DIR, temp_dir.path());
 
         let pid = std::process::id();
         let info = SessionInfo {
