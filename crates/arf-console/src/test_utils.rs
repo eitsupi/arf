@@ -279,10 +279,11 @@ mod tests {
 
     #[test]
     fn lock_env_restores_a_variable_that_was_originally_unset() {
-        // This name is used by no other test and by no production code, so it
-        // is guaranteed to start out unset. Asserting that while holding the
-        // guard avoids the race a lock-then-unlock preamble would introduce.
-        let name = "ARF_TEST_UTILS_ORIGINALLY_UNSET";
+        // Build the name at run time so it cannot have been inherited from the
+        // environment that started the test binary; the test would otherwise
+        // fail whenever someone happened to have that variable set.
+        let name = format!("ARF_TEST_UTILS_ORIGINALLY_UNSET_{}", std::process::id());
+        let name = name.as_str();
 
         {
             let mut guard = lock_env();
