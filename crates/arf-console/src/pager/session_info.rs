@@ -322,6 +322,8 @@ mod tests {
 
     #[test]
     fn test_mask_env_value_with_home() {
+        // Read HOME through dirs::home_dir and mask_env_value -> mask_home_path.
+        let _guard = crate::test_utils::lock_env();
         if let Some(home) = dirs::home_dir() {
             let home_str = home.display().to_string();
             let sep = std::path::MAIN_SEPARATOR;
@@ -340,6 +342,8 @@ mod tests {
 
     #[test]
     fn test_mask_env_value_without_home() {
+        // mask_env_value reads HOME indirectly through mask_home_path.
+        let _guard = crate::test_utils::lock_env();
         let test_value = "/opt/R/library";
         // mask_env_value round-trips through Path::display() which may normalize separators
         let expected = std::path::Path::new(test_value).display().to_string();
@@ -349,6 +353,8 @@ mod tests {
 
     #[test]
     fn test_mask_env_value_multiple_paths() {
+        // Read HOME through dirs::home_dir and mask_env_value -> mask_home_path.
+        let _guard = crate::test_utils::lock_env();
         if let Some(home) = dirs::home_dir() {
             let home_str = home.display().to_string();
             let path_sep = std::path::MAIN_SEPARATOR;
@@ -454,6 +460,8 @@ mod tests {
 
     #[test]
     fn test_generate_info_lines_config_path_none() {
+        // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
+        let _guard = crate::test_utils::lock_env();
         let config = default_prompt_config();
         let lines = generate_info_lines(
             &config,
@@ -476,6 +484,8 @@ mod tests {
 
     #[test]
     fn test_generate_info_lines_config_path_existing() {
+        // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
+        let _guard = crate::test_utils::lock_env();
         let config = default_prompt_config();
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();
@@ -511,6 +521,8 @@ mod tests {
 
     #[test]
     fn test_generate_info_lines_config_path_nonexistent() {
+        // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
+        let _guard = crate::test_utils::lock_env();
         let config = default_prompt_config();
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("nonexistent_config.toml");
@@ -535,6 +547,8 @@ mod tests {
 
     #[test]
     fn test_generate_info_lines_config_parse_error() {
+        // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
+        let _guard = crate::test_utils::lock_env();
         let config = default_prompt_config();
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();
@@ -559,6 +573,8 @@ mod tests {
 
     #[test]
     fn test_generate_info_lines_config_read_error() {
+        // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
+        let _guard = crate::test_utils::lock_env();
         let config = default_prompt_config();
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();

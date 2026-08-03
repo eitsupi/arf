@@ -903,6 +903,8 @@ show_banner = false
 
     #[test]
     fn test_mask_home_path_with_home_prefix() {
+        // mask_home_path reads HOME indirectly through dirs::home_dir.
+        let _guard = crate::test_utils::lock_env();
         if let Some(home) = dirs::home_dir() {
             let test_path = home.join("test").join("file.txt");
             let masked = mask_home_path(&test_path);
@@ -926,6 +928,8 @@ show_banner = false
 
     #[test]
     fn test_mask_home_path_without_home_prefix() {
+        // mask_home_path reads HOME indirectly through dirs::home_dir.
+        let _guard = crate::test_utils::lock_env();
         let test_path = PathBuf::from("/opt/R/4.5.0");
         let expected = test_path.display().to_string();
         let masked = mask_home_path(&test_path);
@@ -937,6 +941,8 @@ show_banner = false
 
     #[test]
     fn test_mask_home_path_exact_home() {
+        // mask_home_path reads HOME indirectly through dirs::home_dir.
+        let _guard = crate::test_utils::lock_env();
         if let Some(home) = dirs::home_dir() {
             let masked = mask_home_path(&home);
             // Should be just "~/" or "~\" depending on platform

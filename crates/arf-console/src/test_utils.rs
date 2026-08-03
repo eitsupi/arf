@@ -47,9 +47,6 @@ pub fn lock_env() -> EnvGuard {
 /// The cwd side is restored automatically when the combined guard is dropped.
 /// Use this helper whenever a test needs both locks so that their acquisition
 /// order cannot be reversed accidentally.
-/// This helper is currently unused, but exists to enforce the ordering policy
-/// structurally.
-#[allow(dead_code)]
 pub fn lock_env_and_cwd() -> EnvCwdGuard {
     // Keep the acquisition order explicit: environment first, then cwd.
     let env = lock_env();
@@ -204,8 +201,10 @@ mod tests {
     fn lock_env_restores_multiple_variables() {
         let first = "ARF_TEST_UTILS_MULTIPLE_FIRST";
         let second = "ARF_TEST_UTILS_MULTIPLE_SECOND";
-        let original_first = std::env::var_os(first);
-        let original_second = std::env::var_os(second);
+        let (original_first, original_second) = {
+            let _guard = lock_env();
+            (std::env::var_os(first), std::env::var_os(second))
+        };
 
         {
             let mut guard = lock_env();
@@ -221,6 +220,7 @@ mod tests {
             );
         }
 
+        let _guard = lock_env();
         assert_eq!(std::env::var_os(first), original_first);
         assert_eq!(std::env::var_os(second), original_second);
     }
@@ -228,8 +228,10 @@ mod tests {
     #[test]
     fn lock_env_restores_first_original_value_after_repeated_mutations() {
         let name = "ARF_TEST_UTILS_REPEATED";
-        let original = std::env::var_os(name);
-
+        let original = {
+            let _guard = lock_env();
+            std::env::var_os(name)
+        };
         {
             let mut guard = lock_env();
             guard.set(name, "first-change");
@@ -237,6 +239,7 @@ mod tests {
             guard.set(name, "second-change");
         }
 
+        let _guard = lock_env();
         assert_eq!(std::env::var_os(name), original);
     }
 
@@ -244,9 +247,10 @@ mod tests {
     fn lock_env_supports_mixed_set_and_unset_mutations() {
         let set_name = "ARF_TEST_UTILS_MIXED_SET";
         let unset_name = "ARF_TEST_UTILS_MIXED_UNSET";
-        let original_set = std::env::var_os(set_name);
-        let original_unset = std::env::var_os(unset_name);
-
+        let (original_set, original_unset) = {
+            let _guard = lock_env();
+            (std::env::var_os(set_name), std::env::var_os(unset_name))
+        };
         {
             let mut guard = lock_env();
             guard.set(set_name, "set-value");
@@ -258,6 +262,7 @@ mod tests {
             assert_eq!(std::env::var_os(unset_name), None);
         }
 
+        let _guard = lock_env();
         assert_eq!(std::env::var_os(set_name), original_set);
         assert_eq!(std::env::var_os(unset_name), original_unset);
     }
@@ -275,6 +280,7 @@ mod tests {
             guard.set(name, "temporary-value");
         }
 
+        let _guard = lock_env();
         assert_eq!(std::env::var_os(name), None);
     }
 
@@ -282,15 +288,17 @@ mod tests {
     fn lock_env_allows_mutating_two_variables_without_deadlocking() {
         let first = "ARF_TEST_UTILS_NO_DEADLOCK_FIRST";
         let second = "ARF_TEST_UTILS_NO_DEADLOCK_SECOND";
-        let original_first = std::env::var_os(first);
-        let original_second = std::env::var_os(second);
-
+        let (original_first, original_second) = {
+            let _guard = lock_env();
+            (std::env::var_os(first), std::env::var_os(second))
+        };
         {
             let mut guard = lock_env();
             guard.set(first, "first-value");
             guard.set(second, "second-value");
         }
 
+        let _guard = lock_env();
         assert_eq!(std::env::var_os(first), original_first);
         assert_eq!(std::env::var_os(second), original_second);
     }
@@ -298,13 +306,15 @@ mod tests {
     #[test]
     fn lock_env_and_cwd_restores_both_after_combined_use() {
         let name = "ARF_TEST_UTILS_COMBINED";
-        let original_value = std::env::var_os(name);
         let temp_dir = tempfile::tempdir().unwrap();
 
-        let original_cwd = {
-            let mut guard = lock_env_and_cwd();
-            let original_cwd = std::env::current_dir().unwrap();
+        let (original_value, original_cwd) = {
+            let _guard = lock_env_and_cwd();
+            (std::env::var_os(name), std::env::current_dir().unwrap())
+        };
 
+        {
+            let mut guard = lock_env_and_cwd();
             guard.env().set(name, "combined-value");
             std::env::set_current_dir(temp_dir.path()).unwrap();
 
@@ -317,10 +327,9 @@ mod tests {
                 std::env::current_dir().unwrap().canonicalize().ok(),
                 temp_dir.path().canonicalize().ok()
             );
+        }
 
-            original_cwd
-        };
-
+        let _guard = lock_env_and_cwd();
         assert_eq!(std::env::var_os(name), original_value);
         assert_eq!(std::env::current_dir().unwrap(), original_cwd);
     }

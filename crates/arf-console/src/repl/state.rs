@@ -636,6 +636,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_build_main_prompt() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let config = create_test_config(false, false);
         let prompt = config.build_main_prompt();
         assert_eq!(prompt.render_prompt_left(), "r> ");
@@ -643,6 +645,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_reprex_mode_indicator() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let config = create_test_config(true, false);
         let prompt = config.build_main_prompt();
         assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
@@ -650,6 +654,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_toggle_reprex() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(false, false);
 
         assert!(!config.is_reprex_enabled());
@@ -661,6 +667,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_set_reprex_with_comment() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(false, false);
 
         config.set_reprex(true, Some("## "));
@@ -670,6 +678,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_shell_mode_prompt() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(false, false);
 
         // Initially R mode prompt
@@ -694,6 +704,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_autoformat_mode_indicator() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(false, false);
 
         // Initially no indicator
@@ -728,6 +740,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_custom_autoformat_indicator() {
+        // create_test_config_with_indicators reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let indicators = Indicators {
             autoformat: "[AIR] ".to_string(),
             ..Indicators::default()
@@ -742,6 +756,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_cwd_placeholder_expansion() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         // Test that {cwd} and {cwd_short} placeholders are expanded dynamically
         let config = PromptRuntimeConfig::builder(
             PromptFormatter::default(),
@@ -770,7 +786,8 @@ mod tests {
 
     #[test]
     fn test_prompt_runtime_config_dynamic_cwd_update() {
-        let _guard = crate::test_utils::lock_cwd();
+        // PromptFormatter::new reads SHELL; the test also changes the cwd.
+        let _guard = crate::test_utils::lock_env_and_cwd();
 
         // Test that build_main_prompt() returns updated cwd after directory change
         let config =
@@ -817,6 +834,8 @@ mod tests {
 
     #[test]
     fn test_status_indicator_with_error_symbol() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let status_config = StatusConfig {
             symbol: StatusSymbol {
                 success: "".to_string(),
@@ -858,6 +877,8 @@ mod tests {
 
     #[test]
     fn test_status_indicator_with_empty_symbols() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         // Both symbols empty - equivalent to old mode=None
         let status_config = StatusConfig {
             symbol: StatusSymbol {
@@ -884,6 +905,8 @@ mod tests {
 
     #[test]
     fn test_status_without_placeholder() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         // Test that status config has no effect when {status} placeholder is absent
         let status_config = StatusConfig {
             symbol: StatusSymbol {
@@ -913,6 +936,8 @@ mod tests {
 
     #[test]
     fn test_status_override_prompt_color() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let status_config = StatusConfig {
             symbol: StatusSymbol {
                 success: "".to_string(),
@@ -955,6 +980,8 @@ mod tests {
 
     #[test]
     fn test_spinner_not_started_in_shell_mode() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(false, false);
         config.set_shell(true);
         // In shell mode, start_spinner should be a no-op (no panic, etc.)
@@ -965,6 +992,8 @@ mod tests {
 
     #[test]
     fn test_spinner_not_started_with_empty_frames() {
+        // create_test_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         // Create config with empty spinner frames (disabled by default)
         let config = create_test_config(false, false);
         // Should not panic when spinner is disabled
@@ -1010,6 +1039,8 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_below_threshold() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let mut config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
                 .mode_indicator_position(ModeIndicatorPosition::None)
@@ -1024,6 +1055,8 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_above_threshold() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let mut config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
                 .mode_indicator_position(ModeIndicatorPosition::None)
@@ -1047,6 +1080,8 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_no_data() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
                 .mode_indicator_position(ModeIndicatorPosition::None)
@@ -1059,6 +1094,8 @@ mod tests {
 
     #[test]
     fn test_clear_command_duration() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let mut config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "{duration}r> ", "+  ", "$ ")
                 .mode_indicator_position(ModeIndicatorPosition::None)
@@ -1082,6 +1119,8 @@ mod tests {
 
     #[test]
     fn test_duration_placeholder_not_present() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let mut config =
             PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "$ ")
                 .mode_indicator_position(ModeIndicatorPosition::None)
@@ -1095,6 +1134,8 @@ mod tests {
 
     #[test]
     fn test_duration_custom_threshold() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let duration_config = PromptDurationConfig {
             threshold_ms: 500,
             ..PromptDurationConfig::default()
@@ -1118,6 +1159,8 @@ mod tests {
 
     #[test]
     fn test_duration_custom_format() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let duration_config = PromptDurationConfig {
             format: "took {value} ".to_string(),
             threshold_ms: 2000,
@@ -1146,6 +1189,8 @@ mod tests {
 
     #[test]
     fn test_duration_format_with_brackets() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let duration_config = PromptDurationConfig {
             format: "({value}) ".to_string(),
             threshold_ms: 2000,
@@ -1169,6 +1214,8 @@ mod tests {
 
     #[test]
     fn test_duration_format_without_value_placeholder() {
+        // PromptFormatter::new reads SHELL while this test builds the formatter.
+        let _guard = crate::test_utils::lock_env();
         let duration_config = PromptDurationConfig {
             format: "slow! ".to_string(),
             threshold_ms: 2000,

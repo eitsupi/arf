@@ -313,6 +313,7 @@ mod tests {
     #[serial]
     fn clear_session_history_id_preserves_session_type() {
         let temp_dir = tempfile::tempdir().unwrap();
+        // clear_session_history_id reads ARF_IPC_SESSIONS_DIR through sessions_dir.
         let mut guard = crate::test_utils::lock_env();
         guard.set(ARF_IPC_SESSIONS_DIR, temp_dir.path());
 

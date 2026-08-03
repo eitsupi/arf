@@ -700,6 +700,8 @@ mod tests {
 
     #[test]
     fn test_print_schema_runs() {
+        // print_schema reads HOME/XDG variables indirectly through history_dir.
+        let _guard = crate::test_utils::lock_env();
         // On systems with XDG support, this should succeed
         // On other systems (or in restrictive environments), it may fail
         let _ = print_schema();

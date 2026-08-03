@@ -46,7 +46,8 @@ fn test_parse_r_history_preserves_leading_whitespace() {
 
 #[test]
 fn test_default_paths() {
-    // Hold the lock to keep concurrent environment writers out while reading R_HISTFILE.
+    // default_radian_path reads HOME through dirs::home_dir, and
+    // default_r_history_path reads R_HISTFILE through std::env::var.
     let _guard = crate::test_utils::lock_env();
     // These just verify the functions don't panic
     let radian_path = default_radian_path();
