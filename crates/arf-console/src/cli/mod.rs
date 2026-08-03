@@ -292,7 +292,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_help_headless_snapshot() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -314,10 +313,9 @@ mod tests {
 
     // clap renders the current value of an option's environment variable into
     // the long help, so this snapshot only holds if those variables are unset.
-    // Clearing them keeps the test independent of the surrounding environment,
-    // and serializing keeps the tests below from setting them concurrently.
+    // Clearing them keeps the test independent of the surrounding environment;
+    // the environment guard keeps the tests below from setting them concurrently.
     #[test]
-    #[serial_test::serial]
     fn test_help_long_snapshot() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -331,7 +329,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_history_dir_rejects_empty_string() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -341,7 +338,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_normal_cli() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -351,7 +347,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_headless_cli() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -364,7 +359,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_r_resolve_subcommand_has_its_own_resolution_flags() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -393,7 +387,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -404,7 +397,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_arf_r_home_has_same_precedence_as_r_home() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -419,7 +411,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_arf_r_version_has_same_precedence_as_with_r_version() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -431,7 +422,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_cli_value_wins_over_r_source_environment_value() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -450,7 +440,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_arf_r_home_conflicts_with_with_r_version() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
@@ -462,7 +451,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_headless_r_source_flags_read_environment_values() {
         let mut guard = crate::test_utils::lock_env();
         guard.set("ARF_R_HOME", "/env/r-home");
@@ -484,7 +472,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_headless_r_source_flags_conflict_with_environment_values() {
         let mut guard = crate::test_utils::lock_env();
         guard.set("ARF_R_HOME", "/env/r-home");
@@ -497,7 +484,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn test_headless_history_dir_reads_environment_value() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");

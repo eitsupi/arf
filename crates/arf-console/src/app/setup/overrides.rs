@@ -499,7 +499,6 @@ mod r_source_override_tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn resolve_r_source_does_not_mutate_r_home() {
         // Hold the lock to keep concurrent environment writers out while reading R_HOME.
         let _guard = crate::test_utils::lock_env();
@@ -583,7 +582,6 @@ mod r_source_override_tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn apply_r_source_does_not_set_r_home_for_path_mode() {
         // Hold the lock to keep concurrent environment writers out while reading R_HOME.
         let _guard = crate::test_utils::lock_env();

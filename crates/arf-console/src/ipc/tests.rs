@@ -73,6 +73,8 @@ fn test_alternate_mode_flag_and_request_rejection() {
 
 /// Tests that `handle_request` returns arf-only session info (not an error)
 /// in various states: alternate mode, R busy, pending operation.
+// Protects the process-global `IN_ALTERNATE_MODE` / `R_IS_AT_PROMPT` atomics
+// and the `PENDING_IPC_OPERATION` static.
 #[test]
 #[serial]
 fn test_session_returns_arf_only_in_various_states() {

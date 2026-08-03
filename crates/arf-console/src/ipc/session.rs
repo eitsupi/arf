@@ -239,7 +239,6 @@ fn is_process_alive(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     fn session_info(session_type: Option<SessionType>) -> SessionInfo {
         SessionInfo {
@@ -310,7 +309,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn clear_session_history_id_preserves_session_type() {
         let temp_dir = tempfile::tempdir().unwrap();
         // clear_session_history_id reads ARF_IPC_SESSIONS_DIR through sessions_dir.
