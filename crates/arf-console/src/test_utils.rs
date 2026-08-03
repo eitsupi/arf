@@ -2,9 +2,17 @@
 //!
 //! This module provides helpers for tests that need to coordinate
 //! access to process-global state like `current_dir`.
+//!
+//! When a test needs both process-global locks, it must acquire the
+//! environment lock first and the cwd lock second. Two mutexes acquired in
+//! two different orders can deadlock: one test can hold the first mutex while
+//! waiting for the second, while another holds the second while waiting for
+//! the first. Use `lock_env_and_cwd()` to enforce this order structurally, and
+//! never acquire either lock separately while already holding the other.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -21,7 +29,10 @@ static ENV_MUTEX: Mutex<()> = Mutex::new(());
 /// Acquire the environment-variable lock.
 ///
 /// Hold one `EnvGuard` for the duration of a test and mutate all required
-/// variables through it.
+/// variables through it. If the test also needs the cwd lock, use
+/// `lock_env_and_cwd()` instead. A test must never call `lock_cwd()` while it
+/// already holds an `EnvGuard`; the combined helper enforces the required
+/// environment-then-cwd order.
 pub fn lock_env() -> EnvGuard {
     let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     EnvGuard {
@@ -30,11 +41,35 @@ pub fn lock_env() -> EnvGuard {
     }
 }
 
+/// Acquire the environment and cwd locks in the required order.
+///
+/// The returned guard exposes the environment side through [`Self::env`].
+/// The cwd side is restored automatically when the combined guard is dropped.
+/// Use this helper whenever a test needs both locks so that their acquisition
+/// order cannot be reversed accidentally.
+/// This helper is currently unused, but exists to enforce the ordering policy
+/// structurally.
+#[allow(dead_code)]
+pub fn lock_env_and_cwd() -> EnvCwdGuard {
+    // Keep the acquisition order explicit: environment first, then cwd.
+    let env = lock_env();
+    let cwd = lock_cwd();
+    EnvCwdGuard {
+        env: Some(env),
+        cwd: Some(cwd),
+    }
+}
+
 /// Acquire the cwd lock and save the current directory.
 ///
 /// Returns a guard that restores the original directory on drop.
 /// Tests that call `set_current_dir` should use this instead of
 /// manually saving/restoring:
+///
+/// If the test also needs the environment lock, use `lock_env_and_cwd()`
+/// instead. A test must never call `lock_env()` while it already holds a
+/// `CwdGuard`; the combined helper enforces the required environment-then-cwd
+/// order.
 ///
 /// ```ignore
 /// let _guard = test_utils::lock_cwd();
@@ -55,6 +90,41 @@ pub fn lock_cwd() -> CwdGuard {
 pub struct CwdGuard {
     _lock: MutexGuard<'static, ()>,
     original: PathBuf,
+}
+
+/// RAII guard that holds both process-global test locks.
+pub struct EnvCwdGuard {
+    env: Option<EnvGuard>,
+    cwd: Option<CwdGuard>,
+}
+
+impl EnvCwdGuard {
+    /// Access the environment guard while the combined locks are held.
+    pub fn env(&mut self) -> &mut EnvGuard {
+        self.env
+            .as_mut()
+            .expect("combined test guard environment guard was already dropped")
+    }
+}
+
+impl Drop for EnvCwdGuard {
+    fn drop(&mut self) {
+        // Release in reverse acquisition order. Dropping CwdGuard first
+        // restores the directory while both locks are still held; dropping
+        // EnvGuard second then restores variables and releases ENV_MUTEX.
+        // Preserve a CwdGuard restoration panic until after EnvGuard has
+        // released ENV_MUTEX, so a failed restoration cannot strand that lock.
+        let cwd_panic = self
+            .cwd
+            .take()
+            .and_then(|cwd| catch_unwind(AssertUnwindSafe(|| drop(cwd))).err());
+        if let Some(env) = self.env.take() {
+            drop(env);
+        }
+        if let Some(payload) = cwd_panic {
+            resume_unwind(payload);
+        }
+    }
 }
 
 impl Drop for CwdGuard {
@@ -223,5 +293,35 @@ mod tests {
 
         assert_eq!(std::env::var_os(first), original_first);
         assert_eq!(std::env::var_os(second), original_second);
+    }
+
+    #[test]
+    fn lock_env_and_cwd_restores_both_after_combined_use() {
+        let name = "ARF_TEST_UTILS_COMBINED";
+        let original_value = std::env::var_os(name);
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let original_cwd = {
+            let mut guard = lock_env_and_cwd();
+            let original_cwd = std::env::current_dir().unwrap();
+
+            guard.env().set(name, "combined-value");
+            std::env::set_current_dir(temp_dir.path()).unwrap();
+
+            assert_eq!(
+                std::env::var_os(name),
+                Some(OsString::from("combined-value"))
+            );
+            // macOS resolves symlinks in getcwd, so canonicalize both sides.
+            assert_eq!(
+                std::env::current_dir().unwrap().canonicalize().ok(),
+                temp_dir.path().canonicalize().ok()
+            );
+
+            original_cwd
+        };
+
+        assert_eq!(std::env::var_os(name), original_value);
+        assert_eq!(std::env::current_dir().unwrap(), original_cwd);
     }
 }
