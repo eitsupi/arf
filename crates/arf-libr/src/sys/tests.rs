@@ -313,12 +313,7 @@ fn test_parse_var_from_wrapper_script_no_partial_prefix_match() {
 
 #[test]
 fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
-    // NOTE: This test mutates process-global env vars. It saves/restores
-    // R_DOC_DIR to minimise interference with parallel tests.
-    let original = std::env::var("R_DOC_DIR").ok();
-
-    // Pre-set R_DOC_DIR in the environment
-    unsafe { std::env::set_var("R_DOC_DIR", "/custom/doc") };
+    let _env_guard = super::test_utils::RDocDirGuard::new("/custom/doc");
 
     // Create a temp dir with a fake wrapper script (auto-cleaned on drop)
     let tmp = tempfile::tempdir().unwrap();
@@ -334,10 +329,4 @@ fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
 
     // R_DOC_DIR should NOT be overwritten
     assert_eq!(std::env::var("R_DOC_DIR").unwrap(), "/custom/doc");
-
-    // Restore original value
-    match original {
-        Some(val) => unsafe { std::env::set_var("R_DOC_DIR", val) },
-        None => unsafe { std::env::remove_var("R_DOC_DIR") },
-    }
 }
