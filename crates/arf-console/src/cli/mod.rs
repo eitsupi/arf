@@ -251,40 +251,6 @@ Examples:
 mod tests {
     use super::*;
 
-    struct EnvVarGuard {
-        name: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(name: &'static str, value: &str) -> Self {
-            let original = std::env::var_os(name);
-            // SAFETY: Tests serialize access to these process-global variables.
-            unsafe { std::env::set_var(name, value) };
-            Self { name, original }
-        }
-
-        fn unset(name: &'static str) -> Self {
-            let original = std::env::var_os(name);
-            // SAFETY: Tests serialize access to these process-global variables.
-            unsafe { std::env::remove_var(name) };
-            Self { name, original }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            // SAFETY: Tests serialize access to these process-global variables.
-            unsafe {
-                if let Some(value) = &self.original {
-                    std::env::set_var(self.name, value);
-                } else {
-                    std::env::remove_var(self.name);
-                }
-            }
-        }
-    }
-
     #[test]
     fn test_completions_bash_snapshot() {
         let completions = Cli::generate_completions_string(Shell::Bash);
@@ -328,9 +294,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_help_headless_snapshot() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _history_dir = EnvVarGuard::unset("ARF_HISTORY_DIR");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_HISTORY_DIR");
         let help = Cli::generate_help_string(&["headless"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {
             insta::assert_snapshot!("help_headless", help);
@@ -352,9 +319,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_help_long_snapshot() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _history_dir = EnvVarGuard::unset("ARF_HISTORY_DIR");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_HISTORY_DIR");
 
         let help = Cli::generate_help_string(&[]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {
@@ -365,8 +333,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_history_dir_rejects_empty_string() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
         let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
         assert!(result.is_err(), "empty --history-dir should be rejected");
     }
@@ -374,8 +343,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_normal_cli() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
         assert!(cli.r_source.no_r_source_overrides);
     }
@@ -383,8 +353,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_no_r_source_overrides_flag_is_available_on_headless_cli() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "headless", "--no-r-source-overrides"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
@@ -395,8 +366,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_r_resolve_subcommand_has_its_own_resolution_flags() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from([
             "arf",
             "r",
@@ -423,8 +395,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
         let cli =
             Cli::try_parse_from(["arf", "--no-r-source-overrides", "--r-home", "/tmp/r-home"]);
         assert!(cli.is_ok());
@@ -433,9 +406,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_arf_r_home_has_same_precedence_as_r_home() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_R_HOME", "/env/r-home");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
         assert_eq!(
@@ -447,9 +421,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_arf_r_version_has_same_precedence_as_with_r_version() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _env = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_R_VERSION", "4.5");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
         assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
@@ -458,30 +433,29 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_cli_value_wins_over_r_source_environment_value() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        {
-            let _home_env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
-            let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
-            assert_eq!(
-                home_cli.r_source.r_home.as_deref(),
-                Some(std::path::Path::new("/cli/r-home"))
-            );
-        }
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_R_HOME", "/env/r-home");
+        let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
+        assert_eq!(
+            home_cli.r_source.r_home.as_deref(),
+            Some(std::path::Path::new("/cli/r-home"))
+        );
 
-        {
-            let _version_env = EnvVarGuard::set("ARF_R_VERSION", "4.4");
-            let version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
-            assert_eq!(version_cli.r_source.r_version.as_deref(), Some("4.5"));
-        }
+        guard.unset("ARF_R_HOME");
+        guard.set("ARF_R_VERSION", "4.4");
+        let version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
+        assert_eq!(version_cli.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
     #[serial_test::serial]
     fn test_arf_r_home_conflicts_with_with_r_version() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _env = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_R_HOME", "/env/r-home");
         let result = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]);
 
         assert!(result.is_err());
@@ -490,18 +464,17 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_headless_r_source_flags_read_environment_values() {
-        let _r_home = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.set("ARF_R_HOME", "/env/r-home");
+        guard.unset("ARF_R_VERSION");
         let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
         };
         assert_eq!(args.r_source.r_home, Some(PathBuf::from("/env/r-home")));
 
-        drop(_r_home);
-        drop(_r_version);
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        guard.unset("ARF_R_HOME");
+        guard.set("ARF_R_VERSION", "4.5");
         let cli = Cli::try_parse_from(["arf", "r", "resolve"]).unwrap();
         let Some(Commands::R(args)) = cli.command else {
             panic!("expected r command");
@@ -513,21 +486,23 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_headless_r_source_flags_conflict_with_environment_values() {
-        let _r_home = EnvVarGuard::set("ARF_R_HOME", "/env/r-home");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
+        let mut guard = crate::test_utils::lock_env();
+        guard.set("ARF_R_HOME", "/env/r-home");
+        guard.unset("ARF_R_VERSION");
         assert!(Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).is_err());
 
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::set("ARF_R_VERSION", "4.5");
+        guard.unset("ARF_R_HOME");
+        guard.set("ARF_R_VERSION", "4.5");
         assert!(Cli::try_parse_from(["arf", "r", "resolve", "--r-home", "/cli"]).is_err());
     }
 
     #[test]
     #[serial_test::serial]
     fn test_headless_history_dir_reads_environment_value() {
-        let _r_home = EnvVarGuard::unset("ARF_R_HOME");
-        let _r_version = EnvVarGuard::unset("ARF_R_VERSION");
-        let _history_dir = EnvVarGuard::set("ARF_HISTORY_DIR", "/env/history");
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_HISTORY_DIR", "/env/history");
         let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");

@@ -79,6 +79,11 @@ impl Drop for CwdGuard {
 
 /// Set an environment variable while holding a lock and restore its original
 /// value when the returned guard is dropped.
+///
+/// Superseded by [`lock_env`], which a test can hold once for any number of
+/// variables. Kept only until the remaining environment-dependent tests have
+/// been audited, then removed.
+#[allow(dead_code)]
 pub fn lock_env_var(name: &'static str, value: impl AsRef<OsStr>) -> EnvVarGuard {
     let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let original = std::env::var_os(name);
@@ -93,6 +98,10 @@ pub fn lock_env_var(name: &'static str, value: impl AsRef<OsStr>) -> EnvVarGuard
 
 /// RAII guard that holds the environment-variable mutex and restores every
 /// variable changed through this guard when it is dropped.
+///
+/// Variable names are compared byte for byte, so on Windows `PATH` and `Path`
+/// are tracked as two separate variables even though the OS treats them as
+/// one. Use a single spelling per variable within one test.
 pub struct EnvGuard {
     _lock: MutexGuard<'static, ()>,
     originals: BTreeMap<OsString, Option<OsString>>,
