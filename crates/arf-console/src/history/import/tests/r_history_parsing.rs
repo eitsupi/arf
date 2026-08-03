@@ -46,6 +46,8 @@ fn test_parse_r_history_preserves_leading_whitespace() {
 
 #[test]
 fn test_default_paths() {
+    // Hold the lock to keep concurrent environment writers out while reading R_HISTFILE.
+    let _guard = crate::test_utils::lock_env();
     // These just verify the functions don't panic
     let radian_path = default_radian_path();
     assert!(radian_path.to_string_lossy().contains("radian_history"));

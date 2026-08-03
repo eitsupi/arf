@@ -18,12 +18,10 @@ static CWD_MUTEX: Mutex<()> = Mutex::new(());
 /// Process-global mutex for tests that modify environment variables.
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
-/// Acquire the environment-variable lock for a group of mutations.
+/// Acquire the environment-variable lock.
 ///
-/// A single guard is useful because `lock_env_var` is not re-entrant:
-/// acquiring two `lock_env_var` guards in one test deadlocks on the
-/// process-global mutex. Use one `EnvGuard` and mutate all required
-/// variables through it instead.
+/// Hold one `EnvGuard` for the duration of a test and mutate all required
+/// variables through it.
 pub fn lock_env() -> EnvGuard {
     let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     EnvGuard {
@@ -77,25 +75,6 @@ impl Drop for CwdGuard {
     }
 }
 
-/// Set an environment variable while holding a lock and restore its original
-/// value when the returned guard is dropped.
-///
-/// Superseded by [`lock_env`], which a test can hold once for any number of
-/// variables. Kept only until the remaining environment-dependent tests have
-/// been audited, then removed.
-#[allow(dead_code)]
-pub fn lock_env_var(name: &'static str, value: impl AsRef<OsStr>) -> EnvVarGuard {
-    let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-    let original = std::env::var_os(name);
-    // SAFETY: Tests serialize access to these process-global variables.
-    unsafe { std::env::set_var(name, value) };
-    EnvVarGuard {
-        _lock: lock,
-        name,
-        original,
-    }
-}
-
 /// RAII guard that holds the environment-variable mutex and restores every
 /// variable changed through this guard when it is dropped.
 ///
@@ -142,27 +121,6 @@ impl Drop for EnvGuard {
                 } else {
                     std::env::remove_var(name);
                 }
-            }
-        }
-    }
-}
-
-/// RAII guard that holds the environment-variable mutex and restores the
-/// original value on drop.
-pub struct EnvVarGuard {
-    _lock: MutexGuard<'static, ()>,
-    name: &'static str,
-    original: Option<OsString>,
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        // SAFETY: Tests serialize access to these process-global variables.
-        unsafe {
-            if let Some(value) = &self.original {
-                std::env::set_var(self.name, value);
-            } else {
-                std::env::remove_var(self.name);
             }
         }
     }
