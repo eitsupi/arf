@@ -53,7 +53,7 @@ pub fn lock_env() -> EnvGuard {
 
 /// Acquire the environment and cwd locks in the required order.
 ///
-/// The returned guard exposes the environment side through [`Self::env`].
+/// The returned guard exposes the environment side through [`EnvCwdGuard::env`].
 /// The cwd side is restored automatically when the combined guard is dropped.
 /// Use this helper whenever a test needs both locks so that their acquisition
 /// order cannot be reversed accidentally.
