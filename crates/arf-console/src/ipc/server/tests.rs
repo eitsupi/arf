@@ -14,9 +14,7 @@ fn test_extract_body_raw_json() {
 
 /// Tests that dispatch_request rejects both evaluate and user_input
 /// in alternate mode.
-///
-/// Serialized with `#[serial]` because all tests that touch the global
-/// `IN_ALTERNATE_MODE` / `R_IS_AT_PROMPT` atomics must not run concurrently.
+// Protects the process-global `IN_ALTERNATE_MODE` atomic.
 #[tokio::test]
 #[serial_test::serial]
 async fn test_dispatch_rejects_in_alternate_mode() {
@@ -59,6 +57,8 @@ async fn test_dispatch_rejects_in_alternate_mode() {
 
 /// Tests that `session` returns arf-only success (not an error) in alternate mode,
 /// with a context-appropriate `r_unavailable_reason`.
+// Protects the process-global `IN_ALTERNATE_MODE` atomic and `SESSION_META`
+// session-metadata cache.
 #[tokio::test]
 #[serial_test::serial]
 async fn test_session_returns_arf_only_in_alternate_mode() {
@@ -114,6 +114,8 @@ async fn test_session_returns_arf_only_in_alternate_mode() {
 
 /// Tests that `session` returns arf-only info when the main thread channel
 /// is broken (tx.send fails).
+// Protects the process-global `IN_ALTERNATE_MODE` atomic and `SESSION_META`
+// session-metadata cache.
 #[tokio::test]
 #[serial_test::serial]
 async fn test_session_fallback_on_channel_failure() {
@@ -159,6 +161,7 @@ async fn test_session_fallback_on_channel_failure() {
 }
 
 /// Tests that `log_file` in `SessionResult` reflects what was passed to `set_session_meta`.
+// Protects the process-global `SESSION_META` session-metadata cache.
 #[test]
 #[serial_test::serial]
 fn test_session_result_includes_log_file() {
@@ -198,6 +201,7 @@ fn test_session_result_includes_log_file() {
 
 /// Tests that `r_home` in `SessionResult` reflects what was passed to
 /// `set_session_meta`.
+// Protects the process-global `SESSION_META` session-metadata cache.
 #[test]
 #[serial_test::serial]
 fn test_session_result_includes_r_home() {
@@ -231,6 +235,7 @@ fn test_session_result_includes_r_home() {
 
 /// Tests that `history_session_id` in `SessionResult` reflects what was passed to
 /// `set_session_meta`.
+// Protects the process-global `SESSION_META` session-metadata cache.
 #[test]
 #[serial_test::serial]
 fn test_session_result_includes_history_session_id() {

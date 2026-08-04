@@ -41,6 +41,8 @@ use discovery::{parse_var_from_wrapper_script, set_r_path_vars_from_wrapper};
 use output::{format_error_output, strip_ansi_escapes, strip_cr};
 #[cfg(test)]
 use spinner::SPINNER_THREAD;
+#[cfg(test)]
+mod test_utils;
 
 use std::os::raw::{c_char, c_int};
 

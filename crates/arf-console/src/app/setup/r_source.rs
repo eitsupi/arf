@@ -460,6 +460,8 @@ mod tests {
 
     #[test]
     fn display_message_masks_its_own_path_and_leaves_pathless_messages_unchanged() {
+        // display_message reads HOME indirectly through dirs::home_dir and mask_home_path.
+        let _guard = crate::test_utils::lock_env();
         let home = dirs::home_dir().expect("test requires a home directory");
         let path = home.join("arf").join("broken.toml");
         let diagnostic = RSourceDiagnostic {

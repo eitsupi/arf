@@ -307,6 +307,8 @@ mod tests {
 
     #[test]
     fn test_expand_tilde() {
+        // expand_tilde and the expected value read HOME through dirs::home_dir.
+        let _guard = crate::test_utils::lock_env();
         // Tilde with slash should expand
         let expanded = expand_tilde("~/Documents");
         if let Some(home) = dirs::home_dir() {

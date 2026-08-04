@@ -556,6 +556,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_not_meta() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta("print(x)", &mut config, &None, &None, &status);
@@ -564,6 +566,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_reprex_toggle() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         assert!(!config.is_reprex_enabled());
@@ -579,6 +583,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_commands() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":commands", &mut config, &None, &None, &status);
@@ -591,6 +597,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_info() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":info", &mut config, &None, &None, &status);
@@ -603,6 +611,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_quit() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":quit", &mut config, &None, &None, &status);
@@ -614,6 +624,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_unknown() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":unknown", &mut config, &None, &None, &status);
@@ -622,6 +634,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_empty_colon() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":", &mut config, &None, &None, &status);
@@ -630,6 +644,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_with_whitespace() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta("  :reprex  ", &mut config, &None, &None, &status);
@@ -639,6 +655,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_shell_enter() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
@@ -650,6 +668,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_shell_exit_with_r() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         config.set_shell(true);
@@ -662,6 +682,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_shell_exit_with_uppercase_r() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         config.set_shell(true);
@@ -674,6 +696,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_r_when_not_in_shell() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         assert!(!config.is_shell_enabled());
@@ -685,6 +709,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_system() {
+        // create_test_prompt_config and execute_shell_command read SHELL indirectly.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":system echo hello", &mut config, &None, &None, &status);
@@ -693,6 +719,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_system_empty() {
+        // create_test_prompt_config and execute_shell_command read SHELL indirectly.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta(":system", &mut config, &None, &None, &status);
@@ -702,6 +730,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_requires_rig() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
 
         // With PATH mode (rig not enabled), :switch should show error
@@ -750,7 +780,8 @@ mod tests {
 
     #[test]
     fn test_meta_cd_tilde() {
-        let _guard = crate::test_utils::lock_cwd();
+        // meta_cd reads HOME through dirs::home_dir and changes the cwd.
+        let _guard = crate::test_utils::lock_env_and_cwd();
         let result = meta_cd("~");
 
         assert!(result.is_ok());
@@ -764,7 +795,8 @@ mod tests {
 
     #[test]
     fn test_meta_cd_no_args() {
-        let _guard = crate::test_utils::lock_cwd();
+        // meta_cd reads HOME through dirs::home_dir and changes the cwd.
+        let _guard = crate::test_utils::lock_env_and_cwd();
         let result = meta_cd("");
 
         assert!(result.is_ok());
@@ -848,7 +880,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_cd() {
-        let _guard = crate::test_utils::lock_cwd();
+        // create_test_prompt_config reads SHELL; this test also changes the cwd.
+        let _guard = crate::test_utils::lock_env_and_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -869,7 +902,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_pushd_popd() {
-        let _guard = crate::test_utils::lock_cwd();
+        // create_test_prompt_config reads SHELL; this test also changes the cwd.
+        let _guard = crate::test_utils::lock_env_and_cwd();
         let tmp = tempfile::tempdir().unwrap();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
@@ -934,6 +968,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_restart_force() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         // :restart! should skip confirmation and return Restart directly
@@ -943,6 +979,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_restart_force_with_whitespace() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         let result = call_meta("  :restart!  ", &mut config, &None, &None, &status);
@@ -951,6 +989,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_force() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
@@ -962,6 +1002,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_force_accepts_space_after_colon() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
@@ -978,6 +1020,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_force_accepts_spaced_version_range() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
@@ -1001,6 +1045,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_force_preserves_named_version() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
@@ -1017,6 +1063,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_switch_force_no_version() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status_rig = RSourceStatus::Rig {
             version: "4.4.0".to_string(),
@@ -1029,6 +1077,8 @@ mod tests {
 
     #[test]
     fn test_process_meta_command_unknown_with_bang() {
+        // create_test_prompt_config reads SHELL through PromptFormatter::new.
+        let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let status = default_r_source_status();
         // :shell! is not a valid command (! only supported on restart/switch)

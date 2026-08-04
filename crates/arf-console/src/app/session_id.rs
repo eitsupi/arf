@@ -48,6 +48,8 @@ mod session_id_tests {
 
     #[test]
     fn test_create_session_id_respects_default_history_dir() {
+        // create_session_id reads HOME/XDG variables indirectly through history_dir.
+        let _guard = crate::test_utils::lock_env();
         // With default config (history.dir = None), session ID depends on
         // whether the platform provides a data directory via history_dir().
         let config = Config::default();

@@ -336,6 +336,8 @@ mod tests {
 
     #[test]
     fn test_validator_complete_expressions() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         // Simple complete expressions
@@ -355,6 +357,8 @@ mod tests {
 
     #[test]
     fn test_validator_incomplete_expressions() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         // Unclosed parentheses
@@ -379,6 +383,8 @@ mod tests {
 
     #[test]
     fn test_validator_meta_commands_are_complete() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         // Meta commands should be treated as complete (even if they're not valid R)
@@ -397,6 +403,8 @@ mod tests {
 
     #[test]
     fn test_validator_empty_and_whitespace() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         assert!(is_complete(validator.validate("")));
@@ -406,6 +414,8 @@ mod tests {
 
     #[test]
     fn test_validator_raw_strings() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         // Complete raw strings
@@ -506,6 +516,8 @@ mod tests {
 
     #[test]
     fn test_validator_multiline() {
+        // validate reads R_TERM_VALIDATOR_DEBUG indirectly through debug_log.
+        let _guard = crate::test_utils::lock_env();
         let validator = RValidator::new();
 
         // Single open paren
