@@ -94,7 +94,7 @@ ctrlc = { version = "3.4", features = ["termination"] }
 
 # Testing
 insta = "1.46"
-serial_test = "3"
+serial_test = "4"
 portable-pty = "0.9"
 regex = "1.11"
 tempfile = "3"
