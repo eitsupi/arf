@@ -31,14 +31,22 @@ Examples:
     /// exit code 0 — they are a normal response, not an IPC failure.
     #[command(after_long_help = "\
 Examples:
-  Evaluate an expression silently (allowlist `+` at startup):
-    $ arf headless --ipc-eval-allow-function '+' &
+  Silent evaluation only runs allowlisted calls, so start the server with the
+  ones these examples use:
+    $ arf headless --ipc-eval-allow-function '+' \\
+        --ipc-eval-allow-function 'Sys.sleep' \\
+        --ipc-eval-allow-function 'getwd' &
+
+  Evaluate an expression:
     $ arf ipc eval '1 + 1'
 
   Pipe code via stdin:
     $ echo '1 + 1' | arf ipc eval
 
-  Show output in the session:
+  Bound the wait for a reply without cancelling the R evaluation:
+    $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
+
+  Show output in the session, which needs no allowlist entry:
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
   Target a specific session when multiple are running:
