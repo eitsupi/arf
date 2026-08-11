@@ -46,7 +46,7 @@ Examples:
   Bound the wait for a reply without cancelling the R evaluation:
     $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
 
-  Show output in the session, which needs no allowlist entry:
+  Run it where the session shows it, which is why it needs no allowlist entry:
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
   Target a specific session when multiple are running:

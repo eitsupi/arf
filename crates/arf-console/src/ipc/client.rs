@@ -127,9 +127,10 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
         R_EVAL_NOT_ALLOWED => (
             "R_EVAL_NOT_ALLOWED",
             Some(
-                "Use --visible (no restart required), add direct call targets to \
-                 [ipc.eval].allowed_functions, pass repeated --ipc-eval-allow-function options \
-                 when starting the server, or start it with --ipc-eval-unrestricted.",
+                "--visible needs no allowlist entry, because it runs the code where the \
+                 session shows it rather than silently. The allowlist itself is set only at \
+                 startup, through [ipc.eval].allowed_functions or repeated \
+                 --ipc-eval-allow-function options, and lifted with --ipc-eval-unrestricted.",
             ),
         ),
         INPUT_NOT_APPROVED => (
