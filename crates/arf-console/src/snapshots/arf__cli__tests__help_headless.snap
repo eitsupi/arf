@@ -51,6 +51,12 @@ Options:
       --ipc-pid-file <PID_FILE>
           Write server PID to a file (removed on shutdown)
 
+      --ipc-eval-allow-function <IPC_EVAL_ALLOW_FUNCTION>
+          Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`
+
+      --ipc-eval-unrestricted
+          Disable the IPC evaluate allowlist for this server startup only
+
       --quiet
           Suppress status messages on stderr (IPC path, ready, shutdown)
 

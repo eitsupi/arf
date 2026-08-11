@@ -72,6 +72,10 @@ pub const R_NOT_AT_PROMPT: i32 = -32001;
 pub const INPUT_ALREADY_PENDING: i32 = -32002;
 pub const USER_IS_TYPING: i32 = -32003;
 pub const INCOMPLETE_INPUT: i32 = -32004;
+/// The request was rejected by the server-side syntactic evaluation policy.
+pub const R_EVAL_NOT_ALLOWED: i32 = -32005;
+/// Interactive user input was not explicitly approved.
+pub const INPUT_NOT_APPROVED: i32 = -32006;
 
 /// Parameters for the `evaluate` method.
 #[derive(Debug, Deserialize)]

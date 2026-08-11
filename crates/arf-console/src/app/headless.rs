@@ -109,6 +109,8 @@ pub(crate) fn run_headless(
     cli_history_dir: Option<&std::path::Path>,
     no_history: bool,
     no_r_source_overrides: bool,
+    ipc_eval_allow_function: &[String],
+    ipc_eval_unrestricted: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -192,6 +194,10 @@ pub(crate) fn run_headless(
     } else if let Some(history_dir) = cli_history_dir {
         config.history.dir = Some(history_dir.to_path_buf());
     }
+
+    let mut eval_allowlist = config.ipc.eval.allowed_functions.clone();
+    eval_allowlist.extend(ipc_eval_allow_function.iter().cloned());
+    ipc::policy::set_policy(eval_allowlist, ipc_eval_unrestricted);
 
     // Initialize history for headless mode (same SQLite database as the REPL).
     // Only advertise history_session_id to IPC if the backend was actually opened.

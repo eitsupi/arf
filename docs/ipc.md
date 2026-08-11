@@ -137,6 +137,8 @@ Error code strings:
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
 | `USER_IS_TYPING` | 4 | User is typing in the REPL (see `data` fields below) |
 | `INCOMPLETE_INPUT` | 4 | R code is syntactically incomplete and would enter the continuation prompt |
+| `R_EVAL_NOT_ALLOWED` | 4 | Evaluation was rejected by the server-side syntactic policy |
+| `INPUT_NOT_APPROVED` | 4 | Interactive `send` was not approved at the REPL prompt |
 | `EMPTY_RESPONSE` | 4 | Server returned no result |
 | `PARSE_ERROR` | 4 | Invalid JSON in request |
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
@@ -157,14 +159,26 @@ When the user is typing in the REPL, the `data` field contains:
 
 ### `arf ipc eval` — Evaluate R Code
 
+IPC evaluation uses a best-effort tree-sitter-r policy in both interactive and
+headless sessions. The default allowlist is empty. Configure exact direct call
+targets at startup, for example `--ipc-eval-allow-function mean` or
+`--ipc-eval-allow-function stats::median`; nested calls must also be allowlisted.
+R operators use their exact spelling (`+`, `[`, `[[`, `$`, and so on) in the
+same list. Assignments, control flow, computed callees, the native pipe `|>`,
+and `:::` are always rejected in restricted mode. Syntax errors and policy
+violations are rejected before R evaluation and history recording.
+`--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
+R sandbox and does not promise that an allowed function is non-mutating.
+
 Evaluates R code and returns the captured output. The code runs silently by default — output is not shown in the session.
 
 ```sh
 # Basic evaluation
-arf ipc eval '1 + 1'
+arf headless --ipc-eval-allow-function length &
+arf ipc eval 'length("abc")'
 
-# With timeout (milliseconds)
-arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
+# With timeout (milliseconds; Sys.sleep must be allowlisted at server startup)
+arf ipc eval --timeout 10000 'Sys.sleep(5)'
 
 # Also show output in the session (REPL or headless stdout)
 arf ipc eval --visible 'cat("hello\n")'
@@ -211,6 +225,14 @@ Example (R error):
 ### `arf ipc send` — Send User Input
 
 Sends code as if the user typed it at the prompt. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
+
+In an interactive REPL, `send` displays a bounded, escaped preview and requires
+an explicit `y` or `Y` key for each request by default. Enter, `n`, Ctrl+C,
+Ctrl+D, Esc, a read error, or a request whose client timeout has elapsed rejects the
+request. This is controlled for the current process only with `:ipc
+send-policy allow` and restored with `:ipc send-policy prompt`; it cannot be
+changed by configuration or startup CLI options. Headless `send` remains
+immediate.
 
 ```sh
 # Send code that appears in the session output

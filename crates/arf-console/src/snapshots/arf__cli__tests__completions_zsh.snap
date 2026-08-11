@@ -40,6 +40,7 @@ _arf() {
 '--arch=[\[R\] Specify a sub-architecture (no-op)]:ARCH:_default' \
 '--ipc-bind=[Bind IPC socket to a specific path instead of the default (requires --with-ipc)]:IPC_BIND:_files' \
 '--ipc-pid-file=[Write server PID to a file on startup (requires --with-ipc)]:IPC_PID_FILE:_files' \
+'*--ipc-eval-allow-function=[Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use \`package\:\:function\`]:IPC_EVAL_ALLOW_FUNCTION:_default' \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
 '--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
@@ -66,6 +67,7 @@ _arf() {
 '--no-readline[\[R\] Don'\''t use readline (no-op)]' \
 '--no-restore-history[\[R\] Don'\''t restore history (no-op)]' \
 '--with-ipc[Enable IPC server for external tool access (AI agents, vscode-R, etc.)]' \
+'--ipc-eval-unrestricted[Disable the IPC evaluate allowlist for this server startup only]' \
 '--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \
 '--no-completion[Disable completion menu (for testing)]' \
 '--no-history[Disable history (no history saved or loaded)]' \
@@ -352,6 +354,7 @@ _arguments "${_arguments_options[@]}" : \
 '(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
 '--ipc-bind=[Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted]:BIND:_files' \
 '--ipc-pid-file=[Write server PID to a file (removed on shutdown)]:PID_FILE:_files' \
+'*--ipc-eval-allow-function=[Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use \`package\:\:function\`]:IPC_EVAL_ALLOW_FUNCTION:_default' \
 '--log-file=[Redirect log output to a file instead of stderr]:LOG_FILE:_files' \
 '--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
 '--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
@@ -360,6 +363,7 @@ _arguments "${_arguments_options[@]}" : \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
+'--ipc-eval-unrestricted[Disable the IPC evaluate allowlist for this server startup only]' \
 '--quiet[Suppress status messages on stderr (IPC path, ready, shutdown)]' \
 '--json[Print session info as JSON to stdout when ready]' \
 '--vanilla[Start R in vanilla mode (no init files, no save/restore)]' \

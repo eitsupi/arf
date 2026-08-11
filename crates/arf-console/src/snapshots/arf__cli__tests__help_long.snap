@@ -119,6 +119,12 @@ Options:
           
           The file is removed when the REPL exits. Startup fails if the file cannot be written, so the editor is guaranteed to own the session or get an error — there is no silent fallback.
 
+      --ipc-eval-allow-function <IPC_EVAL_ALLOW_FUNCTION>
+          Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`
+
+      --ipc-eval-unrestricted
+          Disable the IPC evaluate allowlist for this server startup only
+
       --history-dir <HISTORY_DIR>
           Custom history directory (overrides default XDG location)
           

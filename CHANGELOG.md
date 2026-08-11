@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Experimental/Breaking:** `arf ipc eval` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic and is not an R sandbox.
+- **Experimental/Breaking:** `arf ipc send` now shows the code and asks for confirmation before running it in an interactive REPL. `:ipc send-policy allow` skips the confirmation until arf restarts. Headless sessions are unaffected.
+
 ## [0.4.5] - 2026-08-01
 
 ### Added

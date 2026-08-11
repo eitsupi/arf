@@ -16,6 +16,7 @@
 
 mod capture;
 pub mod client;
+pub mod policy;
 pub mod protocol;
 pub mod server;
 pub mod session;
@@ -23,14 +24,145 @@ pub mod session;
 use chrono::TimeZone;
 use protocol::{
     EvaluateResult, HistoryEntry, HistoryParams, HistoryResult, INPUT_ALREADY_PENDING, IpcMethod,
-    IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT, RSessionInfo, SessionResult, USER_IS_TYPING,
-    UserInputResult,
+    IpcRequest, IpcResponse, R_BUSY, R_EVAL_NOT_ALLOWED, R_NOT_AT_PROMPT, RSessionInfo,
+    SessionResult, USER_IS_TYPING, UserInputResult,
 };
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
+/// Session-only switch for interactive `send` approval.  It intentionally is
+/// not part of Config or startup CLI options.
+static SEND_POLICY_ALLOW: OnceLock<AtomicBool> = OnceLock::new();
+
+fn send_policy_allow() -> &'static AtomicBool {
+    SEND_POLICY_ALLOW.get_or_init(|| AtomicBool::new(false))
+}
+
+pub fn set_send_policy_allow(allow: bool) {
+    send_policy_allow().store(allow, Ordering::Release);
+}
+
+pub fn send_policy_is_allow() -> bool {
+    send_policy_allow().load(Ordering::Acquire)
+}
+
+/// Ask for approval immediately before an interactive `user_input` executes.
+/// The sender check prevents a timed-out request from being executed after its
+/// client has gone away.  A half-close cannot be distinguished from the normal
+/// request framing, so this is necessarily best effort until the server timeout.
+pub fn approve_user_input(code: &str, reply: &tokio::sync::oneshot::Sender<IpcResponse>) -> bool {
+    if send_policy_is_allow() {
+        return !reply.is_closed();
+    }
+    if reply.is_closed() {
+        return false;
+    }
+    let escaped = user_input_preview(code);
+    let prompt = format!("IPC send [{escaped}]? [y/N]: ");
+    use std::io::Write;
+    print!("{prompt}");
+    let _ = std::io::stdout().flush();
+    let finish = |approved: bool| {
+        // Raw terminals do not translate LF to CRLF; return to column zero
+        // explicitly so the agent echo is rendered on the next line.
+        print!("\r\n");
+        let _ = std::io::stdout().flush();
+        approved
+    };
+
+    // Reedline normally owns raw mode, but the fast path can reach this
+    // helper before it starts reading. Preserve whichever state we inherit.
+    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
+        return finish(false);
+    }
+    struct RawModeGuard {
+        was_raw: bool,
+    }
+    impl Drop for RawModeGuard {
+        fn drop(&mut self) {
+            if !self.was_raw {
+                let _ = crossterm::terminal::disable_raw_mode();
+            }
+        }
+    }
+    let _raw_mode_guard = RawModeGuard { was_raw };
+
+    loop {
+        if reply.is_closed() {
+            return finish(false);
+        }
+        if let Err(error) = crossterm::event::poll(std::time::Duration::from_millis(50)) {
+            log::debug!("IPC send approval input failed: {error}");
+            return finish(false);
+        }
+        arf_libr::process_r_events();
+        // Keep the IPC transport responsive while waiting. R is marked busy
+        // by the caller, so later mutating requests receive R_BUSY.
+        poll_ipc_requests();
+        if !crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+            continue;
+        }
+        match crossterm::event::read() {
+            Ok(crossterm::event::Event::Key(key)) => {
+                use crossterm::event::{KeyCode, KeyModifiers};
+                let approved = matches!(key.code, KeyCode::Char('y' | 'Y'))
+                    && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+                    && !reply.is_closed();
+
+                // Consume the rest of the answer before raw mode is released;
+                // otherwise characters such as Enter can reach reedline.
+                while crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+                    if crossterm::event::read().is_err() {
+                        break;
+                    }
+                }
+                return finish(approved);
+            }
+            Ok(_) => return finish(false),
+            Err(error) => {
+                log::debug!("IPC send approval input failed: {error}");
+                return finish(false);
+            }
+        }
+    }
+}
+
+pub(crate) fn user_input_preview(code: &str) -> String {
+    const MAX_PREVIEW_CHARS: usize = 240;
+    let mut preview = String::new();
+    let mut preview_chars = 0;
+    let mut truncated = false;
+
+    for character in code.chars() {
+        let escaped = if character.is_ascii_graphic() || character == ' ' {
+            character.to_string()
+        } else {
+            character.escape_default().to_string()
+        };
+        let escaped_chars = escaped.chars().count();
+        if preview_chars + escaped_chars > MAX_PREVIEW_CHARS - 1 {
+            truncated = true;
+            break;
+        }
+        preview.push_str(&escaped);
+        preview_chars += escaped_chars;
+    }
+
+    if truncated {
+        preview.push('…');
+    }
+    preview
+}
+
+pub fn reject_user_input_not_approved(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
+    let _ = reply.send(IpcResponse::error(
+        protocol::INPUT_NOT_APPROVED,
+        "IPC send was not approved".to_string(),
+    ));
+}
 
 /// Shutdown flag for headless mode. When set, the headless event loop exits.
 /// Not set in REPL mode (shutdown is only available in headless mode).
@@ -405,6 +537,13 @@ fn handle_request(request: IpcRequest) {
             visible,
             timeout_ms,
         } => {
+            if let Err(reason) = policy::validate(&code) {
+                let _ = reply.send(IpcResponse::error(
+                    R_EVAL_NOT_ALLOWED,
+                    format!("IPC evaluation rejected by policy: {reason}"),
+                ));
+                return;
+            }
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(Ordering::Acquire) {
                 let _ = reply.send(IpcResponse::error(R_BUSY, "R is busy".to_string()));
@@ -1038,6 +1177,13 @@ fn headless_handle_request(request: IpcRequest) {
 
     match method {
         IpcMethod::Evaluate { code, visible, .. } => {
+            if let Err(reason) = policy::validate(&code) {
+                let _ = reply.send(IpcResponse::error(
+                    R_EVAL_NOT_ALLOWED,
+                    format!("IPC evaluation rejected by policy: {reason}"),
+                ));
+                return;
+            }
             // Note: timeout_ms is intentionally ignored here. In headless mode,
             // evaluate_with_capture() runs synchronously on the main thread, so
             // R evaluation cannot be interrupted. The server-side oneshot timeout
@@ -1091,3 +1237,15 @@ fn headless_handle_request(request: IpcRequest) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod policy_preview_tests {
+    #[test]
+    fn preview_escapes_controls_and_is_bounded() {
+        let source = format!("\n\t{}", "x".repeat(400));
+        let preview = super::user_input_preview(&source);
+        assert!(preview.starts_with("\\n\\t"));
+        assert!(preview.chars().count() <= 250);
+        assert!(preview.ends_with('…'));
+    }
+}

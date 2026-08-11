@@ -275,8 +275,21 @@ pub fn process_meta_command(
                         );
                     }
                 }
+                "send-policy" => match parts.get(2).copied() {
+                    Some("allow") => {
+                        crate::ipc::set_send_policy_allow(true);
+                        arf_println!("IPC send policy: allow");
+                    }
+                    Some("prompt") => {
+                        crate::ipc::set_send_policy_allow(false);
+                        arf_println!("IPC send policy: prompt");
+                    }
+                    _ => arf_println!("Usage: :ipc send-policy prompt|allow"),
+                },
                 _ => {
-                    arf_println!("Unknown :ipc subcommand. Available: start, stop, status");
+                    arf_println!(
+                        "Unknown :ipc subcommand. Available: start, stop, status, send-policy"
+                    );
                 }
             }
             Some(MetaCommandResult::Handled)
@@ -300,7 +313,9 @@ pub fn process_meta_command(
             println!("#   :restart!      - Restart without confirmation");
             println!("#   :switch <ver>  - Restart with different R version (requires rig)");
             println!("#   :switch! <ver> - Switch without confirmation");
-            println!("#   :ipc           - IPC server management (start, stop, status)");
+            println!(
+                "#   :ipc           - IPC server management (start, stop, status, send-policy)"
+            );
             println!("#   :changelog     - Show arf changelog");
             println!("#   :commands      - Show this list");
             println!("#   :quit          - Exit arf");

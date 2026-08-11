@@ -4,7 +4,7 @@ expression: completions
 ---
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_arf_global_optspecs
-    string join \n e/eval= f/file= reprex auto-format c/config= r-home= with-r-version= no-r-source-overrides no-r-auto-discovery no-banner vanilla no-environ no-site-file no-init-file max-connections= max-ppsize= min-nsize= min-vsize= q/quiet no-save save no-restore no-restore-data restore-data interactive no-echo slave restore verbose encoding= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history with-ipc ipc-bind= ipc-pid-file= no-auto-match no-completion history-dir= no-history h/help V/version
+    string join \n e/eval= f/file= reprex auto-format c/config= r-home= with-r-version= no-r-source-overrides no-r-auto-discovery no-banner vanilla no-environ no-site-file no-init-file max-connections= max-ppsize= min-nsize= min-vsize= q/quiet no-save save no-restore no-restore-data restore-data interactive no-echo slave restore verbose encoding= d/debugger= debugger-args= g/gui= arch= args no-readline no-restore-history with-ipc ipc-bind= ipc-pid-file= ipc-eval-allow-function= ipc-eval-unrestricted no-auto-match no-completion history-dir= no-history h/help V/version
 end
 
 function __fish_arf_needs_command
@@ -44,6 +44,7 @@ complete -c arf -n "__fish_arf_needs_command" -s g -l gui -d '[R] Use TYPE as GU
 complete -c arf -n "__fish_arf_needs_command" -l arch -d '[R] Specify a sub-architecture (no-op)' -r
 complete -c arf -n "__fish_arf_needs_command" -l ipc-bind -d 'Bind IPC socket to a specific path instead of the default (requires --with-ipc)' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l ipc-pid-file -d 'Write server PID to a file on startup (requires --with-ipc)' -r -F
+complete -c arf -n "__fish_arf_needs_command" -l ipc-eval-allow-function -d 'Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`' -r
 complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_needs_command" -l reprex -d 'Enable reprex mode (no prompt, output prefixed with #>)'
 complete -c arf -n "__fish_arf_needs_command" -l auto-format -d 'Enable auto-formatting of R code in reprex mode (requires Air CLI)'
@@ -69,6 +70,7 @@ complete -c arf -n "__fish_arf_needs_command" -l args -d '[R] In R, skip the res
 complete -c arf -n "__fish_arf_needs_command" -l no-readline -d '[R] Don\'t use readline (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l no-restore-history -d '[R] Don\'t restore history (no-op)'
 complete -c arf -n "__fish_arf_needs_command" -l with-ipc -d 'Enable IPC server for external tool access (AI agents, vscode-R, etc.)'
+complete -c arf -n "__fish_arf_needs_command" -l ipc-eval-unrestricted -d 'Disable the IPC evaluate allowlist for this server startup only'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'
 complete -c arf -n "__fish_arf_needs_command" -l no-completion -d 'Disable completion menu (for testing)'
 complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Disable history (no history saved or loaded)'
@@ -156,6 +158,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Highest-
 complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-bind -d 'Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-pid-file -d 'Write server PID to a file (removed on shutdown)' -r -F
+complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-eval-allow-function -d 'Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l log-file -d 'Redirect log output to a file instead of stderr' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-connections -d '[R] Set max number of connections to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
@@ -164,6 +167,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] S
 complete -c arf -n "__fish_arf_using_subcommand headless" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-eval-unrestricted -d 'Disable the IPC evaluate allowlist for this server startup only'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l quiet -d 'Suppress status messages on stderr (IPC path, ready, shutdown)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l json -d 'Print session info as JSON to stdout when ready'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R in vanilla mode (no init files, no save/restore)'

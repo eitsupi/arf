@@ -38,6 +38,30 @@ fn test_headless_eval_value() {
     );
 }
 
+/// Restricted headless sessions apply the same exact-target policy as the
+/// interactive server, including operator targets.
+#[test]
+fn test_headless_eval_allowlist() {
+    let process = HeadlessProcess::spawn_with_args(&["--ipc-eval-allow-function", "+"])
+        .expect("Failed to spawn restricted headless session");
+
+    let allowed = process.ipc_eval("1 + 1").expect("allowed eval should run");
+    assert!(
+        allowed.success && allowed.stdout.contains("[1] 2"),
+        "allowlisted operator should succeed: stdout={}, stderr={}",
+        allowed.stdout,
+        allowed.stderr
+    );
+
+    let denied = process
+        .ipc_eval("length('abc')")
+        .expect("denied eval should return a protocol response");
+    assert_eq!(denied.exit_code, Some(4));
+    let error: serde_json::Value = serde_json::from_str(&denied.stderr)
+        .unwrap_or_else(|e| panic!("denial should be structured JSON: {e}: {}", denied.stderr));
+    assert_eq!(error["error"]["code"], "R_EVAL_NOT_ALLOWED");
+}
+
 /// Test that `arf ipc eval` captures stdout from `cat()`.
 #[test]
 fn test_headless_eval_stdout() {

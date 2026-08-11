@@ -48,6 +48,11 @@ show_banner = true      # Show startup banner
 reprex = false          # Enable reprex mode
 autoformat = false      # Enable auto-formatting (requires air)
 
+[ipc.eval]
+# Exact direct function/operator targets permitted by `arf ipc eval`; empty by default.
+# Examples: ["mean", "stats::median", "+"]
+allowed_functions = []
+
 [editor]
 mode = "emacs"          # Editing mode: "emacs" or "vi"
 auto_match = true       # Auto-close brackets and quotes

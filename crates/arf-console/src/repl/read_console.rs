@@ -165,23 +165,30 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     return Some(op.code);
                 }
                 PendingIpcKind::UserInput { reply } => {
-                    accept_user_input(reply);
-                    let history_id = save_ipc_history(
-                        &mut state.line_editor,
-                        &op.code,
-                        state.history_session_id,
-                    );
-                    if !op.code.trim().is_empty() {
-                        state.pending_history_context = PendingHistoryContext::Ipc { history_id };
-                    }
-                    let prompt_str = "agent> ";
-                    println!("{}{}", prompt_str.dark_cyan(), op.code);
-                    if !op.code.is_empty() {
-                        state.prompt_config.set_command_start();
-                        state.prompt_config.start_spinner();
-                    }
                     crate::ipc::set_r_at_prompt(false);
-                    return Some(op.code);
+                    if !crate::ipc::approve_user_input(&op.code, &reply) {
+                        crate::ipc::set_r_at_prompt(true);
+                        crate::ipc::reject_user_input_not_approved(reply);
+                    } else {
+                        accept_user_input(reply);
+                        let history_id = save_ipc_history(
+                            &mut state.line_editor,
+                            &op.code,
+                            state.history_session_id,
+                        );
+                        if !op.code.trim().is_empty() {
+                            state.pending_history_context =
+                                PendingHistoryContext::Ipc { history_id };
+                        }
+                        let prompt_str = "agent> ";
+                        println!("{}{}", prompt_str.dark_cyan(), op.code);
+                        if !op.code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(op.code);
+                    }
                 }
             }
         }
@@ -401,12 +408,22 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         }
 
                         // Visible evaluate / user input: accept, inject code into REPL
+                        // Approval already emits CRLF in raw mode, so don't add
+                        // another blank line for an approved user_input.
+                        let mut approval_wrote_newline = false;
                         match op.kind {
                             PendingIpcKind::VisibleEvaluate { reply, timeout } => {
                                 setup_visible_eval(reply, timeout);
                             }
                             PendingIpcKind::UserInput { reply } => {
+                                crate::ipc::set_r_at_prompt(false);
+                                if !crate::ipc::approve_user_input(&op.code, &reply) {
+                                    crate::ipc::set_r_at_prompt(true);
+                                    crate::ipc::reject_user_input_not_approved(reply);
+                                    continue;
+                                }
                                 accept_user_input(reply);
+                                approval_wrote_newline = true;
                             }
                             PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
                         }
@@ -425,7 +442,9 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // leave the cursor one row beyond that range. Otherwise, when R produces
                         // no output, the next repaint reuses the old prompt origin and clears the
                         // echoed agent line.
-                        println!();
+                        if !approval_wrote_newline {
+                            println!();
+                        }
 
                         if !op.code.is_empty() {
                             state.prompt_config.set_command_start();

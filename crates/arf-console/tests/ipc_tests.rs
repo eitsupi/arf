@@ -55,6 +55,9 @@ impl IpcTestProcess {
         let mut cmd = CommandBuilder::new(bin_path);
         cmd.arg("--no-history");
         cmd.arg("--with-ipc");
+        // These transport/capture tests predate the eval policy and exercise
+        // arbitrary R expressions. Policy behavior is covered separately.
+        cmd.arg("--ipc-eval-unrestricted");
 
         let child = pair
             .slave
@@ -530,11 +533,26 @@ fn test_ipc_evaluate_visible() {
 fn test_ipc_user_input() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
-    let response = process
-        .request(
+    let socket_path = process.socket_path.clone();
+    let request = thread::spawn(move || {
+        send_ipc_request(
+            &socket_path,
             "user_input",
             serde_json::json!({ "code": "cat('ipc_input_test')" }),
         )
+    });
+    thread::sleep(Duration::from_millis(300));
+    {
+        let mut writer = process
+            ._pty_writer
+            .lock()
+            .expect("PTY writer should not be poisoned");
+        writer.write_all(b"y\n").expect("approve user_input");
+        writer.flush().expect("flush approval");
+    }
+    let response = request
+        .join()
+        .expect("request thread should not panic")
         .expect("user_input should succeed");
 
     assert!(

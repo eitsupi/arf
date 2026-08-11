@@ -15,7 +15,7 @@ pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
 pub(crate) use resolve::RCommand;
 
-use clap::{Parser, Subcommand, ValueHint};
+use clap::{ArgAction, Parser, Subcommand, ValueHint};
 #[cfg(test)]
 use clap_complete::Shell;
 use std::path::PathBuf;
@@ -159,6 +159,18 @@ pub struct Cli {
     /// get an error — there is no silent fallback.
     #[arg(long = "ipc-pid-file", value_hint = ValueHint::FilePath)]
     pub ipc_pid_file: Option<PathBuf>,
+
+    /// Add an exact function target to the IPC evaluate allowlist. May be
+    /// repeated; package-qualified targets use `package::function`.
+    #[arg(
+        long = "ipc-eval-allow-function",
+        action = ArgAction::Append
+    )]
+    pub ipc_eval_allow_function: Vec<String>,
+
+    /// Disable the IPC evaluate allowlist for this server startup only.
+    #[arg(long = "ipc-eval-unrestricted")]
+    pub ipc_eval_unrestricted: bool,
 
     /// Disable auto-matching of brackets and quotes (for testing)
     #[arg(long = "no-auto-match", hide = true)]
