@@ -204,7 +204,7 @@ pub enum Commands {
     #[command(after_long_help = "\
 Quick start:
   # 1. Start a headless session (or use --with-ipc with the REPL)
-  $ arf headless &
+  $ arf headless --ipc-eval-allow-function '+' &
 
   # 2. Check the session is running
   $ arf ipc list
@@ -238,7 +238,7 @@ and `arf ipc` readers.")]
     #[command(after_long_help = "\
 Examples:
   Start headless and evaluate R code:
-    $ arf headless &
+    $ arf headless --ipc-eval-allow-function '+' --ipc-eval-allow-function 'Sys.time' &
     # (wait for the server to be ready)
     $ arf ipc eval '1 + 1'
 
@@ -249,7 +249,8 @@ Examples:
     $ arf headless --log-file arf.log --ipc-pid-file arf.pid
 
   Use a custom socket path:
-    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
+    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid \\
+        --ipc-eval-allow-function 'Sys.time' &
     $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
 
   Shut down a headless session:

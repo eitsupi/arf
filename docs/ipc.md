@@ -208,13 +208,17 @@ interactive case, printed values and errors are in `stdout` and `stderr`.
 
 ```sh
 # Basic evaluation
-arf headless --ipc-eval-allow-function length &
+arf headless \
+  --ipc-eval-allow-function length \
+  --ipc-eval-allow-function Sys.sleep \
+  --ipc-eval-allow-function getwd &
 arf ipc eval 'length("abc")'
 
 # With timeout (milliseconds; Sys.sleep must be allowlisted at server startup)
 arf ipc eval --timeout 10000 'Sys.sleep(5)'
 
-# Also show output in the session (REPL or headless stdout)
+# Also show output in the session (REPL or headless stdout).
+# This runs where the session shows it, so it needs no allowlist entry.
 arf ipc eval --visible 'cat("hello\n")'
 
 # Target a specific session
