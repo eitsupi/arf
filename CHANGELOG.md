@@ -4,9 +4,8 @@
 
 ### Changed
 
-- **Experimental/Breaking:** `arf ipc eval` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session. Literals and object references still evaluate without configuration, so a debugger can read values. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic and is not an R sandbox.
-- **Experimental/Breaking:** `arf ipc send` now shows the code and asks for confirmation before running it in an interactive REPL. `:ipc send-policy allow` skips the confirmation until arf restarts. Headless sessions are unaffected.
-- **Experimental/Breaking:** `arf ipc eval --visible` is exempt from the eval allowlist and is confirmed like `send` instead, since it runs code in the session where the person can see it. The allowlist guards silent evaluation, which nobody watching the session would notice.
+- **Experimental/Breaking:** `arf ipc eval` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session; literals and object references still evaluate without configuration. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic, not an R sandbox.
+- **Experimental/Breaking:** `arf ipc send` and `arf ipc eval --visible` now show the code and ask for confirmation before running it in an interactive REPL; `:ipc send-policy allow` suspends the prompt until arf restarts. Headless sessions run immediately, and the eval allowlist does not apply to either path.
 
 ## [0.4.5] - 2026-08-01
 
