@@ -8,6 +8,10 @@ use std::sync::{OnceLock, RwLock};
 
 use tree_sitter::Node;
 
+fn is_inert_kind(kind: &str) -> bool {
+    matches!(kind, "comment" | "comma")
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EvalPolicy {
     pub allowlist: HashSet<String>,
@@ -52,10 +56,10 @@ fn validate_with_policy(code: &str, policy: &EvalPolicy) -> Result<(), String> {
     let source = code.as_bytes();
     let mut cursor = root.walk();
     let mut saw_expression = false;
-    for child in root.named_children(&mut cursor) {
-        if child.kind() == "comment" {
-            continue;
-        }
+    for child in root
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() != "comment")
+    {
         saw_expression = true;
         validate_top_level(child, source, &policy.allowlist)?;
     }
@@ -80,13 +84,16 @@ fn validate_top_level(
     allowlist: &HashSet<String>,
 ) -> Result<(), String> {
     match node.kind() {
+        "comment" => Ok(()),
         "call" | "binary_operator" | "unary_operator" | "subset" | "subset2"
         | "extract_operator" => validate_expression(node, source, allowlist),
         "identifier" | "string" | "integer" | "float" | "complex" | "true" | "false" | "null"
         | "inf" | "nan" | "na" => Ok(()),
         "parenthesized_expression" => {
             let mut cursor = node.walk();
-            let mut children = node.named_children(&mut cursor);
+            let mut children = node
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment");
             match (children.next(), children.next()) {
                 (Some(child), None) => validate_top_level(child, source, allowlist),
                 _ => Err("parenthesized IPC expression is not a single operation".to_string()),
@@ -117,7 +124,11 @@ fn validate_call(node: Node<'_>, source: &[u8], allowlist: &HashSet<String>) -> 
     // such bindings; assignment is never permitted. Keep the accepted leaves
     // explicit so newly introduced grammar nodes fail closed.
     let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor).skip(1) {
+    for child in node
+        .named_children(&mut cursor)
+        .skip(1)
+        .filter(|child| !is_inert_kind(child.kind()))
+    {
         validate_expression(child, source, allowlist)?;
     }
     Ok(())
@@ -158,6 +169,7 @@ fn validate_expression(
     allowlist: &HashSet<String>,
 ) -> Result<(), String> {
     match node.kind() {
+        "comment" => Ok(()),
         "call" => validate_call(node, source, allowlist),
         "binary_operator" => validate_binary_operator(node, source, allowlist),
         "unary_operator" => validate_unary_operator(node, source, allowlist),
@@ -168,7 +180,10 @@ fn validate_expression(
         | "inf" | "nan" | "na" | "dots" | "dot_dot_i" => Ok(()),
         "arguments" | "argument" | "named_argument" | "parenthesized_expression" => {
             let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
+            for child in node
+                .named_children(&mut cursor)
+                .filter(|child| !is_inert_kind(child.kind()))
+            {
                 validate_expression(child, source, allowlist)?;
             }
             Ok(())
@@ -270,6 +285,34 @@ mod tests {
     #[test]
     fn allows_nested_allowlisted_calls_and_literals() {
         assert!(check("outer(inner(1))", &["outer", "inner"]).is_ok());
+    }
+
+    #[test]
+    fn allows_multiple_arguments() {
+        // The grammar exposes argument separators as named `comma` nodes, so
+        // the traversal has to skip them the same way it skips comments.
+        assert!(check("mean(1, 2)", &["mean"]).is_ok());
+        assert!(check("outer(1, inner(2), 3)", &["outer", "inner"]).is_ok());
+    }
+
+    #[test]
+    fn allows_comments_in_calls_and_parenthesized_expressions() {
+        assert!(
+            check(
+                r#"mean(1, # note
+                2)"#,
+                &["mean"]
+            )
+            .is_ok()
+        );
+        assert!(
+            check(
+                r#"(# note
+                1 + 1)"#,
+                &["+"]
+            )
+            .is_ok()
+        );
     }
 
     #[test]
