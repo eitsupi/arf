@@ -602,7 +602,9 @@ fn test_ipc_user_input() {
             serde_json::json!({ "code": "cat('ipc_input_test')" }),
         )
     });
-    thread::sleep(Duration::from_millis(300));
+    process
+        .wait_for_output("# [arf] Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the PTY");
     {
         let mut writer = process
             ._pty_writer
