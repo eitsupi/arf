@@ -214,6 +214,8 @@ fn run() -> Result<()> {
                 args.history.history_dir.as_deref(),
                 args.history.no_history,
                 args.r_source.no_r_source_overrides,
+                &args.ipc_eval_allow_function,
+                args.ipc_eval_unrestricted,
             );
         }
         Some(Commands::R(args)) => {
@@ -278,6 +280,10 @@ fn run() -> Result<()> {
     if cli.no_completion {
         config.completion.enabled = false;
     }
+
+    let mut eval_allowlist = config.ipc.eval.allowed_functions.clone();
+    eval_allowlist.extend(cli.ipc_eval_allow_function.iter().cloned());
+    ipc::policy::set_policy(eval_allowlist, cli.ipc_eval_unrestricted);
 
     // History configuration: CLI flag overrides default XDG location
     if cli.history.no_history {

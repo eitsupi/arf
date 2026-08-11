@@ -15,7 +15,7 @@ pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
 pub(crate) use resolve::RCommand;
 
-use clap::{Parser, Subcommand, ValueHint};
+use clap::{ArgAction, Parser, Subcommand, ValueHint};
 #[cfg(test)]
 use clap_complete::Shell;
 use std::path::PathBuf;
@@ -160,6 +160,18 @@ pub struct Cli {
     #[arg(long = "ipc-pid-file", value_hint = ValueHint::FilePath)]
     pub ipc_pid_file: Option<PathBuf>,
 
+    /// Add an exact function target to the IPC evaluate allowlist. May be
+    /// repeated; package-qualified targets use `package::function`.
+    #[arg(
+        long = "ipc-eval-allow-function",
+        action = ArgAction::Append
+    )]
+    pub ipc_eval_allow_function: Vec<String>,
+
+    /// Disable the IPC evaluate allowlist for this server startup only.
+    #[arg(long = "ipc-eval-unrestricted")]
+    pub ipc_eval_unrestricted: bool,
+
     /// Disable auto-matching of brackets and quotes (for testing)
     #[arg(long = "no-auto-match", hide = true)]
     pub no_auto_match: bool,
@@ -192,7 +204,7 @@ pub enum Commands {
     #[command(after_long_help = "\
 Quick start:
   # 1. Start a headless session (or use --with-ipc with the REPL)
-  $ arf headless &
+  $ arf headless --ipc-eval-allow-function '+' &
 
   # 2. Check the session is running
   $ arf ipc list
@@ -226,7 +238,7 @@ and `arf ipc` readers.")]
     #[command(after_long_help = "\
 Examples:
   Start headless and evaluate R code:
-    $ arf headless &
+    $ arf headless --ipc-eval-allow-function '+' --ipc-eval-allow-function 'Sys.time' &
     # (wait for the server to be ready)
     $ arf ipc eval '1 + 1'
 
@@ -237,12 +249,14 @@ Examples:
     $ arf headless --log-file arf.log --ipc-pid-file arf.pid
 
   Use a custom socket path:
-    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
+    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid \\
+        --ipc-eval-allow-function 'Sys.time' &
     $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
 
   Shut down a headless session:
     $ arf ipc shutdown")]
-    Headless(headless::HeadlessArgs),
+    // Boxed to keep this variant from dominating the size of the whole enum.
+    Headless(Box<headless::HeadlessArgs>),
     /// R source resolution commands
     R(resolve::RArgs),
 }

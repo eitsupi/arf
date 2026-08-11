@@ -102,6 +102,15 @@
         "menu_max_height": 15
       }
     },
+    "ipc": {
+      "description": "IPC evaluation policy configuration.",
+      "$ref": "#/$defs/IpcConfig",
+      "default": {
+        "eval": {
+          "allowed_functions": []
+        }
+      }
+    },
     "mode": {
       "description": "Mode-specific static configuration (not changeable at runtime).\nFor initial mode state (enabled/disabled), see `startup.mode`.",
       "$ref": "#/$defs/ModeConfig",
@@ -1699,6 +1708,31 @@
           "description": "Indicator text for reprex mode (default: \"[reprex] \").",
           "type": "string",
           "default": "[reprex] "
+        }
+      }
+    },
+    "IpcConfig": {
+      "description": "Settings controlling the syntactic policy applied to IPC `evaluate` calls.\n\nThis is a best-effort syntactic policy, not an R sandbox or a guarantee\nthat an allowed function is non-mutating.",
+      "type": "object",
+      "properties": {
+        "eval": {
+          "$ref": "#/$defs/IpcEvalConfig",
+          "default": {
+            "allowed_functions": []
+          }
+        }
+      }
+    },
+    "IpcEvalConfig": {
+      "type": "object",
+      "properties": {
+        "allowed_functions": {
+          "description": "Exact R function targets permitted by IPC eval. Operators use their R\nspelling (for example `+`, `[`); package targets use `package::function`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

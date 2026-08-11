@@ -165,6 +165,62 @@ mod ipc_tests {
         terminal.clear_buffer().expect("clear PTY output buffer");
     }
 
+    fn ipc_approval_prompt(code: &str) -> String {
+        format!(r"# [arf] IPC send request: [{code}]")
+            + "\r\r\n"
+            + r"# [arf] Press y to approve, any other key declines: "
+    }
+
+    fn send_approved_user_input(
+        terminal: &mut Terminal,
+        socket_path: &str,
+        code: &str,
+    ) -> serde_json::Value {
+        let socket_path = socket_path.to_string();
+        let code = code.to_string();
+        let request_code = code.clone();
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &socket_path,
+                "user_input",
+                serde_json::json!({ "code": request_code }),
+            )
+        });
+        terminal
+            .expect(&ipc_approval_prompt(&code))
+            .expect("REPL should display the approval prompt");
+        terminal.send_line("y").expect("approve IPC send");
+        request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should succeed")
+    }
+
+    fn send_approved_visible_evaluate(
+        terminal: &mut Terminal,
+        socket_path: &str,
+        code: &str,
+    ) -> serde_json::Value {
+        let socket_path = socket_path.to_string();
+        let code = code.to_string();
+        let request_code = code.clone();
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &socket_path,
+                "evaluate",
+                serde_json::json!({ "code": request_code, "visible": true }),
+            )
+        });
+        terminal
+            .expect(&ipc_approval_prompt(&code))
+            .expect("REPL should display the approval prompt for visible evaluate");
+        terminal.send_line("y").expect("approve visible evaluate");
+        request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should succeed")
+    }
+
     /// Wait for the prompt that follows a specific IPC command.
     ///
     /// The caller must clear the PTY output buffer before sending the request.
@@ -173,14 +229,28 @@ mod ipc_tests {
     /// `user_input` acceptance reply has arrived.
     fn wait_for_ipc_prompt(terminal: &mut Terminal, marker: &str) {
         terminal
-            .expect_regex(&format!(r"{}[\s\S]*> ", escape(marker)))
+            .expect_regex(&format!(r"agent> [\s\S]*{}[\s\S]*> ", escape(marker)))
             .unwrap_or_else(|e| panic!("Should return to prompt after IPC input: {e}"));
     }
 
     /// Helper to spawn arf with IPC and return (terminal, socket_path).
     fn spawn_ipc_session() -> (Terminal, String) {
-        let mut terminal =
-            Terminal::spawn_with_args(&["--with-ipc"]).expect("Failed to spawn arf with IPC");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-eval-unrestricted"])
+            .expect("Failed to spawn arf with IPC");
+
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path in session directory");
+
+        (terminal, socket_path)
+    }
+
+    fn spawn_restricted_ipc_session() -> (Terminal, String) {
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc"])
+            .expect("Failed to spawn restricted arf session with IPC");
 
         terminal
             .wait_for_prompt()
@@ -290,18 +360,18 @@ mod ipc_tests {
     /// 4. Response contains captured stdout/stderr from WriteConsoleEx
     #[test]
     fn test_ipc_evaluate_visible() {
-        let (mut terminal, socket_path) = spawn_ipc_session();
+        let (mut terminal, socket_path) = spawn_restricted_ipc_session();
 
         // Clear output buffer so we can detect new output
         terminal.clear_buffer().expect("clear buffer");
 
-        // Evaluate with visible=true — code should appear at the prompt
-        let response = send_ipc_request(
+        // Visible evaluate follows the interactive send approval path and does
+        // not require its target to be on the silent-eval allowlist.
+        let response = send_approved_visible_evaluate(
+            &mut terminal,
             &socket_path,
-            "evaluate",
-            serde_json::json!({ "code": "cat('visible_marker\\n'); 99", "visible": true }),
-        )
-        .expect("evaluate should succeed");
+            r#"cat("visible_marker\n"); 99"#,
+        );
 
         // Verify the response has captured data
         let result = response.get("result").expect("should have result");
@@ -321,6 +391,15 @@ mod ipc_tests {
             "visible mode should not have structured value: {result:?}"
         );
 
+        // The same unlisted target remains rejected on the unattended path.
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": r#"cat("visible_marker\n"); 99"# }),
+        )
+        .expect("silent evaluate should return a policy response");
+        assert_eq!(response["error"]["code"], -32005);
+
         // Verify the output appeared in the REPL terminal
         terminal
             .expect("visible_marker")
@@ -333,6 +412,99 @@ mod ipc_tests {
         terminal
             .wait_for_prompt()
             .expect("Should return to prompt after visible evaluate");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// A declined visible evaluate must not inject or execute its R code.
+    #[test]
+    fn test_ipc_evaluate_visible_declined() {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--ipc-eval-allow-function", "exists"])
+                .expect("Failed to spawn restricted arf session with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path in session directory");
+        terminal.clear_buffer().expect("clear output");
+
+        let code = r#"declined_visible_eval_marker <- TRUE"#;
+        let request_socket = socket_path.clone();
+        let request_code = code.to_string();
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &request_socket,
+                "evaluate",
+                serde_json::json!({ "code": request_code, "visible": true }),
+            )
+        });
+        terminal
+            .expect(&ipc_approval_prompt(code))
+            .expect("REPL should display the approval prompt");
+        terminal.send_line("n").expect("decline visible evaluate");
+        let response = request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should succeed");
+        assert_eq!(response["error"]["code"], -32006);
+        assert_eq!(response["error"]["message"], "IPC send was not approved");
+
+        // `exists` is allowlisted for this check. It must report that the
+        // declined assignment never reached R.
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({ "code": r#"exists("declined_visible_eval_marker")"# }),
+        )
+        .expect("verification evaluate should succeed");
+        assert_eq!(response["result"]["value"], "[1] FALSE");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// `:ipc send-policy allow` also bypasses approval for visible evaluate.
+    #[test]
+    fn test_ipc_send_policy_allow_visible_evaluate() {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--no-auto-match", "--no-completion"])
+                .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        terminal
+            .send_line(":ipc send-policy allow")
+            .expect("set send policy");
+        terminal
+            .expect("IPC send policy: allow")
+            .expect("meta command should confirm the new policy");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path in session directory");
+        terminal.clear_buffer().expect("clear output");
+
+        let response = send_ipc_request(
+            &socket_path,
+            "evaluate",
+            serde_json::json!({
+                "code": r#"cat("visible_send_policy_allow_marker")"#,
+                "visible": true
+            }),
+        )
+        .expect("visible evaluate should succeed without a prompt");
+        assert!(
+            response["result"]["stdout"]
+                .as_str()
+                .is_some_and(|stdout| stdout.contains("visible_send_policy_allow_marker"))
+        );
+        terminal
+            .expect("visible_send_policy_allow_marker")
+            .expect("visible evaluate should run under send-policy allow");
+        assert!(
+            !terminal
+                .get_output()
+                .expect("get terminal output")
+                .contains("# [arf] IPC send request:")
+        );
 
         terminal.quit().expect("Should quit cleanly");
     }
@@ -363,12 +535,7 @@ mod ipc_tests {
         );
 
         // Send a visible command as a sentinel to prove the terminal is caught up
-        send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": "cat('sentinel_after_silent')" }),
-        )
-        .expect("sentinel user_input should succeed");
+        send_approved_user_input(&mut terminal, &socket_path, "cat('sentinel_after_silent')");
 
         // Wait for the sentinel to appear in terminal output
         terminal
@@ -407,14 +574,9 @@ mod ipc_tests {
         let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
             .expect("Should find IPC socket path in session directory");
 
-        // Send user_input via IPC — this should trigger the break signal,
-        // interrupt read_line(), and feed the code to R
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": "cat('ipc_test_output')" }),
-        )
-        .expect("IPC request should succeed");
+        clear_before_ipc_request(&mut terminal);
+        let response =
+            send_approved_user_input(&mut terminal, &socket_path, "cat('ipc_test_output')");
 
         // Verify the IPC response indicates acceptance
         assert!(
@@ -432,9 +594,211 @@ mod ipc_tests {
             .expect("R should execute the injected code and show output");
 
         // Verify we get back to the prompt after execution
+        wait_for_ipc_prompt(&mut terminal, "cat('ipc_test_output')");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that declining the default interactive approval rejects the request
+    /// and does not evaluate or save it.
+    #[test]
+    fn test_ipc_user_input_declined() {
+        let tmp = tempfile::TempDir::new().expect("create history dir");
+        let history_dir = tmp.path().to_str().expect("history dir should be UTF-8");
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--history-dir", history_dir])
+            .expect("Failed to spawn arf with IPC");
         terminal
             .wait_for_prompt()
-            .expect("Should return to prompt after IPC input execution");
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let marker = "ipc_declined_marker <- 1";
+        let socket_for_request = socket_path.clone();
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &socket_for_request,
+                "user_input",
+                serde_json::json!({ "code": marker }),
+            )
+        });
+        terminal
+            .expect(&ipc_approval_prompt(marker))
+            .expect("REPL should display the approval prompt");
+        terminal.send_line("n").expect("decline IPC send");
+        terminal
+            .expect(&(r"# [arf] IPC send declined.".to_owned() + "\r\n"))
+            .expect("REPL should display the decline status");
+        let response = request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should complete");
+
+        assert_eq!(response["error"]["code"], -32006);
+        assert!(
+            query_history(&socket_path, marker)["entries"]
+                .as_array()
+                .is_some_and(Vec::is_empty),
+            "declined code must not be added to history"
+        );
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    #[test]
+    fn test_ipc_user_input_ctrl_c_declines() {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--no-auto-match", "--no-completion"])
+                .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &socket_path,
+                "user_input",
+                serde_json::json!({ "code": "cat('ctrl_c_must_not_execute')" }),
+            )
+        });
+        terminal
+            .expect(&ipc_approval_prompt("cat('ctrl_c_must_not_execute')"))
+            .expect("REPL should display the approval prompt");
+        terminal.send_interrupt().expect("send Ctrl+C");
+        let response = request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should complete");
+        assert_eq!(response["error"]["code"], -32006);
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// A human can bypass prompts for the current REPL process with the meta
+    /// command; there is intentionally no startup option for this switch.
+    #[test]
+    fn test_ipc_send_policy_allow_meta_command() {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--no-auto-match", "--no-completion"])
+                .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        terminal
+            .send_line(":ipc send-policy allow")
+            .expect("set send policy");
+        terminal
+            .expect("IPC send policy: allow")
+            .expect("meta command should confirm the new policy");
+
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+        terminal.clear_buffer().expect("clear output");
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": "cat('send_policy_allow_marker')" }),
+        )
+        .expect("unprompted send should complete");
+        assert_eq!(response["result"]["accepted"], true);
+        terminal
+            .expect("send_policy_allow_marker")
+            .expect("send should execute without another approval");
+        assert!(
+            !terminal
+                .get_output()
+                .expect("get terminal output")
+                .contains("# [arf] IPC send request:"),
+            "allow policy should bypass the approval prompt"
+        );
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that an approved visible evaluate does not create an extra blank
+    /// line before the next prompt.
+    #[test]
+    fn test_ipc_visible_evaluate_no_extra_blank_line() {
+        let (mut terminal, socket_path) = spawn_ipc_session();
+
+        clear_before_ipc_request(&mut terminal);
+        let response = send_approved_visible_evaluate(
+            &mut terminal,
+            &socket_path,
+            r#"cat("visible_marker\n")"#,
+        );
+
+        assert!(
+            response["result"]["stdout"]
+                .as_str()
+                .is_some_and(|stdout| stdout.contains("visible_marker")),
+            "visible evaluate should capture its output, got: {response:?}"
+        );
+        let code = r#"cat("visible_marker\n")"#;
+        wait_for_ipc_prompt(&mut terminal, code);
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        let echo_index = screen
+            .lines
+            .iter()
+            .position(|line| line.contains("agent> cat(\"visible_marker\\n\")"))
+            .expect("IPC echo should remain visible");
+        assert_eq!(
+            screen.lines.get(echo_index + 1).map(String::as_str),
+            Some("visible_marker"),
+            "R output should follow the IPC echo without a blank line; screen:\n{}",
+            screen.lines.join("\n")
+        );
+
+        terminal
+            .previous_line(1)
+            .assert_contains("visible_marker")
+            .expect("line above prompt should be R output, not a blank line");
+
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    /// Test that IPC send under the allow policy preserves the line needed by
+    /// the next prompt.
+    #[test]
+    fn test_ipc_send_policy_allow_no_missing_line() {
+        let mut terminal =
+            Terminal::spawn_with_args(&["--with-ipc", "--no-auto-match", "--no-completion"])
+                .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        terminal
+            .send_line(":ipc send-policy allow")
+            .expect("set send policy");
+        terminal
+            .expect("IPC send policy: allow")
+            .expect("meta command should confirm the new policy");
+
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+        clear_before_ipc_request(&mut terminal);
+        let code = r#"send_policy_allow_echo <- 1"#;
+        let response = send_ipc_request(
+            &socket_path,
+            "user_input",
+            serde_json::json!({ "code": code }),
+        )
+        .expect("unprompted send should complete");
+
+        assert_eq!(response["result"]["accepted"], true);
+        terminal
+            .expect_regex(&format!(r"{}[\s\S]*> ", escape(code)))
+            .expect("should return to a fresh prompt after evaluation");
+
+        let screen = terminal.screen().expect("should get terminal screen");
+        assert!(
+            screen
+                .lines
+                .iter()
+                .any(|line| line.contains("agent> send_policy_allow_echo <- 1")),
+            "IPC echo should remain visible after a silent expression; screen:\n{}",
+            screen.lines.join("\n")
+        );
 
         terminal.quit().expect("Should quit cleanly");
     }
@@ -530,12 +894,7 @@ mod ipc_tests {
 
         let marker = "ipc_external_history_marker <- 1";
         clear_before_ipc_request(&mut terminal);
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": marker }),
-        )
-        .expect("IPC request should succeed");
+        let response = send_approved_user_input(&mut terminal, &socket_path, marker);
         assert_eq!(response["result"]["accepted"], true);
         wait_for_ipc_prompt(&mut terminal, marker);
 
@@ -562,12 +921,7 @@ mod ipc_tests {
 
         let marker = "ipc_fast_history_marker <- 1";
         clear_before_ipc_request(&mut terminal);
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": marker }),
-        )
-        .expect("IPC request should succeed");
+        let response = send_approved_user_input(&mut terminal, &socket_path, marker);
         assert_eq!(response["result"]["accepted"], true);
         wait_for_ipc_prompt(&mut terminal, marker);
 
@@ -591,12 +945,7 @@ mod ipc_tests {
 
         let marker = "stop('ipc_history_error_marker')";
         clear_before_ipc_request(&mut terminal);
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": marker }),
-        )
-        .expect("IPC request should succeed");
+        let response = send_approved_user_input(&mut terminal, &socket_path, marker);
         assert_eq!(response["result"]["accepted"], true);
 
         terminal
@@ -682,12 +1031,9 @@ mod ipc_tests {
         let (mut terminal, socket_path) = spawn_ipc_session();
 
         // Send IPC user_input with a command that produces known output
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": "cat('marker_output\\n')" }),
-        )
-        .expect("IPC request should succeed");
+        clear_before_ipc_request(&mut terminal);
+        let response =
+            send_approved_user_input(&mut terminal, &socket_path, "cat('marker_output\\n')");
 
         assert!(
             response
@@ -699,10 +1045,7 @@ mod ipc_tests {
         );
 
         // Wait for output and next prompt
-        terminal
-            .expect("marker_output")
-            .expect("should see R output");
-        terminal.wait_for_prompt().expect("should return to prompt");
+        wait_for_ipc_prompt(&mut terminal, "cat('marker_output\\n')");
 
         let screen = terminal.screen().expect("should get terminal screen");
         assert!(
@@ -729,12 +1072,8 @@ mod ipc_tests {
     fn test_ipc_user_input_silent_expression_keeps_echo() {
         let (mut terminal, socket_path) = spawn_ipc_session();
 
-        let response = send_ipc_request(
-            &socket_path,
-            "user_input",
-            serde_json::json!({ "code": "ipc_silent_echo <- 1" }),
-        )
-        .expect("IPC request should succeed");
+        let response =
+            send_approved_user_input(&mut terminal, &socket_path, "ipc_silent_echo <- 1");
 
         assert!(
             response
@@ -784,8 +1123,13 @@ mod ipc_tests {
         let sock_path = tmp.path().join("custom.sock");
         let sock_str = sock_path.display().to_string();
 
-        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-bind", &sock_str])
-            .expect("Failed to spawn arf with --with-ipc --ipc-bind");
+        let mut terminal = Terminal::spawn_with_args(&[
+            "--with-ipc",
+            "--ipc-eval-unrestricted",
+            "--ipc-bind",
+            &sock_str,
+        ])
+        .expect("Failed to spawn arf with --with-ipc --ipc-bind");
 
         terminal
             .wait_for_prompt()

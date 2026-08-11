@@ -38,6 +38,30 @@ fn test_headless_eval_value() {
     );
 }
 
+/// Restricted headless sessions apply the same exact-target policy as the
+/// interactive server, including operator targets.
+#[test]
+fn test_headless_eval_allowlist() {
+    let process = HeadlessProcess::spawn_with_args(&["--ipc-eval-allow-function", "+"])
+        .expect("Failed to spawn restricted headless session");
+
+    let allowed = process.ipc_eval("1 + 1").expect("allowed eval should run");
+    assert!(
+        allowed.success && allowed.stdout.contains("[1] 2"),
+        "allowlisted operator should succeed: stdout={}, stderr={}",
+        allowed.stdout,
+        allowed.stderr
+    );
+
+    let denied = process
+        .ipc_eval("length('abc')")
+        .expect("denied eval should return a protocol response");
+    assert_eq!(denied.exit_code, Some(4));
+    let error: serde_json::Value = serde_json::from_str(&denied.stderr)
+        .unwrap_or_else(|e| panic!("denial should be structured JSON: {e}: {}", denied.stderr));
+    assert_eq!(error["error"]["code"], "R_EVAL_NOT_ALLOWED");
+}
+
 /// Test that `arf ipc eval` captures stdout from `cat()`.
 #[test]
 fn test_headless_eval_stdout() {
@@ -166,11 +190,13 @@ fn test_headless_eval_multiline() {
 /// WriteConsoleEx passthrough). This is useful for monitoring/logging.
 #[test]
 fn test_headless_eval_visible() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let process = HeadlessProcess::spawn_with_args(&["--ipc-eval-allow-function", "exists"])
+        .expect("Failed to spawn restricted headless");
 
     // Use a unique marker to avoid matching startup messages
+    let code = r#"cat("vis_marker_42\n")"#;
     let result = process
-        .ipc_eval_visible("cat('vis_marker_42\\n')")
+        .ipc_eval_visible(code)
         .expect("visible eval should run");
     assert!(
         result.success,
@@ -194,6 +220,16 @@ fn test_headless_eval_visible() {
         "visible eval output should appear on headless process output: {}",
         server_output
     );
+
+    // Headless visible evaluate bypasses the allowlist like headless send,
+    // while silent evaluate remains protected by the allowlist.
+    let silent = process
+        .ipc_eval(code)
+        .expect("silent eval should return a policy response");
+    assert_eq!(silent.exit_code, Some(4));
+    let error = serde_json::from_str::<serde_json::Value>(&silent.stderr)
+        .expect("silent policy rejection should be structured JSON");
+    assert_eq!(error["error"]["code"], "R_EVAL_NOT_ALLOWED");
 }
 
 /// Test that silent eval does NOT output to the headless process.

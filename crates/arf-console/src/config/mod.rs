@@ -5,6 +5,7 @@ mod completion;
 mod editor;
 mod experimental;
 mod history;
+mod ipc;
 mod mode;
 pub(crate) mod prompt;
 mod r;
@@ -17,6 +18,7 @@ pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
 };
 pub use history::HistoryConfig;
+pub use ipc::IpcConfig;
 pub use mode::ModeConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
@@ -109,6 +111,8 @@ pub struct Config {
     pub prompt: PromptConfig,
     pub completion: CompletionConfig,
     pub history: HistoryConfig,
+    /// IPC evaluation policy configuration.
+    pub ipc: IpcConfig,
     /// R runtime configuration.
     pub r: RConfig,
     /// Mode-specific static configuration (not changeable at runtime).
@@ -675,6 +679,22 @@ show_banner = false
             config.startup.r_source,
             RSource::Mode(RSourceMode::Auto)
         ));
+    }
+
+    #[test]
+    fn test_parse_ipc_eval_allowed_functions() {
+        let config: Config = toml::from_str(
+            r#"
+[ipc.eval]
+allowed_functions = ["mean", "stats::median", "+"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.ipc.eval.allowed_functions,
+            ["mean", "stats::median", "+"]
+        );
+        assert!(Config::default().ipc.eval.allowed_functions.is_empty());
     }
 
     #[test]

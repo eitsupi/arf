@@ -1,4 +1,4 @@
-use clap::{Args, ValueHint};
+use clap::{ArgAction, Args, ValueHint};
 use std::path::PathBuf;
 
 #[derive(Args, Debug)]
@@ -21,6 +21,18 @@ pub(crate) struct HeadlessArgs {
     /// Write server PID to a file (removed on shutdown)
     #[arg(long = "ipc-pid-file", value_hint = ValueHint::FilePath)]
     pub(crate) pid_file: Option<PathBuf>,
+
+    /// Add an exact function target to the IPC evaluate allowlist. May be
+    /// repeated; package-qualified targets use `package::function`.
+    #[arg(
+        long = "ipc-eval-allow-function",
+        action = ArgAction::Append
+    )]
+    pub(crate) ipc_eval_allow_function: Vec<String>,
+
+    /// Disable the IPC evaluate allowlist for this server startup only.
+    #[arg(long = "ipc-eval-unrestricted")]
+    pub(crate) ipc_eval_unrestricted: bool,
 
     /// Suppress status messages on stderr (IPC path, ready, shutdown)
     #[arg(long)]

@@ -124,6 +124,19 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
             "INCOMPLETE_INPUT",
             Some("Complete the R expression before sending it over IPC."),
         ),
+        R_EVAL_NOT_ALLOWED => (
+            "R_EVAL_NOT_ALLOWED",
+            Some(
+                "--visible needs no allowlist entry, because it runs the code where the \
+                 session shows it rather than silently. The allowlist itself is set only at \
+                 startup, through [ipc.eval].allowed_functions or repeated \
+                 --ipc-eval-allow-function options, and lifted with --ipc-eval-unrestricted.",
+            ),
+        ),
+        INPUT_NOT_APPROVED => (
+            "INPUT_NOT_APPROVED",
+            Some("Approve the request in the interactive REPL, then send it again."),
+        ),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),

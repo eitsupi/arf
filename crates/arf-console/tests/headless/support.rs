@@ -185,6 +185,16 @@ impl HeadlessProcess {
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
+        // Most tests in this module exercise headless execution rather than
+        // the eval policy itself. Preserve their pre-policy behavior unless a
+        // test explicitly supplies a policy option.
+        let has_eval_policy = extra_args.iter().any(|arg| {
+            *arg == OsStr::new("--ipc-eval-unrestricted")
+                || *arg == OsStr::new("--ipc-eval-allow-function")
+        });
+        if !has_eval_policy {
+            cmd.arg("--ipc-eval-unrestricted");
+        }
         for arg in extra_args {
             cmd.arg(arg);
         }

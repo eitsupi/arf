@@ -51,6 +51,12 @@ Options:
       --ipc-pid-file <PID_FILE>
           Write server PID to a file (removed on shutdown)
 
+      --ipc-eval-allow-function <IPC_EVAL_ALLOW_FUNCTION>
+          Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`
+
+      --ipc-eval-unrestricted
+          Disable the IPC evaluate allowlist for this server startup only
+
       --quiet
           Suppress status messages on stderr (IPC path, ready, shutdown)
 
@@ -93,7 +99,7 @@ Options:
 
 Examples:
   Start headless and evaluate R code:
-    $ arf headless &
+    $ arf headless --ipc-eval-allow-function '+' --ipc-eval-allow-function 'Sys.time' &
     # (wait for the server to be ready)
     $ arf ipc eval '1 + 1'
 
@@ -104,7 +110,8 @@ Examples:
     $ arf headless --log-file arf.log --ipc-pid-file arf.pid
 
   Use a custom socket path:
-    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid
+    $ arf headless --ipc-bind /tmp/my-arf.sock --ipc-pid-file arf.pid \
+        --ipc-eval-allow-function 'Sys.time' &
     $ arf ipc eval --pid $(cat arf.pid) 'Sys.time()'
 
   Shut down a headless session:

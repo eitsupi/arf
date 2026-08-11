@@ -16,6 +16,31 @@ use super::{
     strip_reprex_output,
 };
 
+struct ApprovedInteractiveIpcOperation {
+    reply: tokio::sync::oneshot::Sender<crate::ipc::protocol::IpcResponse>,
+    wrote_newline: bool,
+}
+
+/// Ask for approval for an operation that executes in the user's interactive
+/// session, replying with the standard rejection when it is declined.
+fn approve_interactive_ipc_operation(
+    code: &str,
+    reply: tokio::sync::oneshot::Sender<crate::ipc::protocol::IpcResponse>,
+) -> Option<ApprovedInteractiveIpcOperation> {
+    crate::ipc::set_r_at_prompt(false);
+    let approval = crate::ipc::approve_user_input(code, &reply);
+    if approval.approved {
+        Some(ApprovedInteractiveIpcOperation {
+            reply,
+            wrote_newline: approval.wrote_newline,
+        })
+    } else {
+        crate::ipc::set_r_at_prompt(true);
+        crate::ipc::reject_user_input_not_approved(reply);
+        None
+    }
+}
+
 /// ReadConsole callback function.
 /// This is called by R when it needs user input.
 ///
@@ -146,42 +171,52 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     run_silent_eval(&op.code, reply);
                 }
                 PendingIpcKind::VisibleEvaluate { reply, timeout } => {
-                    setup_visible_eval(reply, timeout);
-                    let history_id = save_ipc_history(
-                        &mut state.line_editor,
-                        &op.code,
-                        state.history_session_id,
-                    );
-                    if !op.code.trim().is_empty() {
-                        state.pending_history_context = PendingHistoryContext::Ipc { history_id };
+                    if let Some(ApprovedInteractiveIpcOperation { reply, .. }) =
+                        approve_interactive_ipc_operation(&op.code, reply)
+                    {
+                        setup_visible_eval(reply, timeout);
+                        let history_id = save_ipc_history(
+                            &mut state.line_editor,
+                            &op.code,
+                            state.history_session_id,
+                        );
+                        if !op.code.trim().is_empty() {
+                            state.pending_history_context =
+                                PendingHistoryContext::Ipc { history_id };
+                        }
+                        let prompt_str = "agent> ";
+                        println!("{}{}", prompt_str.dark_cyan(), op.code);
+                        if !op.code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(op.code);
                     }
-                    let prompt_str = "agent> ";
-                    println!("{}{}", prompt_str.dark_cyan(), op.code);
-                    if !op.code.is_empty() {
-                        state.prompt_config.set_command_start();
-                        state.prompt_config.start_spinner();
-                    }
-                    crate::ipc::set_r_at_prompt(false);
-                    return Some(op.code);
                 }
                 PendingIpcKind::UserInput { reply } => {
-                    accept_user_input(reply);
-                    let history_id = save_ipc_history(
-                        &mut state.line_editor,
-                        &op.code,
-                        state.history_session_id,
-                    );
-                    if !op.code.trim().is_empty() {
-                        state.pending_history_context = PendingHistoryContext::Ipc { history_id };
+                    if let Some(ApprovedInteractiveIpcOperation { reply, .. }) =
+                        approve_interactive_ipc_operation(&op.code, reply)
+                    {
+                        accept_user_input(reply);
+                        let history_id = save_ipc_history(
+                            &mut state.line_editor,
+                            &op.code,
+                            state.history_session_id,
+                        );
+                        if !op.code.trim().is_empty() {
+                            state.pending_history_context =
+                                PendingHistoryContext::Ipc { history_id };
+                        }
+                        let prompt_str = "agent> ";
+                        println!("{}{}", prompt_str.dark_cyan(), op.code);
+                        if !op.code.is_empty() {
+                            state.prompt_config.set_command_start();
+                            state.prompt_config.start_spinner();
+                        }
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(op.code);
                     }
-                    let prompt_str = "agent> ";
-                    println!("{}{}", prompt_str.dark_cyan(), op.code);
-                    if !op.code.is_empty() {
-                        state.prompt_config.set_command_start();
-                        state.prompt_config.start_spinner();
-                    }
-                    crate::ipc::set_r_at_prompt(false);
-                    return Some(op.code);
                 }
             }
         }
@@ -400,16 +435,33 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                             continue;
                         }
 
-                        // Visible evaluate / user input: accept, inject code into REPL
-                        match op.kind {
+                        // Visible evaluate / user input: accept, inject code into REPL.
+                        // Preserve whether approval already emitted its CRLF.
+                        let approval_wrote_newline = match op.kind {
                             PendingIpcKind::VisibleEvaluate { reply, timeout } => {
+                                let Some(ApprovedInteractiveIpcOperation {
+                                    reply,
+                                    wrote_newline,
+                                }) = approve_interactive_ipc_operation(&op.code, reply)
+                                else {
+                                    continue;
+                                };
                                 setup_visible_eval(reply, timeout);
+                                wrote_newline
                             }
                             PendingIpcKind::UserInput { reply } => {
+                                let Some(ApprovedInteractiveIpcOperation {
+                                    reply,
+                                    wrote_newline,
+                                }) = approve_interactive_ipc_operation(&op.code, reply)
+                                else {
+                                    continue;
+                                };
                                 accept_user_input(reply);
+                                wrote_newline
                             }
                             PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
-                        }
+                        };
 
                         let history_id =
                             save_ipc_history(editor, &op.code, state.history_session_id);
@@ -425,7 +477,9 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // leave the cursor one row beyond that range. Otherwise, when R produces
                         // no output, the next repaint reuses the old prompt origin and clears the
                         // echoed agent line.
-                        println!();
+                        if !approval_wrote_newline {
+                            println!();
+                        }
 
                         if !op.code.is_empty() {
                             state.prompt_config.set_command_start();

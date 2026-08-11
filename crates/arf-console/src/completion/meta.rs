@@ -124,7 +124,7 @@ const META_COMMANDS: &[MetaCommandDef] = &[
     },
     MetaCommandDef {
         name: "ipc",
-        description: "IPC server management (start, stop, status)",
+        description: "IPC server and send-policy management",
         takes_argument: true,
     },
     MetaCommandDef {
@@ -276,6 +276,8 @@ impl MetaCommandCompleter {
                 } else if cmd == "history" {
                     // Complete with history subcommands
                     self.complete_history_subcommands(pos, "")
+                } else if cmd == "ipc" {
+                    self.complete_ipc_subcommands(pos, "")
                 } else {
                     vec![]
                 }
@@ -288,6 +290,8 @@ impl MetaCommandCompleter {
                     self.complete_switch_versions(line, pos, leading_whitespace, partial)
                 } else if cmd == "history" {
                     self.complete_history_subcommands(pos, partial)
+                } else if cmd == "ipc" {
+                    self.complete_ipc_subcommands(pos, partial)
                 } else {
                     vec![]
                 }
@@ -302,6 +306,15 @@ impl MetaCommandCompleter {
                 } else if cmd == "history" && subcmd == "browse" {
                     // Complete with browse targets (r, shell)
                     self.complete_history_browse_targets(pos, "")
+                } else if cmd == "ipc" && subcmd == "send-policy" {
+                    self.complete_targets(
+                        pos,
+                        "",
+                        &[
+                            ("prompt", "Require approval for every interactive send"),
+                            ("allow", "Allow sends for the current REPL process"),
+                        ],
+                    )
                 } else {
                     vec![]
                 }
@@ -315,6 +328,15 @@ impl MetaCommandCompleter {
                     self.complete_history_clear_targets(pos, partial)
                 } else if cmd == "history" && subcmd == "browse" {
                     self.complete_history_browse_targets(pos, partial)
+                } else if cmd == "ipc" && subcmd == "send-policy" {
+                    self.complete_targets(
+                        pos,
+                        partial,
+                        &[
+                            ("prompt", "Require approval for every interactive send"),
+                            ("allow", "Allow sends for the current REPL process"),
+                        ],
+                    )
                 } else {
                     vec![]
                 }
@@ -441,6 +463,26 @@ impl MetaCommandCompleter {
                 }
             })
             .collect()
+    }
+
+    fn complete_ipc_subcommands(&self, pos: usize, partial: &str) -> Vec<Suggestion> {
+        let mut suggestions = self.complete_targets(
+            pos,
+            partial,
+            &[
+                ("start", "Start the IPC server"),
+                ("stop", "Stop the IPC server"),
+                ("status", "Show IPC server status"),
+                (
+                    "send-policy",
+                    "Change interactive send approval for this process",
+                ),
+            ],
+        );
+        for suggestion in &mut suggestions {
+            suggestion.append_whitespace = suggestion.value == "send-policy";
+        }
+        suggestions
     }
 
     /// Complete from a list of (name, description) targets.
