@@ -60,14 +60,20 @@ pub fn approve_user_input(code: &str, reply: &tokio::sync::oneshot::Sender<IpcRe
         return false;
     }
     let escaped = user_input_preview(code);
-    let prompt = format!("IPC send [{escaped}]? [y/N]: ");
+    let prompt = format!(
+        "# [arf] IPC send request: [{escaped}]\r\n# [arf] Press y to approve, any other key declines: "
+    );
     use std::io::Write;
     print!("{prompt}");
     let _ = std::io::stdout().flush();
     let finish = |approved: bool| {
         // Raw terminals do not translate LF to CRLF; return to column zero
         // explicitly so the agent echo is rendered on the next line.
-        print!("\r\n");
+        if approved {
+            print!("\r\n");
+        } else {
+            print!("\r\n# [arf] IPC send declined.\r\n");
+        }
         let _ = std::io::stdout().flush();
         approved
     };
@@ -121,7 +127,7 @@ pub fn approve_user_input(code: &str, reply: &tokio::sync::oneshot::Sender<IpcRe
                 }
                 return finish(approved);
             }
-            Ok(_) => return finish(false),
+            Ok(_) => continue,
             Err(error) => {
                 log::debug!("IPC send approval input failed: {error}");
                 return finish(false);

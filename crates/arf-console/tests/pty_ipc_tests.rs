@@ -165,6 +165,12 @@ mod ipc_tests {
         terminal.clear_buffer().expect("clear PTY output buffer");
     }
 
+    fn ipc_approval_prompt(code: &str) -> String {
+        format!(r"# [arf] IPC send request: [{code}]")
+            + "\r\r\n"
+            + r"# [arf] Press y to approve, any other key declines: "
+    }
+
     fn send_approved_user_input(
         terminal: &mut Terminal,
         socket_path: &str,
@@ -181,7 +187,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&format!("IPC send [{code}]? [y/N]:"))
+            .expect(&ipc_approval_prompt(&code))
             .expect("REPL should display the approval prompt");
         terminal.send_line("y").expect("approve IPC send");
         request
@@ -476,9 +482,12 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect("IPC send [ipc_declined_marker <- 1]? [y/N]:")
+            .expect(&ipc_approval_prompt(marker))
             .expect("REPL should display the approval prompt");
         terminal.send_line("n").expect("decline IPC send");
+        terminal
+            .expect(&(r"# [arf] IPC send declined.".to_owned() + "\r\n"))
+            .expect("REPL should display the decline status");
         let response = request
             .join()
             .expect("IPC request thread should not panic")
@@ -513,7 +522,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect("IPC send [cat('ctrl_c_must_not_execute')]? [y/N]:")
+            .expect(&ipc_approval_prompt("cat('ctrl_c_must_not_execute')"))
             .expect("REPL should display the approval prompt");
         terminal.send_interrupt().expect("send Ctrl+C");
         let response = request
@@ -558,7 +567,7 @@ mod ipc_tests {
             !terminal
                 .get_output()
                 .expect("get terminal output")
-                .contains("IPC send ["),
+                .contains("# [arf] IPC send request:"),
             "allow policy should bypass the approval prompt"
         );
         terminal.quit().expect("Should quit cleanly");

@@ -226,10 +226,18 @@ Example (R error):
 
 Sends code as if the user typed it at the prompt. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
 
-In an interactive REPL, `send` displays a bounded, escaped preview and requires
-an explicit `y` or `Y` key for each request by default. Enter, `n`, Ctrl+C,
-Ctrl+D, Esc, a read error, or a request whose client timeout has elapsed rejects the
-request. This is controlled for the current process only with `:ipc
+In an interactive REPL, `send` displays a bounded, escaped preview in this
+format and requires an explicit `y` or `Y` key for each request by default:
+
+```text
+# [arf] IPC send request: [<preview>]
+# [arf] Press y to approve, any other key declines:
+```
+
+Any other key, including Enter, `n`, Ctrl+C, Ctrl+D, or Esc, rejects the
+request. Non-key terminal events are ignored while waiting. A read error or a
+request whose client timeout has elapsed also rejects the request. This is
+controlled for the current process only with `:ipc
 send-policy allow` and restored with `:ipc send-policy prompt`; it cannot be
 changed by configuration or startup CLI options. Headless `send` remains
 immediate.
