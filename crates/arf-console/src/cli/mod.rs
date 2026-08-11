@@ -255,7 +255,8 @@ Examples:
 
   Shut down a headless session:
     $ arf ipc shutdown")]
-    Headless(headless::HeadlessArgs),
+    // Boxed to keep this variant from dominating the size of the whole enum.
+    Headless(Box<headless::HeadlessArgs>),
     /// R source resolution commands
     R(resolve::RArgs),
 }
