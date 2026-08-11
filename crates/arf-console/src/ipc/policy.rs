@@ -82,6 +82,8 @@ fn validate_top_level(
     match node.kind() {
         "call" | "binary_operator" | "unary_operator" | "subset" | "subset2"
         | "extract_operator" => validate_expression(node, source, allowlist),
+        "identifier" | "string" | "integer" | "float" | "complex" | "true" | "false" | "null"
+        | "inf" | "nan" | "na" => Ok(()),
         "parenthesized_expression" => {
             let mut cursor = node.walk();
             let mut children = node.named_children(&mut cursor);
@@ -91,7 +93,7 @@ fn validate_top_level(
             }
         }
         kind => Err(format!(
-            "only allowlisted function calls and operators may be evaluated (found {kind})"
+            "R construct '{kind}' is not allowed at the top level of IPC evaluation"
         )),
     }
 }
@@ -109,7 +111,10 @@ fn validate_call(node: Node<'_>, source: &[u8], allowlist: &HashSet<String>) -> 
         ));
     }
 
-    // Walk every argument and nested call.  The small set of inert leaves is
+    // Walk every argument and nested call. Literals are execution-inert, but
+    // identifiers are syntactic leaves whose evaluation can force a promise or
+    // run an active binding. That is acceptable because IPC eval cannot create
+    // such bindings; assignment is never permitted. Keep the accepted leaves
     // explicit so newly introduced grammar nodes fail closed.
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor).skip(1) {
@@ -293,10 +298,31 @@ mod tests {
     #[test]
     fn rejects_unlisted_or_structurally_unsafe_operators() {
         assert!(check("1 + 2", &[]).is_err());
-        assert!(check("1", &["+"]).is_err());
-        assert!(check("x", &["+"]).is_err());
+        assert!(check(r#"1"#, &["+"]).is_ok());
+        assert!(check(r#"x"#, &["+"]).is_ok());
         assert!(check("x <- 1", &["<-"]).is_err());
         assert!(check("x |> length()", &["|>", "length"]).is_err());
+    }
+
+    #[test]
+    fn allows_bare_literals_and_identifiers_without_allowlist() {
+        assert!(check(r#"1"#, &[]).is_ok());
+        assert!(check(r#"x"#, &[]).is_ok());
+    }
+
+    #[test]
+    fn extraction_requires_an_allowlisted_operator() {
+        assert!(check(r#"x$a"#, &[]).is_err());
+        assert!(check(r#"x$a"#, &["$"]).is_ok());
+    }
+
+    #[test]
+    fn permanently_banned_constructs_stay_rejected_with_allowlist_entries() {
+        let allowlist = ["<-", "if", "pkg:::fun", "|>", "length"];
+        assert!(check(r#"x <- 1"#, &allowlist).is_err());
+        assert!(check(r#"if (x) 1 else 2"#, &allowlist).is_err());
+        assert!(check(r#"pkg:::fun(1)"#, &allowlist).is_err());
+        assert!(check(r#"x |> length()"#, &allowlist).is_err());
     }
 
     #[test]

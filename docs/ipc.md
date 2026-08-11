@@ -163,10 +163,13 @@ IPC evaluation uses a best-effort tree-sitter-r policy in both interactive and
 headless sessions. The default allowlist is empty. Configure exact direct call
 targets at startup, for example `--ipc-eval-allow-function mean` or
 `--ipc-eval-allow-function stats::median`; nested calls must also be allowlisted.
-R operators use their exact spelling (`+`, `[`, `[[`, `$`, and so on) in the
-same list. Assignments, control flow, computed callees, the native pipe `|>`,
-and `:::` are always rejected in restricted mode. Syntax errors and policy
-violations are rejected before R evaluation and history recording.
+Bare literals and object references (bare identifiers) evaluate without any
+configuration. Extraction operators (`$`, `[`, and `[[`) remain allowlist-gated
+and must be enabled with repeated `--ipc-eval-allow-function` flags. Other R
+operators use their exact spelling (such as `+`) in the same list. Assignments,
+control flow, computed callees, the native pipe `|>`, and `:::` are always
+rejected in restricted mode. Syntax errors and policy violations are rejected
+before R evaluation and history recording.
 `--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
 R sandbox and does not promise that an allowed function is non-mutating.
 
@@ -176,6 +179,12 @@ Evaluates R code and returns the captured output. The code runs silently by defa
 # Basic evaluation
 arf headless --ipc-eval-allow-function length &
 arf ipc eval 'length("abc")'
+
+# Debugger-style object inspection
+arf headless \
+  --ipc-eval-allow-function '$' \
+  --ipc-eval-allow-function '[' \
+  --ipc-eval-allow-function '[[' &
 
 # With timeout (milliseconds; Sys.sleep must be allowlisted at server startup)
 arf ipc eval --timeout 10000 'Sys.sleep(5)'
