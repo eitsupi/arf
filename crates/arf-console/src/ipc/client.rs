@@ -127,9 +127,9 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
         R_EVAL_NOT_ALLOWED => (
             "R_EVAL_NOT_ALLOWED",
             Some(
-                "Add every direct call target to [ipc.eval].allowed_functions, pass repeated \
-                 --ipc-eval-allow-function options when starting the server, or explicitly \
-                 start it with --ipc-eval-unrestricted.",
+                "Use --visible (no restart required), add direct call targets to \
+                 [ipc.eval].allowed_functions, pass repeated --ipc-eval-allow-function options \
+                 when starting the server, or start it with --ipc-eval-unrestricted.",
             ),
         ),
         INPUT_NOT_APPROVED => (

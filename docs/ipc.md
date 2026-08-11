@@ -192,12 +192,19 @@ Assignments, control flow, computed callees, the native pipe `|>`, and `:::`
 are always rejected in restricted mode. Syntax errors and policy violations
 are rejected before R evaluation and history recording.
 `--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
-R sandbox and does not promise that an allowed function is non-mutating.
+R sandbox and does not promise that an allowed function is non-mutating. Evaluating
+a bare identifier can itself run code by forcing a promise or triggering an active
+binding; this is allowed by default because IPC eval never permits assignment, so a
+caller cannot create such a binding through IPC eval.
 
 Evaluates R code and returns the captured output. The code runs silently by
 default — output is not shown in the session. With `--visible`, an interactive
 session uses the same human approval as `send`; a headless session runs it
-immediately like `send`.
+immediately like `send`. The response fields differ between these two visible
+paths: headless visible evaluation still goes through the capture wrapper and
+populates `value` and `error`, while interactive visible evaluation runs
+through normal REPL evaluation and returns `null` for both fields. In the
+interactive case, printed values and errors are in `stdout` and `stderr`.
 
 ```sh
 # Basic evaluation
@@ -219,11 +226,11 @@ arf ipc eval --pid 12345 'getwd()'
 | Parameter | Description |
 |-----------|-------------|
 | `<CODE>` | R code to evaluate (required) |
-| `--visible` | Also show output in the session. In an interactive session, this is governed by the same human approval as `send`, not the eval allowlist. In headless mode, it runs immediately like `send`. |
+| `--visible` | Also show output in the session. In an interactive session, this is governed by the same human approval as `send`, not the eval allowlist, and `value`/`error` are always `null` in the response. In headless mode, it runs immediately like `send` and still populates `value`/`error`. |
 | `--timeout <MS>` | Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. In silent mode (the default), the printed result appears in the `value` field rather than `stdout`. R evaluation errors are included in the `error` field with exit code 0 — they are a normal response, not an IPC failure.
+**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present, but `value` and `error` are not populated for an interactive session's visible evaluation: normal REPL output and errors appear in `stdout` and `stderr` instead. Silent evaluation (the default) and visible evaluation in a headless session use the capture wrapper, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
 
 When the timeout fires, the server returns a JSON-RPC error response instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. The R evaluation continues, so the session stays busy until it finishes.
 

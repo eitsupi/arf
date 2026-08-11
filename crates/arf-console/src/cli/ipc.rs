@@ -31,16 +31,14 @@ Examples:
     /// exit code 0 — they are a normal response, not an IPC failure.
     #[command(after_long_help = "\
 Examples:
-  Evaluate an expression:
+  Evaluate an expression silently (allowlist `+` at startup):
+    $ arf headless --ipc-eval-allow-function '+' &
     $ arf ipc eval '1 + 1'
 
   Pipe code via stdin:
     $ echo '1 + 1' | arf ipc eval
 
-  Run code with a 10-second timeout:
-    $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
-
-  Also show output in the session (REPL or headless stdout):
+  Show output in the session:
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
   Target a specific session when multiple are running:

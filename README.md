@@ -243,11 +243,14 @@ See the full [Configuration Guide](docs/configuration.md) for all options.
 Run R without a terminal and interact via IPC — useful for AI agents, CI, and editor extensions. Unlike MCP-based solutions that require R package installation and an MCP client, arf provides a single binary with a simple CLI for programmatic R access:
 
 ```sh
-# Start headless R with IPC server
-arf headless
+# Terminal 1: start headless R with `+` allowlisted for silent eval
+arf headless --ipc-eval-allow-function '+'
 
-# From another terminal, evaluate R code
+# Terminal 2: silently evaluate R code (not shown, so `+` was allowlisted at startup)
 arf ipc eval '1 + 1'
+
+# Or show the code where a person can see it; visible eval needs no allowlist
+arf ipc eval --visible '1 + 1'
 
 # Get session info as JSON
 arf ipc session | jq '.r.version'
