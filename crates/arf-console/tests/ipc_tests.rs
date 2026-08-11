@@ -13,7 +13,7 @@
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -32,6 +32,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 struct IpcTestProcess {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     _pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pty_output: Arc<(Mutex<String>, Condvar)>,
     shutdown: Arc<AtomicBool>,
     _reader_handle: Option<thread::JoinHandle<()>>,
     socket_path: String,
@@ -76,8 +77,10 @@ impl IpcTestProcess {
         drop(pair.slave);
 
         let pty_writer = Arc::new(Mutex::new(pty_writer));
+        let pty_output = Arc::new((Mutex::new(String::new()), Condvar::new()));
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
+        let pty_output_clone = Arc::clone(&pty_output);
 
         // On Unix, reedline sends CSI 6n (cursor position query) via the PTY.
         // We must respond or crossterm blocks with a timeout, slowing startup.
@@ -123,6 +126,10 @@ impl IpcTestProcess {
                     match pty_reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
+                            if let Ok(mut output) = pty_output_clone.0.lock() {
+                                output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                pty_output_clone.1.notify_all();
+                            }
                             parser.process(&buf[..n]);
                             // Respond to any cursor queries detected
                             while query_rx.try_recv().is_ok() {
@@ -154,7 +161,12 @@ impl IpcTestProcess {
                     }
                     match pty_reader.read(&mut buf) {
                         Ok(0) => break,
-                        Ok(_) => {}
+                        Ok(n) => {
+                            if let Ok(mut output) = pty_output_clone.0.lock() {
+                                output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                pty_output_clone.1.notify_all();
+                            }
+                        }
                         Err(e) => {
                             if e.kind() != std::io::ErrorKind::WouldBlock
                                 && e.kind() != std::io::ErrorKind::Interrupted
@@ -175,6 +187,7 @@ impl IpcTestProcess {
         Ok(IpcTestProcess {
             child,
             _pty_writer: pty_writer,
+            pty_output,
             shutdown,
             _reader_handle: Some(reader_handle),
             socket_path,
@@ -188,6 +201,34 @@ impl IpcTestProcess {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
         send_ipc_request(&self.socket_path, method, params)
+    }
+
+    /// Wait for text to appear in the PTY output.
+    fn wait_for_output(&self, expected: &str) -> Result<(), String> {
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let (output_lock, output_ready) = &*self.pty_output;
+        let mut output = output_lock.lock().map_err(|e| e.to_string())?;
+
+        loop {
+            if output.contains(expected) {
+                return Ok(());
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(format!(
+                    "Timed out waiting for PTY output '{expected}'. Current output:\n{output}"
+                ));
+            }
+            let (new_output, timeout) = output_ready
+                .wait_timeout(output, remaining)
+                .map_err(|e| e.to_string())?;
+            output = new_output;
+            if timeout.timed_out() && !output.contains(expected) {
+                return Err(format!(
+                    "Timed out waiting for PTY output '{expected}'. Current output:\n{output}"
+                ));
+            }
+        }
     }
 }
 
@@ -503,11 +544,31 @@ fn test_ipc_evaluate_mixed() {
 fn test_ipc_evaluate_visible() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
-    let response = process
-        .request(
+    let socket_path = process.socket_path.clone();
+    let request = thread::spawn(move || {
+        send_ipc_request(
+            &socket_path,
             "evaluate",
-            serde_json::json!({ "code": "cat('vis_marker\\n'); 99", "visible": true }),
+            serde_json::json!({
+                "code": r#"cat("vis_marker\n"); 99"#,
+                "visible": true
+            }),
         )
+    });
+    process
+        .wait_for_output("# [arf] Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the PTY");
+    {
+        let mut writer = process
+            ._pty_writer
+            .lock()
+            .expect("PTY writer should not be poisoned");
+        writer.write_all(b"y\n").expect("approve visible evaluate");
+        writer.flush().expect("flush approval");
+    }
+    let response = request
+        .join()
+        .expect("request thread should not panic")
         .expect("visible evaluate should succeed");
 
     let result = response.get("result").expect("should have result");

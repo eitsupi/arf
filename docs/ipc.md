@@ -159,32 +159,50 @@ When the user is typing in the REPL, the `data` field contains:
 
 ### `arf ipc eval` — Evaluate R Code
 
-IPC evaluation uses a best-effort tree-sitter-r policy in both interactive and
-headless sessions. The default allowlist is empty. Configure exact direct call
-targets at startup, for example `--ipc-eval-allow-function mean` or
-`--ipc-eval-allow-function stats::median`; nested calls must also be allowlisted.
-Bare literals and object references (bare identifiers) evaluate without any
-configuration. Extraction operators (`$`, `[`, and `[[`) remain allowlist-gated
-and must be enabled with repeated `--ipc-eval-allow-function` flags. Other R
-operators use their exact spelling (such as `+`) in the same list. Assignments,
-control flow, computed callees, the native pipe `|>`, and `:::` are always
-rejected in restricted mode. Syntax errors and policy violations are rejected
-before R evaluation and history recording.
+What decides the policy is whether a human can see the operation, not whether
+the session is headless or interactive. Silent eval leaves no trace a person
+watching the session would notice, so it is protected by an exact allowlist.
+`send` and `eval --visible` do surface in the session, so they are protected by
+human approval instead: an interactive session shows a confirmation prompt, and
+a headless session has no human to ask, so both headless `send` and headless
+`eval --visible` run immediately and are unrestricted.
+
+History follows a related but separate rule: every IPC operation is recorded
+except silent eval in an interactive session, which is the one path that runs
+without leaving anything behind for the person at the prompt.
+
+Plain (silent) IPC evaluation uses a best-effort tree-sitter-r policy in both
+interactive and headless sessions. The default allowlist is empty. Configure
+exact direct call targets at startup, for example
+`--ipc-eval-allow-function mean` or `--ipc-eval-allow-function stats::median`;
+nested calls must also be allowlisted. Bare literals and object references
+(bare identifiers) evaluate without any configuration. Extraction operators
+(`$`, `[`, and `[[`) remain allowlist-gated; enable them with repeated
+`--ipc-eval-allow-function` flags, as in this debugger-style inspection setup:
+
+```sh
+arf headless \
+  --ipc-eval-allow-function '$' \
+  --ipc-eval-allow-function '[' \
+  --ipc-eval-allow-function '[[' &
+```
+
+Other R operators use their exact spelling (such as `+`) in the same list.
+Assignments, control flow, computed callees, the native pipe `|>`, and `:::`
+are always rejected in restricted mode. Syntax errors and policy violations
+are rejected before R evaluation and history recording.
 `--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
 R sandbox and does not promise that an allowed function is non-mutating.
 
-Evaluates R code and returns the captured output. The code runs silently by default — output is not shown in the session.
+Evaluates R code and returns the captured output. The code runs silently by
+default — output is not shown in the session. With `--visible`, an interactive
+session uses the same human approval as `send`; a headless session runs it
+immediately like `send`.
 
 ```sh
 # Basic evaluation
 arf headless --ipc-eval-allow-function length &
 arf ipc eval 'length("abc")'
-
-# Debugger-style object inspection
-arf headless \
-  --ipc-eval-allow-function '$' \
-  --ipc-eval-allow-function '[' \
-  --ipc-eval-allow-function '[[' &
 
 # With timeout (milliseconds; Sys.sleep must be allowlisted at server startup)
 arf ipc eval --timeout 10000 'Sys.sleep(5)'
@@ -201,7 +219,7 @@ arf ipc eval --pid 12345 'getwd()'
 | Parameter | Description |
 |-----------|-------------|
 | `<CODE>` | R code to evaluate (required) |
-| `--visible` | Also show output in the session |
+| `--visible` | Also show output in the session. In an interactive session, this is governed by the same human approval as `send`, not the eval allowlist. In headless mode, it runs immediately like `send`. |
 | `--timeout <MS>` | Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
@@ -234,6 +252,10 @@ Example (R error):
 ### `arf ipc send` — Send User Input
 
 Sends code as if the user typed it at the prompt. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
+
+`send` is a visible, history-recorded operation. In an interactive REPL it is
+shown for human approval; in headless mode it runs immediately because there is
+no human to ask. It is not governed by the silent-eval allowlist.
 
 In an interactive REPL, `send` displays a bounded, escaped preview in this
 format and requires an explicit `y` or `Y` key for each request by default:

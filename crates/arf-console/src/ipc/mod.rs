@@ -48,16 +48,30 @@ pub fn send_policy_is_allow() -> bool {
     send_policy_allow().load(Ordering::Acquire)
 }
 
+pub struct UserInputApproval {
+    pub approved: bool,
+    pub wrote_newline: bool,
+}
+
 /// Ask for approval immediately before an interactive `user_input` executes.
 /// The sender check prevents a timed-out request from being executed after its
 /// client has gone away.  A half-close cannot be distinguished from the normal
 /// request framing, so this is necessarily best effort until the server timeout.
-pub fn approve_user_input(code: &str, reply: &tokio::sync::oneshot::Sender<IpcResponse>) -> bool {
+pub fn approve_user_input(
+    code: &str,
+    reply: &tokio::sync::oneshot::Sender<IpcResponse>,
+) -> UserInputApproval {
     if send_policy_is_allow() {
-        return !reply.is_closed();
+        return UserInputApproval {
+            approved: !reply.is_closed(),
+            wrote_newline: false,
+        };
     }
     if reply.is_closed() {
-        return false;
+        return UserInputApproval {
+            approved: false,
+            wrote_newline: false,
+        };
     }
     let escaped = user_input_preview(code);
     let prompt = format!(
@@ -75,7 +89,10 @@ pub fn approve_user_input(code: &str, reply: &tokio::sync::oneshot::Sender<IpcRe
             print!("\r\n# [arf] IPC send declined.\r\n");
         }
         let _ = std::io::stdout().flush();
-        approved
+        UserInputApproval {
+            approved,
+            wrote_newline: true,
+        }
     };
 
     // Reedline normally owns raw mode, but the fast path can reach this
@@ -543,7 +560,7 @@ fn handle_request(request: IpcRequest) {
             visible,
             timeout_ms,
         } => {
-            if let Err(reason) = policy::validate(&code) {
+            if !visible && let Err(reason) = policy::validate(&code) {
                 let _ = reply.send(IpcResponse::error(
                     R_EVAL_NOT_ALLOWED,
                     format!("IPC evaluation rejected by policy: {reason}"),
@@ -1183,7 +1200,7 @@ fn headless_handle_request(request: IpcRequest) {
 
     match method {
         IpcMethod::Evaluate { code, visible, .. } => {
-            if let Err(reason) = policy::validate(&code) {
+            if !visible && let Err(reason) = policy::validate(&code) {
                 let _ = reply.send(IpcResponse::error(
                     R_EVAL_NOT_ALLOWED,
                     format!("IPC evaluation rejected by policy: {reason}"),
