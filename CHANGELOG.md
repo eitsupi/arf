@@ -7,6 +7,10 @@
 - **Experimental/Breaking:** `arf ipc eval` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session; literals and object references still evaluate without configuration. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic, not an R sandbox.
 - **Experimental/Breaking:** `arf ipc send` and `arf ipc eval --visible` now show the code and ask for confirmation before running it in an interactive REPL; `:ipc send-policy allow` suspends the prompt until arf restarts. Headless sessions run immediately, and the eval allowlist does not apply to either path.
 
+### Fixed
+
+- macOS binaries no longer fail to start with a missing `liblzma` library error.
+
 ## [0.4.5] - 2026-08-01
 
 ### Added
