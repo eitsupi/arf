@@ -75,6 +75,22 @@ impl Menu for FunctionAwareMenu {
         self.inner.is_active()
     }
 
+    fn set_active(&mut self, active: bool) {
+        self.inner.set_active(active);
+    }
+
+    fn clear_input(&mut self) {
+        self.inner.clear_input();
+    }
+
+    fn on_activate(&mut self) {
+        self.inner.on_activate();
+    }
+
+    fn handle_menu_event(&mut self, event: &MenuEvent) {
+        self.inner.handle_menu_event(event);
+    }
+
     fn menu_event(&mut self, event: MenuEvent) {
         self.inner.menu_event(event);
     }
@@ -153,6 +169,18 @@ impl Menu for FunctionAwareMenu {
         self.inner.get_values()
     }
 
+    fn reset_position(&mut self) {
+        self.inner.reset_position();
+    }
+
+    fn results_are_provisional(&self) -> bool {
+        self.inner.results_are_provisional()
+    }
+
+    fn is_awaiting_first_answer(&self) -> bool {
+        self.inner.is_awaiting_first_answer()
+    }
+
     fn menu_required_lines(&self, terminal_columns: u16) -> u16 {
         self.inner.menu_required_lines(terminal_columns)
     }
@@ -222,6 +250,18 @@ impl Menu for StateSyncHistoryMenu {
         self.inner.is_active()
     }
 
+    fn set_active(&mut self, active: bool) {
+        self.inner.set_active(active);
+    }
+
+    fn clear_input(&mut self) {
+        self.inner.clear_input();
+    }
+
+    fn handle_menu_event(&mut self, event: &MenuEvent) {
+        self.inner.handle_menu_event(event);
+    }
+
     fn menu_event(&mut self, event: MenuEvent) {
         self.inner.menu_event(event);
     }
@@ -283,6 +323,10 @@ impl Menu for StateSyncHistoryMenu {
 
     fn get_values(&self) -> &[Suggestion] {
         self.inner.get_values()
+    }
+
+    fn reset_position(&mut self) {
+        self.inner.reset_position();
     }
 
     fn menu_required_lines(&self, terminal_columns: u16) -> u16 {
