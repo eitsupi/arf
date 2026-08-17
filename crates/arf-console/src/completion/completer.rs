@@ -4,7 +4,7 @@
 //! [`CombinedCompleter`] which dispatches to the appropriate sub-completer.
 
 use super::r_completer::RCompleter;
-use reedline::{Completer, Suggestion};
+use reedline::{Completer, CompletionResult};
 
 // Re-export so external code can keep using `crate::completion::completer::MetaCommandCompleter`.
 pub use super::meta::MetaCommandCompleter;
@@ -82,7 +82,9 @@ impl Default for CombinedCompleter {
 }
 
 impl Completer for CombinedCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        // Both sub-completers are synchronous, so their result can be handed
+        // straight through; rebuilding it would only copy the shared list.
         if line.trim_start().starts_with(':') {
             self.meta_completer.complete(line, pos)
         } else {
@@ -99,6 +101,7 @@ mod tests {
     fn test_combined_completer_delegates_to_meta() {
         let mut completer = CombinedCompleter::new();
         let suggestions = completer.complete(":rep", 4);
+        let suggestions = suggestions.suggestions();
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].value, "reprex");
     }
@@ -107,6 +110,7 @@ mod tests {
     fn test_combined_completer_with_leading_whitespace() {
         let mut completer = CombinedCompleter::new();
         let suggestions = completer.complete("  :rep", 6);
+        let suggestions = suggestions.suggestions();
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].value, "reprex");
     }
@@ -116,6 +120,7 @@ mod tests {
         // CombinedCompleter is used in R mode, so `:r` should be excluded
         let mut completer = CombinedCompleter::new();
         let suggestions = completer.complete(":", 1);
+        let suggestions = suggestions.suggestions();
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(
             !values.contains(&"r"),

@@ -6,7 +6,7 @@
 use super::meta::MetaCommandCompleter;
 use super::path::PathCompletionOptions;
 use super::string_context::path_to_suggestions;
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 
 /// Shell separators that start a new token.
 const TOKEN_SEPARATORS: &[char] = &['|', ';', '&', '<', '>'];
@@ -135,7 +135,13 @@ impl ShellCompleter {
 }
 
 impl Completer for ShellCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.complete_impl(line, pos))
+    }
+}
+
+impl ShellCompleter {
+    fn complete_impl(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
         let pos = pos.min(line.len());
         if !line.is_char_boundary(pos) {
             return vec![];
@@ -144,7 +150,11 @@ impl Completer for ShellCompleter {
 
         // Delegate meta commands to MetaCommandCompleter
         if trimmed.starts_with(':') {
-            return self.meta_completer.complete(line, pos);
+            return self
+                .meta_completer
+                .complete(line, pos)
+                .suggestions()
+                .to_vec();
         }
 
         // Find the current token start and extract the partial text
@@ -277,6 +287,7 @@ mod tests {
         let mut completer = ShellCompleter::new(false);
         // :cd is available in shell mode (not excluded)
         let suggestions = completer.complete(":c", 2);
+        let suggestions = suggestions.suggestions();
         assert!(
             suggestions.iter().any(|s| s.value == "cd"),
             "should suggest :cd for :c"
@@ -287,6 +298,7 @@ mod tests {
     fn test_shell_completer_excludes_shell_mode_meta_commands() {
         let mut completer = ShellCompleter::new(false);
         let suggestions = completer.complete(":", 1);
+        let suggestions = suggestions.suggestions();
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(
             !values.contains(&"shell"),
@@ -302,6 +314,7 @@ mod tests {
     fn test_shell_completer_no_command_names_when_disabled() {
         let mut completer = ShellCompleter::new(false);
         let suggestions = completer.complete("", 0);
+        let suggestions = suggestions.suggestions();
         assert!(
             suggestions
                 .iter()
@@ -316,7 +329,8 @@ mod tests {
         let mut completer = ShellCompleter::new(false);
         // Completing after "cat " - any path suggestions should have span starting at 4
         let suggestions = completer.complete("cat /", 5);
-        for s in &suggestions {
+        let suggestions = suggestions.suggestions();
+        for s in suggestions {
             assert_eq!(s.span.start, 4, "span should start at the token start (4)");
         }
     }
@@ -395,6 +409,7 @@ mod tests {
         completer.command_cache = Some(collect_executables_from_path_str(&path_str));
 
         let suggestions = completer.complete("my", 2);
+        let suggestions = suggestions.suggestions();
         let cmd_values: Vec<&str> = suggestions
             .iter()
             .filter(|s| s.description.as_deref() == Some("command"))
@@ -420,6 +435,7 @@ mod tests {
 
         // "ls my" — cursor is in argument position, not command position
         let suggestions = completer.complete("ls my", 5);
+        let suggestions = suggestions.suggestions();
         let has_cmd = suggestions
             .iter()
             .any(|s| s.description.as_deref() == Some("command") && s.value == "mybin");

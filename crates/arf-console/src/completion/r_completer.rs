@@ -2,7 +2,7 @@
 
 use super::string_context::{complete_path_in_string, detect_string_context};
 use crate::fuzzy::fuzzy_match;
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -423,7 +423,13 @@ impl Default for RCompleter {
 }
 
 impl Completer for RCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.complete_impl(line, pos))
+    }
+}
+
+impl RCompleter {
+    fn complete_impl(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
         // Check if we're inside a string - use Rust path completion with fuzzy matching
         // This provides better UX than R's built-in completion:
         // - Fuzzy matching: "rdm" matches "README.md"

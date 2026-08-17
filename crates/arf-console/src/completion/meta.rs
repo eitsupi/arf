@@ -4,7 +4,7 @@ use super::path::PathCompletionOptions;
 use super::string_context::path_to_suggestions;
 use crate::external::rig;
 use crate::fuzzy::fuzzy_match;
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 
 /// Definition of a meta command for completion.
 struct MetaCommandDef {
@@ -552,8 +552,8 @@ impl Default for MetaCommandCompleter {
 }
 
 impl Completer for MetaCommandCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        self.complete_commands(line, pos)
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.complete_commands(line, pos))
     }
 }
 
@@ -561,10 +561,18 @@ impl Completer for MetaCommandCompleter {
 mod tests {
     use super::*;
 
+    fn completion_suggestions(
+        completer: &mut MetaCommandCompleter,
+        line: &str,
+        pos: usize,
+    ) -> Vec<Suggestion> {
+        completer.complete(line, pos).suggestions().to_vec()
+    }
+
     #[test]
     fn test_meta_command_completer_empty_colon() {
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
         assert!(!suggestions.is_empty());
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"shell"));
@@ -584,7 +592,7 @@ mod tests {
     #[test]
     fn test_meta_command_completer_partial_command() {
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":rep", 4);
+        let suggestions = completion_suggestions(&mut completer, ":rep", 4);
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].value, "reprex");
     }
@@ -593,23 +601,23 @@ mod tests {
     fn test_meta_command_completer_no_subcommands() {
         let mut completer = MetaCommandCompleter::new();
         // All commands have no subcommands
-        let suggestions = completer.complete(":reprex ", 8);
+        let suggestions = completion_suggestions(&mut completer, ":reprex ", 8);
         assert!(suggestions.is_empty());
-        let suggestions = completer.complete(":commands ", 10);
+        let suggestions = completion_suggestions(&mut completer, ":commands ", 10);
         assert!(suggestions.is_empty());
     }
 
     #[test]
     fn test_meta_command_completer_not_meta_command() {
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete("print(x)", 8);
+        let suggestions = completion_suggestions(&mut completer, "print(x)", 8);
         assert!(suggestions.is_empty());
     }
 
     #[test]
     fn test_meta_command_completer_has_descriptions() {
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
         let reprex = suggestions.iter().find(|s| s.value == "reprex").unwrap();
         assert!(reprex.description.is_some());
         assert!(reprex.description.as_ref().unwrap().contains("reprex"));
@@ -619,7 +627,7 @@ mod tests {
     fn test_meta_command_completer_excludes_r_command() {
         // In R mode, `:r` should be excluded from completion
         let mut completer = MetaCommandCompleter::with_exclusions(vec!["r"]);
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(!values.contains(&"r"), "`:r` should be excluded in R mode");
         assert!(
@@ -633,7 +641,7 @@ mod tests {
         // In Shell mode, R-specific commands should be excluded from completion
         let mut completer =
             MetaCommandCompleter::with_exclusions(MetaCommandCompleter::shell_mode_exclusions());
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
 
         // These should be excluded in Shell mode
@@ -668,7 +676,7 @@ mod tests {
         // Even with partial match, excluded commands should not appear
         let mut completer = MetaCommandCompleter::with_exclusions(vec!["r"]);
         // Typing ":r" should not match excluded "r" command
-        let suggestions = completer.complete(":r", 2);
+        let suggestions = completion_suggestions(&mut completer, ":r", 2);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(
             !values.contains(&"r"),
@@ -685,7 +693,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // :switch takes an argument (R version)
-        let suggestions = completer.complete(":sw", 3);
+        let suggestions = completion_suggestions(&mut completer, ":sw", 3);
         let switch = suggestions.iter().find(|s| s.value == "switch").unwrap();
         assert!(
             switch.append_whitespace,
@@ -693,7 +701,7 @@ mod tests {
         );
 
         // :system takes an argument (shell command)
-        let suggestions = completer.complete(":sys", 4);
+        let suggestions = completion_suggestions(&mut completer, ":sys", 4);
         let system = suggestions.iter().find(|s| s.value == "system").unwrap();
         assert!(
             system.append_whitespace,
@@ -706,7 +714,7 @@ mod tests {
         // Commands that don't take arguments should have append_whitespace: false
         let mut completer = MetaCommandCompleter::new();
 
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
 
         // Commands without arguments
         for cmd_name in &[
@@ -737,7 +745,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // Typing ":rep" should match "reprex" and highlight positions 0,1,2
-        let suggestions = completer.complete(":rep", 4);
+        let suggestions = completion_suggestions(&mut completer, ":rep", 4);
         assert_eq!(suggestions.len(), 1);
         let reprex = &suggestions[0];
         assert_eq!(reprex.value, "reprex");
@@ -749,7 +757,7 @@ mod tests {
         // When just ":" is typed, no prefix to highlight
         let mut completer = MetaCommandCompleter::new();
 
-        let suggestions = completer.complete(":", 1);
+        let suggestions = completion_suggestions(&mut completer, ":", 1);
         assert!(!suggestions.is_empty());
         for suggestion in &suggestions {
             assert_eq!(
@@ -764,7 +772,7 @@ mod tests {
         // Single character fuzzy match - 'r' matches at different positions in different commands
         let mut completer = MetaCommandCompleter::new();
 
-        let suggestions = completer.complete(":r", 2);
+        let suggestions = completion_suggestions(&mut completer, ":r", 2);
         // With fuzzy matching, `:r` matches any command containing 'r':
         // - "r" at position 0
         // - "reprex" at position 0
@@ -801,7 +809,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // ":rst" should fuzzy match "restart"
-        let suggestions = completer.complete(":rst", 4);
+        let suggestions = completion_suggestions(&mut completer, ":rst", 4);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(
             values.contains(&"restart"),
@@ -823,7 +831,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // ":af" should fuzzy match "autoformat"
-        let suggestions = completer.complete(":af", 3);
+        let suggestions = completion_suggestions(&mut completer, ":af", 3);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(
             values.contains(&"autoformat"),
@@ -848,7 +856,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // ":cms" should match "cmds" - c=0, m=1, d=2, s=3
-        let suggestions = completer.complete(":cms", 4);
+        let suggestions = completion_suggestions(&mut completer, ":cms", 4);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"cmds"), "`:cms` should fuzzy match `cmds`");
 
@@ -865,7 +873,7 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
 
         // ":xyz" should not match any command
-        let suggestions = completer.complete(":xyz", 4);
+        let suggestions = completion_suggestions(&mut completer, ":xyz", 4);
         assert!(
             suggestions.is_empty(),
             "`:xyz` should not match any command"
@@ -878,14 +886,14 @@ mod tests {
         // because they open an interactive help browser (no argument needed)
         let mut completer = MetaCommandCompleter::new();
 
-        let suggestions = completer.complete(":hel", 4);
+        let suggestions = completion_suggestions(&mut completer, ":hel", 4);
         let help = suggestions.iter().find(|s| s.value == "help").unwrap();
         assert!(
             !help.append_whitespace,
             "`:help` should NOT append whitespace"
         );
 
-        let suggestions = completer.complete(":h", 2);
+        let suggestions = completion_suggestions(&mut completer, ":h", 2);
         let h = suggestions.iter().find(|s| s.value == "h").unwrap();
         assert!(!h.append_whitespace, "`:h` should NOT append whitespace");
     }
@@ -901,7 +909,7 @@ mod tests {
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":cd ", 4);
+        let suggestions = completion_suggestions(&mut completer, ":cd ", 4);
 
         // Should only contain directories (directories_only: true)
         assert!(!suggestions.is_empty(), "Should have directory completions");
@@ -930,7 +938,7 @@ mod tests {
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":cd su", 6);
+        let suggestions = completion_suggestions(&mut completer, ":cd su", 6);
 
         assert!(
             suggestions.iter().any(|s| s.value == "subdir/"),
@@ -947,7 +955,7 @@ mod tests {
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":pushd ", 7);
+        let suggestions = completion_suggestions(&mut completer, ":pushd ", 7);
 
         assert!(
             suggestions.iter().any(|s| s.value == "mydir/"),
@@ -959,7 +967,7 @@ mod tests {
     fn test_meta_popd_no_completion() {
         // ":popd " should NOT show path completions (takes no argument)
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":popd ", 6);
+        let suggestions = completion_suggestions(&mut completer, ":popd ", 6);
         assert!(
             suggestions.is_empty(),
             "popd should not have completions, got: {:?}",
@@ -977,7 +985,7 @@ mod tests {
         std::env::set_current_dir(tmp.path()).unwrap();
 
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":cd src/", 8);
+        let suggestions = completion_suggestions(&mut completer, ":cd src/", 8);
 
         assert!(
             suggestions.iter().any(|s| s.value == "src/inner/"),
@@ -992,7 +1000,7 @@ mod tests {
     fn test_meta_command_switch_bang_appears_in_completions() {
         let mut completer = MetaCommandCompleter::new();
         // ":sw" should fuzzy match both "switch" and "switch!"
-        let suggestions = completer.complete(":sw", 3);
+        let suggestions = completion_suggestions(&mut completer, ":sw", 3);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"switch"), "should match :switch");
         assert!(values.contains(&"switch!"), "should match :switch!");
@@ -1009,7 +1017,7 @@ mod tests {
     fn test_meta_command_restart_bang_appears_in_completions() {
         let mut completer = MetaCommandCompleter::new();
         // ":restart" should fuzzy match both "restart" and "restart!"
-        let suggestions = completer.complete(":restart", 8);
+        let suggestions = completion_suggestions(&mut completer, ":restart", 8);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"restart"), "should match :restart");
         assert!(values.contains(&"restart!"), "should match :restart!");
@@ -1028,8 +1036,8 @@ mod tests {
         // Without rig installed, both return empty, but the key thing is they take
         // the same code path (not falling through to the default empty vec).
         let mut completer = MetaCommandCompleter::new();
-        let switch_suggestions = completer.complete(":switch ", 8);
-        let switch_bang_suggestions = completer.complete(":switch! ", 9);
+        let switch_suggestions = completion_suggestions(&mut completer, ":switch ", 8);
+        let switch_bang_suggestions = completion_suggestions(&mut completer, ":switch! ", 9);
         assert_eq!(
             switch_suggestions.len(),
             switch_bang_suggestions.len(),
@@ -1037,8 +1045,8 @@ mod tests {
         );
 
         // Partial version input should also work
-        let switch_partial = completer.complete(":switch 4", 9);
-        let switch_bang_partial = completer.complete(":switch! 4", 10);
+        let switch_partial = completion_suggestions(&mut completer, ":switch 4", 9);
+        let switch_bang_partial = completion_suggestions(&mut completer, ":switch! 4", 10);
         assert_eq!(
             switch_partial.len(),
             switch_bang_partial.len(),
@@ -1050,7 +1058,7 @@ mod tests {
     fn test_meta_command_switch_bang_no_subcommands_for_reprex() {
         // ":reprex " should have no subcommands (no false match from strip_suffix)
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":reprex ", 8);
+        let suggestions = completion_suggestions(&mut completer, ":reprex ", 8);
         assert!(suggestions.is_empty(), ":reprex should have no subcommands");
     }
 
@@ -1058,7 +1066,7 @@ mod tests {
     fn test_meta_command_history_bang_no_subcommands() {
         // ":history! " should NOT offer history subcommands (history! is not a valid command)
         let mut completer = MetaCommandCompleter::new();
-        let suggestions = completer.complete(":history! ", 10);
+        let suggestions = completion_suggestions(&mut completer, ":history! ", 10);
         assert!(
             suggestions.is_empty(),
             ":history! should not offer subcommands, got: {:?}",
