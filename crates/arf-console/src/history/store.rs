@@ -116,11 +116,11 @@ impl HistoryStore {
             .save_with_extra(item)
     }
 
-    /// Backfill metadata only if the row is still SQL NULL.
-    pub(crate) fn set_metadata_if_empty(
+    /// Fill missing imported fields only if each row field is still SQL NULL.
+    pub(crate) fn set_missing_fields_if_empty(
         &self,
         id: HistoryItemId,
-        metadata: HistoryExtraInfo,
+        source: HistoryItem<HistoryExtraInfo>,
     ) -> Result<bool> {
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -129,8 +129,28 @@ impl HistoryStore {
             .lock()
             .map_err(|_| lock_error())?
             .update_with_extra::<HistoryExtraInfo>(id, &|mut item| {
-                if item.more_info.is_none() {
-                    item.more_info = Some(metadata.clone());
+                if item.session_id.is_none() && source.session_id.is_some() {
+                    item.session_id = source.session_id;
+                    changed.store(true, Ordering::Relaxed);
+                }
+                if item.hostname.is_none() && source.hostname.is_some() {
+                    item.hostname = source.hostname.clone();
+                    changed.store(true, Ordering::Relaxed);
+                }
+                if item.cwd.is_none() && source.cwd.is_some() {
+                    item.cwd = source.cwd.clone();
+                    changed.store(true, Ordering::Relaxed);
+                }
+                if item.duration.is_none() && source.duration.is_some() {
+                    item.duration = source.duration;
+                    changed.store(true, Ordering::Relaxed);
+                }
+                if item.exit_status.is_none() && source.exit_status.is_some() {
+                    item.exit_status = source.exit_status;
+                    changed.store(true, Ordering::Relaxed);
+                }
+                if item.more_info.is_none() && source.more_info.is_some() {
+                    item.more_info = source.more_info.clone();
                     changed.store(true, Ordering::Relaxed);
                 }
                 item

@@ -240,7 +240,20 @@ fn handle_history_import(
             (None, None)
         };
 
-        let mut result = import_entries_dry_run(&entries, r_dedup.as_ref(), shell_dedup.as_ref());
+        let dry_entries = if let Some(hostname) = hostname {
+            entries
+                .iter()
+                .cloned()
+                .map(|mut entry| {
+                    entry.item.hostname = Some(hostname.to_owned());
+                    entry
+                })
+                .collect()
+        } else {
+            entries.clone()
+        };
+        let mut result =
+            import_entries_dry_run(&dry_entries, r_dedup.as_ref(), shell_dedup.as_ref());
         result.warnings.extend(parse_warnings);
 
         println!("\n[Dry run] Would import:");
@@ -250,8 +263,8 @@ fn handle_history_import(
         println!("  R commands:     {}", result.r_imported);
         println!("  Shell commands: {}", result.shell_imported);
         println!("  Skipped:        {}", result.skipped);
-        if result.metadata_backfilled > 0 {
-            println!("  Metadata backfills: {}", result.metadata_backfilled);
+        if result.duplicates_repaired > 0 {
+            println!("  Duplicate repairs:  {}", result.duplicates_repaired);
         }
         if result.duplicates_skipped > 0 {
             println!(
@@ -331,8 +344,8 @@ fn handle_history_import(
     println!("  R commands:     {}", result.r_imported);
     println!("  Shell commands: {}", result.shell_imported);
     println!("  Skipped:        {}", result.skipped);
-    if result.metadata_backfilled > 0 {
-        println!("  Metadata backfills: {}", result.metadata_backfilled);
+    if result.duplicates_repaired > 0 {
+        println!("  Duplicate repairs:  {}", result.duplicates_repaired);
     }
     if result.duplicates_skipped > 0 {
         println!(

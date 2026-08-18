@@ -118,8 +118,8 @@ pub struct ImportResult {
     pub skipped: usize,
     /// Number of duplicate entries skipped.
     pub duplicates_skipped: usize,
-    /// Number of existing rows whose missing metadata was backfilled.
-    pub metadata_backfilled: usize,
+    /// Number of existing duplicate rows whose missing fields were repaired.
+    pub duplicates_repaired: usize,
     /// Warning messages for non-fatal issues.
     pub warnings: Vec<String>,
 }
@@ -332,6 +332,11 @@ enum MetadataState {
 #[derive(Debug)]
 struct DedupRow {
     id: HistoryItemId,
+    has_session_id: bool,
+    has_hostname: bool,
+    has_cwd: bool,
+    has_duration: bool,
+    has_exit_status: bool,
     metadata: MetadataState,
 }
 
@@ -339,7 +344,7 @@ struct DedupRow {
 enum DuplicateAction {
     NotDuplicate,
     Skip,
-    Backfill(HistoryItemId),
+    Repair(HistoryItemId),
     Ambiguous,
     Malformed,
 }
@@ -368,11 +373,18 @@ impl DedupSet {
     }
 
     fn from_connection(db: rusqlite::Connection) -> Result<Self> {
+        let columns = HistoryTableColumns::read(&db, "history")?;
+        let query = format!(
+            "SELECT id, command_line, start_timestamp, {}, {}, {}, {}, {}, {} FROM history",
+            columns.expression("session_id"),
+            columns.expression("hostname"),
+            columns.expression("cwd"),
+            columns.expression("duration_ms"),
+            columns.expression("exit_status"),
+            columns.expression("more_info"),
+        );
         let mut stmt = db
-            .prepare(
-                "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) \
-                 FROM history",
-            )
+            .prepare(&query)
             .context("Failed to query history for dedup")?;
         let rows = stmt
             .query_map([], |row| {
@@ -380,7 +392,12 @@ impl DedupSet {
                     HistoryItemId::new(row.get::<_, i64>(0)?),
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<i64>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(3)?.is_some(),
+                    row.get::<_, Option<String>>(4)?.is_some(),
+                    row.get::<_, Option<String>>(5)?.is_some(),
+                    row.get::<_, Option<i64>>(6)?.is_some(),
+                    row.get::<_, Option<i64>>(7)?.is_some(),
+                    row.get::<_, Option<String>>(8)?,
                 ))
             })
             .context("Failed to query history for dedup")?;
@@ -393,8 +410,17 @@ impl DedupSet {
             command_rows: HashMap::new(),
         };
         for row in rows {
-            let (id, command, timestamp_millis, raw_metadata) =
-                row.context("Failed to read history row")?;
+            let (
+                id,
+                command,
+                timestamp_millis,
+                has_session_id,
+                has_hostname,
+                has_cwd,
+                has_duration,
+                has_exit_status,
+                raw_metadata,
+            ) = row.context("Failed to read history row")?;
             let metadata = match raw_metadata.as_deref() {
                 None => MetadataState::Null,
                 Some(raw) => match serde_json::from_str::<HistoryExtraInfo>(raw) {
@@ -415,7 +441,15 @@ impl DedupSet {
                     .or_default()
                     .push(row_index);
             }
-            set.rows.push(DedupRow { id, metadata });
+            set.rows.push(DedupRow {
+                id,
+                has_session_id,
+                has_hostname,
+                has_cwd,
+                has_duration,
+                has_exit_status,
+                metadata,
+            });
         }
         Ok(set)
     }
@@ -440,7 +474,7 @@ impl DedupSet {
         &self,
         command: &str,
         timestamp: Option<&DateTime<Utc>>,
-        has_metadata: bool,
+        item: &HistoryItem<HistoryExtraInfo>,
     ) -> DuplicateAction {
         let row_indices = if let Some(ts) = timestamp {
             self.command_timestamps_by_row
@@ -451,16 +485,23 @@ impl DedupSet {
         let Some(row_indices) = row_indices else {
             return DuplicateAction::NotDuplicate;
         };
-        if !has_metadata {
-            return DuplicateAction::Skip;
-        }
         if row_indices.len() != 1 {
             return DuplicateAction::Ambiguous;
         }
-        match self.rows[row_indices[0]].metadata {
-            MetadataState::Null => DuplicateAction::Backfill(self.rows[row_indices[0]].id),
-            MetadataState::Valid => DuplicateAction::Skip,
-            MetadataState::Malformed => DuplicateAction::Malformed,
+        let row = &self.rows[row_indices[0]];
+        let needs_repair = (item.session_id.is_some() && !row.has_session_id)
+            || (item.hostname.is_some() && !row.has_hostname)
+            || (item.cwd.is_some() && !row.has_cwd)
+            || (item.duration.is_some() && !row.has_duration)
+            || (item.exit_status.is_some() && !row.has_exit_status)
+            || (item.more_info.is_some() && matches!(row.metadata, MetadataState::Null));
+        if needs_repair {
+            return DuplicateAction::Repair(row.id);
+        }
+        if matches!(row.metadata, MetadataState::Malformed) && item.more_info.is_some() {
+            DuplicateAction::Malformed
+        } else {
+            DuplicateAction::Skip
         }
     }
 }
@@ -474,7 +515,7 @@ pub(crate) enum ImportTarget {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum EntryPlan {
     Insert(ImportTarget),
-    Backfill {
+    Repair {
         target: ImportTarget,
         id: HistoryItemId,
     },
@@ -483,7 +524,7 @@ pub(crate) enum EntryPlan {
     SkipUnsupported {
         mode: String,
     },
-    AmbiguousMetadata,
+    AmbiguousRepair,
     MalformedExistingMetadata,
 }
 
@@ -514,12 +555,12 @@ pub(crate) fn plan_entry(
     match dedup.duplicate_action(
         &entry.item.command_line,
         entry.item.start_timestamp.as_ref(),
-        entry.item.more_info.is_some(),
+        &entry.item,
     ) {
         DuplicateAction::NotDuplicate => EntryPlan::Insert(target),
         DuplicateAction::Skip => EntryPlan::Duplicate,
-        DuplicateAction::Backfill(id) => EntryPlan::Backfill { target, id },
-        DuplicateAction::Ambiguous => EntryPlan::AmbiguousMetadata,
+        DuplicateAction::Repair(id) => EntryPlan::Repair { target, id },
+        DuplicateAction::Ambiguous => EntryPlan::AmbiguousRepair,
         DuplicateAction::Malformed => EntryPlan::MalformedExistingMetadata,
     }
 }
@@ -533,12 +574,12 @@ fn add_plan_warning(result: &mut ImportResult, entry: &ImportEntry, plan: &Entry
                 .warnings
                 .push(format!("Skipped unknown mode '{}': {}...", mode, preview));
         }
-        EntryPlan::AmbiguousMetadata => result.warnings.push(format!(
-            "Could not backfill metadata for duplicate command '{}': matches multiple rows",
+        EntryPlan::AmbiguousRepair => result.warnings.push(format!(
+            "Could not repair duplicate command '{}': matches multiple rows",
             command
         )),
         EntryPlan::MalformedExistingMetadata => result.warnings.push(format!(
-            "Could not backfill metadata for duplicate command '{}': existing metadata is malformed; leaving it unchanged",
+            "Could not repair duplicate command '{}': existing metadata is malformed; leaving it unchanged",
             command
         )),
         _ => {}
@@ -549,11 +590,11 @@ fn record_plan(result: &mut ImportResult, entry: &ImportEntry, plan: &EntryPlan)
     match plan {
         EntryPlan::Insert(ImportTarget::R) => result.r_imported += 1,
         EntryPlan::Insert(ImportTarget::Shell) => result.shell_imported += 1,
-        EntryPlan::Backfill { .. } => result.metadata_backfilled += 1,
+        EntryPlan::Repair { .. } => result.duplicates_repaired += 1,
         EntryPlan::Duplicate => result.duplicates_skipped += 1,
         EntryPlan::SkipEmpty => result.skipped += 1,
         EntryPlan::SkipUnsupported { .. }
-        | EntryPlan::AmbiguousMetadata
+        | EntryPlan::AmbiguousRepair
         | EntryPlan::MalformedExistingMetadata => {
             result.skipped += usize::from(matches!(plan, EntryPlan::SkipUnsupported { .. }));
             if !matches!(plan, EntryPlan::SkipUnsupported { .. }) {
@@ -616,15 +657,15 @@ pub fn import_entries(
 
     let mut result = ImportResult::default();
 
-    for entry in entries {
+    for mut entry in entries {
+        if let Some(hostname) = hostname_override {
+            entry.item.hostname = Some(hostname.to_owned());
+        }
         let plan = plan_entry(&entry, r_dedup.as_ref(), shell_dedup.as_ref());
         match plan {
             EntryPlan::Insert(target) => {
                 let mut item = entry.item;
                 item.id = None;
-                if let Some(hostname) = hostname_override {
-                    item.hostname = Some(hostname.to_owned());
-                }
                 let save_result = match target {
                     ImportTarget::R => targets.r_history.save_imported(item),
                     ImportTarget::Shell => targets.shell_history.save_imported(item),
@@ -642,19 +683,20 @@ pub fn import_entries(
                     }
                 }
             }
-            EntryPlan::Backfill { target, id } => {
-                let metadata = entry.item.more_info.expect("planner requires metadata");
+            EntryPlan::Repair { target, id } => {
+                let command = entry.item.command_line.clone();
                 let store = match target {
                     ImportTarget::R => &targets.r_history,
                     ImportTarget::Shell => &targets.shell_history,
                 };
-                match store.set_metadata_if_empty(id, metadata) {
-                    Ok(true) => result.metadata_backfilled += 1,
+                let source = entry.item;
+                match store.set_missing_fields_if_empty(id, source) {
+                    Ok(true) => result.duplicates_repaired += 1,
                     Ok(false) => result.duplicates_skipped += 1,
                     Err(error) => {
                         result.warnings.push(format!(
-                            "Failed to backfill metadata for duplicate '{}': {}",
-                            entry.item.command_line, error
+                            "Failed to repair duplicate '{}': {}",
+                            command, error
                         ));
                         result.duplicates_skipped += 1;
                     }

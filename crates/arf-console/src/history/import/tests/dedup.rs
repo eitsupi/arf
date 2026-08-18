@@ -48,7 +48,7 @@ fn idempotent_import_and_duplicate_disabled_import_are_distinct() {
 }
 
 #[test]
-fn metadata_backfills_only_a_metadata_less_duplicate() {
+fn duplicate_repair_fills_missing_fields_even_without_metadata() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("backfill")]);
     let result = fixture.import_with(
@@ -58,9 +58,71 @@ fn metadata_backfills_only_a_metadata_less_duplicate() {
             skip_duplicates: true,
         },
     );
-    assert_eq!(result.metadata_backfilled, 1);
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.duplicates_skipped, 0);
     assert!(fixture.r_items()[0].more_info.is_some());
+}
+
+#[test]
+fn duplicate_repair_fills_all_missing_fields_from_an_old_source() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("old importer").at(timestamp).with_standard_fields().item;
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("old importer").at(timestamp)]);
+
+    let result = fixture.import_with(
+        [ImportEntry {
+            mode: ImportMode::R,
+            item: source.clone(),
+        }],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    assert_eq!(result.duplicates_repaired, 1);
+    assert_eq!(result.r_imported, 0);
+    assert_eq!(fixture.r_items()[0].session_id, source.session_id);
+    assert_eq!(fixture.r_items()[0].hostname, source.hostname);
+    assert_eq!(fixture.r_items()[0].cwd, source.cwd);
+    assert_eq!(fixture.r_items()[0].duration, source.duration);
+    assert_eq!(fixture.r_items()[0].exit_status, source.exit_status);
+    assert_eq!(fixture.r_items()[0].more_info, None);
+}
+
+#[test]
+fn duplicate_repair_preserves_hostname_set_by_hostname_override() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("preserve hostname")
+        .at(timestamp)
+        .with_standard_fields()
+        .item;
+    let mut fixture = ImportFixture::new();
+    fixture.import_with(
+        [r("preserve hostname").at(timestamp)],
+        ImportOptions {
+            hostname_override: Some("chosen-host"),
+            skip_duplicates: false,
+        },
+    );
+
+    let result = fixture.import_with(
+        [ImportEntry {
+            mode: ImportMode::R,
+            item: source,
+        }],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    let item = &fixture.r_items()[0];
+    assert_eq!(result.duplicates_repaired, 1);
+    assert_eq!(item.hostname.as_deref(), Some("chosen-host"));
+    assert_eq!(item.cwd.as_deref(), Some("/fixture/cwd"));
+    assert_eq!(item.exit_status, Some(17));
 }
 
 #[test]
@@ -90,8 +152,14 @@ fn existing_metadata_wins_and_ambiguous_rows_warn() {
         },
     );
     assert_eq!(result.duplicates_skipped, 1);
-    assert_eq!(result.metadata_backfilled, 0);
+    assert_eq!(result.duplicates_repaired, 0);
     assert_eq!(result.warnings.len(), 1);
+    assert!(
+        ambiguous
+            .r_items()
+            .iter()
+            .all(|item| item.more_info.is_none())
+    );
 }
 
 fn malformed_target() -> (tempfile::TempDir, ImportTargets) {
@@ -174,7 +242,7 @@ fn dry_run_dedup_is_partial_and_does_not_write_or_create_side_files() {
         None,
     );
     assert_eq!(result.duplicates_skipped, 1);
-    assert_eq!(result.metadata_backfilled, 1);
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.shell_imported, 1);
     assert!(!wal.exists());
     assert!(!shm.exists());
@@ -190,4 +258,51 @@ fn dry_run_dedup_is_partial_and_does_not_write_or_create_side_files() {
         )
         .unwrap();
     assert!(metadata.is_none());
+}
+
+#[test]
+fn dry_run_repair_matches_real_import_and_keeps_source_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("export.db");
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source_item = r("dry repair").at(timestamp).with_standard_fields().item;
+    let db = rusqlite::Connection::open(&source_path).unwrap();
+    create_export_table(
+        &db,
+        "r",
+        ExportColumns::Full,
+        &[DbRow {
+            command: "dry repair",
+            timestamp_ms: Some(timestamp.timestamp_millis()),
+            session_id: source_item.session_id.map(Into::into),
+            hostname: source_item.hostname.as_deref(),
+            cwd: source_item.cwd.as_deref(),
+            duration_ms: source_item.duration.map(|value| value.as_millis() as i64),
+            exit_status: source_item.exit_status,
+            metadata: None,
+        }],
+    );
+    drop(db);
+    let parsed = parse_unified_arf_history(&source_path, "r", "shell").unwrap();
+    assert!(!source_path.with_extension("db-wal").exists());
+    assert!(!source_path.with_extension("db-shm").exists());
+
+    let target_dir = tempfile::tempdir().unwrap();
+    let r_path = target_dir.path().join("r.db");
+    let shell_path = target_dir.path().join("shell.db");
+    let mut targets = ImportTargets {
+        r_history: HistoryStore::open(r_path.clone(), None, None).unwrap(),
+        shell_history: HistoryStore::open(shell_path, None, None).unwrap(),
+    };
+    targets
+        .r_history
+        .save_imported(r("dry repair").at(timestamp).item)
+        .unwrap();
+
+    let dedup = DedupSet::from_db(&r_path).unwrap();
+    let dry = import_entries_dry_run(&parsed.entries, Some(&dedup), None);
+    let real = import_entries(&mut targets, parsed.entries, None, true).unwrap();
+
+    assert_eq!(dry, real);
+    assert_eq!(dry.duplicates_repaired, 1);
 }
