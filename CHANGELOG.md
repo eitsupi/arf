@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Command history now tracks whether each entry was a meta command (`:cd`, `:help`, ...), laying groundwork for excluding them from history search.
+
 ## [0.5.0-rc.1] - 2026-08-12
 
 ### Changed

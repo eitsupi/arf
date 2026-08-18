@@ -4,10 +4,33 @@
 //! history search with fuzzy matching capabilities using the nucleo library.
 
 use crate::fuzzy::fuzzy_match;
+use crate::history::HistoryExtraInfo;
 use reedline::{
-    History, HistoryItem, HistoryItemId, HistorySessionId, Result, SearchFilter, SearchQuery,
-    SqliteBackedHistory,
+    History, HistoryItem, HistoryItemExtraInfo, HistoryItemId, HistorySessionId,
+    IgnoreAllExtraInfo, Result, SearchFilter, SearchQuery, SqliteBackedHistory,
 };
+
+/// Returns whether a line is a meta command according to the REPL's syntax.
+fn is_meta_command(line: &str) -> bool {
+    line.trim_start().starts_with(':')
+}
+
+fn convert_history_item<A: HistoryItemExtraInfo, B: HistoryItemExtraInfo>(
+    item: HistoryItem<A>,
+    more_info: Option<B>,
+) -> HistoryItem<B> {
+    HistoryItem {
+        id: item.id,
+        start_timestamp: item.start_timestamp,
+        command_line: item.command_line,
+        session_id: item.session_id,
+        hostname: item.hostname,
+        cwd: item.cwd,
+        duration: item.duration,
+        exit_status: item.exit_status,
+        more_info,
+    }
+}
 
 /// A wrapper around `SqliteBackedHistory` that provides fuzzy search capabilities.
 ///
@@ -95,8 +118,6 @@ impl FuzzyHistory {
 
 impl History for FuzzyHistory {
     fn save(&mut self, mut h: HistoryItem) -> Result<HistoryItem> {
-        // TODO: Once reedline's History trait accepts HistoryItem<HistoryExtraInfo>,
-        // populate h.more_info with metadata (meta_command flag, reprex output, etc.).
         // Populate metadata if not already set
         if h.start_timestamp.is_none() {
             h.start_timestamp = Some(chrono::Utc::now());
@@ -109,7 +130,17 @@ impl History for FuzzyHistory {
         if h.hostname.is_none() {
             h.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
         }
-        self.inner.save(h)
+
+        let meta_command = is_meta_command(&h.command_line);
+        let h = convert_history_item(
+            h,
+            Some(HistoryExtraInfo {
+                meta_command,
+                ..Default::default()
+            }),
+        );
+        let saved = self.inner.save_with_extra(h)?;
+        Ok(convert_history_item::<HistoryExtraInfo, IgnoreAllExtraInfo>(saved, None))
     }
 
     fn load(&self, id: HistoryItemId) -> Result<HistoryItem> {
@@ -165,13 +196,55 @@ impl History for FuzzyHistory {
 
 #[cfg(test)]
 mod tests {
-    // Note: These tests require a working SQLite history which is tested
-    // in the integration tests. Unit tests here focus on the wrapper logic.
+    use super::*;
+    use reedline::History;
 
     #[test]
-    fn test_fuzzy_history_module_compiles() {
-        // We can't create a SqliteBackedHistory without a file in unit tests,
-        // so this test just verifies the module compiles correctly.
-        // Integration tests will cover actual functionality.
+    fn meta_command_detection_matches_repl_syntax() {
+        let cases = [
+            (":cd", true),
+            ("  :help", true),
+            ("x <- 1 + 1", false),
+            ("x <- 1:10", false),
+            ("utils::head(x)", false),
+            ("", false),
+        ];
+
+        for (line, expected) in cases {
+            assert_eq!(is_meta_command(line), expected, "line: {line:?}");
+        }
+    }
+
+    #[test]
+    fn save_populates_meta_command_metadata() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let history_path = temp_dir.path().join("history.db");
+        let inner = SqliteBackedHistory::with_file(history_path.clone(), None, None)
+            .expect("create SQLite history");
+        let mut history = FuzzyHistory::new(inner);
+
+        let meta_id = history
+            .save(HistoryItem::from_command_line(":cd /tmp"))
+            .expect("save meta command")
+            .id
+            .expect("saved meta command should have an ID");
+        let normal_id = history
+            .save(HistoryItem::from_command_line("x <- 1:10"))
+            .expect("save normal command")
+            .id
+            .expect("saved normal command should have an ID");
+        drop(history);
+
+        let stored = SqliteBackedHistory::with_file(history_path, None, None)
+            .expect("reopen SQLite history");
+        let meta = stored
+            .load_with_extra::<HistoryExtraInfo>(meta_id)
+            .expect("load meta command");
+        let normal = stored
+            .load_with_extra::<HistoryExtraInfo>(normal_id)
+            .expect("load normal command");
+
+        assert!(meta.more_info.expect("meta metadata").meta_command);
+        assert!(!normal.more_info.expect("normal metadata").meta_command);
     }
 }

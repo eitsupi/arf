@@ -2,16 +2,11 @@
 //!
 //! This module provides types for arf-console history management.
 //! [`HistoryExtraInfo`] implements reedline's `HistoryItemExtraInfo` trait and
-//! can be stored in the `more_info` field of `HistoryItem<HistoryExtraInfo>`.
+//! is serialized into the `more_info` column by
+//! [`reedline::SqliteBackedHistory`]'s typed history methods.
 //!
-//! Note: reedline's `History` trait currently uses `HistoryItem<IgnoreAllExtraInfo>`
-//! (non-generic), so storing custom `more_info` through the trait API is not yet
-//! possible. The trait implementation is prepared here for when the `History` trait
-//! becomes generic over `ExtraInfo`.
-//!
-//! TODO: Once reedline's `History` trait supports generic `ExtraInfo`, update
-//! `FuzzyHistory` to save/load `HistoryItem<HistoryExtraInfo>` and populate the
-//! `more_info` field on save.
+//! New fields can be added over time without breaking existing history entries,
+//! thanks to `#[serde(default)]` filling missing fields with their defaults.
 
 use reedline::HistoryItemExtraInfo;
 use serde::{Deserialize, Serialize};
@@ -23,7 +18,6 @@ use serde::{Deserialize, Serialize};
 ///
 /// New fields can be added over time without breaking existing history entries,
 /// thanks to `#[serde(default)]` which fills missing fields with their defaults.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HistoryExtraInfo {
