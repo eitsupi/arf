@@ -1,5 +1,6 @@
 use super::super::*;
 use super::create_test_targets;
+use reedline::SqliteBackedHistory;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -15,6 +16,19 @@ fn test_parse_arf_history_not_found() {
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("not found"));
+}
+
+#[test]
+fn test_parse_arf_history_rejects_non_history_database() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join("not-history.db");
+    rusqlite::Connection::open(&path).unwrap();
+
+    let error = parse_arf_history(&path).unwrap_err().to_string();
+    assert!(error.contains(path.to_string_lossy().as_ref()));
+    assert!(error.contains("does not look like an arf history database"));
 }
 
 #[test]
@@ -247,4 +261,93 @@ fn test_arf_history_malformed_metadata_degrades_per_row() {
             .iter()
             .all(|warning| warning.contains(source_path.to_string_lossy().as_ref()))
     );
+}
+
+#[test]
+fn test_arf_history_preserves_standard_columns() {
+    use reedline::{History, Reedline};
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    let source_dir = TempDir::new().unwrap();
+    let target_dir = TempDir::new().unwrap();
+    let source_path = source_dir.path().join("r.db");
+    let source_session = Reedline::create_history_session_id();
+    let mut source_db = SqliteBackedHistory::with_file(source_path.clone(), None, None).unwrap();
+    source_db
+        .save(HistoryItem {
+            id: None,
+            command_line: "standard columns".to_string(),
+            start_timestamp: Some(Utc::now()),
+            session_id: source_session,
+            hostname: Some("source-host".to_string()),
+            cwd: Some("/source/cwd".to_string()),
+            duration: Some(Duration::from_millis(1234)),
+            exit_status: Some(17),
+            more_info: None,
+        })
+        .unwrap();
+    drop(source_db);
+
+    let parsed = parse_arf_history(&source_path).unwrap();
+    let entry = &parsed.entries[0];
+    assert_eq!(
+        entry.session_id.map(|id| id.to_string()),
+        source_session.map(|id| id.to_string())
+    );
+    assert_eq!(entry.hostname.as_deref(), Some("source-host"));
+    assert_eq!(entry.cwd.as_deref(), Some("/source/cwd"));
+    assert_eq!(entry.duration, Some(Duration::from_millis(1234)));
+    assert_eq!(entry.exit_status, Some(17));
+
+    let mut targets = create_test_targets(&target_dir);
+    let result = import_entries(&mut targets, parsed.entries, None, false).unwrap();
+    assert_eq!(result.r_imported, 1);
+    let stored = targets
+        .r_history
+        .load(reedline::HistoryItemId::new(1))
+        .unwrap();
+    assert_eq!(
+        stored.session_id.map(|id| id.to_string()),
+        source_session.map(|id| id.to_string())
+    );
+    assert_eq!(stored.hostname.as_deref(), Some("source-host"));
+    assert_eq!(stored.cwd.as_deref(), Some("/source/cwd"));
+    assert_eq!(stored.duration, Some(Duration::from_millis(1234)));
+    assert_eq!(stored.exit_status, Some(17));
+}
+
+#[test]
+fn test_import_hostname_override_replaces_source_hostname() {
+    use reedline::{History, Reedline};
+    use tempfile::TempDir;
+
+    let source_dir = TempDir::new().unwrap();
+    let target_dir = TempDir::new().unwrap();
+    let source_path = source_dir.path().join("r.db");
+    let mut source_db = SqliteBackedHistory::with_file(source_path.clone(), None, None).unwrap();
+    source_db
+        .save(HistoryItem {
+            id: None,
+            command_line: "hostname override".to_string(),
+            start_timestamp: None,
+            session_id: Reedline::create_history_session_id(),
+            hostname: Some("source-host".to_string()),
+            cwd: None,
+            duration: None,
+            exit_status: None,
+            more_info: None,
+        })
+        .unwrap();
+    drop(source_db);
+
+    let parsed = parse_arf_history(&source_path).unwrap();
+    let mut targets = create_test_targets(&target_dir);
+    import_entries(&mut targets, parsed.entries, Some("override-host"), false).unwrap();
+
+    let stored = targets
+        .r_history
+        .load(reedline::HistoryItemId::new(1))
+        .unwrap();
+    assert_eq!(stored.hostname.as_deref(), Some("override-host"));
 }

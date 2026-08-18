@@ -193,4 +193,9 @@ fn test_parse_radian_history_colon_command_has_no_metadata() {
     let parsed = parse_radian_history(file.path()).unwrap();
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].metadata, None);
+    assert!(parsed.entries[0].session_id.is_none());
+    assert!(parsed.entries[0].hostname.is_none());
+    assert!(parsed.entries[0].cwd.is_none());
+    assert!(parsed.entries[0].duration.is_none());
+    assert!(parsed.entries[0].exit_status.is_none());
 }

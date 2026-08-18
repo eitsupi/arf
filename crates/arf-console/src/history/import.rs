@@ -29,11 +29,12 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use reedline::{HistoryItem, HistoryItemId, SqliteBackedHistory};
+use reedline::{HistoryItem, HistoryItemId, HistorySessionId};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::metadata::HistoryExtraInfo;
 use super::store::HistoryStore;
@@ -49,6 +50,16 @@ pub struct ImportEntry {
     pub mode: Option<String>,
     /// Metadata arf determined for this row, if the source retained it.
     pub metadata: Option<HistoryExtraInfo>,
+    /// Source session identifier, if present.
+    pub session_id: Option<HistorySessionId>,
+    /// Source hostname, unless the import hostname override replaces it.
+    pub hostname: Option<String>,
+    /// Source working directory, if present.
+    pub cwd: Option<String>,
+    /// Source command duration, if present.
+    pub duration: Option<Duration>,
+    /// Source command exit status, if present.
+    pub exit_status: Option<i64>,
 }
 
 /// Parsed entries together with non-fatal row warnings.
@@ -138,6 +149,11 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
                     timestamp: current_timestamp,
                     mode: current_mode.take(),
                     metadata: None,
+                    session_id: None,
+                    hostname: None,
+                    cwd: None,
+                    duration: None,
+                    exit_status: None,
                 });
                 current_lines.clear();
             }
@@ -167,6 +183,11 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
                     timestamp: current_timestamp,
                     mode: current_mode.take(),
                     metadata: None,
+                    session_id: None,
+                    hostname: None,
+                    cwd: None,
+                    duration: None,
+                    exit_status: None,
                 });
                 current_lines.clear();
                 current_timestamp = None;
@@ -183,6 +204,11 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
             timestamp: current_timestamp,
             mode: current_mode.take(),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         });
     }
 
@@ -214,6 +240,11 @@ pub fn parse_r_history(path: &Path) -> Result<ParsedImport> {
                 timestamp: None,
                 mode: Some("r".to_string()),
                 metadata: None,
+                session_id: None,
+                hostname: None,
+                cwd: None,
+                duration: None,
+                exit_status: None,
             });
         }
     }
@@ -245,49 +276,22 @@ pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
         Some("r".to_string())
     };
 
-    // Open source history database
-    let source = SqliteBackedHistory::with_file(path.to_path_buf(), None, None)
-        .with_context(|| format!("Failed to open arf history database: {}", path.display()))?;
-
-    // Keep the established reedline constructor above. Its typed and erased
-    // search APIs deserialize every row while collecting results, so neither
-    // can isolate malformed JSON. Read raw rows separately and deserialize
-    // only each row's metadata.
-    drop(source);
     let db =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .with_context(|| format!("Failed to read arf history database: {}", path.display()))?;
-    let mut stmt = db
-        .prepare(
-            "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) \
-             FROM history ORDER BY id",
-        )
-        .with_context(|| format!("Failed to query arf history: {}", path.display()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                HistoryItemId::new(row.get::<_, i64>(0)?),
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .context("Failed to query arf history rows")?;
-
-    let mut parsed = ParsedImport::default();
-    for row in rows {
-        let (id, command, ts_millis, raw_metadata) =
-            row.context("Failed to read arf history row")?;
-        parsed.entries.push(ImportEntry {
-            command,
-            timestamp: ts_millis
-                .and_then(|ms| chrono::TimeZone::timestamp_millis_opt(&Utc, ms).single()),
-            mode: mode.clone(),
-            metadata: parse_row_metadata(raw_metadata.as_deref(), path, id, &mut parsed.warnings),
-        });
+            .with_context(|| format!("Failed to open arf history database: {}", path.display()))?;
+    if !table_exists(&db, "history")? {
+        bail!(
+            "File '{}' does not look like an arf history database: missing history table",
+            path.display()
+        );
     }
 
-    Ok(parsed)
+    read_history_table(&db, path, "history", mode.as_deref().unwrap_or("r")).with_context(|| {
+        format!(
+            "File '{}' does not look like an arf history database",
+            path.display()
+        )
+    })
 }
 
 /// Target databases for import.
@@ -673,11 +677,11 @@ pub fn import_entries(
             id: None, // Will be assigned by the database
             command_line: entry.command,
             start_timestamp: entry.timestamp,
-            session_id: None,
-            hostname: hostname_override.map(|s| s.to_string()),
-            cwd: None,
-            duration: None,
-            exit_status: None,
+            session_id: entry.session_id,
+            hostname: hostname_override.map(str::to_owned).or(entry.hostname),
+            cwd: entry.cwd,
+            duration: entry.duration,
+            exit_status: entry.exit_status,
             more_info: None,
         };
 
@@ -813,18 +817,17 @@ fn read_history_table(
 
     // Use format! for table name since it can't be parameterized in SQL.
     // Table names are validated by validate_table_name() before reaching here.
-    let has_metadata = table_has_column(db, table_name, "more_info")?;
-    let query = if has_metadata {
-        format!(
-            "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) FROM \"{}\" ORDER BY id",
-            table_name
-        )
-    } else {
-        format!(
-            "SELECT id, command_line, start_timestamp FROM \"{}\" ORDER BY id",
-            table_name
-        )
-    };
+    let columns = HistoryTableColumns::read(db, table_name)?;
+    let query = format!(
+        "SELECT id, command_line, start_timestamp, {}, {}, {}, {}, {}, {} FROM \"{}\" ORDER BY id",
+        columns.expression("session_id"),
+        columns.expression("hostname"),
+        columns.expression("cwd"),
+        columns.expression("duration_ms"),
+        columns.expression("exit_status"),
+        columns.expression("more_info"),
+        table_name
+    );
 
     let mut stmt = db.prepare(&query).with_context(|| {
         format!(
@@ -838,15 +841,44 @@ fn read_history_table(
             let id: i64 = row.get(0)?;
             let command: String = row.get(1)?;
             let ts_millis: Option<i64> = row.get(2)?;
-            let raw_metadata: Option<String> = if has_metadata { row.get(3)? } else { None };
-            Ok((id, command, ts_millis, raw_metadata))
+            let session_id: Option<i64> = row.get(3)?;
+            let hostname: Option<String> = row.get(4)?;
+            let cwd: Option<String> = row.get(5)?;
+            let duration_millis: Option<i64> = row.get(6)?;
+            let exit_status: Option<i64> = row.get(7)?;
+            let raw_metadata: Option<String> = row.get(8)?;
+            Ok((
+                id,
+                command,
+                ts_millis,
+                session_id,
+                hostname,
+                cwd,
+                duration_millis,
+                exit_status,
+                raw_metadata,
+            ))
         })
         .context("Failed to query history")?;
 
     let mut parsed = ParsedImport::default();
     for row in rows {
-        let (id, command, ts_millis, raw_metadata) = row.context("Failed to read history row")?;
+        let (
+            id,
+            command,
+            ts_millis,
+            raw_session_id,
+            hostname,
+            cwd,
+            duration_millis,
+            exit_status,
+            raw_metadata,
+        ) = row.context("Failed to read history row")?;
         let timestamp = ts_millis.and_then(|ms| Utc.timestamp_millis_opt(ms).single());
+        let session_id = raw_session_id
+            .map(|id| serde_json::from_str::<HistorySessionId>(&id.to_string()))
+            .transpose()
+            .with_context(|| format!("Invalid session_id in row {}", id))?;
         parsed.entries.push(ImportEntry {
             command,
             timestamp,
@@ -857,28 +889,48 @@ fn read_history_table(
                 HistoryItemId::new(id),
                 &mut parsed.warnings,
             ),
+            session_id,
+            hostname,
+            cwd,
+            duration: duration_millis.map(|ms| Duration::from_millis(ms as u64)),
+            exit_status,
         });
     }
 
     Ok(parsed)
 }
 
-fn table_has_column(
-    db: &rusqlite::Connection,
-    table_name: &str,
-    column_name: &str,
-) -> Result<bool> {
-    let query = format!("PRAGMA table_info(\"{}\")", table_name);
-    let mut stmt = db
-        .prepare(&query)
-        .context("Failed to inspect history table")?;
-    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for column in columns {
-        if column? == column_name {
-            return Ok(true);
+struct HistoryTableColumns {
+    names: HashSet<String>,
+}
+
+impl HistoryTableColumns {
+    fn read(db: &rusqlite::Connection, table_name: &str) -> Result<Self> {
+        let mut names = HashSet::new();
+        let query = format!("PRAGMA table_info(\"{}\")", table_name);
+        let mut stmt = db
+            .prepare(&query)
+            .context("Failed to inspect history table")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for column in columns {
+            names.insert(column?);
+        }
+        Ok(Self { names })
+    }
+
+    fn expression(&self, column: &str) -> String {
+        if column == "more_info" {
+            if self.names.contains(column) {
+                "CAST(more_info AS TEXT)".to_string()
+            } else {
+                "NULL".to_string()
+            }
+        } else if self.names.contains(column) {
+            column.to_string()
+        } else {
+            "NULL".to_string()
         }
     }
-    Ok(false)
 }
 
 fn parse_row_metadata(

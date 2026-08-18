@@ -20,6 +20,11 @@ fn test_parse_r_history_basic() {
     for entry in entries.iter() {
         assert_eq!(entry.mode, Some("r".to_string()));
         assert!(entry.timestamp.is_none());
+        assert!(entry.session_id.is_none());
+        assert!(entry.hostname.is_none());
+        assert!(entry.cwd.is_none());
+        assert!(entry.duration.is_none());
+        assert!(entry.exit_status.is_none());
     }
 }
 
@@ -64,6 +69,11 @@ fn test_import_entry_struct() {
         timestamp: Some(Utc::now()),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     };
     assert_eq!(entry.command, "test");
     assert!(entry.timestamp.is_some());
@@ -105,4 +115,9 @@ fn test_parse_r_history_colon_command_has_no_metadata() {
     let parsed = parse_r_history(file.path()).unwrap();
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].metadata, None);
+    assert!(parsed.entries[0].session_id.is_none());
+    assert!(parsed.entries[0].hostname.is_none());
+    assert!(parsed.entries[0].cwd.is_none());
+    assert!(parsed.entries[0].duration.is_none());
+    assert!(parsed.entries[0].exit_status.is_none());
 }

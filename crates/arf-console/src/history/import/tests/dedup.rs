@@ -20,6 +20,11 @@ fn test_import_skips_duplicates_with_timestamp() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -31,6 +36,11 @@ fn test_import_skips_duplicates_with_timestamp() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -55,6 +65,11 @@ fn test_import_skips_duplicates_without_timestamp() {
         timestamp: None,
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -66,6 +81,11 @@ fn test_import_skips_duplicates_without_timestamp() {
         timestamp: None,
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -97,6 +117,11 @@ fn test_import_allows_same_command_different_timestamp() {
         timestamp: Some(ts1),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -106,6 +131,11 @@ fn test_import_allows_same_command_different_timestamp() {
         timestamp: Some(ts2),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -134,6 +164,11 @@ fn test_import_duplicates_flag_disables_dedup() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, false).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -144,6 +179,11 @@ fn test_import_duplicates_flag_disables_dedup() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, false).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -168,6 +208,11 @@ fn test_import_dedup_works_per_database() {
         timestamp: None,
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -179,6 +224,11 @@ fn test_import_dedup_works_per_database() {
         timestamp: None,
         mode: Some("shell".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.shell_imported, 1);
@@ -211,6 +261,11 @@ fn test_import_dry_run_with_dedup() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -225,12 +280,22 @@ fn test_import_dry_run_with_dedup() {
             timestamp: Some(ts),
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
     ];
 
@@ -256,6 +321,11 @@ fn test_import_mixed_dedup_new_and_existing() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -266,18 +336,33 @@ fn test_import_mixed_dedup_new_and_existing() {
             timestamp: Some(ts),
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "git status".to_string(), // new (shell)
             timestamp: None,
             mode: Some("shell".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
     ];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
@@ -310,6 +395,11 @@ fn test_import_dry_run_with_partial_dedup() {
         timestamp: None,
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -322,18 +412,33 @@ fn test_import_dry_run_with_partial_dedup() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new R entry
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "ls -la".to_string(), // shell entry, no dedup set
             timestamp: None,
             mode: Some("shell".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
     ];
 
@@ -364,6 +469,11 @@ fn test_import_skips_notimestamp_when_timestamped_exists() {
         timestamp: Some(ts),
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -374,6 +484,11 @@ fn test_import_skips_notimestamp_when_timestamped_exists() {
         timestamp: None,
         mode: Some("r".to_string()),
         metadata: None,
+        session_id: None,
+        hostname: None,
+        cwd: None,
+        duration: None,
+        exit_status: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -404,18 +519,33 @@ fn test_from_db_matches_from_history() {
             timestamp: Some(ts1),
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "print(1)".to_string(),
             timestamp: Some(ts2),
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "summary(iris)".to_string(),
             timestamp: None, // no timestamp
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
     ];
     import_entries(&mut targets, entries, None, false).unwrap();
@@ -456,6 +586,11 @@ fn test_metadata_backfills_duplicate_without_metadata() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         None,
         false,
@@ -470,6 +605,11 @@ fn test_metadata_backfills_duplicate_without_metadata() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: Some(metadata.clone()),
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         None,
         true,
@@ -502,6 +642,11 @@ fn test_existing_metadata_wins_on_duplicate() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: Some(original.clone()),
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         None,
         false,
@@ -515,6 +660,11 @@ fn test_existing_metadata_wins_on_duplicate() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: Some(test_metadata(r#"{"owner":"source"}"#)),
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         None,
         true,
@@ -544,12 +694,22 @@ fn test_no_timestamp_metadata_duplicate_with_multiple_matches_warns() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
         ImportEntry {
             command: "ambiguous".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: None,
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         },
     ];
     import_entries(&mut targets, entries, None, false).unwrap();
@@ -561,6 +721,11 @@ fn test_no_timestamp_metadata_duplicate_with_multiple_matches_warns() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: Some(test_metadata(r#"{"future":true}"#)),
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         None,
         true,
@@ -611,6 +776,11 @@ fn test_dry_run_counts_metadata_backfill_without_writing() {
             timestamp: None,
             mode: Some("r".to_string()),
             metadata: Some(test_metadata(r#"{"future":true}"#)),
+            session_id: None,
+            hostname: None,
+            cwd: None,
+            duration: None,
+            exit_status: None,
         }],
         Some(&dedup),
         None,

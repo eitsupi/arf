@@ -108,6 +108,73 @@ fn test_unified_export_preserves_metadata_through_import() {
 }
 
 #[test]
+fn test_unified_export_preserves_standard_columns_through_import() {
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    let source_dir = TempDir::new().unwrap();
+    let target_dir = TempDir::new().unwrap();
+    let unified_path = source_dir.path().join("export.db");
+    let db = rusqlite::Connection::open(&unified_path).unwrap();
+    db.execute(
+        r#"CREATE TABLE r (
+            id INTEGER PRIMARY KEY,
+            command_line TEXT NOT NULL,
+            start_timestamp INTEGER,
+            session_id INTEGER,
+            hostname TEXT,
+            cwd TEXT,
+            duration_ms INTEGER,
+            exit_status INTEGER,
+            more_info TEXT
+        )"#,
+        [],
+    )
+    .unwrap();
+    db.execute(
+        r#"INSERT INTO r
+           (command_line, session_id, hostname, cwd, duration_ms, exit_status)
+           VALUES (?, ?, ?, ?, ?, ?)"#,
+        rusqlite::params![
+            "unified standard columns",
+            987654321_i64,
+            "export-host",
+            "/export/cwd",
+            4321_i64,
+            23_i64
+        ],
+    )
+    .unwrap();
+    drop(db);
+
+    let parsed = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+    let entry = &parsed.entries[0];
+    assert_eq!(
+        entry.session_id.map(|id| id.to_string()),
+        Some("987654321".to_string())
+    );
+    assert_eq!(entry.hostname.as_deref(), Some("export-host"));
+    assert_eq!(entry.cwd.as_deref(), Some("/export/cwd"));
+    assert_eq!(entry.duration, Some(Duration::from_millis(4321)));
+    assert_eq!(entry.exit_status, Some(23));
+
+    let mut targets = create_test_targets(&target_dir);
+    import_entries(&mut targets, parsed.entries, None, false).unwrap();
+    let stored = targets
+        .r_history
+        .load(reedline::HistoryItemId::new(1))
+        .unwrap();
+    assert_eq!(
+        stored.session_id.map(|id| id.to_string()),
+        Some("987654321".to_string())
+    );
+    assert_eq!(stored.hostname.as_deref(), Some("export-host"));
+    assert_eq!(stored.cwd.as_deref(), Some("/export/cwd"));
+    assert_eq!(stored.duration, Some(Duration::from_millis(4321)));
+    assert_eq!(stored.exit_status, Some(23));
+}
+
+#[test]
 fn test_unified_export_without_metadata_column_still_imports() {
     use tempfile::TempDir;
 
@@ -130,6 +197,11 @@ fn test_unified_export_without_metadata_column_still_imports() {
     let parsed = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].metadata, None);
+    assert!(parsed.entries[0].session_id.is_none());
+    assert!(parsed.entries[0].hostname.is_none());
+    assert!(parsed.entries[0].cwd.is_none());
+    assert!(parsed.entries[0].duration.is_none());
+    assert!(parsed.entries[0].exit_status.is_none());
     assert!(parsed.warnings.is_empty());
 }
 
