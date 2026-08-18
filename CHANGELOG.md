@@ -11,6 +11,7 @@
 - A command that prompted for input (`readline()`, `menu()`, `browser()`) recorded its success or failure against the answer typed at that prompt instead of against the command itself (#312).
 - A history database error while saving a command no longer aborts the session (#312).
 - Importing an arf history database now preserves session, hostname, working directory, duration, exit status and metadata, not just the command and timestamp (#313).
+- Re-importing a source repairs those columns on entries an earlier import left empty, without replacing values already recorded (#313).
 - Importing a history database no longer writes to the source database (#313).
 - Importing a file that is not an arf history database now reports an error instead of silently importing nothing (#313).
 
