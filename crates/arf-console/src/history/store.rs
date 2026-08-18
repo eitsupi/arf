@@ -122,6 +122,7 @@ impl HistoryStore {
         id: HistoryItemId,
         source: HistoryItem<HistoryExtraInfo>,
     ) -> Result<bool> {
+        let _history = self.inner.lock().map_err(|_| lock_error())?;
         let serialized_metadata = source
             .more_info
             .as_ref()
@@ -133,6 +134,9 @@ impl HistoryStore {
                 ))
             })?;
         let mut connection = rusqlite::Connection::open(&self.path).map_err(sqlite_error)?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(sqlite_error)?;
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
@@ -146,6 +150,11 @@ impl HistoryStore {
                     exit_status = COALESCE(exit_status, :exit_status),
                     more_info = COALESCE(more_info, :more_info)
                  WHERE id = :id
+                   AND command_line = :command_line
+                   AND (
+                       :start_timestamp IS NULL
+                    OR start_timestamp = :start_timestamp
+                   )
                    AND (
                        (:session_id IS NOT NULL AND session_id IS NULL)
                     OR (:hostname IS NOT NULL AND hostname IS NULL)
@@ -156,6 +165,8 @@ impl HistoryStore {
                    )",
                 rusqlite::named_params! {
                     ":id": id.0,
+                    ":command_line": source.command_line,
+                    ":start_timestamp": source.start_timestamp.map(|value| value.timestamp_millis()),
                     ":session_id": source.session_id.map(i64::from),
                     ":hostname": source.hostname,
                     ":cwd": source.cwd,

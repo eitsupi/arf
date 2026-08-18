@@ -126,6 +126,73 @@ fn duplicate_repair_preserves_hostname_set_by_hostname_override() {
 }
 
 #[test]
+fn stale_duplicate_repair_skips_when_command_line_changed() {
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("selected")]);
+    let path = fixture.targets.r_history.path().to_owned();
+    let r_dedup = DedupSet::from_db(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            r#"UPDATE history SET command_line = ? WHERE id = ?"#,
+            rusqlite::params!["changed", 1_i64],
+        )
+        .unwrap();
+
+    let result = import_entries_with_dedup_sets(
+        &mut fixture.targets,
+        vec![r("selected").with_metadata(r#"{"new":true}"#)],
+        None,
+        Some(r_dedup),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(result.duplicates_repaired, 0);
+    assert_eq!(fixture.r_items()[0].command_line, "changed");
+    assert_eq!(fixture.r_items()[0].more_info, None);
+}
+
+#[test]
+fn stale_duplicate_repair_skips_when_timestamp_changed() {
+    let original_timestamp = timestamp("2024-06-15T14:30:45Z");
+    let changed_timestamp = timestamp("2024-06-15T14:30:46Z");
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("timestamp selected").at(original_timestamp)]);
+    let path = fixture.targets.r_history.path().to_owned();
+    let r_dedup = DedupSet::from_db(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            r#"UPDATE history SET start_timestamp = ? WHERE id = ?"#,
+            rusqlite::params![changed_timestamp.timestamp_millis(), 1_i64],
+        )
+        .unwrap();
+
+    let result = import_entries_with_dedup_sets(
+        &mut fixture.targets,
+        vec![
+            r("timestamp selected")
+                .at(original_timestamp)
+                .with_metadata(r#"{"new":true}"#),
+        ],
+        None,
+        Some(r_dedup),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(result.duplicates_repaired, 0);
+    assert_eq!(
+        fixture.r_items()[0].start_timestamp,
+        Some(changed_timestamp)
+    );
+    assert_eq!(fixture.r_items()[0].more_info, None);
+}
+
+#[test]
 fn malformed_metadata_does_not_block_other_repairs_or_change_metadata() {
     let (dir, mut targets) = malformed_target();
     import_entries(&mut targets, vec![r("broken fields")], None, false).unwrap();

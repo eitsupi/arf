@@ -647,7 +647,7 @@ pub fn import_entries(
     hostname_override: Option<&str>,
     skip_duplicates: bool,
 ) -> Result<ImportResult> {
-    let (mut r_dedup, mut shell_dedup) = if skip_duplicates {
+    let (r_dedup, shell_dedup) = if skip_duplicates {
         (
             Some(DedupSet::from_history(&targets.r_history)?),
             Some(DedupSet::from_history(&targets.shell_history)?),
@@ -656,6 +656,16 @@ pub fn import_entries(
         (None, None)
     };
 
+    import_entries_with_dedup_sets(targets, entries, hostname_override, r_dedup, shell_dedup)
+}
+
+fn import_entries_with_dedup_sets(
+    targets: &mut ImportTargets,
+    entries: Vec<ImportEntry>,
+    hostname_override: Option<&str>,
+    mut r_dedup: Option<DedupSet>,
+    mut shell_dedup: Option<DedupSet>,
+) -> Result<ImportResult> {
     let mut result = ImportResult::default();
 
     for mut entry in entries {
