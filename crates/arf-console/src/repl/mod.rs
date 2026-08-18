@@ -44,7 +44,7 @@ use crate::editor::keybindings::{
 };
 use crate::editor::validator::RValidator;
 use banner::{format_banner, format_override_line};
-use history::setup_history;
+use history::{finalize_history, setup_history};
 use meta_command::{MetaCommandResult, process_meta_command};
 use pager_ui::{run_pager_help_browser, run_pager_history_browser, with_ipc_alternate_guard};
 use prompt::RPrompt;
@@ -360,7 +360,7 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let (mut line_editor, r_history_ok) =
+        let (mut line_editor, r_history_handle) =
             setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
@@ -498,11 +498,11 @@ impl Repl {
             }));
 
         // Create shell line editor with separate history
-        let (shell_line_editor, shell_history_ok) = self.create_shell_line_editor();
+        let (shell_line_editor, shell_history_handle) = self.create_shell_line_editor();
 
         // If neither history DB was opened, clear the session ID from IPC metadata
         // so clients are not misled about history isolation being active.
-        if !r_history_ok && !shell_history_ok {
+        if r_history_handle.is_none() && shell_history_handle.is_none() {
             crate::ipc::clear_history_session_id();
         }
 
@@ -561,11 +561,14 @@ impl Repl {
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
                 // Only expose session ID if at least one history DB was opened
-                history_session_id: if r_history_ok || shell_history_ok {
+                history_session_id: if r_history_handle.is_some() || shell_history_handle.is_some()
+                {
                     self.session_id
                 } else {
                     None
                 },
+                r_history: r_history_handle,
+                shell_history: shell_history_handle,
                 pending_history_context: PendingHistoryContext::None,
             });
         });
@@ -626,9 +629,13 @@ impl Repl {
                 && !repl_state.sponge_queue.is_empty()
             {
                 for id_to_delete in repl_state.sponge_queue.drain_failed_ids() {
-                    let _ = repl_state.line_editor.history_mut().delete(id_to_delete);
+                    if let Some(handle) = &repl_state.r_history {
+                        let _ = handle.store.delete(id_to_delete);
+                    }
                 }
-                let _ = repl_state.line_editor.sync_history();
+                if let Some(handle) = &repl_state.r_history {
+                    let _ = handle.store.sync();
+                }
             }
         });
 
@@ -646,14 +653,14 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let (mut line_editor, history_ok) =
+        let (mut line_editor, history_handle) =
             setup_history(line_editor, self.r_history_path(), self.session_id);
 
         // If history DB failed to open, clear the session ID from IPC metadata
-        if !history_ok {
+        if history_handle.is_none() {
             crate::ipc::clear_history_session_id();
         }
-        let history_session_id = if history_ok {
+        let history_session_id = if history_handle.is_some() {
             self.history_session_id_raw()
         } else {
             None
@@ -761,8 +768,15 @@ impl Repl {
         loop {
             match line_editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
+                    let save_outcome = history_handle
+                        .as_ref()
+                        .and_then(|handle| handle.receipt.take());
+
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
+                        // A whitespace-only buffer is still saved by reedline,
+                        // so record that it is an ordinary line before skipping.
+                        finalize_history(history_handle.as_ref(), save_outcome, false);
                         continue;
                     }
 
@@ -778,6 +792,7 @@ impl Repl {
                         history_session_id,
                         self.r_home.as_deref(),
                     ) {
+                        finalize_history(history_handle.as_ref(), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         prompt_config.clear_command_duration();
@@ -797,6 +812,8 @@ impl Repl {
                             }
                         }
                     }
+
+                    finalize_history(history_handle.as_ref(), save_outcome, false);
 
                     // Not a meta command - show R not initialized message
                     println!("{}", format!("[R not initialized] {}", line).dark_grey());
@@ -830,12 +847,12 @@ impl Repl {
     /// Create a shell mode line editor with separate history.
     ///
     /// Shell mode uses a separate SQLite history database from R mode.
-    fn create_shell_line_editor(&self) -> (Reedline, bool) {
+    fn create_shell_line_editor(&self) -> (Reedline, Option<crate::history::HistoryHandle>) {
         // Create shell editor with bracketed paste enabled
         let shell_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for Shell mode (separate from R)
-        let (mut shell_editor, history_ok) =
+        let (mut shell_editor, history_handle) =
             setup_history(shell_editor, self.shell_history_path(), self.session_id);
 
         // Use same edit mode as R editor
@@ -919,7 +936,7 @@ impl Repl {
                 arf_libr::process_r_events();
             }));
 
-        (shell_editor, history_ok)
+        (shell_editor, history_handle)
     }
 }
 

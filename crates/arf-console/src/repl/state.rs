@@ -22,18 +22,16 @@ use super::prompt::RPrompt;
 /// Identifies which history entry should receive the result of the command
 /// that just finished evaluating.
 ///
-/// IPC entries are saved before R evaluates them, so they cannot use
-/// reedline's internal last-command context. Keep their ID explicitly and
-/// update that entry when the next prompt is built instead.
-#[derive(Debug, Default)]
+/// Both interactive and IPC entries carry their database row explicitly. This
+/// avoids reedline's mutable "last run" slot, which is overwritten by every
+/// Enter-save, including entries created by menu prompts.
+#[derive(Default)]
 pub enum PendingHistoryContext {
-    /// The last command was submitted through reedline and its context should
-    /// be updated through `update_last_command_context`.
-    Reedline,
-    /// The last command was injected through IPC. The ID is absent when the
-    /// history backend rejected the save, but the command status still needs
-    /// to be reflected in the prompt.
-    Ipc { history_id: Option<HistoryItemId> },
+    /// The command whose evaluation just completed, if it was persisted.
+    Command {
+        store: Option<crate::history::HistoryStore>,
+        history_id: Option<HistoryItemId>,
+    },
     /// No command needs a history context update.
     #[default]
     None,
@@ -80,6 +78,10 @@ pub struct ReplState {
     pub dir_stack: Vec<PathBuf>,
     /// History session ID for R history entries and IPC metadata.
     pub history_session_id: Option<HistorySessionId>,
+    /// Persistent R history store and adapter save receipt.
+    pub r_history: Option<crate::history::HistoryHandle>,
+    /// Persistent shell history store and adapter save receipt.
+    pub shell_history: Option<crate::history::HistoryHandle>,
     /// History context for the command whose evaluation just completed.
     pub pending_history_context: PendingHistoryContext,
 }

@@ -21,6 +21,7 @@ pub mod protocol;
 pub mod server;
 pub mod session;
 
+use crate::history::{HistoryExtraInfo, HistoryStore};
 use chrono::TimeZone;
 use protocol::{
     EvaluateResult, HistoryEntry, HistoryParams, HistoryResult, INPUT_ALREADY_PENDING, IpcMethod,
@@ -193,7 +194,7 @@ static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 /// History backend for headless mode. When set, evaluated commands are
 /// persisted to the same SQLite history database used by the REPL.
-static HEADLESS_HISTORY: OnceLock<Mutex<reedline::SqliteBackedHistory>> = OnceLock::new();
+static HEADLESS_HISTORY: OnceLock<HistoryStore> = OnceLock::new();
 
 /// History database path and session ID, shared between REPL and headless modes.
 /// Used by the `history` IPC method to open a read-only connection for queries.
@@ -797,8 +798,8 @@ pub fn clear_history_session_id() {
 ///
 /// Once set, `headless_handle_request` will persist evaluated commands
 /// (both `evaluate` and `user_input`) to the SQLite history database.
-pub fn set_headless_history(history: reedline::SqliteBackedHistory) {
-    if HEADLESS_HISTORY.set(Mutex::new(history)).is_err() {
+pub fn set_headless_history(history: HistoryStore) {
+    if HEADLESS_HISTORY.set(history).is_err() {
         log::warn!(
             "Headless history backend already initialized; ignoring duplicate set_headless_history call"
         );
@@ -953,11 +954,6 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
     let Some(h) = HEADLESS_HISTORY.get() else {
         return;
     };
-    let Ok(mut history) = h.lock() else {
-        log::warn!("Headless history lock poisoned, skipping save");
-        return;
-    };
-    use reedline::History;
     let mut item = reedline::HistoryItem::from_command_line(code);
     item.start_timestamp = Some(chrono::Utc::now());
     item.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
@@ -966,7 +962,7 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
         .map(|p| p.to_string_lossy().into_owned());
     item.exit_status = exit_status;
     item.session_id = HISTORY_DB_INFO.get().and_then(|(_, sid)| *sid);
-    if let Err(e) = history.save(item) {
+    if let Err(e) = h.save_known(item, HistoryExtraInfo::default()) {
         log::warn!("Failed to save headless history: {}", e);
     }
 }

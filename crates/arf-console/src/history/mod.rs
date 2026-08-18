@@ -5,9 +5,10 @@
 
 pub mod export;
 pub mod import;
-mod search;
-mod storage;
+mod metadata;
+mod reedline_adapter;
+mod store;
 
-pub use search::FuzzyHistory;
-#[allow(unused_imports)]
-pub use storage::HistoryExtraInfo;
+pub use metadata::HistoryExtraInfo;
+pub use reedline_adapter::ReedlineHistoryAdapter;
+pub use store::{HistoryHandle, HistorySaveOutcome, HistorySaveReceipt, HistoryStore};

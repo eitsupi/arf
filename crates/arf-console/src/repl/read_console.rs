@@ -8,7 +8,7 @@ use crossterm::{
 use reedline::Signal;
 use std::io::{self, Write};
 
-use super::history::save_ipc_history;
+use super::history::{finalize_history, save_ipc_history};
 use super::state::PendingHistoryContext;
 use super::{
     MetaAction, REPL_STATE, RPrompt, SessionInfoContext, arf_println, clear_input_lines,
@@ -82,60 +82,29 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
         if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
             let pending_history_context = std::mem::take(&mut state.pending_history_context);
             let had_error = match pending_history_context {
-                PendingHistoryContext::Reedline => {
-                    if state.line_editor.has_last_command_context() {
-                        let had_error = arf_libr::command_had_error();
-                        let exit_status = if had_error { 1i64 } else { 0i64 };
-
-                        // Use Cell to capture the history item ID through the immutable closure
-                        let captured_id: std::cell::Cell<Option<reedline::HistoryItemId>> =
-                            std::cell::Cell::new(None);
-                        let _ = state.line_editor.update_last_command_context(&|mut item| {
-                            item.exit_status = Some(exit_status);
-                            captured_id.set(item.id);
-                            item
-                        });
-
-                        // Sponge feature: track all commands and purge old failed ones.
-                        // See SpongeQueue for the algorithm details.
-                        if state.forget_config.enabled {
-                            // Determine effective delay: use configured delay normally,
-                            // or usize::MAX for on_exit_only (defer all deletions until exit)
-                            let effective_delay = if state.forget_config.on_exit_only {
-                                usize::MAX
-                            } else {
-                                state.forget_config.delay
-                            };
-
-                            if let Some(id_to_delete) = state.sponge_queue.record_command(
-                                had_error,
-                                captured_id.get(),
-                                effective_delay,
-                            ) {
-                                let _ = state.line_editor.history_mut().delete(id_to_delete);
-                            }
-                        }
-                        had_error
-                    } else {
-                        false
-                    }
-                }
-                PendingHistoryContext::Ipc { history_id } => {
-                    // IPC history is saved before evaluation. Reedline's
-                    // History::update API accepts that saved ID, so update the
-                    // IPC entry directly instead of touching the previous
-                    // interactive entry. This also preserves the error status
-                    // for IPC commands in the history database.
+                PendingHistoryContext::Command { store, history_id } => {
                     let had_error = arf_libr::command_had_error();
-                    if let Some(history_id) = history_id {
+                    if let (Some(store), Some(history_id)) = (&store, history_id) {
                         let exit_status = if had_error { 1i64 } else { 0i64 };
-                        let _ = state
-                            .line_editor
-                            .history_mut()
-                            .update(history_id, &|mut item| {
-                                item.exit_status = Some(exit_status);
-                                item
-                            });
+                        if let Err(error) = store.set_exit_status(history_id, exit_status) {
+                            log::warn!("Failed to update history exit status: {error}");
+                        }
+                    }
+
+                    if state.forget_config.enabled {
+                        let effective_delay = if state.forget_config.on_exit_only {
+                            usize::MAX
+                        } else {
+                            state.forget_config.delay
+                        };
+                        if let Some(id_to_delete) = state.sponge_queue.record_command(
+                            had_error,
+                            history_id,
+                            effective_delay,
+                        ) && let Some(store) = &store
+                        {
+                            let _ = store.delete(id_to_delete);
+                        }
                     }
                     had_error
                 }
@@ -175,14 +144,18 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         setup_visible_eval(reply, timeout);
+                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
                         let history_id = save_ipc_history(
-                            &mut state.line_editor,
+                            state.line_editor.history_mut(),
+                            store,
                             &op.code,
                             state.history_session_id,
                         );
                         if !op.code.trim().is_empty() {
-                            state.pending_history_context =
-                                PendingHistoryContext::Ipc { history_id };
+                            state.pending_history_context = PendingHistoryContext::Command {
+                                store: state.r_history.as_ref().map(|handle| handle.store.clone()),
+                                history_id,
+                            };
                         }
                         let prompt_str = "agent> ";
                         println!("{}{}", prompt_str.dark_cyan(), op.code);
@@ -199,14 +172,18 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         accept_user_input(reply);
+                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
                         let history_id = save_ipc_history(
-                            &mut state.line_editor,
+                            state.line_editor.history_mut(),
+                            store,
                             &op.code,
                             state.history_session_id,
                         );
                         if !op.code.trim().is_empty() {
-                            state.pending_history_context =
-                                PendingHistoryContext::Ipc { history_id };
+                            state.pending_history_context = PendingHistoryContext::Command {
+                                store: state.r_history.as_ref().map(|handle| handle.store.clone()),
+                                history_id,
+                            };
                         }
                         let prompt_str = "agent> ";
                         println!("{}{}", prompt_str.dark_cyan(), op.code);
@@ -238,7 +215,13 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
             };
 
             // Use shell editor when in shell mode (for separate history)
-            let editor = if state.prompt_config.is_shell_enabled() {
+            let is_shell_mode = state.prompt_config.is_shell_enabled();
+            let history_handle = if is_shell_mode {
+                state.shell_history.clone()
+            } else {
+                state.r_history.clone()
+            };
+            let editor = if is_shell_mode {
                 &mut state.shell_line_editor
             } else {
                 &mut state.line_editor
@@ -254,6 +237,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
 
             match editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
+                    let save_outcome = history_handle
+                        .as_ref()
+                        .and_then(|handle| handle.receipt.take());
+
                     // For non-standard prompts (menus, etc.), pass input directly to R
                     // without any processing (meta commands, shell mode, reprex, autoformat)
                     if is_menu_prompt {
@@ -265,6 +252,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // an exit status, which matters most when that entry
                         // came from IPC and cannot be recovered from reedline's
                         // own last-command context.
+                        finalize_history(history_handle.as_ref(), save_outcome, false);
                         return Some(line);
                     }
 
@@ -279,6 +267,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         state.history_session_id.map(i64::from),
                         state.r_home.as_deref(),
                     ) {
+                        finalize_history(history_handle.as_ref(), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         state.prompt_config.clear_command_duration();
@@ -299,8 +288,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         }
                     }
 
+                    finalize_history(history_handle.as_ref(), save_outcome, false);
+
                     // Shell mode: execute as shell command instead of R
-                    if state.prompt_config.is_shell_enabled() {
+                    if is_shell_mode {
                         let trimmed = line.trim();
                         if !trimmed.is_empty() {
                             // Check if user wants to exit shell mode.
@@ -359,7 +350,14 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // context. Continuation prompts remain part of the outer
                     // command, so preserve its context until evaluation ends.
                     if is_r_command_prompt(r_prompt) && !code.trim().is_empty() {
-                        state.pending_history_context = PendingHistoryContext::Reedline;
+                        let history_id = match save_outcome {
+                            Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
+                            _ => None,
+                        };
+                        state.pending_history_context = PendingHistoryContext::Command {
+                            store: history_handle.map(|handle| handle.store),
+                            history_id,
+                        };
                     }
                     return Some(code);
                 }
@@ -463,11 +461,17 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                             PendingIpcKind::SilentEvaluate { .. } => unreachable!(),
                         };
 
-                        let history_id =
-                            save_ipc_history(editor, &op.code, state.history_session_id);
+                        let history_id = save_ipc_history(
+                            editor.history_mut(),
+                            history_handle.as_ref().map(|handle| handle.store.clone()),
+                            &op.code,
+                            state.history_session_id,
+                        );
                         if !op.code.trim().is_empty() {
-                            state.pending_history_context =
-                                PendingHistoryContext::Ipc { history_id };
+                            state.pending_history_context = PendingHistoryContext::Command {
+                                store: history_handle.as_ref().map(|handle| handle.store.clone()),
+                                history_id,
+                            };
                         }
 
                         clear_and_show_agent_prompt(&op.code);
