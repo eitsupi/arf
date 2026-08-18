@@ -105,16 +105,15 @@ impl HistoryStore {
         Ok(convert_history_item(saved, None))
     }
 
-    /// Save an imported item, preserving metadata when the source supplied it.
-    pub(crate) fn save_entry(
+    /// Save a fully typed item imported from an external history source.
+    pub(crate) fn save_imported(
         &self,
-        item: HistoryItem,
-        metadata: Option<HistoryExtraInfo>,
-    ) -> Result<HistoryItem> {
-        match metadata {
-            Some(metadata) => self.save_known(item, metadata),
-            None => self.save_unknown(item),
-        }
+        item: HistoryItem<HistoryExtraInfo>,
+    ) -> Result<HistoryItem<HistoryExtraInfo>> {
+        self.inner
+            .lock()
+            .map_err(|_| lock_error())?
+            .save_with_extra(item)
     }
 
     /// Backfill metadata only if the row is still SQL NULL.

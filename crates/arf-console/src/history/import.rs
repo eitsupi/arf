@@ -39,27 +39,57 @@ use std::time::Duration;
 use super::metadata::HistoryExtraInfo;
 use super::store::HistoryStore;
 
+/// The destination selected for an imported item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportMode {
+    R,
+    Shell,
+    Browse,
+    Unspecified,
+    Unsupported(String),
+}
+
+impl ImportMode {
+    fn from_external(mode: Option<&str>) -> Self {
+        match mode {
+            Some("r") => Self::R,
+            Some("shell") => Self::Shell,
+            Some("browse") => Self::Browse,
+            Some(mode) => Self::Unsupported(mode.to_owned()),
+            None => Self::Unspecified,
+        }
+    }
+}
+
 /// A parsed history entry ready for import.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportEntry {
-    /// The command text.
-    pub command: String,
-    /// Timestamp when the command was executed (if available).
-    pub timestamp: Option<DateTime<Utc>>,
-    /// Mode in which the command was executed (r, shell, browse).
-    pub mode: Option<String>,
-    /// Metadata arf determined for this row, if the source retained it.
-    pub metadata: Option<HistoryExtraInfo>,
-    /// Source session identifier, if present.
-    pub session_id: Option<HistorySessionId>,
-    /// Source hostname, unless the import hostname override replaces it.
-    pub hostname: Option<String>,
-    /// Source working directory, if present.
-    pub cwd: Option<String>,
-    /// Source command duration, if present.
-    pub duration: Option<Duration>,
-    /// Source command exit status, if present.
-    pub exit_status: Option<i64>,
+    pub mode: ImportMode,
+    pub item: HistoryItem<HistoryExtraInfo>,
+}
+
+impl ImportEntry {
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            mode: ImportMode::Unspecified,
+            item: HistoryItem {
+                id: None,
+                start_timestamp: None,
+                command_line: command.into(),
+                session_id: None,
+                hostname: None,
+                cwd: None,
+                duration: None,
+                exit_status: None,
+                more_info: None,
+            },
+        }
+    }
+
+    pub fn with_mode(mut self, mode: ImportMode) -> Self {
+        self.mode = mode;
+        self
+    }
 }
 
 /// Parsed entries together with non-fatal row warnings.
@@ -78,7 +108,7 @@ impl std::ops::Deref for ParsedImport {
 }
 
 /// Result of an import operation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ImportResult {
     /// Number of R entries successfully imported.
     pub r_imported: usize,
@@ -144,17 +174,10 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
             // Finalize previous entry if we have one
             if !current_lines.is_empty() {
                 let command = current_lines.join("\n");
-                entries.push(ImportEntry {
-                    command,
-                    timestamp: current_timestamp,
-                    mode: current_mode.take(),
-                    metadata: None,
-                    session_id: None,
-                    hostname: None,
-                    cwd: None,
-                    duration: None,
-                    exit_status: None,
-                });
+                let mut entry = ImportEntry::new(command)
+                    .with_mode(ImportMode::from_external(current_mode.take().as_deref()));
+                entry.item.start_timestamp = current_timestamp;
+                entries.push(entry);
                 current_lines.clear();
             }
 
@@ -178,17 +201,10 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
             // Empty line can separate entries
             if !current_lines.is_empty() {
                 let command = current_lines.join("\n");
-                entries.push(ImportEntry {
-                    command,
-                    timestamp: current_timestamp,
-                    mode: current_mode.take(),
-                    metadata: None,
-                    session_id: None,
-                    hostname: None,
-                    cwd: None,
-                    duration: None,
-                    exit_status: None,
-                });
+                let mut entry = ImportEntry::new(command)
+                    .with_mode(ImportMode::from_external(current_mode.take().as_deref()));
+                entry.item.start_timestamp = current_timestamp;
+                entries.push(entry);
                 current_lines.clear();
                 current_timestamp = None;
             }
@@ -199,17 +215,10 @@ pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
     // Don't forget the last entry
     if !current_lines.is_empty() {
         let command = current_lines.join("\n");
-        entries.push(ImportEntry {
-            command,
-            timestamp: current_timestamp,
-            mode: current_mode.take(),
-            metadata: None,
-            session_id: None,
-            hostname: None,
-            cwd: None,
-            duration: None,
-            exit_status: None,
-        });
+        let mut entry = ImportEntry::new(command)
+            .with_mode(ImportMode::from_external(current_mode.take().as_deref()));
+        entry.item.start_timestamp = current_timestamp;
+        entries.push(entry);
     }
 
     Ok(ParsedImport {
@@ -235,17 +244,7 @@ pub fn parse_r_history(path: &Path) -> Result<ParsedImport> {
         let content = line.trim_end();
         // Skip empty/whitespace-only lines
         if !content.trim().is_empty() {
-            entries.push(ImportEntry {
-                command: content.to_string(),
-                timestamp: None,
-                mode: Some("r".to_string()),
-                metadata: None,
-                session_id: None,
-                hostname: None,
-                cwd: None,
-                duration: None,
-                exit_status: None,
-            });
+            entries.push(ImportEntry::new(content.to_string()).with_mode(ImportMode::R));
         }
     }
 
@@ -271,9 +270,9 @@ pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
         .and_then(|n| n.to_str())
         .is_some_and(|n| n == "shell.db");
     let mode = if is_shell {
-        Some("shell".to_string())
+        ImportMode::Shell
     } else {
-        Some("r".to_string())
+        ImportMode::R
     };
 
     let db =
@@ -286,7 +285,7 @@ pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
         );
     }
 
-    read_history_table(&db, path, "history", mode.as_deref().unwrap_or("r")).with_context(|| {
+    read_history_table(&db, path, "history", mode).with_context(|| {
         format!(
             "File '{}' does not look like an arf history database",
             path.display()
@@ -300,18 +299,6 @@ pub struct ImportTargets {
     pub r_history: HistoryStore,
     /// Shell history database.
     pub shell_history: HistoryStore,
-}
-
-/// Determine the target database for an entry based on its mode.
-///
-/// Returns `Some(true)` for shell, `Some(false)` for R/browse, `None` for unknown modes.
-fn classify_mode(mode: Option<&str>) -> Option<bool> {
-    match mode {
-        Some("shell") => Some(true),               // shell database
-        Some("r") | Some("browse") => Some(false), // R database
-        None => Some(false),                       // Default to R database
-        Some(_) => None,                           // Unknown mode - skip
-    }
 }
 
 /// Pre-loaded set of existing history entries for duplicate detection (anti-join).
@@ -478,86 +465,116 @@ impl DedupSet {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImportTarget {
+    R,
+    Shell,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EntryPlan {
+    Insert(ImportTarget),
+    Backfill {
+        target: ImportTarget,
+        id: HistoryItemId,
+    },
+    Duplicate,
+    SkipEmpty,
+    SkipUnsupported {
+        mode: String,
+    },
+    AmbiguousMetadata,
+    MalformedExistingMetadata,
+}
+
+pub(crate) fn plan_entry(
+    entry: &ImportEntry,
+    r_dedup: Option<&DedupSet>,
+    shell_dedup: Option<&DedupSet>,
+) -> EntryPlan {
+    if entry.item.command_line.trim().is_empty() {
+        return EntryPlan::SkipEmpty;
+    }
+
+    let target = match &entry.mode {
+        ImportMode::R | ImportMode::Browse | ImportMode::Unspecified => ImportTarget::R,
+        ImportMode::Shell => ImportTarget::Shell,
+        ImportMode::Unsupported(mode) => {
+            return EntryPlan::SkipUnsupported { mode: mode.clone() };
+        }
+    };
+    let dedup = match target {
+        ImportTarget::R => r_dedup,
+        ImportTarget::Shell => shell_dedup,
+    };
+    let Some(dedup) = dedup else {
+        return EntryPlan::Insert(target);
+    };
+
+    match dedup.duplicate_action(
+        &entry.item.command_line,
+        entry.item.start_timestamp.as_ref(),
+        entry.item.more_info.is_some(),
+    ) {
+        DuplicateAction::NotDuplicate => EntryPlan::Insert(target),
+        DuplicateAction::Skip => EntryPlan::Duplicate,
+        DuplicateAction::Backfill(id) => EntryPlan::Backfill { target, id },
+        DuplicateAction::Ambiguous => EntryPlan::AmbiguousMetadata,
+        DuplicateAction::Malformed => EntryPlan::MalformedExistingMetadata,
+    }
+}
+
+fn add_plan_warning(result: &mut ImportResult, entry: &ImportEntry, plan: &EntryPlan) {
+    let command = &entry.item.command_line;
+    match plan {
+        EntryPlan::SkipUnsupported { mode } => {
+            let preview: String = command.chars().take(30).collect();
+            result
+                .warnings
+                .push(format!("Skipped unknown mode '{}': {}...", mode, preview));
+        }
+        EntryPlan::AmbiguousMetadata => result.warnings.push(format!(
+            "Could not backfill metadata for duplicate command '{}': matches multiple rows",
+            command
+        )),
+        EntryPlan::MalformedExistingMetadata => result.warnings.push(format!(
+            "Could not backfill metadata for duplicate command '{}': existing metadata is malformed; leaving it unchanged",
+            command
+        )),
+        _ => {}
+    }
+}
+
+fn record_plan(result: &mut ImportResult, entry: &ImportEntry, plan: &EntryPlan) {
+    match plan {
+        EntryPlan::Insert(ImportTarget::R) => result.r_imported += 1,
+        EntryPlan::Insert(ImportTarget::Shell) => result.shell_imported += 1,
+        EntryPlan::Backfill { .. } => result.metadata_backfilled += 1,
+        EntryPlan::Duplicate => result.duplicates_skipped += 1,
+        EntryPlan::SkipEmpty => result.skipped += 1,
+        EntryPlan::SkipUnsupported { .. }
+        | EntryPlan::AmbiguousMetadata
+        | EntryPlan::MalformedExistingMetadata => {
+            result.skipped += usize::from(matches!(plan, EntryPlan::SkipUnsupported { .. }));
+            if !matches!(plan, EntryPlan::SkipUnsupported { .. }) {
+                result.duplicates_skipped += 1;
+            }
+        }
+    }
+    add_plan_warning(result, entry, plan);
+}
+
 /// Simulate importing entries without accessing databases.
-///
-/// Uses the same classification logic as `import_entries` to provide
-/// accurate counts and warnings for `--dry-run` mode.
-///
-/// If dedup sets are provided, duplicate entries will be counted in
-/// `duplicates_skipped` instead of being "imported". Each dedup set
-/// is optional independently, so dedup works even if only one target
-/// database exists.
 pub fn import_entries_dry_run(
     entries: &[ImportEntry],
     r_dedup: Option<&DedupSet>,
     shell_dedup: Option<&DedupSet>,
 ) -> ImportResult {
     let mut result = ImportResult::default();
-
     for entry in entries {
-        if entry.command.trim().is_empty() {
-            result.skipped += 1;
-            continue;
-        }
-
-        // Classify mode and skip unknown modes
-        let is_shell = match classify_mode(entry.mode.as_deref()) {
-            Some(is_shell) => is_shell,
-            None => {
-                let mode = entry.mode.as_deref().unwrap_or("?");
-                let cmd_preview: String = entry.command.chars().take(30).collect();
-                result.warnings.push(format!(
-                    "Skipped unknown mode '{}': {}...",
-                    mode, cmd_preview
-                ));
-                result.skipped += 1;
-                continue;
-            }
-        };
-
-        // Check for duplicates if the corresponding dedup set is available.
-        let dedup_set = if is_shell { shell_dedup } else { r_dedup };
-        if let Some(dedup) = dedup_set {
-            match dedup.duplicate_action(
-                &entry.command,
-                entry.timestamp.as_ref(),
-                entry.metadata.is_some(),
-            ) {
-                DuplicateAction::Skip => {
-                    result.duplicates_skipped += 1;
-                    continue;
-                }
-                DuplicateAction::Backfill(_) => {
-                    result.metadata_backfilled += 1;
-                    continue;
-                }
-                DuplicateAction::Ambiguous => {
-                    result.duplicates_skipped += 1;
-                    result.warnings.push(format!(
-                        "Could not backfill metadata for duplicate command from dry run: '{}' matches multiple rows",
-                        entry.command
-                    ));
-                    continue;
-                }
-                DuplicateAction::Malformed => {
-                    result.duplicates_skipped += 1;
-                    result.warnings.push(format!(
-                        "Could not backfill metadata for duplicate command from dry run: existing metadata is malformed for '{}'; leaving it unchanged",
-                        entry.command
-                    ));
-                    continue;
-                }
-                DuplicateAction::NotDuplicate => {}
-            }
-        }
-
-        if is_shell {
-            result.shell_imported += 1;
-        } else {
-            result.r_imported += 1;
-        }
+        let plan = plan_entry(entry, r_dedup, shell_dedup);
+        record_plan(&mut result, entry, &plan);
     }
-
     result
 }
 
@@ -588,7 +605,6 @@ pub fn import_entries(
     hostname_override: Option<&str>,
     skip_duplicates: bool,
 ) -> Result<ImportResult> {
-    // Build dedup sets if duplicate skipping is enabled
     let (r_dedup, shell_dedup) = if skip_duplicates {
         (
             Some(DedupSet::from_history(&targets.r_history)?),
@@ -601,113 +617,50 @@ pub fn import_entries(
     let mut result = ImportResult::default();
 
     for entry in entries {
-        if entry.command.trim().is_empty() {
-            result.skipped += 1;
-            continue;
-        }
-
-        // Classify mode and skip unknown modes
-        let is_shell = match classify_mode(entry.mode.as_deref()) {
-            Some(is_shell) => is_shell,
-            None => {
-                let mode = entry.mode.as_deref().unwrap_or("?");
-                let cmd_preview: String = entry.command.chars().take(30).collect();
-                result.warnings.push(format!(
-                    "Skipped unknown mode '{}': {}...",
-                    mode, cmd_preview
-                ));
-                result.skipped += 1;
-                continue;
-            }
-        };
-
-        // Check for duplicates if enabled.
-        let dedup_set = if is_shell { &shell_dedup } else { &r_dedup };
-        if let Some(dedup) = dedup_set {
-            match dedup.duplicate_action(
-                &entry.command,
-                entry.timestamp.as_ref(),
-                entry.metadata.is_some(),
-            ) {
-                DuplicateAction::Skip => {
-                    result.duplicates_skipped += 1;
-                    continue;
+        let plan = plan_entry(&entry, r_dedup.as_ref(), shell_dedup.as_ref());
+        match plan {
+            EntryPlan::Insert(target) => {
+                let mut item = entry.item;
+                item.id = None;
+                if let Some(hostname) = hostname_override {
+                    item.hostname = Some(hostname.to_owned());
                 }
-                DuplicateAction::Backfill(id) => {
-                    let store = if is_shell {
-                        &targets.shell_history
-                    } else {
-                        &targets.r_history
-                    };
-                    match store.set_metadata_if_empty(id, entry.metadata.clone().unwrap()) {
-                        Ok(true) => result.metadata_backfilled += 1,
-                        Ok(false) => result.duplicates_skipped += 1,
-                        Err(error) => {
-                            result.warnings.push(format!(
-                                "Failed to backfill metadata for duplicate '{}': {}",
-                                entry.command, error
-                            ));
-                            result.duplicates_skipped += 1;
-                        }
+                let save_result = match target {
+                    ImportTarget::R => targets.r_history.save_imported(item),
+                    ImportTarget::Shell => targets.shell_history.save_imported(item),
+                };
+                match save_result {
+                    Ok(_) => match target {
+                        ImportTarget::R => result.r_imported += 1,
+                        ImportTarget::Shell => result.shell_imported += 1,
+                    },
+                    Err(error) => {
+                        result
+                            .warnings
+                            .push(format!("Failed to import entry: {}", error));
+                        result.skipped += 1;
                     }
-                    continue;
-                }
-                DuplicateAction::Ambiguous => {
-                    result.duplicates_skipped += 1;
-                    result.warnings.push(format!(
-                        "Could not backfill metadata for duplicate command '{}': matches multiple rows",
-                        entry.command
-                    ));
-                    continue;
-                }
-                DuplicateAction::Malformed => {
-                    result.duplicates_skipped += 1;
-                    result.warnings.push(format!(
-                        "Could not backfill metadata for duplicate command '{}': existing metadata is malformed; leaving it unchanged",
-                        entry.command
-                    ));
-                    continue;
-                }
-                DuplicateAction::NotDuplicate => {}
-            }
-        }
-
-        // Create a HistoryItem for import
-        let item = HistoryItem {
-            id: None, // Will be assigned by the database
-            command_line: entry.command,
-            start_timestamp: entry.timestamp,
-            session_id: entry.session_id,
-            hostname: hostname_override.map(str::to_owned).or(entry.hostname),
-            cwd: entry.cwd,
-            duration: entry.duration,
-            exit_status: entry.exit_status,
-            more_info: None,
-        };
-
-        // Route to appropriate database based on mode
-        let save_result = if is_shell {
-            targets
-                .shell_history
-                .save_entry(item, entry.metadata.clone())
-        } else {
-            targets.r_history.save_entry(item, entry.metadata.clone())
-        };
-
-        match save_result {
-            Ok(_) => {
-                if is_shell {
-                    result.shell_imported += 1;
-                } else {
-                    result.r_imported += 1;
                 }
             }
-            Err(e) => {
-                result
-                    .warnings
-                    .push(format!("Failed to import entry: {}", e));
-                result.skipped += 1;
+            EntryPlan::Backfill { target, id } => {
+                let metadata = entry.item.more_info.expect("planner requires metadata");
+                let store = match target {
+                    ImportTarget::R => &targets.r_history,
+                    ImportTarget::Shell => &targets.shell_history,
+                };
+                match store.set_metadata_if_empty(id, metadata) {
+                    Ok(true) => result.metadata_backfilled += 1,
+                    Ok(false) => result.duplicates_skipped += 1,
+                    Err(error) => {
+                        result.warnings.push(format!(
+                            "Failed to backfill metadata for duplicate '{}': {}",
+                            entry.item.command_line, error
+                        ));
+                        result.duplicates_skipped += 1;
+                    }
+                }
             }
+            other => record_plan(&mut result, &entry, &other),
         }
     }
 
@@ -779,14 +732,14 @@ pub fn parse_unified_arf_history(
 
     // Try to read R history table
     if table_exists(&db, r_table)? {
-        let r_entries = read_history_table(&db, path, r_table, "r")?;
+        let r_entries = read_history_table(&db, path, r_table, ImportMode::R)?;
         parsed.entries.extend(r_entries.entries);
         parsed.warnings.extend(r_entries.warnings);
     }
 
     // Try to read shell history table
     if table_exists(&db, shell_table)? {
-        let shell_entries = read_history_table(&db, path, shell_table, "shell")?;
+        let shell_entries = read_history_table(&db, path, shell_table, ImportMode::Shell)?;
         parsed.entries.extend(shell_entries.entries);
         parsed.warnings.extend(shell_entries.warnings);
     }
@@ -811,7 +764,7 @@ fn read_history_table(
     db: &rusqlite::Connection,
     source_path: &Path,
     table_name: &str,
-    mode: &str,
+    mode: ImportMode,
 ) -> Result<ParsedImport> {
     use chrono::TimeZone;
 
@@ -879,21 +832,38 @@ fn read_history_table(
             .map(|id| serde_json::from_str::<HistorySessionId>(&id.to_string()))
             .transpose()
             .with_context(|| format!("Invalid session_id in row {}", id))?;
+        let duration = match duration_millis {
+            Some(ms) if ms >= 0 => Some(Duration::from_millis(ms as u64)),
+            Some(ms) => {
+                parsed.warnings.push(format!(
+                    "Invalid negative duration {} for row {} from '{}'; importing with NULL duration",
+                    ms,
+                    id,
+                    source_path.display()
+                ));
+                None
+            }
+            None => None,
+        };
+        let metadata = parse_row_metadata(
+            raw_metadata.as_deref(),
+            source_path,
+            HistoryItemId::new(id),
+            &mut parsed.warnings,
+        );
         parsed.entries.push(ImportEntry {
-            command,
-            timestamp,
-            mode: Some(mode.to_string()),
-            metadata: parse_row_metadata(
-                raw_metadata.as_deref(),
-                source_path,
-                HistoryItemId::new(id),
-                &mut parsed.warnings,
-            ),
-            session_id,
-            hostname,
-            cwd,
-            duration: duration_millis.map(|ms| Duration::from_millis(ms as u64)),
-            exit_status,
+            mode: mode.clone(),
+            item: HistoryItem {
+                id: None,
+                start_timestamp: timestamp,
+                command_line: command,
+                session_id,
+                hostname,
+                cwd,
+                duration,
+                exit_status,
+                more_info: metadata,
+            },
         });
     }
 
