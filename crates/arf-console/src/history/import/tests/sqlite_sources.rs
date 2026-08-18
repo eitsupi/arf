@@ -105,11 +105,39 @@ fn legacy_tables_and_missing_tables_remain_compatible() {
 
     let empty = dir.path().join("empty.db");
     rusqlite::Connection::open(&empty).unwrap();
-    assert!(
-        parse_unified_arf_history(&empty, "r", "shell")
-            .unwrap()
-            .entries
-            .is_empty()
+    let error = parse_unified_arf_history(&empty, "r", "shell").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            r#"File '{}' does not look like an arf export: missing configured history tables 'r' and 'shell'"#,
+            empty.display()
+        )
+    );
+}
+
+#[test]
+fn unified_source_rejects_database_with_only_unconfigured_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("unrelated.db");
+    let db = rusqlite::Connection::open(&source).unwrap();
+    create_export_table(
+        &db,
+        "other",
+        ExportColumns::LegacyMinimal,
+        &[DbRow {
+            command: "unrelated",
+            ..DbRow::default()
+        }],
+    );
+    drop(db);
+
+    let error = parse_unified_arf_history(&source, "custom_r", "custom_shell").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            r#"File '{}' does not look like an arf export: missing configured history tables 'custom_r' and 'custom_shell'"#,
+            source.display()
+        )
     );
 }
 

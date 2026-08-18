@@ -700,8 +700,8 @@ pub fn validate_table_name(name: &str) -> Result<()> {
 ///
 /// This function reads from a SQLite file that has separate tables for R and shell history,
 /// as created by `export_history`. The table names are specified by the caller.
+/// At least one configured table must exist; a missing individual table is skipped.
 ///
-/// If a table doesn't exist, it's silently skipped (no error).
 pub fn parse_unified_arf_history(
     path: &Path,
     r_table: &str,
@@ -728,17 +728,28 @@ pub fn parse_unified_arf_history(
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("Failed to open arf export file: {}", path.display()))?;
 
+    let has_r_table = table_exists(&db, r_table)?;
+    let has_shell_table = table_exists(&db, shell_table)?;
+    if !has_r_table && !has_shell_table {
+        bail!(
+            "File '{}' does not look like an arf export: missing configured history tables '{}' and '{}'",
+            path.display(),
+            r_table,
+            shell_table
+        );
+    }
+
     let mut parsed = ParsedImport::default();
 
     // Try to read R history table
-    if table_exists(&db, r_table)? {
+    if has_r_table {
         let r_entries = read_history_table(&db, path, r_table, ImportMode::R)?;
         parsed.entries.extend(r_entries.entries);
         parsed.warnings.extend(r_entries.warnings);
     }
 
     // Try to read shell history table
-    if table_exists(&db, shell_table)? {
+    if has_shell_table {
         let shell_entries = read_history_table(&db, path, shell_table, ImportMode::Shell)?;
         parsed.entries.extend(shell_entries.entries);
         parsed.warnings.extend(shell_entries.warnings);
