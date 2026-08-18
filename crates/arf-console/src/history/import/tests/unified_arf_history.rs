@@ -1,4 +1,5 @@
 use super::super::*;
+use super::create_test_targets;
 
 #[test]
 fn test_parse_unified_arf_history_basic() {
@@ -60,6 +61,76 @@ fn test_parse_unified_arf_history_basic() {
         .collect();
     assert_eq!(shell_entries.len(), 1);
     assert_eq!(shell_entries[0].command, "ls -la");
+}
+
+#[test]
+fn test_unified_export_preserves_metadata_through_import() {
+    use tempfile::TempDir;
+
+    let source_dir = TempDir::new().unwrap();
+    let target_dir = TempDir::new().unwrap();
+    let unified_path = source_dir.path().join("export.db");
+    let db = rusqlite::Connection::open(&unified_path).unwrap();
+    db.execute(
+        r#"CREATE TABLE r (
+            id INTEGER PRIMARY KEY,
+            command_line TEXT NOT NULL,
+            start_timestamp INTEGER,
+            more_info TEXT
+        )"#,
+        [],
+    )
+    .unwrap();
+    let metadata = r#"{"future_field":{"value":42}}"#;
+    db.execute(
+        "INSERT INTO r (command_line, more_info) VALUES (?, ?)",
+        rusqlite::params!["future command", metadata],
+    )
+    .unwrap();
+    drop(db);
+
+    let parsed = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+    assert_eq!(parsed.warnings, Vec::<String>::new());
+    assert_eq!(parsed.entries.len(), 1);
+    assert!(parsed.entries[0].metadata.is_some());
+
+    let mut targets = create_test_targets(&target_dir);
+    let result = import_entries(&mut targets, parsed.entries, None, false).unwrap();
+    assert_eq!(result.r_imported, 1);
+    let stored = targets
+        .r_history
+        .load_with_metadata(reedline::HistoryItemId::new(1))
+        .unwrap();
+    assert_eq!(
+        serde_json::to_string(&stored.more_info.unwrap()).unwrap(),
+        metadata
+    );
+}
+
+#[test]
+fn test_unified_export_without_metadata_column_still_imports() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let unified_path = temp_dir.path().join("old-export.db");
+    let db = rusqlite::Connection::open(&unified_path).unwrap();
+    db.execute(
+        r#"CREATE TABLE r (
+            id INTEGER PRIMARY KEY,
+            command_line TEXT NOT NULL,
+            start_timestamp INTEGER
+        )"#,
+        [],
+    )
+    .unwrap();
+    db.execute("INSERT INTO r (command_line) VALUES (?)", [":not metadata"])
+        .unwrap();
+    drop(db);
+
+    let parsed = parse_unified_arf_history(&unified_path, "r", "shell").unwrap();
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].metadata, None);
+    assert!(parsed.warnings.is_empty());
 }
 
 #[test]

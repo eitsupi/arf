@@ -30,14 +30,16 @@ fn test_parse_radian_history_multiline() {
     writeln!(file, "# time: 2024-01-15 10:30:00 UTC").unwrap();
     writeln!(file, "# mode: r").unwrap();
     writeln!(file, "+iris %>%").unwrap();
-    writeln!(file, "+  filter(Species == \"setosa\") %>%").unwrap();
+    writeln!(file, r#"+  filter(Species == "setosa") %>%"#).unwrap();
     writeln!(file, "+  head()").unwrap();
 
     let entries = parse_radian_history(file.path()).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0].command,
-        "iris %>%\n  filter(Species == \"setosa\") %>%\n  head()"
+        r#"iris %>%
+  filter(Species == "setosa") %>%
+  head()"#
     );
 }
 
@@ -179,4 +181,16 @@ fn test_parse_radian_history_crlf_line_endings() {
     // Command should not have trailing \r
     assert_eq!(entries[0].command, "print(1)");
     assert!(!entries[0].command.ends_with('\r'));
+}
+
+#[test]
+fn test_parse_radian_history_colon_command_has_no_metadata() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "# time: 2024-06-15 14:30:45 UTC").unwrap();
+    writeln!(file, "# mode: r").unwrap();
+    writeln!(file, "+:help(topic)").unwrap();
+
+    let parsed = parse_radian_history(file.path()).unwrap();
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].metadata, None);
 }

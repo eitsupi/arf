@@ -6,18 +6,18 @@ use tempfile::NamedTempFile;
 fn test_parse_r_history_basic() {
     let mut file = NamedTempFile::new().unwrap();
     writeln!(file, "library(dplyr)").unwrap();
-    writeln!(file, "print(\"hello\")").unwrap();
+    writeln!(file, r#"print("hello")"#).unwrap();
     writeln!(file).unwrap(); // Empty line should be skipped
     writeln!(file, "summary(iris)").unwrap();
 
     let entries = parse_r_history(file.path()).unwrap();
     assert_eq!(entries.len(), 3);
     assert_eq!(entries[0].command, "library(dplyr)");
-    assert_eq!(entries[1].command, "print(\"hello\")");
+    assert_eq!(entries[1].command, r#"print("hello")"#);
     assert_eq!(entries[2].command, "summary(iris)");
 
     // All entries should have mode "r" and no timestamp
-    for entry in &entries {
+    for entry in entries.iter() {
         assert_eq!(entry.mode, Some("r".to_string()));
         assert!(entry.timestamp.is_none());
     }
@@ -63,6 +63,7 @@ fn test_import_entry_struct() {
         command: "test".to_string(),
         timestamp: Some(Utc::now()),
         mode: Some("r".to_string()),
+        metadata: None,
     };
     assert_eq!(entry.command, "test");
     assert!(entry.timestamp.is_some());
@@ -94,4 +95,14 @@ fn test_parse_r_history_whitespace_only_lines_skipped() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].command, "library(dplyr)");
     assert_eq!(entries[1].command, "print(1)");
+}
+
+#[test]
+fn test_parse_r_history_colon_command_has_no_metadata() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, ":help(topic)").unwrap();
+
+    let parsed = parse_r_history(file.path()).unwrap();
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].metadata, None);
 }

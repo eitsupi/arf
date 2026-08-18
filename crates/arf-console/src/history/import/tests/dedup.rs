@@ -5,7 +5,6 @@ use super::create_test_targets;
 
 #[test]
 fn test_import_skips_duplicates_with_timestamp() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -20,6 +19,7 @@ fn test_import_skips_duplicates_with_timestamp() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -30,6 +30,7 @@ fn test_import_skips_duplicates_with_timestamp() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -43,7 +44,6 @@ fn test_import_skips_duplicates_with_timestamp() {
 
 #[test]
 fn test_import_skips_duplicates_without_timestamp() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -54,6 +54,7 @@ fn test_import_skips_duplicates_without_timestamp() {
         command: "summary(iris)".to_string(),
         timestamp: None,
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -64,6 +65,7 @@ fn test_import_skips_duplicates_without_timestamp() {
         command: "summary(iris)".to_string(),
         timestamp: None,
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -77,7 +79,6 @@ fn test_import_skips_duplicates_without_timestamp() {
 
 #[test]
 fn test_import_allows_same_command_different_timestamp() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -95,6 +96,7 @@ fn test_import_allows_same_command_different_timestamp() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts1),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -103,6 +105,7 @@ fn test_import_allows_same_command_different_timestamp() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts2),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -116,7 +119,6 @@ fn test_import_allows_same_command_different_timestamp() {
 
 #[test]
 fn test_import_duplicates_flag_disables_dedup() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -131,6 +133,7 @@ fn test_import_duplicates_flag_disables_dedup() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, false).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -140,6 +143,7 @@ fn test_import_duplicates_flag_disables_dedup() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, false).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -153,7 +157,6 @@ fn test_import_duplicates_flag_disables_dedup() {
 
 #[test]
 fn test_import_dedup_works_per_database() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -164,6 +167,7 @@ fn test_import_dedup_works_per_database() {
         command: "ls -la".to_string(),
         timestamp: None,
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -174,6 +178,7 @@ fn test_import_dedup_works_per_database() {
         command: "ls -la".to_string(),
         timestamp: None,
         mode: Some("shell".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.shell_imported, 1);
@@ -205,6 +210,7 @@ fn test_import_dry_run_with_dedup() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -218,11 +224,13 @@ fn test_import_dry_run_with_dedup() {
             command: "library(dplyr)".to_string(), // duplicate
             timestamp: Some(ts),
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
     ];
 
@@ -233,7 +241,6 @@ fn test_import_dry_run_with_dedup() {
 
 #[test]
 fn test_import_mixed_dedup_new_and_existing() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -248,6 +255,7 @@ fn test_import_mixed_dedup_new_and_existing() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -257,16 +265,19 @@ fn test_import_mixed_dedup_new_and_existing() {
             command: "library(dplyr)".to_string(), // duplicate
             timestamp: Some(ts),
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "git status".to_string(), // new (shell)
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
     ];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
@@ -298,6 +309,7 @@ fn test_import_dry_run_with_partial_dedup() {
         command: "library(dplyr)".to_string(),
         timestamp: None,
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     import_entries(&mut targets, entries, None, false).unwrap();
 
@@ -309,16 +321,19 @@ fn test_import_dry_run_with_partial_dedup() {
             command: "library(dplyr)".to_string(), // duplicate in R
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "print(1)".to_string(), // new R entry
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "ls -la".to_string(), // shell entry, no dedup set
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
     ];
 
@@ -334,7 +349,6 @@ fn test_import_skips_notimestamp_when_timestamped_exists() {
     // Regression test: a no-timestamp import entry should be skipped if
     // the same command already exists in the DB with any timestamp.
     // This is documented in lines 265-270.
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -349,6 +363,7 @@ fn test_import_skips_notimestamp_when_timestamped_exists() {
         command: "library(dplyr)".to_string(),
         timestamp: Some(ts),
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 1);
@@ -358,6 +373,7 @@ fn test_import_skips_notimestamp_when_timestamped_exists() {
         command: "library(dplyr)".to_string(),
         timestamp: None,
         mode: Some("r".to_string()),
+        metadata: None,
     }];
     let result = import_entries(&mut targets, entries, None, true).unwrap();
     assert_eq!(result.r_imported, 0);
@@ -387,16 +403,19 @@ fn test_from_db_matches_from_history() {
             command: "library(dplyr)".to_string(),
             timestamp: Some(ts1),
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "print(1)".to_string(),
             timestamp: Some(ts2),
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "summary(iris)".to_string(),
             timestamp: None, // no timestamp
             mode: Some("r".to_string()),
+            metadata: None,
         },
     ];
     import_entries(&mut targets, entries, None, false).unwrap();
@@ -417,4 +436,187 @@ fn test_from_db_matches_from_history() {
     assert!(!from_db.is_duplicate("new_cmd", None));
     assert!(from_history.is_duplicate("summary(iris)", None));
     assert!(from_db.is_duplicate("summary(iris)", None));
+}
+
+fn test_metadata(value: &str) -> HistoryExtraInfo {
+    serde_json::from_str(value).unwrap()
+}
+
+#[test]
+fn test_metadata_backfills_duplicate_without_metadata() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let mut targets = create_test_targets(&temp_dir);
+    let command = "backfill me";
+    import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            command: command.to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: None,
+        }],
+        None,
+        false,
+    )
+    .unwrap();
+
+    let metadata = test_metadata(r#"{"future":true}"#);
+    let result = import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            command: command.to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: Some(metadata.clone()),
+        }],
+        None,
+        true,
+    )
+    .unwrap();
+    assert_eq!(result.r_imported, 0);
+    assert_eq!(result.metadata_backfilled, 1);
+    assert_eq!(result.duplicates_skipped, 0);
+    assert_eq!(
+        targets
+            .r_history
+            .load_with_metadata(reedline::HistoryItemId::new(1))
+            .unwrap()
+            .more_info,
+        Some(metadata)
+    );
+}
+
+#[test]
+fn test_existing_metadata_wins_on_duplicate() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let mut targets = create_test_targets(&temp_dir);
+    let original = test_metadata(r#"{"owner":"target"}"#);
+    import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            command: "target wins".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: Some(original.clone()),
+        }],
+        None,
+        false,
+    )
+    .unwrap();
+
+    let result = import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            command: "target wins".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: Some(test_metadata(r#"{"owner":"source"}"#)),
+        }],
+        None,
+        true,
+    )
+    .unwrap();
+    assert_eq!(result.metadata_backfilled, 0);
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(
+        targets
+            .r_history
+            .load_with_metadata(reedline::HistoryItemId::new(1))
+            .unwrap()
+            .more_info,
+        Some(original)
+    );
+}
+
+#[test]
+fn test_no_timestamp_metadata_duplicate_with_multiple_matches_warns() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let mut targets = create_test_targets(&temp_dir);
+    let entries = vec![
+        ImportEntry {
+            command: "ambiguous".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: None,
+        },
+        ImportEntry {
+            command: "ambiguous".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: None,
+        },
+    ];
+    import_entries(&mut targets, entries, None, false).unwrap();
+
+    let result = import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            command: "ambiguous".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: Some(test_metadata(r#"{"future":true}"#)),
+        }],
+        None,
+        true,
+    )
+    .unwrap();
+    assert_eq!(result.metadata_backfilled, 0);
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(result.warnings.len(), 1);
+    assert!(result.warnings[0].contains("multiple rows"));
+    let rows = targets
+        .r_history
+        .search(reedline::SearchQuery::everything(
+            reedline::SearchDirection::Backward,
+            None,
+        ))
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn test_dry_run_counts_metadata_backfill_without_writing() {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join("r.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        r#"CREATE TABLE history (
+            id INTEGER PRIMARY KEY,
+            command_line TEXT NOT NULL,
+            start_timestamp INTEGER,
+            more_info TEXT
+        )"#,
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO history (command_line) VALUES (?)",
+        ["dry backfill"],
+    )
+    .unwrap();
+    drop(db);
+
+    let dedup = DedupSet::from_db(&path).unwrap();
+    let result = import_entries_dry_run(
+        &[ImportEntry {
+            command: "dry backfill".to_string(),
+            timestamp: None,
+            mode: Some("r".to_string()),
+            metadata: Some(test_metadata(r#"{"future":true}"#)),
+        }],
+        Some(&dedup),
+        None,
+    );
+    assert_eq!(result.r_imported, 0);
+    assert_eq!(result.metadata_backfilled, 1);
+    assert!(!path.with_extension("db-wal").exists());
+    assert!(!path.with_extension("db-shm").exists());
 }

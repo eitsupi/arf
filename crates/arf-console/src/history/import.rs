@@ -29,11 +29,14 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use reedline::{HistoryItem, SqliteBackedHistory};
-use std::collections::HashSet;
+use reedline::{HistoryItem, HistoryItemId, SqliteBackedHistory};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+use super::metadata::HistoryExtraInfo;
+use super::store::HistoryStore;
 
 /// A parsed history entry ready for import.
 #[derive(Debug, Clone)]
@@ -44,6 +47,23 @@ pub struct ImportEntry {
     pub timestamp: Option<DateTime<Utc>>,
     /// Mode in which the command was executed (r, shell, browse).
     pub mode: Option<String>,
+    /// Metadata arf determined for this row, if the source retained it.
+    pub metadata: Option<HistoryExtraInfo>,
+}
+
+/// Parsed entries together with non-fatal row warnings.
+#[derive(Debug, Default)]
+pub struct ParsedImport {
+    pub entries: Vec<ImportEntry>,
+    pub warnings: Vec<String>,
+}
+
+impl std::ops::Deref for ParsedImport {
+    type Target = [ImportEntry];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
 }
 
 /// Result of an import operation.
@@ -57,6 +77,8 @@ pub struct ImportResult {
     pub skipped: usize,
     /// Number of duplicate entries skipped.
     pub duplicates_skipped: usize,
+    /// Number of existing rows whose missing metadata was backfilled.
+    pub metadata_backfilled: usize,
     /// Warning messages for non-fatal issues.
     pub warnings: Vec<String>,
 }
@@ -94,7 +116,7 @@ pub fn default_r_history_path() -> PathBuf {
 /// - `# mode: <mode>` for the input mode
 /// - `+<line>` for command lines (may span multiple lines)
 /// - Blank lines separate entries
-pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
+pub fn parse_radian_history(path: &Path) -> Result<ParsedImport> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open radian history: {}", path.display()))?;
     let reader = BufReader::new(file);
@@ -115,6 +137,7 @@ pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
                     command,
                     timestamp: current_timestamp,
                     mode: current_mode.take(),
+                    metadata: None,
                 });
                 current_lines.clear();
             }
@@ -143,6 +166,7 @@ pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
                     command,
                     timestamp: current_timestamp,
                     mode: current_mode.take(),
+                    metadata: None,
                 });
                 current_lines.clear();
                 current_timestamp = None;
@@ -158,17 +182,21 @@ pub fn parse_radian_history(path: &Path) -> Result<Vec<ImportEntry>> {
             command,
             timestamp: current_timestamp,
             mode: current_mode.take(),
+            metadata: None,
         });
     }
 
-    Ok(entries)
+    Ok(ParsedImport {
+        entries,
+        warnings: Vec::new(),
+    })
 }
 
 /// Parse an R native history file (.Rhistory).
 ///
 /// The R native format is simply one command per line, no metadata.
 /// Multi-line commands are NOT supported by R's native history.
-pub fn parse_r_history(path: &Path) -> Result<Vec<ImportEntry>> {
+pub fn parse_r_history(path: &Path) -> Result<ParsedImport> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open R history: {}", path.display()))?;
     let reader = BufReader::new(file);
@@ -185,11 +213,15 @@ pub fn parse_r_history(path: &Path) -> Result<Vec<ImportEntry>> {
                 command: content.to_string(),
                 timestamp: None,
                 mode: Some("r".to_string()),
+                metadata: None,
             });
         }
     }
 
-    Ok(entries)
+    Ok(ParsedImport {
+        entries,
+        warnings: Vec::new(),
+    })
 }
 
 /// Copy entries from another arf SQLite history database.
@@ -197,9 +229,7 @@ pub fn parse_r_history(path: &Path) -> Result<Vec<ImportEntry>> {
 /// The mode is inferred from the filename:
 /// - Files named `shell.db` are treated as shell history
 /// - All other files are treated as R history
-pub fn parse_arf_history(path: &Path) -> Result<Vec<ImportEntry>> {
-    use reedline::History;
-
+pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
     if !path.exists() {
         bail!("arf history database not found: {}", path.display());
     }
@@ -219,30 +249,53 @@ pub fn parse_arf_history(path: &Path) -> Result<Vec<ImportEntry>> {
     let source = SqliteBackedHistory::with_file(path.to_path_buf(), None, None)
         .with_context(|| format!("Failed to open arf history database: {}", path.display()))?;
 
-    // Query all history items
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = source
-        .search(query)
-        .with_context(|| "Failed to query arf history")?;
-
-    let entries: Vec<ImportEntry> = items
-        .into_iter()
-        .map(|item| ImportEntry {
-            command: item.command_line,
-            timestamp: item.start_timestamp,
-            mode: mode.clone(),
+    // Keep the established reedline constructor above. Its typed and erased
+    // search APIs deserialize every row while collecting results, so neither
+    // can isolate malformed JSON. Read raw rows separately and deserialize
+    // only each row's metadata.
+    drop(source);
+    let db =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("Failed to read arf history database: {}", path.display()))?;
+    let mut stmt = db
+        .prepare(
+            "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) \
+             FROM history ORDER BY id",
+        )
+        .with_context(|| format!("Failed to query arf history: {}", path.display()))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                HistoryItemId::new(row.get::<_, i64>(0)?),
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
         })
-        .collect();
+        .context("Failed to query arf history rows")?;
 
-    Ok(entries)
+    let mut parsed = ParsedImport::default();
+    for row in rows {
+        let (id, command, ts_millis, raw_metadata) =
+            row.context("Failed to read arf history row")?;
+        parsed.entries.push(ImportEntry {
+            command,
+            timestamp: ts_millis
+                .and_then(|ms| chrono::TimeZone::timestamp_millis_opt(&Utc, ms).single()),
+            mode: mode.clone(),
+            metadata: parse_row_metadata(raw_metadata.as_deref(), path, id, &mut parsed.warnings),
+        });
+    }
+
+    Ok(parsed)
 }
 
 /// Target databases for import.
 pub struct ImportTargets {
     /// R history database.
-    pub r_history: SqliteBackedHistory,
+    pub r_history: HistoryStore,
     /// Shell history database.
-    pub shell_history: SqliteBackedHistory,
+    pub shell_history: HistoryStore,
 }
 
 /// Determine the target database for an entry based on its mode.
@@ -273,46 +326,42 @@ pub struct DedupSet {
     command_timestamps: HashSet<(String, i64)>,
     /// All distinct `command_line` values for matching entries without timestamps.
     commands: HashSet<String>,
+    rows: Vec<DedupRow>,
+    command_timestamps_by_row: HashMap<(String, i64), Vec<usize>>,
+    command_rows: HashMap<String, Vec<usize>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetadataState {
+    Null,
+    Valid,
+    Malformed,
+}
+
+#[derive(Debug)]
+struct DedupRow {
+    id: HistoryItemId,
+    metadata: MetadataState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DuplicateAction {
+    NotDuplicate,
+    Skip,
+    Backfill(HistoryItemId),
+    Ambiguous,
+    Malformed,
 }
 
 impl DedupSet {
-    /// Build a dedup set from an existing history database opened for writing.
-    ///
-    /// Used in the non-dry-run import path where the database is already opened
-    /// via `SqliteBackedHistory::with_file()` for writing.
-    ///
-    /// Note: reedline's deserialization falls back to `Utc::now()` when a
-    /// stored timestamp is not a valid millisecond value. This means the
-    /// millis round-trip (`DateTime → i64 → DateTime → i64`) could
-    /// theoretically differ from the raw DB value for corrupt rows. In
-    /// practice this cannot happen because reedline always writes
-    /// `timestamp_millis()`, but [`from_db`] avoids this entirely by
-    /// reading the raw i64 directly.
-    pub fn from_history(history: &SqliteBackedHistory) -> Result<Self> {
-        use reedline::History;
-
-        let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-        let items = history
-            .search(query)
-            .context("Failed to query existing history for dedup")?;
-
-        let mut command_timestamps = HashSet::new();
-        let mut commands = HashSet::new();
-
-        // INVARIANT: `commands` must contain every command_line that appears
-        // in `command_timestamps`, because `is_duplicate` uses `commands` as
-        // a fast-path filter for both timestamped and non-timestamped lookups.
-        for item in items {
-            commands.insert(item.command_line.clone());
-            if let Some(ts) = item.start_timestamp {
-                command_timestamps.insert((item.command_line, ts.timestamp_millis()));
-            }
-        }
-
-        Ok(DedupSet {
-            command_timestamps,
-            commands,
-        })
+    /// Build a dedup set while the writable target store is already open.
+    pub fn from_history(history: &HistoryStore) -> Result<Self> {
+        Self::from_connection(rusqlite::Connection::open(history.path()).with_context(|| {
+            format!(
+                "Failed to read history database: {}",
+                history.path().display()
+            )
+        })?)
     }
 
     /// Build a dedup set by opening a history database in read-only mode.
@@ -324,48 +373,64 @@ impl DedupSet {
 
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open history database: {}", path.display()))?;
+        Self::from_connection(db)
+    }
 
-        // reedline stores start_timestamp as Unix milliseconds (i64) in SQLite.
-        // We read the raw value directly to stay consistent with from_history(),
-        // which converts DateTime<Utc> back to millis via timestamp_millis().
+    fn from_connection(db: rusqlite::Connection) -> Result<Self> {
         let mut stmt = db
-            .prepare("SELECT command_line, start_timestamp FROM history")
-            .with_context(|| {
-                format!(
-                    "Failed to query history table in '{}' (not an arf database?)",
-                    path.display()
-                )
-            })?;
-
-        let mut command_timestamps = HashSet::new();
-        let mut commands = HashSet::new();
-
-        // INVARIANT: `commands` must contain every command_line that appears
-        // in `command_timestamps`, because `is_duplicate` uses `commands` as
-        // a fast-path filter for both timestamped and non-timestamped lookups.
+            .prepare(
+                "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) \
+                 FROM history",
+            )
+            .context("Failed to query history for dedup")?;
         let rows = stmt
             .query_map([], |row| {
-                let command: String = row.get(0)?;
-                let ts_millis: Option<i64> = row.get(1)?;
-                Ok((command, ts_millis))
+                Ok((
+                    HistoryItemId::new(row.get::<_, i64>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
             })
             .context("Failed to query history for dedup")?;
 
+        let mut set = Self {
+            command_timestamps: HashSet::new(),
+            commands: HashSet::new(),
+            rows: Vec::new(),
+            command_timestamps_by_row: HashMap::new(),
+            command_rows: HashMap::new(),
+        };
         for row in rows {
-            let (command, ts_millis) = row.context("Failed to read history row")?;
-            commands.insert(command.clone());
-            if let Some(ms) = ts_millis {
-                command_timestamps.insert((command, ms));
+            let (id, command, timestamp_millis, raw_metadata) =
+                row.context("Failed to read history row")?;
+            let metadata = match raw_metadata.as_deref() {
+                None => MetadataState::Null,
+                Some(raw) => match serde_json::from_str::<HistoryExtraInfo>(raw) {
+                    Ok(_) => MetadataState::Valid,
+                    Err(_) => MetadataState::Malformed,
+                },
+            };
+            let row_index = set.rows.len();
+            set.commands.insert(command.clone());
+            set.command_rows
+                .entry(command.clone())
+                .or_default()
+                .push(row_index);
+            if let Some(ms) = timestamp_millis {
+                set.command_timestamps.insert((command.clone(), ms));
+                set.command_timestamps_by_row
+                    .entry((command.clone(), ms))
+                    .or_default()
+                    .push(row_index);
             }
+            set.rows.push(DedupRow { id, metadata });
         }
-
-        Ok(DedupSet {
-            command_timestamps,
-            commands,
-        })
+        Ok(set)
     }
 
     /// Check if an entry already exists in the set.
+    #[allow(dead_code)]
     fn is_duplicate(&self, command: &str, timestamp: Option<&DateTime<Utc>>) -> bool {
         // Fast path: if the command doesn't exist at all, skip the allocation
         // needed for the (String, i64) HashSet lookup.
@@ -377,6 +442,34 @@ impl DedupSet {
                 .contains(&(command.to_string(), ts.timestamp_millis()))
         } else {
             true // command exists in commands set (checked above)
+        }
+    }
+
+    fn duplicate_action(
+        &self,
+        command: &str,
+        timestamp: Option<&DateTime<Utc>>,
+        has_metadata: bool,
+    ) -> DuplicateAction {
+        let row_indices = if let Some(ts) = timestamp {
+            self.command_timestamps_by_row
+                .get(&(command.to_string(), ts.timestamp_millis()))
+        } else {
+            self.command_rows.get(command)
+        };
+        let Some(row_indices) = row_indices else {
+            return DuplicateAction::NotDuplicate;
+        };
+        if !has_metadata {
+            return DuplicateAction::Skip;
+        }
+        if row_indices.len() != 1 {
+            return DuplicateAction::Ambiguous;
+        }
+        match self.rows[row_indices[0]].metadata {
+            MetadataState::Null => DuplicateAction::Backfill(self.rows[row_indices[0]].id),
+            MetadataState::Valid => DuplicateAction::Skip,
+            MetadataState::Malformed => DuplicateAction::Malformed,
         }
     }
 }
@@ -418,13 +511,40 @@ pub fn import_entries_dry_run(
             }
         };
 
-        // Check for duplicates if the corresponding dedup set is available
+        // Check for duplicates if the corresponding dedup set is available.
         let dedup_set = if is_shell { shell_dedup } else { r_dedup };
-        if let Some(dedup) = dedup_set
-            && dedup.is_duplicate(&entry.command, entry.timestamp.as_ref())
-        {
-            result.duplicates_skipped += 1;
-            continue;
+        if let Some(dedup) = dedup_set {
+            match dedup.duplicate_action(
+                &entry.command,
+                entry.timestamp.as_ref(),
+                entry.metadata.is_some(),
+            ) {
+                DuplicateAction::Skip => {
+                    result.duplicates_skipped += 1;
+                    continue;
+                }
+                DuplicateAction::Backfill(_) => {
+                    result.metadata_backfilled += 1;
+                    continue;
+                }
+                DuplicateAction::Ambiguous => {
+                    result.duplicates_skipped += 1;
+                    result.warnings.push(format!(
+                        "Could not backfill metadata for duplicate command from dry run: '{}' matches multiple rows",
+                        entry.command
+                    ));
+                    continue;
+                }
+                DuplicateAction::Malformed => {
+                    result.duplicates_skipped += 1;
+                    result.warnings.push(format!(
+                        "Could not backfill metadata for duplicate command from dry run: existing metadata is malformed for '{}'; leaving it unchanged",
+                        entry.command
+                    ));
+                    continue;
+                }
+                DuplicateAction::NotDuplicate => {}
+            }
         }
 
         if is_shell {
@@ -464,8 +584,6 @@ pub fn import_entries(
     hostname_override: Option<&str>,
     skip_duplicates: bool,
 ) -> Result<ImportResult> {
-    use reedline::History;
-
     // Build dedup sets if duplicate skipping is enabled
     let (r_dedup, shell_dedup) = if skip_duplicates {
         (
@@ -499,12 +617,55 @@ pub fn import_entries(
             }
         };
 
-        // Check for duplicates if enabled
-        if let Some(dedup_set) = if is_shell { &shell_dedup } else { &r_dedup }
-            && dedup_set.is_duplicate(&entry.command, entry.timestamp.as_ref())
-        {
-            result.duplicates_skipped += 1;
-            continue;
+        // Check for duplicates if enabled.
+        let dedup_set = if is_shell { &shell_dedup } else { &r_dedup };
+        if let Some(dedup) = dedup_set {
+            match dedup.duplicate_action(
+                &entry.command,
+                entry.timestamp.as_ref(),
+                entry.metadata.is_some(),
+            ) {
+                DuplicateAction::Skip => {
+                    result.duplicates_skipped += 1;
+                    continue;
+                }
+                DuplicateAction::Backfill(id) => {
+                    let store = if is_shell {
+                        &targets.shell_history
+                    } else {
+                        &targets.r_history
+                    };
+                    match store.set_metadata_if_empty(id, entry.metadata.clone().unwrap()) {
+                        Ok(true) => result.metadata_backfilled += 1,
+                        Ok(false) => result.duplicates_skipped += 1,
+                        Err(error) => {
+                            result.warnings.push(format!(
+                                "Failed to backfill metadata for duplicate '{}': {}",
+                                entry.command, error
+                            ));
+                            result.duplicates_skipped += 1;
+                        }
+                    }
+                    continue;
+                }
+                DuplicateAction::Ambiguous => {
+                    result.duplicates_skipped += 1;
+                    result.warnings.push(format!(
+                        "Could not backfill metadata for duplicate command '{}': matches multiple rows",
+                        entry.command
+                    ));
+                    continue;
+                }
+                DuplicateAction::Malformed => {
+                    result.duplicates_skipped += 1;
+                    result.warnings.push(format!(
+                        "Could not backfill metadata for duplicate command '{}': existing metadata is malformed; leaving it unchanged",
+                        entry.command
+                    ));
+                    continue;
+                }
+                DuplicateAction::NotDuplicate => {}
+            }
         }
 
         // Create a HistoryItem for import
@@ -522,9 +683,11 @@ pub fn import_entries(
 
         // Route to appropriate database based on mode
         let save_result = if is_shell {
-            targets.shell_history.save(item)
+            targets
+                .shell_history
+                .save_entry(item, entry.metadata.clone())
         } else {
-            targets.r_history.save(item)
+            targets.r_history.save_entry(item, entry.metadata.clone())
         };
 
         match save_result {
@@ -586,7 +749,7 @@ pub fn parse_unified_arf_history(
     path: &Path,
     r_table: &str,
     shell_table: &str,
-) -> Result<Vec<ImportEntry>> {
+) -> Result<ParsedImport> {
     use rusqlite::{Connection, OpenFlags};
 
     // Validate table names to prevent SQL injection
@@ -608,21 +771,23 @@ pub fn parse_unified_arf_history(
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("Failed to open arf export file: {}", path.display()))?;
 
-    let mut entries = Vec::new();
+    let mut parsed = ParsedImport::default();
 
     // Try to read R history table
     if table_exists(&db, r_table)? {
-        let r_entries = read_history_table(&db, r_table, "r")?;
-        entries.extend(r_entries);
+        let r_entries = read_history_table(&db, path, r_table, "r")?;
+        parsed.entries.extend(r_entries.entries);
+        parsed.warnings.extend(r_entries.warnings);
     }
 
     // Try to read shell history table
     if table_exists(&db, shell_table)? {
-        let shell_entries = read_history_table(&db, shell_table, "shell")?;
-        entries.extend(shell_entries);
+        let shell_entries = read_history_table(&db, path, shell_table, "shell")?;
+        parsed.entries.extend(shell_entries.entries);
+        parsed.warnings.extend(shell_entries.warnings);
     }
 
-    Ok(entries)
+    Ok(parsed)
 }
 
 /// Check if a table exists in the database.
@@ -640,17 +805,26 @@ fn table_exists(db: &rusqlite::Connection, table_name: &str) -> Result<bool> {
 /// Read history entries from a table.
 fn read_history_table(
     db: &rusqlite::Connection,
+    source_path: &Path,
     table_name: &str,
     mode: &str,
-) -> Result<Vec<ImportEntry>> {
+) -> Result<ParsedImport> {
     use chrono::TimeZone;
 
     // Use format! for table name since it can't be parameterized in SQL.
     // Table names are validated by validate_table_name() before reaching here.
-    let query = format!(
-        "SELECT command_line, start_timestamp FROM \"{}\" ORDER BY id",
-        table_name
-    );
+    let has_metadata = table_has_column(db, table_name, "more_info")?;
+    let query = if has_metadata {
+        format!(
+            "SELECT id, command_line, start_timestamp, CAST(more_info AS TEXT) FROM \"{}\" ORDER BY id",
+            table_name
+        )
+    } else {
+        format!(
+            "SELECT id, command_line, start_timestamp FROM \"{}\" ORDER BY id",
+            table_name
+        )
+    };
 
     let mut stmt = db.prepare(&query).with_context(|| {
         format!(
@@ -661,24 +835,71 @@ fn read_history_table(
 
     let rows = stmt
         .query_map([], |row| {
-            let command: String = row.get(0)?;
-            let ts_millis: Option<i64> = row.get(1)?;
-            Ok((command, ts_millis))
+            let id: i64 = row.get(0)?;
+            let command: String = row.get(1)?;
+            let ts_millis: Option<i64> = row.get(2)?;
+            let raw_metadata: Option<String> = if has_metadata { row.get(3)? } else { None };
+            Ok((id, command, ts_millis, raw_metadata))
         })
         .context("Failed to query history")?;
 
-    let mut entries = Vec::new();
+    let mut parsed = ParsedImport::default();
     for row in rows {
-        let (command, ts_millis) = row.context("Failed to read history row")?;
+        let (id, command, ts_millis, raw_metadata) = row.context("Failed to read history row")?;
         let timestamp = ts_millis.and_then(|ms| Utc.timestamp_millis_opt(ms).single());
-        entries.push(ImportEntry {
+        parsed.entries.push(ImportEntry {
             command,
             timestamp,
             mode: Some(mode.to_string()),
+            metadata: parse_row_metadata(
+                raw_metadata.as_deref(),
+                source_path,
+                HistoryItemId::new(id),
+                &mut parsed.warnings,
+            ),
         });
     }
 
-    Ok(entries)
+    Ok(parsed)
+}
+
+fn table_has_column(
+    db: &rusqlite::Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool> {
+    let query = format!("PRAGMA table_info(\"{}\")", table_name);
+    let mut stmt = db
+        .prepare(&query)
+        .context("Failed to inspect history table")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for column in columns {
+        if column? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn parse_row_metadata(
+    raw_metadata: Option<&str>,
+    source: &Path,
+    id: HistoryItemId,
+    warnings: &mut Vec<String>,
+) -> Option<HistoryExtraInfo> {
+    let raw_metadata = raw_metadata?;
+    match serde_json::from_str::<HistoryExtraInfo>(raw_metadata) {
+        Ok(metadata) => Some(metadata),
+        Err(error) => {
+            warnings.push(format!(
+                "Could not deserialize metadata for row {} from '{}': {}; importing with NULL metadata",
+                id.0,
+                source.display(),
+                error
+            ));
+            None
+        }
+    }
 }
 
 #[cfg(test)]

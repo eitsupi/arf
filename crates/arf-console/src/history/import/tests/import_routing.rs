@@ -3,7 +3,6 @@ use super::create_test_targets;
 
 #[test]
 fn test_import_entries_to_sqlite() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -15,11 +14,13 @@ fn test_import_entries_to_sqlite() {
             command: "library(ggplot2)".to_string(),
             timestamp: Some(Utc::now()),
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "print('hello')".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
     ];
 
@@ -42,7 +43,6 @@ fn test_import_entries_to_sqlite() {
 
 #[test]
 fn test_import_entries_routes_shell_mode() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -54,16 +54,19 @@ fn test_import_entries_routes_shell_mode() {
             command: "library(dplyr)".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "ls -la".to_string(),
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "pwd".to_string(),
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
     ];
 
@@ -99,21 +102,25 @@ fn test_import_entries_dry_run() {
             command: "test_r".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "test_shell".to_string(),
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "unknown_mode".to_string(),
             timestamp: None,
             mode: Some("python".to_string()), // Unknown mode
+            metadata: None,
         },
         ImportEntry {
             command: "   ".to_string(), // Whitespace-only, should be skipped
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
     ];
 
@@ -139,16 +146,19 @@ fn test_import_entries_skips_empty() {
             command: "valid".to_string(),
             timestamp: None,
             mode: None,
+            metadata: None,
         },
         ImportEntry {
             command: "   ".to_string(), // Whitespace only - should be skipped
             timestamp: None,
             mode: None,
+            metadata: None,
         },
         ImportEntry {
             command: "".to_string(), // Empty - should be skipped
             timestamp: None,
             mode: None,
+            metadata: None,
         },
     ];
 
@@ -171,21 +181,25 @@ fn test_import_entries_skips_unknown_modes() {
             command: "valid_r".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "valid_shell".to_string(),
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "unknown_mode_cmd".to_string(),
             timestamp: None,
             mode: Some("python".to_string()), // Unknown mode
+            metadata: None,
         },
         ImportEntry {
             command: "another_unknown".to_string(),
             timestamp: None,
             mode: Some("jupyter".to_string()), // Unknown mode
+            metadata: None,
         },
     ];
 
@@ -201,7 +215,6 @@ fn test_import_entries_skips_unknown_modes() {
 
 #[test]
 fn test_import_entries_handles_browse_mode() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -212,11 +225,13 @@ fn test_import_entries_handles_browse_mode() {
             command: "n".to_string(), // debug step
             timestamp: None,
             mode: Some("browse".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "c".to_string(), // continue
             timestamp: None,
             mode: Some("browse".to_string()),
+            metadata: None,
         },
     ];
 
@@ -236,7 +251,6 @@ fn test_import_entries_handles_browse_mode() {
 #[test]
 fn test_import_entries_none_mode_goes_to_r_database() {
     // Entries with mode=None should go to R database (default behavior)
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -246,6 +260,7 @@ fn test_import_entries_none_mode_goes_to_r_database() {
         command: "summary(mtcars)".to_string(),
         timestamp: None,
         mode: None, // No mode specified
+        metadata: None,
     }];
 
     let result = import_entries(&mut targets, entries, None, false).unwrap();
@@ -261,7 +276,6 @@ fn test_import_entries_none_mode_goes_to_r_database() {
 
 #[test]
 fn test_import_entries_with_hostname_override() {
-    use reedline::History;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
@@ -272,11 +286,13 @@ fn test_import_entries_with_hostname_override() {
             command: "library(dplyr)".to_string(),
             timestamp: None,
             mode: Some("r".to_string()),
+            metadata: None,
         },
         ImportEntry {
             command: "ls -la".to_string(),
             timestamp: None,
             mode: Some("shell".to_string()),
+            metadata: None,
         },
     ];
 

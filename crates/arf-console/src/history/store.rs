@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct HistoryStore {
     inner: Arc<Mutex<SqliteBackedHistory>>,
+    path: PathBuf,
 }
 
 /// The result of the most recent adapter save.
@@ -70,11 +71,16 @@ impl HistoryStore {
     ) -> Result<Self> {
         Ok(Self {
             inner: Arc::new(Mutex::new(SqliteBackedHistory::with_file(
-                path,
+                path.clone(),
                 session_id,
                 session_timestamp,
             )?)),
+            path,
         })
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
     }
 
     /// Save an item with SQL `NULL` in `more_info`.
@@ -97,6 +103,40 @@ impl HistoryStore {
             .map_err(|_| lock_error())?
             .save_with_extra(typed)?;
         Ok(convert_history_item(saved, None))
+    }
+
+    /// Save an imported item, preserving metadata when the source supplied it.
+    pub(crate) fn save_entry(
+        &self,
+        item: HistoryItem,
+        metadata: Option<HistoryExtraInfo>,
+    ) -> Result<HistoryItem> {
+        match metadata {
+            Some(metadata) => self.save_known(item, metadata),
+            None => self.save_unknown(item),
+        }
+    }
+
+    /// Backfill metadata only if the row is still SQL NULL.
+    pub(crate) fn set_metadata_if_empty(
+        &self,
+        id: HistoryItemId,
+        metadata: HistoryExtraInfo,
+    ) -> Result<bool> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let changed = AtomicBool::new(false);
+        self.inner
+            .lock()
+            .map_err(|_| lock_error())?
+            .update_with_extra::<HistoryExtraInfo>(id, &|mut item| {
+                if item.more_info.is_none() {
+                    item.more_info = Some(metadata.clone());
+                    changed.store(true, Ordering::Relaxed);
+                }
+                item
+            })?;
+        Ok(changed.load(Ordering::Relaxed))
     }
 
     /// Set the final meta-command disposition while preserving all other fields.
