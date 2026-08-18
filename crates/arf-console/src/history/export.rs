@@ -561,8 +561,8 @@ mod tests {
 
     #[test]
     fn test_export_import_round_trip() {
+        use crate::history::HistoryStore;
         use crate::history::import::{ImportTargets, import_entries, parse_unified_arf_history};
-        use reedline::History;
 
         let temp_dir = TempDir::new().unwrap();
 
@@ -588,11 +588,11 @@ mod tests {
         let new_r_path = temp_dir.path().join("new_r.db");
         let new_shell_path = temp_dir.path().join("new_shell.db");
         let mut targets = ImportTargets {
-            r_history: SqliteBackedHistory::with_file(new_r_path, None, None).unwrap(),
-            shell_history: SqliteBackedHistory::with_file(new_shell_path, None, None).unwrap(),
+            r_history: HistoryStore::open(new_r_path, None, None).unwrap(),
+            shell_history: HistoryStore::open(new_shell_path, None, None).unwrap(),
         };
 
-        let import_result = import_entries(&mut targets, entries, None, false).unwrap();
+        let import_result = import_entries(&mut targets, entries.entries, None, false).unwrap();
         assert_eq!(import_result.r_imported, 3);
         assert_eq!(import_result.shell_imported, 3);
 

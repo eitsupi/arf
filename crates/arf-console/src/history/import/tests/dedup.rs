@@ -1,420 +1,456 @@
 use super::super::*;
-use super::create_test_targets;
-
-// === Dedup (anti-join) tests ===
+use super::support::*;
 
 #[test]
-fn test_import_skips_duplicates_with_timestamp() {
-    use reedline::History;
-    use tempfile::TempDir;
+fn dedup_key_matrix_is_command_and_optional_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let r_path = dir.path().join("r.db");
+    let shell_path = dir.path().join("shell.db");
+    let ts = timestamp("2024-06-15T14:30:45Z");
+    create_reedline_db(&r_path, &[r("same").at(ts).item, r("untimestamped").item]);
+    create_reedline_db(&shell_path, &[shell("same").item]);
+    let r_dedup = DedupSet::from_db(&r_path).unwrap();
+    let shell_dedup = DedupSet::from_db(&shell_path).unwrap();
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let cases = [
+        (r("same").at(ts), EntryPlan::Duplicate),
+        (
+            r("same").at(timestamp("2024-06-15T14:30:46Z")),
+            EntryPlan::Insert(ImportTarget::R),
+        ),
+        (r("untimestamped"), EntryPlan::Duplicate),
+        (r("different"), EntryPlan::Insert(ImportTarget::R)),
+        (shell("same"), EntryPlan::Duplicate),
+    ];
+    for (input, expected) in cases {
+        let plan = plan_entry(&input, Some(&r_dedup), Some(&shell_dedup));
+        assert_eq!(plan, expected);
+    }
+}
 
-    let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
+#[test]
+fn idempotent_import_and_duplicate_disabled_import_are_distinct() {
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("same")]);
+    let duplicate = fixture.import_with(
+        [r("same")],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+    assert_eq!(duplicate.duplicates_skipped, 1);
 
-    // First import: should succeed
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
+    let mut disabled = ImportFixture::new();
+    disabled.import([r("same")]);
+    disabled.import([r("same")]);
+    assert_eq!(disabled.r_items().len(), 2);
+}
+
+#[test]
+fn duplicate_repair_fills_missing_fields_even_without_metadata() {
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("backfill")]);
+    let result = fixture.import_with(
+        [r("backfill").with_metadata(r#"{"future":true}"#)],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.duplicates_skipped, 0);
+    assert!(fixture.r_items()[0].more_info.is_some());
+}
 
-    // Second import of the same entry: should be skipped as duplicate
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
+#[test]
+fn duplicate_repair_fills_all_missing_fields_from_an_old_source() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("old importer").at(timestamp).with_standard_fields().item;
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("old importer").at(timestamp)]);
+
+    let result = fixture.import_with(
+        [ImportEntry {
+            mode: ImportMode::R,
+            item: source.clone(),
+        }],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.r_imported, 0);
+    assert_eq!(fixture.r_items()[0].session_id, source.session_id);
+    assert_eq!(fixture.r_items()[0].hostname, source.hostname);
+    assert_eq!(fixture.r_items()[0].cwd, source.cwd);
+    assert_eq!(fixture.r_items()[0].duration, source.duration);
+    assert_eq!(fixture.r_items()[0].exit_status, source.exit_status);
+    assert_eq!(fixture.r_items()[0].more_info, None);
+}
+
+#[test]
+fn duplicate_repair_preserves_hostname_set_by_hostname_override() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("preserve hostname")
+        .at(timestamp)
+        .with_standard_fields()
+        .item;
+    let mut fixture = ImportFixture::new();
+    fixture.import_with(
+        [r("preserve hostname").at(timestamp)],
+        ImportOptions {
+            hostname_override: Some("chosen-host"),
+            skip_duplicates: false,
+        },
+    );
+
+    let result = fixture.import_with(
+        [ImportEntry {
+            mode: ImportMode::R,
+            item: source,
+        }],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    let item = &fixture.r_items()[0];
+    assert_eq!(result.duplicates_repaired, 1);
+    assert_eq!(item.hostname.as_deref(), Some("chosen-host"));
+    assert_eq!(item.cwd.as_deref(), Some("/fixture/cwd"));
+    assert_eq!(item.exit_status, Some(17));
+}
+
+#[test]
+fn stale_duplicate_repair_skips_when_command_line_changed() {
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("selected")]);
+    let path = fixture.targets.r_history.path().to_owned();
+    let r_dedup = DedupSet::from_db(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            r#"UPDATE history SET command_line = ? WHERE id = ?"#,
+            rusqlite::params!["changed", 1_i64],
+        )
+        .unwrap();
+
+    let result = import_entries_with_dedup_sets(
+        &mut fixture.targets,
+        vec![r("selected").with_metadata(r#"{"new":true}"#)],
+        None,
+        Some(r_dedup),
+        None,
+    )
+    .unwrap();
+
     assert_eq!(result.duplicates_skipped, 1);
-
-    // Verify only one entry exists in the database
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = targets.r_history.search(query).unwrap();
-    assert_eq!(items.len(), 1);
+    assert_eq!(result.duplicates_repaired, 0);
+    assert_eq!(fixture.r_items()[0].command_line, "changed");
+    assert_eq!(fixture.r_items()[0].more_info, None);
 }
 
 #[test]
-fn test_import_skips_duplicates_without_timestamp() {
-    use reedline::History;
-    use tempfile::TempDir;
+fn stale_duplicate_repair_skips_when_timestamp_changed() {
+    let original_timestamp = timestamp("2024-06-15T14:30:45Z");
+    let changed_timestamp = timestamp("2024-06-15T14:30:46Z");
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("timestamp selected").at(original_timestamp)]);
+    let path = fixture.targets.r_history.path().to_owned();
+    let r_dedup = DedupSet::from_db(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            r#"UPDATE history SET start_timestamp = ? WHERE id = ?"#,
+            rusqlite::params![changed_timestamp.timestamp_millis(), 1_i64],
+        )
+        .unwrap();
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let result = import_entries_with_dedup_sets(
+        &mut fixture.targets,
+        vec![
+            r("timestamp selected")
+                .at(original_timestamp)
+                .with_metadata(r#"{"new":true}"#),
+        ],
+        None,
+        Some(r_dedup),
+        None,
+    )
+    .unwrap();
 
-    // First import (no timestamp)
-    let entries = vec![ImportEntry {
-        command: "summary(iris)".to_string(),
-        timestamp: None,
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
-    assert_eq!(result.duplicates_skipped, 0);
-
-    // Second import of the same command (no timestamp): should be skipped
-    let entries = vec![ImportEntry {
-        command: "summary(iris)".to_string(),
-        timestamp: None,
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 0);
     assert_eq!(result.duplicates_skipped, 1);
-
-    // Verify only one entry exists
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = targets.r_history.search(query).unwrap();
-    assert_eq!(items.len(), 1);
+    assert_eq!(result.duplicates_repaired, 0);
+    assert_eq!(
+        fixture.r_items()[0].start_timestamp,
+        Some(changed_timestamp)
+    );
+    assert_eq!(fixture.r_items()[0].more_info, None);
 }
 
 #[test]
-fn test_import_allows_same_command_different_timestamp() {
-    use reedline::History;
-    use tempfile::TempDir;
+fn malformed_metadata_does_not_block_other_repairs_or_change_metadata() {
+    let (dir, mut targets) = malformed_target();
+    import_entries(&mut targets, vec![r("broken fields")], None, false).unwrap();
+    let path = dir.path().join("r.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        r#"UPDATE history SET more_info = ? WHERE command_line = ?"#,
+        rusqlite::params![r#"{"broken"#, "broken fields"],
+    )
+    .unwrap();
+    drop(db);
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let source = r("broken fields")
+        .with_standard_fields()
+        .with_metadata(r#"{"new":true}"#)
+        .item;
+    let expected_session_id = source.session_id;
+    let result = import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            mode: ImportMode::R,
+            item: source,
+        }],
+        None,
+        true,
+    )
+    .unwrap();
 
-    let ts1 = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
-    let ts2 = DateTime::parse_from_rfc3339("2024-06-15T15:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
-
-    // Import the same command with two different timestamps
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts1),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
-
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts2),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.duplicates_skipped, 0);
-
-    // Both should exist
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = targets.r_history.search(query).unwrap();
-    assert_eq!(items.len(), 2);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let row = db
+        .query_row(
+            r#"SELECT session_id, hostname, cwd, duration_ms, exit_status, more_info
+               FROM history WHERE command_line = ?"#,
+            ["broken fields"],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(row.0, expected_session_id.map(Into::into));
+    assert_eq!(row.1.as_deref(), Some("fixture-host"));
+    assert_eq!(row.2.as_deref(), Some("/fixture/cwd"));
+    assert_eq!(row.3, Some(1234));
+    assert_eq!(row.4, Some(17));
+    assert_eq!(row.5.as_deref(), Some(r#"{"broken"#));
 }
 
 #[test]
-fn test_import_duplicates_flag_disables_dedup() {
-    use reedline::History;
-    use tempfile::TempDir;
+fn existing_metadata_wins_and_ambiguous_rows_warn() {
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("known").with_metadata(r#"{"original":true}"#)]);
+    let result = fixture.import_with(
+        [r("known").with_metadata(r#"{"replacement":true}"#)],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(
+        fixture.r_items()[0].more_info,
+        serde_json::from_str(r#"{"original":true}"#).ok()
+    );
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let mut ambiguous = ImportFixture::new();
+    ambiguous.import([r("ambiguous"), r("ambiguous")]);
+    let result = ambiguous.import_with(
+        [r("ambiguous").with_metadata(r#"{"future":true}"#)],
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(result.duplicates_repaired, 0);
+    assert_eq!(result.warnings.len(), 1);
+    assert!(
+        ambiguous
+            .r_items()
+            .iter()
+            .all(|item| item.more_info.is_none())
+    );
+}
 
-    let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
-
-    // First import
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, false).unwrap();
-    assert_eq!(result.r_imported, 1);
-
-    // Second import with skip_duplicates=false (--import-duplicates)
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, false).unwrap();
-    assert_eq!(result.r_imported, 1);
-    assert_eq!(result.duplicates_skipped, 0);
-
-    // Both entries should exist (duplicate allowed)
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = targets.r_history.search(query).unwrap();
-    assert_eq!(items.len(), 2);
+fn malformed_target() -> (tempfile::TempDir, ImportTargets) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let targets = ImportTargets {
+        r_history: HistoryStore::open(dir.path().join("r.db"), None, None).unwrap(),
+        shell_history: HistoryStore::open(dir.path().join("shell.db"), None, None).unwrap(),
+    };
+    (dir, targets)
 }
 
 #[test]
-fn test_import_dedup_works_per_database() {
-    use reedline::History;
-    use tempfile::TempDir;
+fn malformed_existing_metadata_is_duplicate_in_real_and_dry_paths() {
+    let (dir, mut targets) = malformed_target();
+    import_entries(&mut targets, vec![r("broken")], None, false).unwrap();
+    let path = dir.path().join("r.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        r#"UPDATE history SET more_info = ? WHERE command_line = ?"#,
+        rusqlite::params![r#"{"broken"#, "broken"],
+    )
+    .unwrap();
+    drop(db);
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let incoming = r("broken").with_metadata(r#"{"new":true}"#);
+    let real = import_entries(&mut targets, vec![incoming.clone()], None, true).unwrap();
+    assert_eq!(real.duplicates_skipped, 1);
+    assert_eq!(real.warnings.len(), 1);
 
-    // Import an R command
-    let entries = vec![ImportEntry {
-        command: "ls -la".to_string(),
-        timestamp: None,
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
+    let dedup = DedupSet::from_db(&path).unwrap();
+    let dry = import_entries_dry_run(&[incoming], Some(&dedup), None);
+    assert_eq!(dry.duplicates_skipped, 1);
+    assert_eq!(dry.r_imported, 0);
+    assert_eq!(dry.warnings.len(), 1);
+}
 
-    // Import the same command as shell — should NOT be a duplicate
-    // because it's checked against the shell database, not R
-    let entries = vec![ImportEntry {
-        command: "ls -la".to_string(),
-        timestamp: None,
-        mode: Some("shell".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
+#[test]
+fn repeated_repairs_have_the_same_dry_run_and_real_counts() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("repeated repair").at(timestamp).with_standard_fields();
+    let entries = vec![source.clone(), source];
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("repeated repair").at(timestamp)]);
+
+    let dedup = DedupSet::from_db(fixture.targets.r_history.path()).unwrap();
+    let dry = import_entries_dry_run(&entries, Some(&dedup), None);
+    let real = fixture.import_with(
+        entries,
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    assert_eq!(dry, real);
+    assert_eq!(dry.duplicates_repaired, 1);
+    assert_eq!(dry.duplicates_skipped, 1);
+    assert!(dry.warnings.is_empty());
+}
+
+#[test]
+fn dry_run_dedup_is_partial_and_does_not_write_or_create_side_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("r.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        r#"CREATE TABLE history (
+            id INTEGER PRIMARY KEY,
+            command_line TEXT NOT NULL,
+            start_timestamp INTEGER,
+            more_info TEXT
+        )"#,
+        [],
+    )
+    .unwrap();
+    db.execute(
+        r#"INSERT INTO history (command_line) VALUES (?)"#,
+        ["existing"],
+    )
+    .unwrap();
+    db.execute(
+        r#"INSERT INTO history (command_line) VALUES (?)"#,
+        ["backfill"],
+    )
+    .unwrap();
+    drop(db);
+    let wal = path.with_extension("db-wal");
+    let shm = path.with_extension("db-shm");
+    assert!(!wal.exists());
+    assert!(!shm.exists());
+
+    let dedup = DedupSet::from_db(&path);
+    assert!(dedup.is_ok());
+    assert!(!wal.exists());
+    assert!(!shm.exists());
+    let dedup = dedup.unwrap();
+    let result = import_entries_dry_run(
+        &[
+            r("existing"),
+            r("backfill").with_metadata(r#"{"new":true}"#),
+            shell("new shell"),
+        ],
+        Some(&dedup),
+        None,
+    );
+    assert_eq!(result.duplicates_skipped, 1);
+    assert_eq!(result.duplicates_repaired, 1);
     assert_eq!(result.shell_imported, 1);
-    assert_eq!(result.duplicates_skipped, 0);
+    assert!(!wal.exists());
+    assert!(!shm.exists());
 
-    // Verify both databases have the entry
-    let r_query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let r_items = targets.r_history.search(r_query).unwrap();
-    assert_eq!(r_items.len(), 1);
-
-    let shell_query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let shell_items = targets.shell_history.search(shell_query).unwrap();
-    assert_eq!(shell_items.len(), 1);
+    let read_only =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let metadata: Option<String> = read_only
+        .query_row(
+            r#"SELECT more_info FROM history WHERE command_line = ?"#,
+            ["existing"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(metadata.is_none());
 }
 
 #[test]
-fn test_import_dry_run_with_dedup() {
-    use tempfile::TempDir;
+fn dry_run_repair_matches_real_import_and_keeps_source_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("export.db");
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source_item = r("dry repair").at(timestamp).with_standard_fields().item;
+    let db = rusqlite::Connection::open(&source_path).unwrap();
+    create_export_table(
+        &db,
+        "r",
+        ExportColumns::Full,
+        &[DbRow {
+            command: "dry repair",
+            timestamp_ms: Some(timestamp.timestamp_millis()),
+            session_id: source_item.session_id.map(Into::into),
+            hostname: source_item.hostname.as_deref(),
+            cwd: source_item.cwd.as_deref(),
+            duration_ms: source_item.duration.map(|value| value.as_millis() as i64),
+            exit_status: source_item.exit_status,
+            metadata: None,
+        }],
+    );
+    drop(db);
+    let parsed = parse_unified_arf_history(&source_path, "r", "shell").unwrap();
+    assert!(!source_path.with_extension("db-wal").exists());
+    assert!(!source_path.with_extension("db-shm").exists());
 
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
+    let target_dir = tempfile::tempdir().unwrap();
+    let r_path = target_dir.path().join("r.db");
+    let shell_path = target_dir.path().join("shell.db");
+    let mut targets = ImportTargets {
+        r_history: HistoryStore::open(r_path.clone(), None, None).unwrap(),
+        shell_history: HistoryStore::open(shell_path, None, None).unwrap(),
+    };
+    targets
+        .r_history
+        .save_imported(r("dry repair").at(timestamp).item)
+        .unwrap();
 
-    let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let dedup = DedupSet::from_db(&r_path).unwrap();
+    let dry = import_entries_dry_run(&parsed.entries, Some(&dedup), None);
+    let real = import_entries(&mut targets, parsed.entries, None, true).unwrap();
 
-    // Pre-populate the database
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    import_entries(&mut targets, entries, None, false).unwrap();
-
-    // Build dedup sets
-    let r_dedup = DedupSet::from_history(&targets.r_history).unwrap();
-    let shell_dedup = DedupSet::from_history(&targets.shell_history).unwrap();
-
-    // Dry run with existing + new entries
-    let entries = vec![
-        ImportEntry {
-            command: "library(dplyr)".to_string(), // duplicate
-            timestamp: Some(ts),
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "print(1)".to_string(), // new
-            timestamp: None,
-            mode: Some("r".to_string()),
-        },
-    ];
-
-    let result = import_entries_dry_run(&entries, Some(&r_dedup), Some(&shell_dedup));
-    assert_eq!(result.r_imported, 1);
-    assert_eq!(result.duplicates_skipped, 1);
-}
-
-#[test]
-fn test_import_mixed_dedup_new_and_existing() {
-    use reedline::History;
-    use tempfile::TempDir;
-
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
-
-    let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
-
-    // Pre-populate with one entry
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    import_entries(&mut targets, entries, None, false).unwrap();
-
-    // Import a batch with duplicates and new entries
-    let entries = vec![
-        ImportEntry {
-            command: "library(dplyr)".to_string(), // duplicate
-            timestamp: Some(ts),
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "print(1)".to_string(), // new
-            timestamp: None,
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "git status".to_string(), // new (shell)
-            timestamp: None,
-            mode: Some("shell".to_string()),
-        },
-    ];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
-    assert_eq!(result.shell_imported, 1);
-    assert_eq!(result.duplicates_skipped, 1);
-
-    // Verify databases
-    let r_query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let r_items = targets.r_history.search(r_query).unwrap();
-    assert_eq!(r_items.len(), 2); // original + new
-
-    let shell_query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let shell_items = targets.shell_history.search(shell_query).unwrap();
-    assert_eq!(shell_items.len(), 1);
-}
-
-#[test]
-fn test_import_dry_run_with_partial_dedup() {
-    // Regression test: dry-run dedup should work when only one database
-    // has a dedup set (e.g., r.db exists but shell.db doesn't).
-    use tempfile::TempDir;
-
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
-
-    // Pre-populate only the R database
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: None,
-        mode: Some("r".to_string()),
-    }];
-    import_entries(&mut targets, entries, None, false).unwrap();
-
-    // Build dedup set only for R (simulating shell.db not existing)
-    let r_dedup = DedupSet::from_history(&targets.r_history).unwrap();
-
-    let entries = vec![
-        ImportEntry {
-            command: "library(dplyr)".to_string(), // duplicate in R
-            timestamp: None,
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "print(1)".to_string(), // new R entry
-            timestamp: None,
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "ls -la".to_string(), // shell entry, no dedup set
-            timestamp: None,
-            mode: Some("shell".to_string()),
-        },
-    ];
-
-    // Pass R dedup but None for shell
-    let result = import_entries_dry_run(&entries, Some(&r_dedup), None);
-    assert_eq!(result.r_imported, 1); // only "print(1)"
-    assert_eq!(result.shell_imported, 1); // "ls -la" not checked (no shell dedup)
-    assert_eq!(result.duplicates_skipped, 1); // "library(dplyr)"
-}
-
-#[test]
-fn test_import_skips_notimestamp_when_timestamped_exists() {
-    // Regression test: a no-timestamp import entry should be skipped if
-    // the same command already exists in the DB with any timestamp.
-    // This is documented in lines 265-270.
-    use reedline::History;
-    use tempfile::TempDir;
-
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
-
-    let ts = DateTime::parse_from_rfc3339("2024-06-15T14:30:45Z")
-        .unwrap()
-        .with_timezone(&Utc);
-
-    // Pre-populate with a timestamped entry
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: Some(ts),
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 1);
-
-    // Try to import the same command without a timestamp: should be skipped
-    let entries = vec![ImportEntry {
-        command: "library(dplyr)".to_string(),
-        timestamp: None,
-        mode: Some("r".to_string()),
-    }];
-    let result = import_entries(&mut targets, entries, None, true).unwrap();
-    assert_eq!(result.r_imported, 0);
-    assert_eq!(result.duplicates_skipped, 1);
-
-    // Verify only the original entry exists
-    let query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
-    let items = targets.r_history.search(query).unwrap();
-    assert_eq!(items.len(), 1);
-    assert!(items[0].start_timestamp.is_some());
-}
-
-#[test]
-fn test_from_db_matches_from_history() {
-    // Verify that from_db (read-only SQLite) and from_history (via reedline)
-    // produce the same dedup set for the same database contents.
-    use tempfile::TempDir;
-
-    let temp_dir = TempDir::new().unwrap();
-    let mut targets = create_test_targets(&temp_dir);
-
-    let ts1 = Utc::now();
-    let ts2 = ts1 + chrono::Duration::seconds(60);
-
-    let entries = vec![
-        ImportEntry {
-            command: "library(dplyr)".to_string(),
-            timestamp: Some(ts1),
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "print(1)".to_string(),
-            timestamp: Some(ts2),
-            mode: Some("r".to_string()),
-        },
-        ImportEntry {
-            command: "summary(iris)".to_string(),
-            timestamp: None, // no timestamp
-            mode: Some("r".to_string()),
-        },
-    ];
-    import_entries(&mut targets, entries, None, false).unwrap();
-
-    let r_path = temp_dir.path().join("r.db");
-    let from_history = DedupSet::from_history(&targets.r_history).unwrap();
-    let from_db = DedupSet::from_db(&r_path).unwrap();
-
-    // Both should have the same commands set
-    assert_eq!(from_history.commands, from_db.commands);
-    // Both should have the same command_timestamps set
-    assert_eq!(from_history.command_timestamps, from_db.command_timestamps);
-
-    // Verify dedup behavior is identical for both
-    assert!(from_history.is_duplicate("library(dplyr)", Some(&ts1)));
-    assert!(from_db.is_duplicate("library(dplyr)", Some(&ts1)));
-    assert!(!from_history.is_duplicate("new_cmd", None));
-    assert!(!from_db.is_duplicate("new_cmd", None));
-    assert!(from_history.is_duplicate("summary(iris)", None));
-    assert!(from_db.is_duplicate("summary(iris)", None));
+    assert_eq!(dry, real);
+    assert_eq!(dry.duplicates_repaired, 1);
 }

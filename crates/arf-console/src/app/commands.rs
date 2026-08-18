@@ -142,7 +142,6 @@ fn handle_history_import(
         import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
         parse_unified_arf_history,
     };
-    use reedline::SqliteBackedHistory;
 
     // Load config (respecting --config flag if provided)
     let config = load_config_or_warn(config_path);
@@ -179,7 +178,7 @@ fn handle_history_import(
     println!("Importing from: {}", source_path.display());
 
     // Parse entries from source
-    let entries = match source {
+    let parsed = match source {
         ImportSource::Radian => parse_radian_history(&source_path)?,
         ImportSource::R => parse_r_history(&source_path)?,
         ImportSource::Arf => {
@@ -202,6 +201,8 @@ fn handle_history_import(
             }
         }
     };
+    let entries = parsed.entries;
+    let parse_warnings = parsed.warnings;
 
     println!("Found {} entries to import", entries.len());
 
@@ -239,7 +240,21 @@ fn handle_history_import(
             (None, None)
         };
 
-        let result = import_entries_dry_run(&entries, r_dedup.as_ref(), shell_dedup.as_ref());
+        let dry_entries = if let Some(hostname) = hostname {
+            entries
+                .iter()
+                .cloned()
+                .map(|mut entry| {
+                    entry.item.hostname = Some(hostname.to_owned());
+                    entry
+                })
+                .collect()
+        } else {
+            entries.clone()
+        };
+        let mut result =
+            import_entries_dry_run(&dry_entries, r_dedup.as_ref(), shell_dedup.as_ref());
+        result.warnings.extend(parse_warnings);
 
         println!("\n[Dry run] Would import:");
         if let Some(h) = hostname {
@@ -248,6 +263,9 @@ fn handle_history_import(
         println!("  R commands:     {}", result.r_imported);
         println!("  Shell commands: {}", result.shell_imported);
         println!("  Skipped:        {}", result.skipped);
+        if result.duplicates_repaired > 0 {
+            println!("  Duplicate repairs:  {}", result.duplicates_repaired);
+        }
         if result.duplicates_skipped > 0 {
             println!(
                 "  Duplicates:     {} (use --import-duplicates to import anyway)",
@@ -309,14 +327,15 @@ fn handle_history_import(
     println!("  Shell: {}", shell_path.display());
 
     let mut targets = history::import::ImportTargets {
-        r_history: SqliteBackedHistory::with_file(r_path, None, None)
+        r_history: history::HistoryStore::open(r_path, None, None)
             .context("Failed to open R history database")?,
-        shell_history: SqliteBackedHistory::with_file(shell_path, None, None)
+        shell_history: history::HistoryStore::open(shell_path, None, None)
             .context("Failed to open shell history database")?,
     };
 
     // Import entries
-    let result = import_entries(&mut targets, entries, hostname, skip_duplicates)?;
+    let mut result = import_entries(&mut targets, entries, hostname, skip_duplicates)?;
+    result.warnings.extend(parse_warnings);
 
     println!("\nImport complete:");
     if let Some(h) = hostname {
@@ -325,6 +344,9 @@ fn handle_history_import(
     println!("  R commands:     {}", result.r_imported);
     println!("  Shell commands: {}", result.shell_imported);
     println!("  Skipped:        {}", result.skipped);
+    if result.duplicates_repaired > 0 {
+        println!("  Duplicate repairs:  {}", result.duplicates_repaired);
+    }
     if result.duplicates_skipped > 0 {
         println!(
             "  Duplicates:     {} (use --import-duplicates to import anyway)",

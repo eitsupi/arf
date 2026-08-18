@@ -453,7 +453,7 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
     use tempfile::TempDir;
 
     let temp = TempDir::new().expect("Failed to create temporary directory");
-    let source_file = temp.path().join("source.db");
+    let source_file = temp.path().join("r.db");
     drop(
         SqliteBackedHistory::with_file(source_file.clone(), None, None)
             .expect("Failed to create source history database"),
