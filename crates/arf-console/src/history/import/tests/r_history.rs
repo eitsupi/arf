@@ -32,15 +32,15 @@ fn parses_empty_and_file_not_found() {
 }
 
 #[test]
-#[serial_test::serial]
 fn default_r_history_path_has_deterministic_override_and_fallback() {
     let override_path = "/tmp/arf-test-history";
-    unsafe { std::env::set_var("R_HISTFILE", override_path) };
+    let mut env = crate::test_utils::lock_env();
+    env.set("R_HISTFILE", override_path);
     assert_eq!(
         default_r_history_path(),
         std::path::PathBuf::from(override_path)
     );
-    unsafe { std::env::remove_var("R_HISTFILE") };
+    env.unset("R_HISTFILE");
     assert_eq!(
         default_r_history_path(),
         std::path::PathBuf::from(".Rhistory")

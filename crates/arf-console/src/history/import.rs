@@ -305,19 +305,8 @@ pub struct ImportTargets {
 ///
 /// For entries with timestamps, duplicates are detected by `(command_line, timestamp)`.
 /// For entries without timestamps, duplicates are detected by `command_line` alone.
-///
-/// Note: `commands` intentionally contains **all** command_lines from the database,
-/// including those that also have timestamps. This is because a no-timestamp import
-/// entry (e.g., from `.Rhistory`) should be considered a duplicate if the same command
-/// text already exists in the DB with any timestamp (e.g., from a prior radian import).
-/// The `.Rhistory` import is typically a one-time migration, so this conservative
-/// approach is acceptable.
 #[derive(Clone)]
 pub struct DedupSet {
-    /// `(command_line, unix_timestamp_millis)` pairs for matching entries with timestamps.
-    command_timestamps: HashSet<(String, i64)>,
-    /// All distinct `command_line` values for matching entries without timestamps.
-    commands: HashSet<String>,
     rows: Vec<DedupRow>,
     command_timestamps_by_row: HashMap<(String, i64), Vec<usize>>,
     command_rows: HashMap<String, Vec<usize>>,
@@ -404,8 +393,6 @@ impl DedupSet {
             .context("Failed to query history for dedup")?;
 
         let mut set = Self {
-            command_timestamps: HashSet::new(),
-            commands: HashSet::new(),
             rows: Vec::new(),
             command_timestamps_by_row: HashMap::new(),
             command_rows: HashMap::new(),
@@ -430,13 +417,11 @@ impl DedupSet {
                 },
             };
             let row_index = set.rows.len();
-            set.commands.insert(command.clone());
             set.command_rows
                 .entry(command.clone())
                 .or_default()
                 .push(row_index);
             if let Some(ms) = timestamp_millis {
-                set.command_timestamps.insert((command.clone(), ms));
                 set.command_timestamps_by_row
                     .entry((command.clone(), ms))
                     .or_default()
@@ -453,22 +438,6 @@ impl DedupSet {
             });
         }
         Ok(set)
-    }
-
-    /// Check if an entry already exists in the set.
-    #[allow(dead_code)]
-    fn is_duplicate(&self, command: &str, timestamp: Option<&DateTime<Utc>>) -> bool {
-        // Fast path: if the command doesn't exist at all, skip the allocation
-        // needed for the (String, i64) HashSet lookup.
-        if !self.commands.contains(command) {
-            return false;
-        }
-        if let Some(ts) = timestamp {
-            self.command_timestamps
-                .contains(&(command.to_string(), ts.timestamp_millis()))
-        } else {
-            true // command exists in commands set (checked above)
-        }
     }
 
     fn duplicate_action(
