@@ -126,6 +126,63 @@ fn duplicate_repair_preserves_hostname_set_by_hostname_override() {
 }
 
 #[test]
+fn malformed_metadata_does_not_block_other_repairs_or_change_metadata() {
+    let (dir, mut targets) = malformed_target();
+    import_entries(&mut targets, vec![r("broken fields")], None, false).unwrap();
+    let path = dir.path().join("r.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        r#"UPDATE history SET more_info = ? WHERE command_line = ?"#,
+        rusqlite::params![r#"{"broken"#, "broken fields"],
+    )
+    .unwrap();
+    drop(db);
+
+    let source = r("broken fields")
+        .with_standard_fields()
+        .with_metadata(r#"{"new":true}"#)
+        .item;
+    let expected_session_id = source.session_id;
+    let result = import_entries(
+        &mut targets,
+        vec![ImportEntry {
+            mode: ImportMode::R,
+            item: source,
+        }],
+        None,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(result.duplicates_repaired, 1);
+    assert_eq!(result.duplicates_skipped, 0);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let row = db
+        .query_row(
+            r#"SELECT session_id, hostname, cwd, duration_ms, exit_status, more_info
+               FROM history WHERE command_line = ?"#,
+            ["broken fields"],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(row.0, expected_session_id.map(Into::into));
+    assert_eq!(row.1.as_deref(), Some("fixture-host"));
+    assert_eq!(row.2.as_deref(), Some("/fixture/cwd"));
+    assert_eq!(row.3, Some(1234));
+    assert_eq!(row.4, Some(17));
+    assert_eq!(row.5.as_deref(), Some(r#"{"broken"#));
+}
+
+#[test]
 fn existing_metadata_wins_and_ambiguous_rows_warn() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("known").with_metadata(r#"{"original":true}"#)]);
@@ -194,6 +251,30 @@ fn malformed_existing_metadata_is_duplicate_in_real_and_dry_paths() {
     assert_eq!(dry.duplicates_skipped, 1);
     assert_eq!(dry.r_imported, 0);
     assert_eq!(dry.warnings.len(), 1);
+}
+
+#[test]
+fn repeated_repairs_have_the_same_dry_run_and_real_counts() {
+    let timestamp = timestamp("2024-06-15T14:30:45Z");
+    let source = r("repeated repair").at(timestamp).with_standard_fields();
+    let entries = vec![source.clone(), source];
+    let mut fixture = ImportFixture::new();
+    fixture.import([r("repeated repair").at(timestamp)]);
+
+    let dedup = DedupSet::from_db(fixture.targets.r_history.path()).unwrap();
+    let dry = import_entries_dry_run(&entries, Some(&dedup), None);
+    let real = fixture.import_with(
+        entries,
+        ImportOptions {
+            hostname_override: None,
+            skip_duplicates: true,
+        },
+    );
+
+    assert_eq!(dry, real);
+    assert_eq!(dry.duplicates_repaired, 1);
+    assert_eq!(dry.duplicates_skipped, 1);
+    assert!(dry.warnings.is_empty());
 }
 
 #[test]

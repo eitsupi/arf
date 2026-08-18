@@ -312,6 +312,7 @@ pub struct ImportTargets {
 /// text already exists in the DB with any timestamp (e.g., from a prior radian import).
 /// The `.Rhistory` import is typically a one-time migration, so this conservative
 /// approach is acceptable.
+#[derive(Clone)]
 pub struct DedupSet {
     /// `(command_line, unix_timestamp_millis)` pairs for matching entries with timestamps.
     command_timestamps: HashSet<(String, i64)>,
@@ -329,7 +330,7 @@ enum MetadataState {
     Malformed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DedupRow {
     id: HistoryItemId,
     has_session_id: bool,
@@ -504,6 +505,20 @@ impl DedupSet {
             DuplicateAction::Skip
         }
     }
+
+    fn mark_repaired(&mut self, id: HistoryItemId, source: &HistoryItem<HistoryExtraInfo>) {
+        let Some(row) = self.rows.iter_mut().find(|row| row.id == id) else {
+            return;
+        };
+        row.has_session_id |= source.session_id.is_some();
+        row.has_hostname |= source.hostname.is_some();
+        row.has_cwd |= source.cwd.is_some();
+        row.has_duration |= source.duration.is_some();
+        row.has_exit_status |= source.exit_status.is_some();
+        if source.more_info.is_some() && matches!(row.metadata, MetadataState::Null) {
+            row.metadata = MetadataState::Valid;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -611,10 +626,24 @@ pub fn import_entries_dry_run(
     r_dedup: Option<&DedupSet>,
     shell_dedup: Option<&DedupSet>,
 ) -> ImportResult {
+    let mut r_dedup = r_dedup.cloned();
+    let mut shell_dedup = shell_dedup.cloned();
     let mut result = ImportResult::default();
     for entry in entries {
-        let plan = plan_entry(entry, r_dedup, shell_dedup);
+        let plan = plan_entry(entry, r_dedup.as_ref(), shell_dedup.as_ref());
         record_plan(&mut result, entry, &plan);
+        if let EntryPlan::Repair { target, id } = plan {
+            match target {
+                ImportTarget::R => r_dedup
+                    .as_mut()
+                    .expect("repair requires an R dedup set")
+                    .mark_repaired(id, &entry.item),
+                ImportTarget::Shell => shell_dedup
+                    .as_mut()
+                    .expect("repair requires a shell dedup set")
+                    .mark_repaired(id, &entry.item),
+            }
+        }
     }
     result
 }
@@ -633,11 +662,14 @@ pub fn import_entries_dry_run(
 /// database are skipped (anti-join on command + timestamp).
 ///
 /// Note: The dedup set is built once from the database state at the start
-/// of the import. Duplicates *within* the import batch are not detected
-/// (e.g., if the source file contains the same entry twice, both will be
-/// imported). This is acceptable because real-world history files rarely
-/// contain exact duplicates, and the primary use case is idempotent
-/// re-import across separate invocations.
+/// of the import. Plain insertion does not add new rows to that snapshot, so
+/// duplicates *within* the import batch are still not detected (e.g., if the
+/// source file contains the same new entry twice, both will be imported).
+/// Successful repairs do advance the missing-field state in the snapshot,
+/// because a second repair of the same row would otherwise plan work that the
+/// transactional update correctly finds already complete. This preserves the
+/// deliberate insertion behavior while keeping repeated repairs consistent
+/// with dry-run planning.
 ///
 /// For dry-run previews, use [`import_entries_dry_run`] instead.
 pub fn import_entries(
@@ -646,7 +678,7 @@ pub fn import_entries(
     hostname_override: Option<&str>,
     skip_duplicates: bool,
 ) -> Result<ImportResult> {
-    let (r_dedup, shell_dedup) = if skip_duplicates {
+    let (mut r_dedup, mut shell_dedup) = if skip_duplicates {
         (
             Some(DedupSet::from_history(&targets.r_history)?),
             Some(DedupSet::from_history(&targets.shell_history)?),
@@ -690,8 +722,20 @@ pub fn import_entries(
                     ImportTarget::Shell => &targets.shell_history,
                 };
                 let source = entry.item;
-                match store.set_missing_fields_if_empty(id, source) {
-                    Ok(true) => result.duplicates_repaired += 1,
+                match store.set_missing_fields_if_empty(id, source.clone()) {
+                    Ok(true) => {
+                        match target {
+                            ImportTarget::R => r_dedup
+                                .as_mut()
+                                .expect("repair requires an R dedup set")
+                                .mark_repaired(id, &source),
+                            ImportTarget::Shell => shell_dedup
+                                .as_mut()
+                                .expect("repair requires a shell dedup set")
+                                .mark_repaired(id, &source),
+                        }
+                        result.duplicates_repaired += 1
+                    }
                     Ok(false) => result.duplicates_skipped += 1,
                     Err(error) => {
                         result.warnings.push(format!(

@@ -14,7 +14,7 @@ fn planner_classifies_routing_and_input_edges() {
                 mode: "python".to_owned(),
             },
         ),
-        (entry(" \t"), EntryPlan::SkipEmpty),
+        (entry(r" 	"), EntryPlan::SkipEmpty),
     ];
 
     for (input, expected) in cases {

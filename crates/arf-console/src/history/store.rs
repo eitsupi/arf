@@ -122,40 +122,51 @@ impl HistoryStore {
         id: HistoryItemId,
         source: HistoryItem<HistoryExtraInfo>,
     ) -> Result<bool> {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
-        let changed = AtomicBool::new(false);
-        self.inner
-            .lock()
-            .map_err(|_| lock_error())?
-            .update_with_extra::<HistoryExtraInfo>(id, &|mut item| {
-                if item.session_id.is_none() && source.session_id.is_some() {
-                    item.session_id = source.session_id;
-                    changed.store(true, Ordering::Relaxed);
-                }
-                if item.hostname.is_none() && source.hostname.is_some() {
-                    item.hostname = source.hostname.clone();
-                    changed.store(true, Ordering::Relaxed);
-                }
-                if item.cwd.is_none() && source.cwd.is_some() {
-                    item.cwd = source.cwd.clone();
-                    changed.store(true, Ordering::Relaxed);
-                }
-                if item.duration.is_none() && source.duration.is_some() {
-                    item.duration = source.duration;
-                    changed.store(true, Ordering::Relaxed);
-                }
-                if item.exit_status.is_none() && source.exit_status.is_some() {
-                    item.exit_status = source.exit_status;
-                    changed.store(true, Ordering::Relaxed);
-                }
-                if item.more_info.is_none() && source.more_info.is_some() {
-                    item.more_info = source.more_info.clone();
-                    changed.store(true, Ordering::Relaxed);
-                }
-                item
+        let serialized_metadata = source
+            .more_info
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
+                    format!("could not serialize more_info: {error}"),
+                ))
             })?;
-        Ok(changed.load(Ordering::Relaxed))
+        let mut connection = rusqlite::Connection::open(&self.path).map_err(sqlite_error)?;
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        let changed = transaction
+            .execute(
+                "UPDATE history SET
+                    session_id = COALESCE(session_id, :session_id),
+                    hostname = COALESCE(hostname, :hostname),
+                    cwd = COALESCE(cwd, :cwd),
+                    duration_ms = COALESCE(duration_ms, :duration_ms),
+                    exit_status = COALESCE(exit_status, :exit_status),
+                    more_info = COALESCE(more_info, :more_info)
+                 WHERE id = :id
+                   AND (
+                       (:session_id IS NOT NULL AND session_id IS NULL)
+                    OR (:hostname IS NOT NULL AND hostname IS NULL)
+                    OR (:cwd IS NOT NULL AND cwd IS NULL)
+                    OR (:duration_ms IS NOT NULL AND duration_ms IS NULL)
+                    OR (:exit_status IS NOT NULL AND exit_status IS NULL)
+                    OR (:more_info IS NOT NULL AND more_info IS NULL)
+                   )",
+                rusqlite::named_params! {
+                    ":id": id.0,
+                    ":session_id": source.session_id.map(i64::from),
+                    ":hostname": source.hostname,
+                    ":cwd": source.cwd,
+                    ":duration_ms": source.duration.map(|value| value.as_millis() as i64),
+                    ":exit_status": source.exit_status,
+                    ":more_info": serialized_metadata,
+                },
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(changed != 0)
     }
 
     /// Set the final meta-command disposition while preserving all other fields.
@@ -274,6 +285,12 @@ pub(crate) fn convert_history_item<A: HistoryItemExtraInfo, B: HistoryItemExtraI
 fn lock_error() -> reedline::ReedlineError {
     reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
         "history store lock poisoned".to_string(),
+    ))
+}
+
+fn sqlite_error(error: rusqlite::Error) -> reedline::ReedlineError {
+    reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
+        format!("{error:?}"),
     ))
 }
 
