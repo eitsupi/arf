@@ -209,7 +209,7 @@ pub(crate) fn run_headless(
             dir.map(|d| d.join("r.db"))
         };
         if let Some(path) = history_path {
-            match reedline::SqliteBackedHistory::with_file(
+            match crate::history::HistoryStore::open(
                 path.clone(),
                 Some(sid),
                 Some(chrono::Utc::now()),

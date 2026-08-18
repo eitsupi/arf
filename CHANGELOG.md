@@ -4,7 +4,12 @@
 
 ### Changed
 
-- Command history now tracks whether each entry was a meta command (`:cd`, `:help`, ...), laying groundwork for excluding them from history search.
+- Command history now records whether each entry was a meta command (`:cd`, `:help`, ...) as determined by the REPL itself, laying groundwork for excluding them from history search.
+
+### Fixed
+
+- A command that prompted for input (`readline()`, `menu()`, `browser()`) recorded its success or failure against the answer typed at that prompt instead of against the command itself.
+- A history database error while saving a command no longer aborts the session.
 
 ## [0.5.0-rc.1] - 2026-08-12
 
