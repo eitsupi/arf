@@ -768,11 +768,15 @@ impl Repl {
         loop {
             match line_editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
+                    let save_outcome = history_handle
+                        .as_ref()
+                        .and_then(|handle| handle.receipt.take());
+
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         // A whitespace-only buffer is still saved by reedline,
                         // so record that it is an ordinary line before skipping.
-                        finalize_history(history_handle.as_ref(), &line, false);
+                        finalize_history(history_handle.as_ref(), save_outcome, false);
                         continue;
                     }
 
@@ -788,7 +792,7 @@ impl Repl {
                         history_session_id,
                         self.r_home.as_deref(),
                     ) {
-                        finalize_history(history_handle.as_ref(), &line, true);
+                        finalize_history(history_handle.as_ref(), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         prompt_config.clear_command_duration();
@@ -809,7 +813,7 @@ impl Repl {
                         }
                     }
 
-                    finalize_history(history_handle.as_ref(), &line, false);
+                    finalize_history(history_handle.as_ref(), save_outcome, false);
 
                     // Not a meta command - show R not initialized message
                     println!("{}", format!("[R not initialized] {}", line).dark_grey());

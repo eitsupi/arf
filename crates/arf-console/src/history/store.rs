@@ -40,8 +40,11 @@ impl HistorySaveReceipt {
         }
     }
 
-    pub fn latest(&self) -> Option<HistorySaveOutcome> {
-        self.inner.lock().ok().and_then(|outcome| *outcome)
+    pub fn take(&self) -> Option<HistorySaveOutcome> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|mut outcome| outcome.take())
     }
 
     pub(crate) fn record(&self, outcome: HistorySaveOutcome) {
@@ -276,6 +279,16 @@ mod tests {
         let fields: serde_json::Map<String, Value> =
             serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
         assert_eq!(fields.get("future"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn taking_a_recorded_outcome_consumes_it() {
+        let receipt = HistorySaveReceipt::new();
+        let outcome = HistorySaveOutcome::Saved(reedline::HistoryItemId::new(42));
+        receipt.record(outcome);
+
+        assert_eq!(receipt.take(), Some(outcome));
+        assert_eq!(receipt.take(), None);
     }
 
     #[test]

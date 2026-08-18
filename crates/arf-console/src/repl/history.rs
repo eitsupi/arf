@@ -91,21 +91,20 @@ pub(super) fn save_ipc_history(
     }
 }
 
-/// Finalize metadata for the row an editor adapter saved for `line`.
+/// Finalize metadata for the row identified by an editor save outcome.
 ///
-/// reedline saves every buffer it does not consider empty, testing the raw
-/// buffer rather than a trimmed one, so mirror that exact condition here: a
-/// whitespace-only submission is still a history row and still needs its
-/// metadata written. Skipping it would leave the row NULL, which means "arf
-/// does not know" — and arf does know such a line is not a meta command.
-pub(super) fn finalize_history(handle: Option<&HistoryHandle>, line: &str, is_meta_command: bool) {
+/// A failed or absent outcome leaves the row's metadata as SQL NULL, which
+/// means "arf does not know".  Writing `false` would claim that arf knows the
+/// row was an ordinary command when the adapter did not save one successfully.
+pub(super) fn finalize_history(
+    handle: Option<&HistoryHandle>,
+    outcome: Option<HistorySaveOutcome>,
+    is_meta_command: bool,
+) {
     let Some(handle) = handle else {
         return;
     };
-    if line.is_empty() {
-        return;
-    }
-    let Some(HistorySaveOutcome::Saved(id)) = handle.receipt.latest() else {
+    let Some(HistorySaveOutcome::Saved(id)) = outcome else {
         return;
     };
 
@@ -121,7 +120,7 @@ mod tests {
     use crate::editor::prompt::PromptFormatter;
     use crate::history::HistorySaveReceipt;
     use crate::repl::meta_command::process_meta_command;
-    use crate::repl::state::PromptRuntimeConfig;
+    use crate::repl::state::{PendingHistoryContext, PromptRuntimeConfig};
     use reedline::{
         FileBackedHistory, History, HistoryItem, SearchDirection, SearchQuery, SqliteBackedHistory,
     };
@@ -158,7 +157,7 @@ mod tests {
     /// Trimming before the emptiness test would leave the row NULL, which means
     /// "arf does not know" — a claim that is false for a line arf just routed.
     #[test]
-    fn whitespace_only_line_is_finalized_but_an_empty_line_is_not() {
+    fn whitespace_only_line_is_finalized_and_unsaved_followup_is_ignored() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
         let path = temp_dir.path().join("r.db");
         let store = HistoryStore::open(path.clone(), None, None).unwrap();
@@ -168,25 +167,25 @@ mod tests {
             receipt: receipt.clone(),
         };
 
-        let mut adapter = ReedlineHistoryAdapter::new(store, receipt);
+        let mut adapter = ReedlineHistoryAdapter::new(store, receipt.clone());
         let saved = adapter
             .save(HistoryItem::from_command_line(r"   "))
             .unwrap();
         let id = saved.id.unwrap();
 
-        // An empty line is never saved by reedline, so it must not touch the
-        // row the receipt still refers to.
-        finalize_history(Some(&handle), "", false);
+        finalize_history(Some(&handle), receipt.take(), false);
         let reopened = SqliteBackedHistory::with_file(path.clone(), None, None).unwrap();
         assert_eq!(
             reopened
                 .load_with_extra::<HistoryExtraInfo>(id)
                 .unwrap()
                 .more_info,
-            None,
+            Some(HistoryExtraInfo::default()),
         );
 
-        finalize_history(Some(&handle), r"   ", false);
+        // An empty line is never saved by reedline, so its empty receipt
+        // outcome must not re-finalize the previous row.
+        finalize_history(Some(&handle), receipt.take(), true);
         let reopened = SqliteBackedHistory::with_file(path, None, None).unwrap();
         assert_eq!(
             reopened
@@ -195,6 +194,46 @@ mod tests {
                 .more_info,
             Some(HistoryExtraInfo::default()),
         );
+    }
+
+    #[test]
+    fn taken_outcome_can_finalize_and_update_exit_status() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let receipt = HistorySaveReceipt::new();
+        let handle = HistoryHandle {
+            store: store.clone(),
+            receipt: receipt.clone(),
+        };
+        let mut adapter = ReedlineHistoryAdapter::new(store.clone(), receipt);
+        let id = adapter
+            .save(HistoryItem::from_command_line(r"ordinary command"))
+            .unwrap()
+            .id
+            .unwrap();
+        let outcome = handle.receipt.take();
+
+        // The same taken value is passed to both consumers, as it is on the
+        // ordinary top-level R path: finalization and pending exit status.
+        finalize_history(Some(&handle), outcome, false);
+        let pending_history_context = PendingHistoryContext::Command {
+            store: Some(store.clone()),
+            history_id: match outcome {
+                Some(HistorySaveOutcome::Saved(id)) => Some(id),
+                _ => None,
+            },
+        };
+        if let PendingHistoryContext::Command {
+            store: Some(store),
+            history_id: Some(id),
+        } = pending_history_context
+        {
+            store.set_exit_status(id, 0).unwrap();
+        }
+
+        let stored = store.load_with_metadata(id).unwrap();
+        assert_eq!(stored.more_info, Some(HistoryExtraInfo::default()));
+        assert_eq!(stored.exit_status, Some(0));
     }
 
     /// Without a persistent store, reedline keeps an in-memory backend that
@@ -232,10 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn no_store_is_a_no_op() {
+    fn finalization_without_a_store_is_a_no_op() {
         let mut sink = FileBackedHistory::default();
         assert!(save_ipc_history(&mut sink, None, "x <- 1", None).is_none());
-        finalize_history(None, "x <- 1", false);
+        finalize_history(None, None, false);
     }
 
     #[test]

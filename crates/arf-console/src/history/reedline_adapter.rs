@@ -209,6 +209,6 @@ mod tests {
             .save(HistoryItem::from_command_line("save failure"))
             .unwrap();
         assert_eq!(saved.id, None);
-        assert_eq!(receipt.latest(), Some(HistorySaveOutcome::Failed));
+        assert_eq!(receipt.take(), Some(HistorySaveOutcome::Failed));
     }
 }

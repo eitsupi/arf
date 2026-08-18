@@ -237,6 +237,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
 
             match editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
+                    let save_outcome = history_handle
+                        .as_ref()
+                        .and_then(|handle| handle.receipt.take());
+
                     // For non-standard prompts (menus, etc.), pass input directly to R
                     // without any processing (meta commands, shell mode, reprex, autoformat)
                     if is_menu_prompt {
@@ -248,7 +252,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // an exit status, which matters most when that entry
                         // came from IPC and cannot be recovered from reedline's
                         // own last-command context.
-                        finalize_history(history_handle.as_ref(), &line, false);
+                        finalize_history(history_handle.as_ref(), save_outcome, false);
                         return Some(line);
                     }
 
@@ -263,7 +267,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         state.history_session_id.map(i64::from),
                         state.r_home.as_deref(),
                     ) {
-                        finalize_history(history_handle.as_ref(), &line, true);
+                        finalize_history(history_handle.as_ref(), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         state.prompt_config.clear_command_duration();
@@ -284,7 +288,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         }
                     }
 
-                    finalize_history(history_handle.as_ref(), &line, false);
+                    finalize_history(history_handle.as_ref(), save_outcome, false);
 
                     // Shell mode: execute as shell command instead of R
                     if is_shell_mode {
@@ -346,12 +350,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // context. Continuation prompts remain part of the outer
                     // command, so preserve its context until evaluation ends.
                     if is_r_command_prompt(r_prompt) && !code.trim().is_empty() {
-                        let history_id = history_handle.as_ref().and_then(|handle| {
-                            match handle.receipt.latest() {
-                                Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
-                                _ => None,
-                            }
-                        });
+                        let history_id = match save_outcome {
+                            Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
+                            _ => None,
+                        };
                         state.pending_history_context = PendingHistoryContext::Command {
                             store: history_handle.map(|handle| handle.store),
                             history_id,
