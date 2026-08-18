@@ -3,7 +3,7 @@
 use crate::history::{
     HistoryExtraInfo, HistoryHandle, HistorySaveOutcome, HistoryStore, ReedlineHistoryAdapter,
 };
-use reedline::{HistoryItem, HistoryItemId, HistorySessionId, Reedline};
+use reedline::{History, HistoryItem, HistoryItemId, HistorySessionId, Reedline};
 
 /// Set up history for a line editor with a specific database path.
 ///
@@ -42,8 +42,21 @@ pub(super) fn setup_history(
 
 /// Save code injected into an interactive session with known ordinary-command
 /// metadata.  History failures are non-fatal to the IPC operation.
+///
+/// Without a persistent store, reedline keeps its own default backend — an
+/// in-memory ring buffer — and ordinary typed input still lands there, so IPC
+/// code must too or it silently drops out of in-session recall. That backend is
+/// the only writer in that case, so the two branches must stay exclusive:
+/// saving through the editor while the adapter is installed would write to
+/// SQLite a second time.
+///
+/// No ID is returned for the in-memory branch. `FileBackedHistory` hands back a
+/// deque index that shifts as the buffer evicts old entries, refuses `update`
+/// outright, and returns nothing at all when the entry repeats the previous
+/// one — so the value cannot address a row later.
 pub(super) fn save_ipc_history(
-    store: Option<&HistoryStore>,
+    history: &mut dyn History,
+    store: Option<HistoryStore>,
     code: &str,
     session_id: Option<HistorySessionId>,
 ) -> Option<HistoryItemId> {
@@ -51,7 +64,15 @@ pub(super) fn save_ipc_history(
         return None;
     }
 
-    let store = store?;
+    let Some(store) = store else {
+        let mut item = HistoryItem::from_command_line(code);
+        item.start_timestamp = Some(chrono::Utc::now());
+        item.session_id = session_id;
+        if let Err(error) = history.save(item) {
+            log::warn!("Failed to save IPC history to the in-memory backend: {error}");
+        }
+        return None;
+    };
 
     let mut item = HistoryItem::from_command_line(code);
     item.start_timestamp = Some(chrono::Utc::now());
@@ -101,7 +122,9 @@ mod tests {
     use crate::history::HistorySaveReceipt;
     use crate::repl::meta_command::process_meta_command;
     use crate::repl::state::PromptRuntimeConfig;
-    use reedline::{History, HistoryItem, SearchDirection, SearchQuery, SqliteBackedHistory};
+    use reedline::{
+        FileBackedHistory, History, HistoryItem, SearchDirection, SearchQuery, SqliteBackedHistory,
+    };
 
     fn everything_query() -> SearchQuery {
         SearchQuery::everything(SearchDirection::Forward, None)
@@ -112,7 +135,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
         let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
 
-        assert!(save_ipc_history(Some(&store), r"   ", None).is_none());
+        let mut sink = FileBackedHistory::default();
+        assert!(save_ipc_history(&mut sink, Some(store.clone()), r"   ", None).is_none());
         assert_eq!(store.count(everything_query()).unwrap(), 0);
     }
 
@@ -121,7 +145,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
         let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
 
-        let id = save_ipc_history(Some(&store), r#":starts as R code"#, None).unwrap();
+        let mut sink = FileBackedHistory::default();
+        let id = save_ipc_history(&mut sink, Some(store), r#":starts as R code"#, None).unwrap();
         let stored = SqliteBackedHistory::with_file(temp_dir.path().join("r.db"), None, None)
             .unwrap()
             .load_with_extra::<HistoryExtraInfo>(id)
@@ -172,9 +197,44 @@ mod tests {
         );
     }
 
+    /// Without a persistent store, reedline keeps an in-memory backend that
+    /// ordinary typed input still reaches, so IPC code has to reach it too --
+    /// otherwise injected commands vanish from in-session recall under
+    /// `--no-history` or when the database fails to open.
+    #[test]
+    fn ipc_history_falls_back_to_the_in_memory_backend_without_a_store() {
+        let mut memory = FileBackedHistory::default();
+
+        assert!(save_ipc_history(&mut memory, None, r#"print("hi")"#, None).is_none());
+
+        let stored = memory.search(everything_query()).unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .map(|item| item.command_line.as_str())
+                .collect::<Vec<_>>(),
+            vec![r#"print("hi")"#],
+        );
+    }
+
+    /// With a store the adapter owns persistence, so the editor backend must be
+    /// left alone; writing to both would insert the row into SQLite twice.
+    #[test]
+    fn ipc_history_does_not_also_write_to_the_editor_backend_with_a_store() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let mut memory = FileBackedHistory::default();
+
+        save_ipc_history(&mut memory, Some(store.clone()), r#"print("hi")"#, None).unwrap();
+
+        assert_eq!(store.count(everything_query()).unwrap(), 1);
+        assert!(memory.search(everything_query()).unwrap().is_empty());
+    }
+
     #[test]
     fn no_store_is_a_no_op() {
-        assert!(save_ipc_history(None, "x <- 1", None).is_none());
+        let mut sink = FileBackedHistory::default();
+        assert!(save_ipc_history(&mut sink, None, "x <- 1", None).is_none());
         finalize_history(None, "x <- 1", false);
     }
 

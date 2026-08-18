@@ -144,8 +144,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         setup_visible_eval(reply, timeout);
+                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
                         let history_id = save_ipc_history(
-                            state.r_history.as_ref().map(|handle| &handle.store),
+                            state.line_editor.history_mut(),
+                            store,
                             &op.code,
                             state.history_session_id,
                         );
@@ -170,8 +172,10 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         accept_user_input(reply);
+                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
                         let history_id = save_ipc_history(
-                            state.r_history.as_ref().map(|handle| &handle.store),
+                            state.line_editor.history_mut(),
+                            store,
                             &op.code,
                             state.history_session_id,
                         );
@@ -456,7 +460,8 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         };
 
                         let history_id = save_ipc_history(
-                            history_handle.as_ref().map(|handle| &handle.store),
+                            editor.history_mut(),
+                            history_handle.as_ref().map(|handle| handle.store.clone()),
                             &op.code,
                             state.history_session_id,
                         );
