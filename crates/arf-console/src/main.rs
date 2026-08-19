@@ -263,12 +263,11 @@ fn run() -> Result<()> {
         let formatter = config.reprex.formatter;
         if mode == ReprexMode::Format && !external::formatter::is_formatter_available(formatter) {
             anyhow::bail!(
-                "Cannot use --reprex=format: {} CLI ('{}' command) not found in PATH.\n\
-                 Install {} CLI from {}",
-                formatter.display_name(),
-                formatter.command(),
-                formatter.display_name(),
-                formatter.install_url()
+                "{}",
+                external::formatter::unavailable_message(
+                    formatter,
+                    external::formatter::FormatterUnavailableContext::ExplicitCli
+                )
             );
         }
         config.startup.reprex = mode;
@@ -303,9 +302,11 @@ fn run() -> Result<()> {
         && !external::formatter::is_formatter_available(formatter)
     {
         eprintln!(
-            "Warning: Reprex format mode is configured but {} CLI ('{}' command) was not found; using reprex on mode.",
-            formatter.display_name(),
-            formatter.command()
+            "{}",
+            external::formatter::unavailable_message(
+                formatter,
+                external::formatter::FormatterUnavailableContext::ConfiguredMode
+            )
         );
         config.startup.reprex = ReprexMode::On;
     }

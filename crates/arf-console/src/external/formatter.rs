@@ -14,6 +14,42 @@ use std::io::Write;
 use std::process::Command;
 use std::sync::OnceLock;
 
+/// The user-facing context for a missing formatter diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatterUnavailableContext {
+    /// An explicit `--reprex=format` request.
+    ExplicitCli,
+    /// A configured format mode that will fall back to reprex on mode.
+    ConfiguredMode,
+    /// The interactive `:reprex format` command.
+    MetaCommand,
+}
+
+/// Build the diagnostic shown when a configured formatter is unavailable.
+pub fn unavailable_message(
+    formatter: ReprexFormatter,
+    context: FormatterUnavailableContext,
+) -> String {
+    let backend = format!(
+        "{} CLI ('{}' command)",
+        formatter.display_name(),
+        formatter.command()
+    );
+    match context {
+        FormatterUnavailableContext::ExplicitCli => format!(
+            "Cannot use --reprex=format: {backend} not found in PATH.\nInstall {} CLI from {}",
+            formatter.display_name(),
+            formatter.install_url()
+        ),
+        FormatterUnavailableContext::ConfiguredMode => format!(
+            "Warning: Reprex format mode is configured but {backend} was not found; using reprex on mode."
+        ),
+        FormatterUnavailableContext::MetaCommand => {
+            format!("Error: Cannot use reprex format mode - {backend} not found in PATH.")
+        }
+    }
+}
+
 /// Check if a formatter backend is available on the system.
 pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
     match formatter {
@@ -165,6 +201,42 @@ mod tests {
 
         let result = format_code(ReprexFormatter::Air, "   ");
         assert_eq!(result, "   ");
+    }
+
+    #[test]
+    fn unavailable_explicit_cli_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::ExplicitCli
+            ),
+            @r###"
+Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.
+Install Air CLI from https://github.com/posit-dev/air
+"###
+        );
+    }
+
+    #[test]
+    fn unavailable_configured_mode_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::ConfiguredMode
+            ),
+            @r###"Warning: Reprex format mode is configured but Air CLI ('air' command) was not found; using reprex on mode."###
+        );
+    }
+
+    #[test]
+    fn unavailable_meta_command_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::MetaCommand
+            ),
+            @r###"Error: Cannot use reprex format mode - Air CLI ('air' command) not found in PATH."###
+        );
     }
 
     #[test]

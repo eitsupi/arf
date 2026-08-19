@@ -81,9 +81,11 @@ pub fn process_meta_command(
                     && !formatter::is_formatter_available(reprex.formatter)
                 {
                     arf_println!(
-                        "Error: Cannot use reprex format mode - {} CLI ('{}' command) not found in PATH.",
-                        reprex.formatter.display_name(),
-                        reprex.formatter.command()
+                        "{}",
+                        formatter::unavailable_message(
+                            reprex.formatter,
+                            formatter::FormatterUnavailableContext::MetaCommand
+                        )
                     );
                 } else {
                     reprex.set_mode(ReprexMode::Format);

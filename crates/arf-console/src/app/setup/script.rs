@@ -70,15 +70,19 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     if reprex_mode == ReprexMode::Format && !formatter::is_formatter_available(formatter_backend) {
         if cli.reprex.is_some() {
             anyhow::bail!(
-                "Cannot use --reprex=format: {} CLI ('{}' command) not found in PATH.",
-                formatter_backend.display_name(),
-                formatter_backend.command()
+                "{}",
+                formatter::unavailable_message(
+                    formatter_backend,
+                    formatter::FormatterUnavailableContext::ExplicitCli
+                )
             );
         }
         eprintln!(
-            "Warning: Reprex format mode is configured but {} CLI ('{}' command) was not found; using reprex on mode.",
-            formatter_backend.display_name(),
-            formatter_backend.command()
+            "{}",
+            formatter::unavailable_message(
+                formatter_backend,
+                formatter::FormatterUnavailableContext::ConfiguredMode
+            )
         );
         reprex_mode = ReprexMode::On;
     }
