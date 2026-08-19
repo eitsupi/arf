@@ -14,23 +14,19 @@ use std::io::Write;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The formatter command to use.
-/// Currently only `air` is supported.
-const FORMATTER_COMMAND: &str = "air";
-
-/// Cached result of formatter availability check.
-static FORMATTER_AVAILABLE: OnceLock<bool> = OnceLock::new();
-
-/// Check if the air formatter is available on the system.
+/// Check if a formatter backend is available on the system.
 pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
     match formatter {
-        ReprexFormatter::Air => *FORMATTER_AVAILABLE.get_or_init(|| {
-            Command::new(FORMATTER_COMMAND)
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        }),
+        ReprexFormatter::Air => {
+            static AIR_AVAILABLE: OnceLock<bool> = OnceLock::new();
+            *AIR_AVAILABLE.get_or_init(|| {
+                Command::new(formatter.command())
+                    .arg("--version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
+        }
     }
 }
 
@@ -45,7 +41,7 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
 ///
 /// Once air supports stdin, replace this with:
 /// ```ignore
-/// let output = Command::new("air")
+/// let output = Command::new("<formatter command>")
 ///     .args(["format", "--stdin"])
 ///     .stdin(Stdio::piped())
 ///     .stdout(Stdio::piped())
@@ -55,28 +51,28 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
 /// ```
 pub fn format_code(formatter: ReprexFormatter, code: &str) -> String {
     match formatter {
-        ReprexFormatter::Air => format_air_code(code),
+        ReprexFormatter::Air => format_air_code(formatter, code),
     }
 }
 
-fn format_air_code(code: &str) -> String {
+fn format_air_code(formatter: ReprexFormatter, code: &str) -> String {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
         return code.to_string();
     }
 
     // Check if formatter is available
-    if !is_formatter_available(ReprexFormatter::Air) {
+    if !is_formatter_available(formatter) {
         log::debug!(
             "Formatter '{}' not available, skipping format",
-            FORMATTER_COMMAND
+            formatter.command()
         );
         return code.to_string();
     }
 
     // Create temp file for formatting
     // TODO: Replace with stdin pipe when air supports it (posit-dev/air#202)
-    match format_via_temp_file(code) {
+    match format_via_temp_file(formatter, code) {
         Ok(formatted) => formatted,
         Err(e) => {
             log::debug!("Formatting failed: {}, using original code", e);
@@ -88,7 +84,7 @@ fn format_air_code(code: &str) -> String {
 /// Format code by writing to a temp file and running the formatter.
 ///
 /// This is a workaround for formatters that don't support stdin.
-fn format_via_temp_file(code: &str) -> Result<String, FormatterError> {
+fn format_via_temp_file(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     // Create a temp file with .R extension so the formatter recognizes it
     let temp_dir = std::env::temp_dir();
     let temp_path = temp_dir.join("arf-format.R");
@@ -100,7 +96,7 @@ fn format_via_temp_file(code: &str) -> Result<String, FormatterError> {
     drop(file); // Ensure file is closed before formatter reads it
 
     // Run formatter
-    let output = Command::new(FORMATTER_COMMAND)
+    let output = Command::new(formatter.command())
         .arg("format")
         .arg(&temp_path)
         .output()?;

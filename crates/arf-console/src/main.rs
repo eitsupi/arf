@@ -260,12 +260,15 @@ fn run() -> Result<()> {
 
     // Apply CLI overrides
     if let Some(mode) = cli.reprex {
-        if mode == ReprexMode::Format
-            && !external::formatter::is_formatter_available(config.reprex.formatter)
-        {
+        let formatter = config.reprex.formatter;
+        if mode == ReprexMode::Format && !external::formatter::is_formatter_available(formatter) {
             anyhow::bail!(
-                "Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.\n\
-                 Install Air CLI from https://github.com/posit-dev/air"
+                "Cannot use --reprex=format: {} CLI ('{}' command) not found in PATH.\n\
+                 Install {} CLI from {}",
+                formatter.display_name(),
+                formatter.command(),
+                formatter.display_name(),
+                formatter.install_url()
             );
         }
         config.startup.reprex = mode;
@@ -293,13 +296,16 @@ fn run() -> Result<()> {
         };
     }
 
-    // Configured format mode degrades to on when Air is unavailable.
+    // Configured format mode degrades to on when its formatter is unavailable.
+    let formatter = config.reprex.formatter;
     if config.startup.reprex == ReprexMode::Format
         && cli.reprex.is_none()
-        && !external::formatter::is_formatter_available(config.reprex.formatter)
+        && !external::formatter::is_formatter_available(formatter)
     {
         eprintln!(
-            "Warning: Reprex format mode is configured but Air CLI ('air' command) was not found; using reprex on mode."
+            "Warning: Reprex format mode is configured but {} CLI ('{}' command) was not found; using reprex on mode.",
+            formatter.display_name(),
+            formatter.command()
         );
         config.startup.reprex = ReprexMode::On;
     }

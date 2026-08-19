@@ -66,20 +66,25 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
 
     // Evaluate the code using the CLI override or configured reprex mode.
     let mut reprex_mode = cli.reprex.unwrap_or(config.startup.reprex);
-    if reprex_mode == ReprexMode::Format
-        && !formatter::is_formatter_available(config.reprex.formatter)
-    {
+    let formatter_backend = config.reprex.formatter;
+    if reprex_mode == ReprexMode::Format && !formatter::is_formatter_available(formatter_backend) {
         if cli.reprex.is_some() {
-            anyhow::bail!("Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.");
+            anyhow::bail!(
+                "Cannot use --reprex=format: {} CLI ('{}' command) not found in PATH.",
+                formatter_backend.display_name(),
+                formatter_backend.command()
+            );
         }
         eprintln!(
-            "Warning: Reprex format mode is configured but Air CLI ('air' command) was not found; using reprex on mode."
+            "Warning: Reprex format mode is configured but {} CLI ('{}' command) was not found; using reprex on mode.",
+            formatter_backend.display_name(),
+            formatter_backend.command()
         );
         reprex_mode = ReprexMode::On;
     }
     if reprex_mode != ReprexMode::Off {
         let code = if reprex_mode == ReprexMode::Format {
-            formatter::format_code(config.reprex.formatter, &code)
+            formatter::format_code(formatter_backend, &code)
         } else {
             code
         };

@@ -17,11 +17,32 @@ pub enum ReprexFormatter {
     Air,
 }
 
+impl ReprexFormatter {
+    /// Human-readable backend name for diagnostics.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Air => "Air",
+        }
+    }
+
+    /// Executable used to invoke this formatter backend.
+    pub const fn command(self) -> &'static str {
+        match self {
+            Self::Air => "air",
+        }
+    }
+
+    /// Installation URL used in diagnostics when the backend is unavailable.
+    pub const fn install_url(self) -> &'static str {
+        match self {
+            Self::Air => "https://github.com/posit-dev/air",
+        }
+    }
+}
+
 impl fmt::Display for ReprexFormatter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Air => f.write_str("air"),
-        }
+        f.write_str(self.command())
     }
 }
 

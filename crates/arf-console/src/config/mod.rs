@@ -524,6 +524,15 @@ formatter = "air"
     }
 
     #[test]
+    fn reprex_formatter_metadata_describes_air_backend() {
+        let formatter = ReprexFormatter::Air;
+        assert_eq!(formatter.display_name(), "Air");
+        assert_eq!(formatter.command(), "air");
+        assert_eq!(formatter.install_url(), "https://github.com/posit-dev/air");
+        assert_eq!(formatter.to_string(), "air");
+    }
+
+    #[test]
     fn removed_reprex_configuration_keys_are_rejected_explicitly() {
         for source in [
             r#"[startup.mode]

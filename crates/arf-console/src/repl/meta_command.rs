@@ -81,7 +81,9 @@ pub fn process_meta_command(
                     && !formatter::is_formatter_available(reprex.formatter)
                 {
                     arf_println!(
-                        "Error: Cannot use reprex format mode - Air CLI ('air' command) not found in PATH."
+                        "Error: Cannot use reprex format mode - {} CLI ('{}' command) not found in PATH.",
+                        reprex.formatter.display_name(),
+                        reprex.formatter.command()
                     );
                 } else {
                     reprex.set_mode(ReprexMode::Format);
