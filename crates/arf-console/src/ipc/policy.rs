@@ -9,6 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
+use super::approval::send_policy_is_allow;
 use super::session::SessionType;
 
 fn is_inert_kind(kind: &str) -> bool {
@@ -17,8 +18,8 @@ fn is_inert_kind(kind: &str) -> bool {
 
 /// Public description of the effective policy applied to IPC operations.
 ///
-/// This is the stable representation shared by on-disk session metadata, IPC
-/// session results, headless readiness output, `ipc list`, and `:info`.
+/// This is the live representation shared by IPC session results, headless
+/// readiness output, and `:info`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcPolicy {
     pub silent: SilentPolicy,
@@ -63,10 +64,14 @@ pub fn policy(session_type: SessionType) -> IpcPolicy {
         .get_or_init(|| RwLock::new(PolicyState::default()))
         .read()
         .unwrap_or_else(|e| e.into_inner());
-    policy_description(&state, session_type)
+    policy_description(&state, session_type, send_policy_is_allow())
 }
 
-fn policy_description(state: &PolicyState, session_type: SessionType) -> IpcPolicy {
+fn policy_description(
+    state: &PolicyState,
+    session_type: SessionType,
+    send_policy_allow: bool,
+) -> IpcPolicy {
     let mut allowed_functions: Vec<_> = state.allowlist.iter().cloned().collect();
     allowed_functions.sort();
 
@@ -77,6 +82,7 @@ fn policy_description(state: &PolicyState, session_type: SessionType) -> IpcPoli
             SilentPolicy::Restricted { allowed_functions }
         },
         visible: match session_type {
+            SessionType::Interactive if send_policy_allow => VisiblePolicy::ApprovalNotRequired,
             SessionType::Interactive => VisiblePolicy::ApprovalRequired,
             SessionType::Headless => VisiblePolicy::ApprovalNotRequired,
         },
@@ -440,6 +446,7 @@ mod tests {
                 unrestricted: false,
             },
             SessionType::Interactive,
+            false,
         );
 
         assert_eq!(
@@ -452,14 +459,26 @@ mod tests {
     }
 
     #[test]
+    fn public_policy_reflects_interactive_send_policy_state() {
+        let state = PolicyState::default();
+        let required = policy_description(&state, SessionType::Interactive, false);
+        let not_required = policy_description(&state, SessionType::Interactive, true);
+
+        assert_eq!(required.visible, VisiblePolicy::ApprovalRequired);
+        assert_eq!(not_required.visible, VisiblePolicy::ApprovalNotRequired);
+    }
+
+    #[test]
     fn public_policy_keeps_empty_restricted_allowlist_distinct_from_unrestricted() {
-        let restricted = policy_description(&PolicyState::default(), SessionType::Interactive);
+        let restricted =
+            policy_description(&PolicyState::default(), SessionType::Interactive, false);
         let unrestricted = policy_description(
             &PolicyState {
                 allowlist: HashSet::new(),
                 unrestricted: true,
             },
             SessionType::Headless,
+            false,
         );
 
         assert_eq!(

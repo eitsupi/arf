@@ -12,7 +12,7 @@ pub(crate) enum IpcAction {
     ///
     /// Returns a JSON object with a `sessions` array. Each entry contains
     /// pid, r_version, r_home, socket_path, cwd, started_at, session_type,
-    /// log_file, history_session_id, and ipc_policy.
+    /// log_file, and history_session_id.
     /// Returns `{"sessions": []}` when no sessions are running (exit 0).
     #[command(after_long_help = "\
 Examples:

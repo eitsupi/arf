@@ -511,6 +511,94 @@ mod ipc_tests {
         terminal.quit().expect("Should quit cleanly");
     }
 
+    /// The live session policy and :info reflect the interactive send-policy
+    /// switch without changing discovery metadata.
+    #[test]
+    fn test_ipc_live_visible_policy_tracks_send_policy() {
+        let mut terminal = Terminal::spawn_with_size(
+            &["--with-ipc", "--no-auto-match", "--no-completion"],
+            40,
+            100,
+        )
+        .expect("Failed to spawn arf with IPC");
+        terminal.wait_for_prompt().expect("Should show prompt");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+
+        let session = send_ipc_request(&socket_path, "session", serde_json::json!({}))
+            .expect("session request should succeed");
+        assert_eq!(
+            session["result"]["ipc_policy"]["visible"]["mode"],
+            "approval_required"
+        );
+
+        terminal
+            .send_line(":ipc send-policy allow")
+            .expect("set send policy to allow");
+        terminal
+            .expect("IPC send policy: allow")
+            .expect("allow policy should be confirmed");
+        let session = send_ipc_request(&socket_path, "session", serde_json::json!({}))
+            .expect("session request should succeed after allow");
+        assert_eq!(
+            session["result"]["ipc_policy"]["visible"]["mode"],
+            "approval_not_required"
+        );
+
+        terminal.clear_buffer().expect("clear output before :info");
+        terminal.send_line(":info").expect("show session info");
+        terminal.send("G").expect("jump to end in :info");
+        wait_for_screen_line(&terminal, "Visible requests: approval not required");
+        terminal.send("q").expect("exit :info pager");
+        terminal.wait_for_prompt().expect("return to prompt");
+
+        terminal
+            .send_line(":ipc send-policy prompt")
+            .expect("set send policy to prompt");
+        terminal
+            .expect("IPC send policy: prompt")
+            .expect("prompt policy should be confirmed");
+        let session = send_ipc_request(&socket_path, "session", serde_json::json!({}))
+            .expect("session request should succeed after prompt");
+        assert_eq!(
+            session["result"]["ipc_policy"]["visible"]["mode"],
+            "approval_required"
+        );
+
+        terminal
+            .clear_buffer()
+            .expect("clear output before second :info");
+        terminal
+            .send_line(":info")
+            .expect("show session info again");
+        terminal.send("G").expect("jump to end in second :info");
+        wait_for_screen_line(&terminal, "Visible requests: approval required");
+        terminal.send("q").expect("exit second :info pager");
+        terminal.wait_for_prompt().expect("return to prompt");
+        terminal.quit().expect("Should quit cleanly");
+    }
+
+    fn wait_for_screen_line(terminal: &Terminal, expected: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if terminal
+                .screen()
+                .expect("read terminal screen")
+                .lines
+                .iter()
+                .any(|line| line.contains(expected))
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let screen = terminal.screen().expect("read terminal screen");
+        panic!(
+            "timed out waiting for {expected:?}; screen:\n{}",
+            screen.lines.join("\n")
+        );
+    }
+
     /// Test that `visible=false` (default) does NOT show output in the REPL terminal.
     #[test]
     fn test_ipc_evaluate_silent() {

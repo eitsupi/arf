@@ -88,7 +88,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present and uses the same shape as `arf ipc session` and `arf ipc list`: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. `visible` covers both `send` and `eval --visible`; its mode is `approval_required` for interactive sessions and `approval_not_required` for headless sessions. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 
@@ -213,12 +213,12 @@ binding; this is allowed by default because IPC eval never permits assignment, s
 caller cannot create such a binding through IPC eval.
 
 The same policy is advertised as the `ipc_policy` object in the headless
-`--json` readiness output, `arf ipc session`, and every entry from `arf ipc
-list`. The interactive `:info` pager reports whether the IPC server is enabled.
+`--json` readiness output and live `arf ipc session` responses. The interactive
+`:info` pager reports whether the IPC server is enabled.
 When enabled, it shows the silent-eval mode, lists each configured target on
 its own line so the complete allowlist can be checked without horizontal
-scrolling, and states that visible requests (`send`/`eval --visible`) require
-approval. When disabled, it omits the policy details.
+scrolling, and states the current approval requirement for visible requests
+(`send`/`eval --visible`). When disabled, it omits the policy details.
 
 Evaluates R code and returns the captured output. The code runs silently by
 default — output is not shown in the session. With `--visible`, an interactive
@@ -385,8 +385,10 @@ and may be `null` while R is busy or unavailable. `arch` is the architecture of 
 not the R installation.
 
 The example above shows a headless session, so `visible` has mode
-`approval_not_required`; it covers both `send` and `eval --visible`. An
-interactive session reports mode `approval_required` for `visible`.
+`approval_not_required`; it covers both `send` and `eval --visible`. For an
+interactive session, this live policy reflects the current `:ipc send-policy`
+state: `allow` reports `approval_not_required`, while `prompt` reports
+`approval_required`.
 
 When R is idle, the `r` field contains session details (other top-level fields omitted for brevity):
 
@@ -425,16 +427,7 @@ arf ipc list
 #       "started_at": "2026-03-22T10:00:00+09:00",
 #       "session_type": "headless",
 #       "log_file": null,
-#       "history_session_id": 1742601600000000000,
-#       "ipc_policy": {
-#         "silent": {
-#           "mode": "restricted",
-#           "allowed_functions": []
-#         },
-#         "visible": {
-#           "mode": "approval_not_required"
-#         }
-#       }
+#       "history_session_id": 1742601600000000000
 #     }
 #   ]
 # }
@@ -455,8 +448,9 @@ is listed with `r_home` set to `null`, like any other unset field. Clients must
 treat `null` as unknown and must not assume an R installation is available.
 
 `r_version`, `r_home`, `session_type`, `log_file`, and `history_session_id` may
-all be `null`. `ipc_policy` is always present for current session files and
-is identical to the policy object returned by `arf ipc session`.
+all be `null`. The list is discovery metadata only; it does not include the
+effective IPC policy. Query `arf ipc session` to obtain the live policy at the
+time of the request.
 
 ### `arf ipc history` — Query Command History
 
@@ -602,7 +596,7 @@ arf --with-ipc --ipc-bind /tmp/my-arf.sock
 
 ### Session Discovery
 
-Each arf session with IPC enabled writes a session file to the OS cache directory (e.g., `~/.cache/arf/sessions/<PID>.json` on Linux, `~/Library/Caches/arf/sessions/<PID>.json` on macOS). The session file contains the socket path so that `arf ipc` client commands can discover running sessions. Stale session files (where the process is no longer running) are automatically cleaned up.
+Each arf session with IPC enabled writes a session file to the OS cache directory (e.g., `~/.cache/arf/sessions/<PID>.json` on Linux, `~/Library/Caches/arf/sessions/<PID>.json` on macOS). The session file contains discovery metadata such as the socket path so that `arf ipc` client commands can discover running sessions; it does not store the effective IPC policy. Query `arf ipc session` for the live policy at request time. Stale session files (where the process is no longer running) are automatically cleaned up.
 
 ### Remote Access (No Built-in TCP)
 

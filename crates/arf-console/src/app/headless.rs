@@ -110,7 +110,7 @@ impl HeadlessInfo {
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
             history_session_id: session.history_session_id,
-            ipc_policy: session.ipc_policy.clone(),
+            ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
             history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
             r_source_override: HeadlessRSourceOverride::from_report(resolution),
             warnings,
@@ -506,7 +506,6 @@ mod tests {
             session_type: Some(SessionType::Headless),
             log_file: None,
             history_session_id: None,
-            ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
         };
 
         let output = HeadlessInfo::from_session(

@@ -23,8 +23,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::policy::IpcPolicy;
-
 const ARF_IPC_SESSIONS_DIR: &str = "ARF_IPC_SESSIONS_DIR";
 
 /// Session metadata written to disk for client discovery.
@@ -50,8 +48,6 @@ pub struct SessionInfo {
     /// initialization is unavailable.
     #[serde(default)]
     pub history_session_id: Option<i64>,
-    /// The complete IPC policy advertised by this session.
-    pub ipc_policy: IpcPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,7 +250,6 @@ mod tests {
             session_type,
             log_file: None,
             history_session_id: Some(42),
-            ipc_policy: crate::ipc::policy::policy(SessionType::Interactive),
         }
     }
 
@@ -266,6 +261,18 @@ mod tests {
 
         assert_eq!(json["session_type"], "headless");
         assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+        insta::assert_snapshot!(serde_json::to_string_pretty(&json).unwrap(), @r###"
+{
+  "cwd": "/tmp",
+  "history_session_id": 42,
+  "log_file": null,
+  "pid": 12345,
+  "r_home": "/opt/R/4.4.1/lib/R",
+  "r_version": "4.4.1",
+  "session_type": "headless",
+  "socket_path": "/tmp/arf.sock",
+  "started_at": "2026-01-01T00:00:00+00:00"
+}"###);
 
         let restored: SessionInfo = serde_json::from_value(json).unwrap();
         assert_eq!(restored.session_type, Some(SessionType::Headless));
@@ -280,10 +287,6 @@ mod tests {
             "r_version": "4.4.1",
             "cwd": "/tmp",
             "started_at": "2026-01-01T00:00:00+00:00",
-            "ipc_policy": {
-                "silent": {"mode": "restricted", "allowed_functions": []},
-                "visible": {"mode": "approval_required"}
-            }
         });
 
         let info: SessionInfo = serde_json::from_value(json).unwrap();
@@ -298,10 +301,6 @@ mod tests {
             "r_version": "4.4.1",
             "cwd": "/tmp",
             "started_at": "2026-01-01T00:00:00+00:00",
-            "ipc_policy": {
-                "silent": {"mode": "restricted", "allowed_functions": []},
-                "visible": {"mode": "approval_required"}
-            }
         });
 
         let info: SessionInfo = serde_json::from_value(json).unwrap();

@@ -5,7 +5,6 @@
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
 use crate::editor::validator::RValidator;
-use crate::ipc::policy::policy;
 use crate::ipc::protocol::{
     EvaluateParams, HistoryParams, INCOMPLETE_INPUT, INTERNAL_ERROR, INVALID_PARAMS,
     INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
@@ -240,7 +239,6 @@ pub fn start_server(
         session_type: Some(session_type),
         log_file,
         history_session_id,
-        ipc_policy: policy(session_type),
     };
 
     if let Err(e) = write_session(&session) {
