@@ -45,10 +45,7 @@ pub fn approve_user_input(
             wrote_newline: false,
         };
     }
-    let escaped = user_input_display(code);
-    let prompt = format!(
-        "# [arf] IPC send request: [{escaped}]\r\n# [arf] Press y to approve, any other key declines: "
-    );
+    let prompt = approval_prompt(code);
     use std::io::Write;
     print!("{prompt}");
     let _ = std::io::stdout().flush();
@@ -125,6 +122,20 @@ pub fn approve_user_input(
     }
 }
 
+fn approval_prompt(code: &str) -> String {
+    use crossterm::style::Stylize;
+
+    let escaped = user_input_display(code);
+    format!(
+        "{}\r\n  {}\r\n{}",
+        "# [arf] IPC send request:".dark_cyan(),
+        escaped.yellow(),
+        "# [arf] Press y to approve, any other key declines: "
+            .yellow()
+            .bold(),
+    )
+}
+
 pub(crate) fn user_input_display(code: &str) -> String {
     code.chars()
         .map(|character| {
@@ -146,6 +157,41 @@ pub fn reject_user_input_not_approved(reply: tokio::sync::oneshot::Sender<protoc
 
 #[cfg(test)]
 mod approval_display_tests {
+    fn strip_sgr(input: &str) -> String {
+        let mut output = String::new();
+        let mut chars = input.chars();
+        while let Some(character) = chars.next() {
+            if character == '\x1b' && chars.next() == Some('[') {
+                for character in chars.by_ref() {
+                    if character == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                output.push(character);
+            }
+        }
+        output
+    }
+
+    #[test]
+    fn approval_prompt_styles_and_separates_heading_code_and_confirmation() {
+        let prompt = super::approval_prompt(
+            r#"system("SHOULD_BE_VISIBLE")
+next"#,
+        );
+
+        let plain = format!("{}<END>", strip_sgr(&prompt).replace("\r\n", "\n"));
+        insta::assert_snapshot!(
+            plain,
+            @r###"
+# [arf] IPC send request:
+  system("SHOULD_BE_VISIBLE")\nnext
+# [arf] Press y to approve, any other key declines: <END>
+"###
+        );
+    }
+
     #[test]
     fn display_includes_content_after_old_preview_limit() {
         let source = format!(

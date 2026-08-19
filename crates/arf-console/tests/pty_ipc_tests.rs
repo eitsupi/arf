@@ -166,9 +166,11 @@ mod ipc_tests {
     }
 
     fn ipc_approval_prompt(code: &str) -> String {
-        format!(r"# [arf] IPC send request: [{code}]")
-            + "\r\r\n"
-            + r"# [arf] Press y to approve, any other key declines: "
+        let sgr = r"\x1b\[[0-9;]*m";
+        format!(
+            r"{sgr}# \[arf\] IPC send request:{sgr}\r\r\n  {sgr}{}{sgr}\r\r\n(?:{sgr})+# \[arf\] Press y to approve, any other key declines: {sgr}",
+            escape(code)
+        )
     }
 
     fn send_approved_user_input(
@@ -187,7 +189,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&ipc_approval_prompt(&code))
+            .expect_regex(&ipc_approval_prompt(&code))
             .expect("REPL should display the approval prompt");
         terminal.send_line("y").expect("approve IPC send");
         request
@@ -212,7 +214,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&ipc_approval_prompt(&code))
+            .expect_regex(&ipc_approval_prompt(&code))
             .expect("REPL should display the approval prompt for visible evaluate");
         terminal.send_line("y").expect("approve visible evaluate");
         request
@@ -440,7 +442,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&ipc_approval_prompt(code))
+            .expect_regex(&ipc_approval_prompt(code))
             .expect("REPL should display the approval prompt");
         terminal.send_line("n").expect("decline visible evaluate");
         let response = request
@@ -599,6 +601,47 @@ mod ipc_tests {
         terminal.quit().expect("Should quit cleanly");
     }
 
+    #[test]
+    fn test_ipc_approval_prompt_emits_styles_and_full_code() {
+        let mut terminal = Terminal::spawn_with_args_and_env(&["--with-ipc"], &[("NO_COLOR", "")])
+            .expect("Failed to spawn arf with IPC");
+        terminal
+            .wait_for_prompt()
+            .expect("Should show prompt after startup");
+        let socket_path = find_socket_path(terminal.process_id(), Duration::from_secs(10))
+            .expect("Should find IPC socket path");
+        let code = format!(
+            "{}{}",
+            "0123456789".repeat(24),
+            r#"system("SHOULD_BE_VISIBLE")"#,
+        );
+        let request_socket = socket_path.clone();
+        let request_code = code.clone();
+        let request = std::thread::spawn(move || {
+            send_ipc_request(
+                &request_socket,
+                "user_input",
+                serde_json::json!({ "code": request_code }),
+            )
+        });
+
+        terminal
+            .expect("\x1b[38;5;6m# [arf] IPC send request:")
+            .expect("approval heading should be dark cyan");
+        terminal
+            .expect(&format!("\x1b[38;5;11m{code}\x1b[39m"))
+            .expect("approval code should be yellow and fully visible");
+        terminal
+            .expect("\x1b[38;5;11m\x1b[1m# [arf] Press y to approve, any other key declines:")
+            .expect("approval confirmation should be bold");
+        terminal.send_line("y").expect("approve IPC send");
+        request
+            .join()
+            .expect("IPC request thread should not panic")
+            .expect("IPC request should succeed");
+        terminal.quit().expect("Should quit cleanly");
+    }
+
     /// Test that declining the default interactive approval rejects the request
     /// and does not evaluate or save it.
     #[test]
@@ -623,7 +666,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&ipc_approval_prompt(marker))
+            .expect_regex(&ipc_approval_prompt(marker))
             .expect("REPL should display the approval prompt");
         terminal.send_line("n").expect("decline IPC send");
         terminal
@@ -663,7 +706,7 @@ mod ipc_tests {
             )
         });
         terminal
-            .expect(&ipc_approval_prompt("cat('ctrl_c_must_not_execute')"))
+            .expect_regex(&ipc_approval_prompt("cat('ctrl_c_must_not_execute')"))
             .expect("REPL should display the approval prompt");
         terminal.send_interrupt().expect("send Ctrl+C");
         let response = request
