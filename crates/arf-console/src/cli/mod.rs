@@ -33,17 +33,11 @@ pub struct Cli {
     #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath, conflicts_with = "eval", hide_short_help = true)]
     pub file: Option<PathBuf>,
 
-    /// Enable reprex mode (no prompt, output prefixed with #>)
+    /// Set reprex mode (off, on, or format).
     ///
-    /// Config: startup.mode.reprex
-    #[arg(long)]
-    pub reprex: bool,
-
-    /// Enable auto-formatting of R code in reprex mode (requires Air CLI)
-    ///
-    /// Config: startup.mode.autoformat
-    #[arg(long)]
-    pub auto_format: bool,
+    /// Config: startup.reprex
+    #[arg(long, value_name = "MODE")]
+    pub reprex: Option<crate::config::ReprexMode>,
 
     /// Shared R source options
     #[command(flatten)]

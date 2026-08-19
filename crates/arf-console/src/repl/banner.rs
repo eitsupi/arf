@@ -1,6 +1,6 @@
 //! Startup banner formatting.
 
-use crate::config::{Config, RSourceOverrideInfo};
+use crate::config::{Config, RSourceOverrideInfo, ReprexMode};
 use crate::editor::prompt::get_r_version;
 
 /// Format the startup banner.
@@ -22,15 +22,18 @@ pub fn format_banner(
     lines.push(format!("# arf console v{}", env!("CARGO_PKG_VERSION")));
     lines.push(format!("# Edit mode: {}", config.editor.mode));
 
-    if config.startup.mode.reprex {
-        lines.push(format!(
-            "# Reprex mode: enabled | Comment: {:?}",
-            config.mode.reprex.comment
-        ));
-    }
-
-    if config.startup.mode.autoformat {
-        lines.push("# Auto-format: enabled (using air)".to_string());
+    match config.startup.reprex {
+        ReprexMode::Off => {}
+        ReprexMode::On => lines.push(format!(
+            "# Reprex: on | Comment: {:?}",
+            config.reprex.comment
+        )),
+        ReprexMode::Format => {
+            lines.push(format!(
+                "# Reprex: format | Comment: {:?} | Formatter: {}",
+                config.reprex.comment, config.reprex.formatter
+            ));
+        }
     }
 
     if r_initialized {
@@ -79,7 +82,7 @@ mod tests {
     #[test]
     fn test_banner_reprex_mode() {
         let mut config = Config::default();
-        config.startup.mode.reprex = true;
+        config.startup.reprex = ReprexMode::On;
         let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_reprex_mode", banner);
     }
@@ -87,10 +90,18 @@ mod tests {
     #[test]
     fn test_banner_reprex_custom_comment() {
         let mut config = Config::default();
-        config.startup.mode.reprex = true;
-        config.mode.reprex.comment = "## ".to_string();
+        config.startup.reprex = ReprexMode::On;
+        config.reprex.comment = "## ".to_string();
         let banner = format_banner(&config, true, None);
         insta::assert_snapshot!("banner_reprex_custom_comment", banner);
+    }
+
+    #[test]
+    fn test_banner_reprex_format_mode() {
+        let mut config = Config::default();
+        config.startup.reprex = ReprexMode::Format;
+        let banner = format_banner(&config, true, None);
+        insta::assert_snapshot!("banner_reprex_format_mode", banner);
     }
 
     #[test]

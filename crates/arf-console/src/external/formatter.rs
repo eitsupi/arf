@@ -1,6 +1,6 @@
 //! R code formatter integration.
 //!
-//! This module provides auto-formatting of R code using external formatters like `air`.
+//! This module provides formatting of R code using external formatters like `air`.
 //!
 //! # TODO
 //! Currently uses a temp file workaround because `air format` doesn't support stdin/stdout.
@@ -9,26 +9,61 @@
 //! When air adds stdin support (e.g., `echo "x<-1" | air format --stdin`), this module
 //! should be updated to pipe directly to the formatter process, avoiding disk I/O overhead.
 
+use crate::config::ReprexFormatter;
 use std::io::Write;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The formatter command to use.
-/// Currently only `air` is supported.
-const FORMATTER_COMMAND: &str = "air";
+/// The user-facing context for a missing formatter diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatterUnavailableContext {
+    /// An explicit `--reprex=format` request.
+    ExplicitCli,
+    /// A configured format mode that will fall back to reprex on mode.
+    ConfiguredMode,
+    /// The interactive `:reprex format` command.
+    MetaCommand,
+}
 
-/// Cached result of formatter availability check.
-static FORMATTER_AVAILABLE: OnceLock<bool> = OnceLock::new();
+/// Build the diagnostic shown when a configured formatter is unavailable.
+pub fn unavailable_message(
+    formatter: ReprexFormatter,
+    context: FormatterUnavailableContext,
+) -> String {
+    let backend = format!(
+        "{} CLI ('{}' command)",
+        formatter.display_name(),
+        formatter.command()
+    );
+    match context {
+        FormatterUnavailableContext::ExplicitCli => format!(
+            "Cannot use --reprex=format: {backend} not found in PATH.\nInstall {} CLI from {}",
+            formatter.display_name(),
+            formatter.install_url()
+        ),
+        FormatterUnavailableContext::ConfiguredMode => format!(
+            "Warning: Reprex format mode is configured but {backend} was not found; using reprex on mode."
+        ),
+        FormatterUnavailableContext::MetaCommand => {
+            format!("Error: Cannot use reprex format mode - {backend} not found in PATH.")
+        }
+    }
+}
 
-/// Check if the air formatter is available on the system.
-pub fn is_formatter_available() -> bool {
-    *FORMATTER_AVAILABLE.get_or_init(|| {
-        Command::new(FORMATTER_COMMAND)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    })
+/// Check if a formatter backend is available on the system.
+pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
+    match formatter {
+        ReprexFormatter::Air => {
+            static AIR_AVAILABLE: OnceLock<bool> = OnceLock::new();
+            *AIR_AVAILABLE.get_or_init(|| {
+                Command::new(formatter.command())
+                    .arg("--version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
+        }
+    }
 }
 
 /// Format R code using air.
@@ -42,7 +77,7 @@ pub fn is_formatter_available() -> bool {
 ///
 /// Once air supports stdin, replace this with:
 /// ```ignore
-/// let output = Command::new("air")
+/// let output = Command::new("<formatter command>")
 ///     .args(["format", "--stdin"])
 ///     .stdin(Stdio::piped())
 ///     .stdout(Stdio::piped())
@@ -50,24 +85,30 @@ pub fn is_formatter_available() -> bool {
 /// output.stdin.write_all(code.as_bytes())?;
 /// let formatted = String::from_utf8(output.wait_with_output()?.stdout)?;
 /// ```
-pub fn format_code(code: &str) -> String {
+pub fn format_code(formatter: ReprexFormatter, code: &str) -> String {
+    match formatter {
+        ReprexFormatter::Air => format_air_code(formatter, code),
+    }
+}
+
+fn format_air_code(formatter: ReprexFormatter, code: &str) -> String {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
         return code.to_string();
     }
 
     // Check if formatter is available
-    if !is_formatter_available() {
+    if !is_formatter_available(formatter) {
         log::debug!(
             "Formatter '{}' not available, skipping format",
-            FORMATTER_COMMAND
+            formatter.command()
         );
         return code.to_string();
     }
 
     // Create temp file for formatting
     // TODO: Replace with stdin pipe when air supports it (posit-dev/air#202)
-    match format_via_temp_file(code) {
+    match format_via_temp_file(formatter, code) {
         Ok(formatted) => formatted,
         Err(e) => {
             log::debug!("Formatting failed: {}, using original code", e);
@@ -79,7 +120,7 @@ pub fn format_code(code: &str) -> String {
 /// Format code by writing to a temp file and running the formatter.
 ///
 /// This is a workaround for formatters that don't support stdin.
-fn format_via_temp_file(code: &str) -> Result<String, FormatterError> {
+fn format_via_temp_file(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     // Create a temp file with .R extension so the formatter recognizes it
     let temp_dir = std::env::temp_dir();
     let temp_path = temp_dir.join("arf-format.R");
@@ -91,7 +132,7 @@ fn format_via_temp_file(code: &str) -> Result<String, FormatterError> {
     drop(file); // Ensure file is closed before formatter reads it
 
     // Run formatter
-    let output = Command::new(FORMATTER_COMMAND)
+    let output = Command::new(formatter.command())
         .arg("format")
         .arg(&temp_path)
         .output()?;
@@ -155,18 +196,54 @@ mod tests {
 
     #[test]
     fn test_format_empty_code() {
-        let result = format_code("");
+        let result = format_code(ReprexFormatter::Air, "");
         assert_eq!(result, "");
 
-        let result = format_code("   ");
+        let result = format_code(ReprexFormatter::Air, "   ");
         assert_eq!(result, "   ");
+    }
+
+    #[test]
+    fn unavailable_explicit_cli_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::ExplicitCli
+            ),
+            @r###"
+Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.
+Install Air CLI from https://github.com/posit-dev/air
+"###
+        );
+    }
+
+    #[test]
+    fn unavailable_configured_mode_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::ConfiguredMode
+            ),
+            @r###"Warning: Reprex format mode is configured but Air CLI ('air' command) was not found; using reprex on mode."###
+        );
+    }
+
+    #[test]
+    fn unavailable_meta_command_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Air,
+                FormatterUnavailableContext::MetaCommand
+            ),
+            @r###"Error: Cannot use reprex format mode - Air CLI ('air' command) not found in PATH."###
+        );
     }
 
     #[test]
     #[ignore] // Requires air to be installed
     fn test_format_simple_assignment() {
         let code = "x<-1+2";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert_eq!(result, "x <- 1 + 2");
     }
 
@@ -174,7 +251,7 @@ mod tests {
     #[ignore] // Requires air to be installed
     fn test_format_function_definition() {
         let code = "f=function(x,y){x+y}";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         // air formats this with proper spacing and indentation
         assert!(result.contains("function(x, y)"));
         assert!(result.contains("x + y"));
@@ -185,12 +262,12 @@ mod tests {
     fn test_format_preserves_trailing_newline_style() {
         // Without trailing newline
         let code = "x <- 1";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert!(!result.ends_with('\n'));
 
         // With trailing newline
         let code = "x <- 1\n";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert!(result.ends_with('\n'));
     }
 }

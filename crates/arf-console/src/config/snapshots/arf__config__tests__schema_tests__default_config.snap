@@ -10,10 +10,7 @@ expression: config
 [startup]
 r_source = "auto"
 show_banner = true
-
-[startup.mode]
-reprex = false
-autoformat = false
+reprex = "off"
 
 [editor]
 mode = "emacs"
@@ -33,7 +30,7 @@ mode_indicator = "prefix"
 
 [prompt.indicators]
 reprex = "[reprex] "
-autoformat = "[format] "
+reprex_format = "[format] "
 
 [prompt.status]
 override_prompt_color = false
@@ -64,8 +61,9 @@ allowed_functions = []
 [r]
 auto_width = true
 
-[mode.reprex]
+[reprex]
 comment = "#> "
+formatter = "air"
 
 [colors.r]
 comment = "DarkGray"

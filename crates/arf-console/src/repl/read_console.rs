@@ -205,9 +205,9 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
             // - Command prompts typically end with "> " (R's default prompt)
             // - Non-standard prompts (menus, etc.) are passed through directly
             let prompt = if r_prompt.starts_with('+') {
-                state.prompt_config.build_cont_prompt()
+                state.prompt_config.build_cont_prompt(state.reprex.mode)
             } else if is_r_command_prompt(r_prompt) {
-                state.prompt_config.build_main_prompt()
+                state.prompt_config.build_main_prompt(state.reprex.mode)
             } else {
                 // Non-standard prompt from R (menu selection, etc.)
                 // Pass through R's actual prompt instead of our configured one
@@ -240,7 +240,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     let save_outcome = history_handle.receipt_outcome();
 
                     // For non-standard prompts (menus, etc.), pass input directly to R
-                    // without any processing (meta commands, shell mode, reprex, autoformat)
+                    // without any processing (meta commands, shell mode, or reprex)
                     if is_menu_prompt {
                         // Deliberately leave pending_history_context alone. This
                         // input was requested by R during an evaluation that is
@@ -258,6 +258,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut state.prompt_config,
+                        &mut state.reprex,
                         &state.r_history,
                         &state.shell_history,
                         &state.r_source_status,
@@ -271,6 +272,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         state.prompt_config.clear_command_duration();
                         let ctx = SessionInfoContext {
                             prompt_config: &state.prompt_config,
+                            reprex: &state.reprex,
                             config_path: &state.config_path,
                             config_status: state.config_status,
                             r_history: &state.r_history,
@@ -316,19 +318,19 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // In reprex mode, strip lines starting with "#>" (reprex output comments)
                     // This allows users to paste reprex output directly without duplicate output
                     // Keep original for line count calculation in clear_input_lines
-                    let (original_line, line) = if state.prompt_config.is_reprex_enabled() {
+                    let (original_line, line) = if state.reprex.is_enabled() {
                         (line.clone(), strip_reprex_output(&line))
                     } else {
                         (line.clone(), line)
                     };
 
-                    // Format code if autoformat is enabled
-                    let code = state.prompt_config.maybe_format_code(&line);
+                    // Format code when format mode is enabled.
+                    let code = state.reprex.maybe_format_code(&line);
 
                     // In reprex mode, clear the prompt and input lines
                     // Show the (possibly formatted) code
                     // Use original_line for line count since that's what was displayed on terminal
-                    if state.prompt_config.is_reprex_enabled() && !code.is_empty() {
+                    if state.reprex.is_enabled() && !code.is_empty() {
                         clear_input_lines(&original_line, &code);
                     }
 

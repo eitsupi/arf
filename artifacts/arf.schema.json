@@ -110,23 +110,14 @@
         }
       }
     },
-    "mode": {
-      "description": "Mode-specific static configuration (not changeable at runtime).\nFor initial mode state (enabled/disabled), see `startup.mode`.",
-      "$ref": "#/$defs/ModeConfig",
-      "default": {
-        "reprex": {
-          "comment": "#> "
-        }
-      }
-    },
     "prompt": {
       "$ref": "#/$defs/PromptConfig",
       "default": {
         "continuation": "+  ",
         "format": "{status}R {version}> ",
         "indicators": {
-          "autoformat": "[format] ",
-          "reprex": "[reprex] "
+          "reprex": "[reprex] ",
+          "reprex_format": "[format] "
         },
         "mode_indicator": "prefix",
         "shell_format": "[{shell}] $ ",
@@ -153,14 +144,19 @@
         "auto_width": true
       }
     },
+    "reprex": {
+      "description": "Static reprex configuration.",
+      "$ref": "#/$defs/ReprexConfig",
+      "default": {
+        "comment": "#> ",
+        "formatter": "air"
+      }
+    },
     "startup": {
       "$ref": "#/$defs/StartupConfig",
       "default": {
-        "mode": {
-          "autoformat": false,
-          "reprex": false
-        },
         "r_source": "auto",
+        "reprex": "off",
         "show_banner": true
       }
     }
@@ -1709,15 +1705,15 @@
       "description": "Text strings for mode indicators shown in the prompt.\n\nThese are the prefix/suffix texts that indicate special modes like reprex.",
       "type": "object",
       "properties": {
-        "autoformat": {
-          "description": "Indicator text for auto-format mode (default: \"[format] \").\nShown when both reprex mode and auto-format are enabled.",
-          "type": "string",
-          "default": "[format] "
-        },
         "reprex": {
           "description": "Indicator text for reprex mode (default: \"[reprex] \").",
           "type": "string",
           "default": "[reprex] "
+        },
+        "reprex_format": {
+          "description": "Indicator text for formatted reprex mode (default: \"[format] \").",
+          "type": "string",
+          "default": "[format] "
         }
       }
     },
@@ -1742,19 +1738,6 @@
           "default": [],
           "items": {
             "type": "string"
-          }
-        }
-      }
-    },
-    "ModeConfig": {
-      "description": "Mode configuration container.\n\nContains static configuration for modes like reprex.\nThe initial enabled state of modes is configured in `startup.mode`.",
-      "type": "object",
-      "properties": {
-        "reprex": {
-          "description": "Reprex mode static configuration.",
-          "$ref": "#/$defs/ReprexConfig",
-          "default": {
-            "comment": "#> "
           }
         }
       }
@@ -1797,8 +1780,8 @@
           "description": "Custom text for mode indicators.",
           "$ref": "#/$defs/Indicators",
           "default": {
-            "autoformat": "[format] ",
-            "reprex": "[reprex] "
+            "reprex": "[reprex] ",
+            "reprex_format": "[format] "
           }
         },
         "mode_indicator": {
@@ -1980,15 +1963,47 @@
       ]
     },
     "ReprexConfig": {
-      "description": "Reprex mode static configuration.\n\nThese settings are not changeable at runtime.\nFor enabling/disabling reprex mode, see `startup.mode.reprex`.",
+      "description": "Reprex mode static configuration.\n\nThese settings are not changeable at runtime.",
       "type": "object",
       "properties": {
         "comment": {
           "description": "Comment prefix for output (default: \"#> \").",
           "type": "string",
           "default": "#> "
+        },
+        "formatter": {
+          "description": "Formatter backend (currently only `air` is supported).",
+          "$ref": "#/$defs/ReprexFormatter",
+          "default": "air"
         }
       }
+    },
+    "ReprexFormatter": {
+      "description": "Formatter backend used by reprex format mode.\n\nAir is the only supported backend for now; additional backends are\nintentionally deferred until their integration is designed.",
+      "type": "string",
+      "enum": [
+        "air"
+      ]
+    },
+    "ReprexMode": {
+      "description": "Reprex execution mode.",
+      "oneOf": [
+        {
+          "description": "Evaluate normally.",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "Evaluate and show reprex output.",
+          "type": "string",
+          "const": "on"
+        },
+        {
+          "description": "Format code with the configured formatter before reprex evaluation.",
+          "type": "string",
+          "const": "format"
+        }
+      ]
     },
     "ShellCompletionConfig": {
       "description": "Configuration for shell mode completion.\n\nControls what is suggested when Tab is pressed in shell mode.",
@@ -2079,39 +2094,20 @@
       "description": "Startup configuration.\n\nSettings in this section are evaluated once at startup and do not change during the session.",
       "type": "object",
       "properties": {
-        "mode": {
-          "description": "Initial mode settings (reprex, autoformat).",
-          "$ref": "#/$defs/StartupModeConfig",
-          "default": {
-            "autoformat": false,
-            "reprex": false
-          }
-        },
         "r_source": {
           "description": "How to locate R installation.",
           "$ref": "#/$defs/RSource",
           "default": "auto"
         },
+        "reprex": {
+          "description": "Initial reprex mode.",
+          "$ref": "#/$defs/ReprexMode",
+          "default": "off"
+        },
         "show_banner": {
           "description": "Show startup banner.",
           "type": "boolean",
           "default": true
-        }
-      }
-    },
-    "StartupModeConfig": {
-      "description": "Initial mode configuration.\n\nThese modes can be toggled at runtime via meta commands, but\nthis configuration determines their initial state at startup.",
-      "type": "object",
-      "properties": {
-        "autoformat": {
-          "description": "Enable auto-formatting of R code in reprex mode (requires Air CLI).",
-          "type": "boolean",
-          "default": false
-        },
-        "reprex": {
-          "description": "Enable reprex mode (no prompt, output prefixed with comment).",
-          "type": "boolean",
-          "default": false
         }
       }
     },

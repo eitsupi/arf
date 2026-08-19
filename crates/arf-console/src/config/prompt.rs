@@ -154,16 +154,15 @@ pub enum ModeIndicatorPosition {
 pub struct Indicators {
     /// Indicator text for reprex mode (default: "[reprex] ").
     pub reprex: String,
-    /// Indicator text for auto-format mode (default: "[format] ").
-    /// Shown when both reprex mode and auto-format are enabled.
-    pub autoformat: String,
+    /// Indicator text for formatted reprex mode (default: "[format] ").
+    pub reprex_format: String,
 }
 
 impl Default for Indicators {
     fn default() -> Self {
         Self {
             reprex: "[reprex] ".to_string(),
-            autoformat: "[format] ".to_string(),
+            reprex_format: "[format] ".to_string(),
         }
     }
 }

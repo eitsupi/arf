@@ -366,6 +366,50 @@ fn test_top_level_config_before_config_check_rejected_with_nested_corrected_form
 }
 
 #[test]
+fn test_config_check_reports_all_removed_reprex_keys() {
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(
+        config_file,
+        r##"[startup.mode]
+reprex = true
+
+[mode.reprex]
+comment = "#> "
+
+[reprex]
+enabled = true
+autoformat = true
+
+[prompt.indicators]
+autoformat = true
+"##
+    )
+    .expect("Failed to write config file");
+
+    let output = sanitized_arf_command()
+        .args([
+            "config",
+            "check",
+            "--config",
+            config_file.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf config check");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    insta::assert_snapshot!(stderr, @r###"
+Error: Config file has errors:
+
+  [startup.mode] was removed; use [startup] reprex = "off"|"on"|"format"
+  [mode.reprex] was removed; use [reprex]
+  reprex.enabled was removed; use startup.reprex
+  reprex.autoformat was removed; use startup.reprex
+  prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format
+"###);
+}
+
+#[test]
 fn test_top_level_no_banner_before_nested_ipc_rejected() {
     assert_top_level_scope_error(
         &["--no-banner", "ipc", "list"],
@@ -623,7 +667,7 @@ fn test_eval_pipe_error() {
 #[test]
 fn test_eval_reprex_mode() {
     let output = sanitized_arf_command()
-        .args(["--reprex", "-e", "1 + 1"])
+        .args(["--reprex", "on", "-e", "1 + 1"])
         .output()
         .expect("Failed to run arf --reprex -e");
 
@@ -652,7 +696,7 @@ fn test_eval_reprex_custom_comment() {
     let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
     writeln!(
         config_file,
-        r###"[mode.reprex]
+        r###"[reprex]
 comment = "## "
 "###
     )
@@ -663,6 +707,7 @@ comment = "## "
             "--config",
             config_file.path().to_str().unwrap(),
             "--reprex",
+            "on",
             "-e",
             "1 + 1",
         ])
@@ -694,7 +739,7 @@ comment = "## "
 #[test]
 fn test_eval_reprex_cat_output() {
     let output = sanitized_arf_command()
-        .args(["--reprex", "-e", r#"cat("hello")"#])
+        .args(["--reprex", "on", "-e", r#"cat("hello")"#])
         .output()
         .expect("Failed to run arf --reprex -e cat()");
 
@@ -722,7 +767,7 @@ fn test_eval_reprex_cat_output() {
 #[test]
 fn test_eval_reprex_cat_with_newline() {
     let output = sanitized_arf_command()
-        .args(["--reprex", "-e", r#"cat("hello\n")"#])
+        .args(["--reprex", "on", "-e", r#"cat("hello\n")"#])
         .output()
         .expect("Failed to run arf --reprex -e cat() with newline");
 
@@ -801,7 +846,7 @@ fn test_script_file_reprex() {
     writeln!(file, "1 + 1").expect("Failed to write");
 
     let output = sanitized_arf_command()
-        .arg("--reprex")
+        .args(["--reprex", "on"])
         .arg("-f")
         .arg(file.path())
         .output()
@@ -887,7 +932,7 @@ fn test_script_file_stdin() {
 #[test]
 fn test_script_file_stdin_reprex() {
     let mut child = sanitized_arf_command()
-        .args(["--reprex", "-f", "-"])
+        .args(["--reprex", "on", "-f", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

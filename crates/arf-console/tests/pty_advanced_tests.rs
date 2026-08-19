@@ -24,7 +24,7 @@ use std::process::Command;
 /// This is a regression test for the bug where clearing the prompt used the
 /// stripped line count instead of the original line count.
 ///
-/// Requires Air CLI for autoformat functionality.
+/// Requires Air CLI for reprex format functionality.
 #[test]
 #[cfg(unix)]
 fn test_pty_reprex_paste_strips_output_lines() {
@@ -38,18 +38,18 @@ fn test_pty_reprex_paste_strips_output_lines() {
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    // Enable autoformat and reprex mode
     terminal
-        .send_line(":autoformat")
-        .expect("Should send :autoformat");
+        .send_line(":reprex on")
+        .expect("Should send :reprex on");
     terminal
-        .clear_and_expect("Autoformat enabled")
-        .expect("Should show autoformat message");
-
-    terminal.send_line(":reprex").expect("Should send :reprex");
-    terminal
-        .clear_and_expect("Reprex mode enabled")
+        .clear_and_expect("Reprex: on")
         .expect("Should show reprex mode message");
+    terminal
+        .send_line(":reprex format")
+        .expect("Should send :reprex format");
+    terminal
+        .clear_and_expect("Reprex: format")
+        .expect("Should show reprex format message");
 
     // Paste reprex output using bracketed paste
     // This simulates pasting:

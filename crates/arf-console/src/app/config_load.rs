@@ -54,6 +54,12 @@ pub(crate) fn load_config_with_fallback(
                     source.to_string(),
                     ConfigStatus::ParseError,
                 ),
+                ConfigLoadError::Validation { path, message } => (
+                    path.display().to_string(),
+                    mask_home_path(path),
+                    message.clone(),
+                    ConfigStatus::ParseError,
+                ),
             };
             eprintln!(
                 "Warning: Failed to load config from {}: {}",
@@ -94,6 +100,9 @@ pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> C
                 ConfigLoadError::Parse { path, source } => {
                     (mask_home_path(path), source.to_string())
                 }
+                ConfigLoadError::Validation { path, message } => {
+                    (mask_home_path(path), message.clone())
+                }
             };
             eprintln!(
                 "Warning: Failed to load config from {}: {}",
@@ -133,6 +142,9 @@ pub(crate) fn load_config_collecting_warnings(
                 }
                 ConfigLoadError::Parse { path, source } => {
                     (mask_home_path(path), source.to_string())
+                }
+                ConfigLoadError::Validation { path, message } => {
+                    (mask_home_path(path), message.clone())
                 }
             };
             warnings.push(format!(
@@ -180,6 +192,9 @@ pub(crate) fn load_config_collecting_diagnostics(
                 }
                 ConfigLoadError::Parse { path, source } => {
                     ("config.parse_failed", path, source.to_string())
+                }
+                ConfigLoadError::Validation { path, message } => {
+                    ("config.parse_failed", path, message)
                 }
             };
             warnings.push(ConfigLoadWarning {

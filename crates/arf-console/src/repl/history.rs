@@ -106,6 +106,7 @@ mod tests {
         VolatileHistoryReason,
     };
     use crate::repl::meta_command::process_meta_command;
+    use crate::repl::reprex::ReprexRuntime;
     use crate::repl::state::{PendingHistoryContext, PromptRuntimeConfig};
     use reedline::{
         FileBackedHistory, History, HistoryItem, SearchDirection, SearchQuery, SqliteBackedHistory,
@@ -359,6 +360,11 @@ mod tests {
             process_meta_command(
                 input,
                 &mut prompt,
+                &mut ReprexRuntime::new(
+                    crate::config::ReprexMode::Off,
+                    "#> ",
+                    crate::config::ReprexFormatter::Air,
+                ),
                 &HistoryRuntime::Unavailable {
                     failure: HistoryFailureDetail::test_memory(),
                     previous_failure: None,

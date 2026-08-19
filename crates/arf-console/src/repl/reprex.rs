@@ -1,10 +1,48 @@
 //! Reprex mode utilities.
 
+use crate::config::{ReprexFormatter, ReprexMode};
+use crate::external::formatter;
+
 use crossterm::{
     ExecutableCommand, cursor,
     terminal::{self, ClearType},
 };
 use std::io::{self, Write};
+
+/// Runtime reprex settings owned by the REPL state.
+#[derive(Debug, Clone)]
+pub struct ReprexRuntime {
+    pub mode: ReprexMode,
+    pub comment: String,
+    pub formatter: ReprexFormatter,
+}
+
+impl ReprexRuntime {
+    pub fn new(mode: ReprexMode, comment: impl Into<String>, formatter: ReprexFormatter) -> Self {
+        Self {
+            mode,
+            comment: comment.into(),
+            formatter,
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.mode != ReprexMode::Off
+    }
+
+    pub fn set_mode(&mut self, mode: ReprexMode) {
+        self.mode = mode;
+        arf_libr::set_reprex_mode(mode != ReprexMode::Off, &self.comment);
+    }
+
+    pub fn maybe_format_code(&self, code: &str) -> String {
+        if self.mode == ReprexMode::Format {
+            formatter::format_code(self.formatter, code)
+        } else {
+            code.to_string()
+        }
+    }
+}
 
 /// Strip reprex output comment lines from input.
 ///

@@ -54,18 +54,8 @@ const META_COMMANDS: &[MetaCommandDef] = &[
     },
     MetaCommandDef {
         name: "reprex",
-        description: "Toggle reprex mode",
-        takes_argument: false,
-    },
-    MetaCommandDef {
-        name: "autoformat",
-        description: "Toggle auto-formatting (requires Air CLI)",
-        takes_argument: false,
-    },
-    MetaCommandDef {
-        name: "format",
-        description: "Toggle auto-formatting (alias)",
-        takes_argument: false,
+        description: "Set reprex mode (on, off, or format)",
+        takes_argument: true,
     },
     MetaCommandDef {
         name: "commands",
@@ -160,15 +150,7 @@ impl MetaCommandCompleter {
     /// Commands excluded from meta completion while in shell mode.
     pub(crate) fn shell_mode_exclusions() -> Vec<&'static str> {
         vec![
-            "shell",
-            "system",
-            "autoformat",
-            "format",
-            "restart",
-            "reprex",
-            "switch",
-            "h",
-            "help",
+            "shell", "system", "restart", "reprex", "switch", "h", "help",
         ]
     }
 
@@ -278,6 +260,16 @@ impl MetaCommandCompleter {
                     self.complete_history_subcommands(pos, "")
                 } else if cmd == "ipc" {
                     self.complete_ipc_subcommands(pos, "")
+                } else if cmd == "reprex" {
+                    self.complete_targets(
+                        pos,
+                        "",
+                        &[
+                            ("on", "Enable reprex output"),
+                            ("off", "Disable reprex output"),
+                            ("format", "Format code before reprex evaluation"),
+                        ],
+                    )
                 } else {
                     vec![]
                 }
@@ -292,6 +284,16 @@ impl MetaCommandCompleter {
                     self.complete_history_subcommands(pos, partial)
                 } else if cmd == "ipc" {
                     self.complete_ipc_subcommands(pos, partial)
+                } else if cmd == "reprex" {
+                    self.complete_targets(
+                        pos,
+                        partial,
+                        &[
+                            ("on", "Enable reprex output"),
+                            ("off", "Disable reprex output"),
+                            ("format", "Format code before reprex evaluation"),
+                        ],
+                    )
                 } else {
                     vec![]
                 }
@@ -600,9 +602,15 @@ mod tests {
     #[test]
     fn test_meta_command_completer_no_subcommands() {
         let mut completer = MetaCommandCompleter::new();
-        // All commands have no subcommands
+        // Reprex accepts the format subcommand.
         let suggestions = completion_suggestions(&mut completer, ":reprex ", 8);
-        assert!(suggestions.is_empty());
+        assert_eq!(
+            suggestions
+                .iter()
+                .map(|s| s.value.as_str())
+                .collect::<Vec<_>>(),
+            ["on", "off", "format"]
+        );
         let suggestions = completion_suggestions(&mut completer, ":commands ", 10);
         assert!(suggestions.is_empty());
     }
@@ -647,11 +655,6 @@ mod tests {
         // These should be excluded in Shell mode
         assert!(!values.contains(&"shell"), "`:shell` should be excluded");
         assert!(!values.contains(&"system"), "`:system` should be excluded");
-        assert!(
-            !values.contains(&"autoformat"),
-            "`:autoformat` should be excluded"
-        );
-        assert!(!values.contains(&"format"), "`:format` should be excluded");
         assert!(
             !values.contains(&"restart"),
             "`:restart` should be excluded"
@@ -717,18 +720,7 @@ mod tests {
         let suggestions = completion_suggestions(&mut completer, ":", 1);
 
         // Commands without arguments
-        for cmd_name in &[
-            "shell",
-            "r",
-            "reprex",
-            "autoformat",
-            "format",
-            "commands",
-            "cmds",
-            "restart",
-            "quit",
-            "exit",
-        ] {
+        for cmd_name in &["shell", "r", "commands", "cmds", "restart", "quit", "exit"] {
             if let Some(cmd) = suggestions.iter().find(|s| s.value == *cmd_name) {
                 assert!(
                     !cmd.append_whitespace,
@@ -777,14 +769,11 @@ mod tests {
         // - "r" at position 0
         // - "reprex" at position 0
         // - "restart" at position 0
-        // - "autoformat" at position 6
-        // - "format" at position 2
+        // Formatter aliases are not completion candidates.
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"r"));
         assert!(values.contains(&"reprex"));
         assert!(values.contains(&"restart"));
-        assert!(values.contains(&"autoformat"));
-        assert!(values.contains(&"format"));
 
         // Verify match_indices are correct for each
         for suggestion in &suggestions {
@@ -823,31 +812,6 @@ mod tests {
             restart.match_indices,
             Some(vec![0, 2, 3]),
             "`:rst` should highlight positions 0, 2, 3 in `restart`"
-        );
-    }
-
-    #[test]
-    fn test_meta_command_fuzzy_matching_af_autoformat() {
-        let mut completer = MetaCommandCompleter::new();
-
-        // ":af" should fuzzy match "autoformat"
-        let suggestions = completion_suggestions(&mut completer, ":af", 3);
-        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
-        assert!(
-            values.contains(&"autoformat"),
-            "`:af` should fuzzy match `autoformat`, got: {:?}",
-            values
-        );
-
-        // Check match_indices
-        let autoformat = suggestions
-            .iter()
-            .find(|s| s.value == "autoformat")
-            .unwrap();
-        assert_eq!(
-            autoformat.match_indices,
-            Some(vec![0, 4]),
-            "`:af` should highlight positions 0, 4 in `autoformat`"
         );
     }
 
@@ -1055,11 +1019,17 @@ mod tests {
     }
 
     #[test]
-    fn test_meta_command_switch_bang_no_subcommands_for_reprex() {
-        // ":reprex " should have no subcommands (no false match from strip_suffix)
+    fn test_meta_command_reprex_format_subcommand() {
+        // ":reprex " offers all supported subcommands.
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completion_suggestions(&mut completer, ":reprex ", 8);
-        assert!(suggestions.is_empty(), ":reprex should have no subcommands");
+        assert_eq!(
+            suggestions
+                .iter()
+                .map(|s| s.value.as_str())
+                .collect::<Vec<_>>(),
+            ["on", "off", "format"]
+        );
     }
 
     #[test]

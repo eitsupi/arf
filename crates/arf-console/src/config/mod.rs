@@ -6,9 +6,9 @@ mod editor;
 mod experimental;
 mod history;
 mod ipc;
-mod mode;
 pub(crate) mod prompt;
 mod r;
+mod reprex;
 mod startup;
 
 pub use colors::{ColorsConfig, MetaColorConfig, RColorConfig, StatusColorConfig, ViColorConfig};
@@ -19,14 +19,16 @@ pub use experimental::{
 };
 pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;
-pub use mode::ModeConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
 pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
 pub use r::RConfig;
-pub use startup::{RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, StartupConfig};
+pub use reprex::{ReprexConfig, ReprexFormatter};
+pub use startup::{
+    RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -57,6 +59,8 @@ pub enum ConfigLoadError {
         source: toml::de::Error,
         path: PathBuf,
     },
+    /// A removed configuration key was found.
+    Validation { message: String, path: PathBuf },
 }
 
 /// Configuration metadata collected while loading the file contents.
@@ -86,6 +90,9 @@ impl std::fmt::Display for ConfigLoadError {
                     source
                 )
             }
+            ConfigLoadError::Validation { message, path } => {
+                write!(f, "Invalid config file {}: {}", path.display(), message)
+            }
         }
     }
 }
@@ -95,6 +102,7 @@ impl std::error::Error for ConfigLoadError {
         match self {
             ConfigLoadError::Read { source, .. } => Some(source),
             ConfigLoadError::Parse { source, .. } => Some(source),
+            ConfigLoadError::Validation { .. } => None,
         }
     }
 }
@@ -116,9 +124,8 @@ pub struct Config {
     pub ipc: IpcConfig,
     /// R runtime configuration.
     pub r: RConfig,
-    /// Mode-specific static configuration (not changeable at runtime).
-    /// For initial mode state (enabled/disabled), see `startup.mode`.
-    pub mode: ModeConfig,
+    /// Static reprex configuration.
+    pub reprex: ReprexConfig,
     pub colors: ColorsConfig,
     #[serde(default)]
     pub experimental: ExperimentalConfig,
@@ -227,6 +234,12 @@ pub(crate) fn load_config_from_path_with_provenance(
         .get("startup")
         .and_then(|startup| startup.get("r_source"))
         .is_some();
+    if let Some(message) = removed_reprex_keys(&document) {
+        return Err(ConfigLoadError::Validation {
+            message,
+            path: path.to_path_buf(),
+        });
+    }
     let mut config = toml::from_str::<Config>(&content).map_err(|e| ConfigLoadError::Parse {
         source: e,
         path: path.to_path_buf(),
@@ -242,6 +255,45 @@ pub(crate) fn load_config_from_path_with_provenance(
             history_migration_warning: migration_warning,
         }),
     ))
+}
+
+fn removed_reprex_keys(document: &toml::Value) -> Option<String> {
+    let mut messages = Vec::new();
+
+    if document
+        .get("startup")
+        .and_then(|value| value.get("mode"))
+        .is_some()
+    {
+        messages
+            .push("[startup.mode] was removed; use [startup] reprex = \"off\"|\"on\"|\"format\"");
+    }
+    if document
+        .get("mode")
+        .and_then(|value| value.get("reprex"))
+        .is_some()
+    {
+        messages.push("[mode.reprex] was removed; use [reprex]");
+    }
+    if let Some(table) = document.get("reprex").and_then(toml::Value::as_table) {
+        if table.contains_key("enabled") {
+            messages.push("reprex.enabled was removed; use startup.reprex");
+        }
+        if table.contains_key("autoformat") {
+            messages.push("reprex.autoformat was removed; use startup.reprex");
+        }
+    }
+    if document
+        .get("prompt")
+        .and_then(|value| value.get("indicators"))
+        .and_then(toml::Value::as_table)
+        .is_some_and(|table| table.contains_key("autoformat"))
+    {
+        messages
+            .push("prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format");
+    }
+
+    (!messages.is_empty()).then(|| messages.join("\n  "))
 }
 
 fn history_migration_warning(document: &toml::Value) -> Option<String> {
@@ -428,10 +480,7 @@ auto_match = false
 [startup]
 r_source = "rig"
 show_banner = false
-
-[startup.mode]
-reprex = true
-autoformat = true
+reprex = "on"
 
 [editor]
 mode = "vi"
@@ -445,8 +494,9 @@ continuation = ".. "
 enabled = true
 timeout_ms = 100
 
-[mode.reprex]
+[reprex]
 comment = "# "
+formatter = "air"
 "##;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(matches!(
@@ -457,9 +507,97 @@ comment = "# "
         assert_eq!(config.editor.mode, EditorMode::Vi);
         assert!(!config.editor.auto_match);
         assert_eq!(config.prompt.format, "R> ");
-        assert!(config.startup.mode.reprex);
-        assert!(config.startup.mode.autoformat);
-        assert_eq!(config.mode.reprex.comment, "# ");
+        assert_eq!(config.startup.reprex, ReprexMode::On);
+        assert_eq!(config.reprex.comment, "# ");
+        assert_eq!(config.reprex.formatter, ReprexFormatter::Air);
+    }
+
+    #[test]
+    fn reprex_formatter_rejects_unsupported_backends() {
+        for formatter in ["arity", "unknown"] {
+            let source = format!("[reprex]\nformatter = \"{formatter}\"");
+            assert!(
+                toml::from_str::<Config>(&source).is_err(),
+                "unsupported formatter should be rejected: {formatter}"
+            );
+        }
+    }
+
+    #[test]
+    fn reprex_formatter_metadata_describes_air_backend() {
+        let formatter = ReprexFormatter::Air;
+        assert_eq!(formatter.display_name(), "Air");
+        assert_eq!(formatter.command(), "air");
+        assert_eq!(formatter.install_url(), "https://github.com/posit-dev/air");
+        assert_eq!(formatter.to_string(), "air");
+    }
+
+    #[test]
+    fn removed_reprex_configuration_keys_are_rejected_explicitly() {
+        for source in [
+            r#"[startup.mode]
+reprex = true"#,
+            r##"[mode.reprex]
+comment = "#> ""##,
+            r#"[reprex]
+enabled = true"#,
+        ] {
+            let document: toml::Value = toml::from_str(source).unwrap();
+            let message = removed_reprex_keys(&document).expect("removed key should be found");
+            assert!(!message.is_empty());
+        }
+    }
+
+    #[test]
+    fn removed_reprex_configuration_keys_are_all_reported() {
+        let source = r##"
+[startup.mode]
+reprex = true
+
+[mode.reprex]
+comment = "#> "
+
+[reprex]
+enabled = true
+autoformat = true
+
+[prompt.indicators]
+autoformat = true
+"##;
+        let document: toml::Value = toml::from_str(source).unwrap();
+        let message = removed_reprex_keys(&document).expect("removed keys should be found");
+
+        insta::assert_snapshot!(message, @r###"
+[startup.mode] was removed; use [startup] reprex = "off"|"on"|"format"
+  [mode.reprex] was removed; use [reprex]
+  reprex.enabled was removed; use startup.reprex
+  reprex.autoformat was removed; use startup.reprex
+  prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format
+"###);
+    }
+
+    #[test]
+    fn removed_reprex_configuration_keys_are_rejected_by_file_loader() {
+        let cases = [
+            r#"[startup.mode]
+reprex = true"#,
+            r##"[mode.reprex]
+comment = "#> ""##,
+            r#"[reprex]
+enabled = true"#,
+            r#"[reprex]
+autoformat = true"#,
+        ];
+
+        for source in cases {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), source).unwrap();
+            let error = load_config_from_path(file.path()).expect_err(source);
+            assert!(
+                matches!(error, ConfigLoadError::Validation { .. }),
+                "removed key must fail validation through the loader: {source}"
+            );
+        }
     }
 
     #[test]
@@ -512,7 +650,7 @@ mode = "emacs"
         let config = Config::default();
         assert_eq!(config.prompt.mode_indicator, ModeIndicatorPosition::Prefix);
         assert_eq!(config.prompt.indicators.reprex, "[reprex] ");
-        assert_eq!(config.prompt.indicators.autoformat, "[format] ");
+        assert_eq!(config.prompt.indicators.reprex_format, "[format] ");
     }
 
     #[test]
@@ -935,16 +1073,16 @@ allowed_functions = ["mean", "stats::median", "+"]
             "Should have show_banner in startup section"
         );
 
-        // Should have [startup.mode] section
+        // Reprex mode is part of the startup section.
         assert!(
-            config_str.contains("[startup.mode]"),
-            "Should have [startup.mode] section"
+            config_str.contains("reprex = \"off\""),
+            "Should have reprex mode in startup section"
         );
 
-        // Should have [mode.reprex] section
+        // Should have [reprex] section
         assert!(
-            config_str.contains("[mode.reprex]"),
-            "Should have [mode.reprex] section"
+            config_str.contains("[reprex]"),
+            "Should have [reprex] section"
         );
 
         // Should NOT have old sections
@@ -1093,16 +1231,16 @@ allowed_functions = ["mean", "stats::median", "+"]
                         .is_some_and(|required| required.iter().any(|name| name == "dir"))
             }));
 
-            // Should have startup section (contains r_source, show_banner, mode)
+            // Should have startup section (contains r_source, show_banner, reprex)
             assert!(
                 properties.get("startup").is_some(),
                 "Schema should have startup section"
             );
 
-            // Should have mode section (contains reprex static config)
+            // Should have reprex section (contains static configuration)
             assert!(
-                properties.get("mode").is_some(),
-                "Schema should have mode section"
+                properties.get("reprex").is_some(),
+                "Schema should have reprex section"
             );
 
             // Should have other sections
@@ -1129,8 +1267,8 @@ allowed_functions = ["mean", "stats::median", "+"]
                 "Schema should NOT have general section"
             );
             assert!(
-                properties.get("reprex").is_none(),
-                "reprex should be in mode section, not top-level"
+                properties.get("reprex").is_some(),
+                "reprex should be in its top-level section"
             );
             assert!(
                 properties.get("r_version").is_none(),
