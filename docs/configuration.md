@@ -101,7 +101,7 @@ auto_width = true          # Sync R's options(width) with terminal size
 
 [reprex]
 comment = "#> "            # Comment prefix for reprex output
-formatter = "air"          # "air" (>= 0.9.0) or "arity" (>= 0.18.0)
+formatter = "auto"         # "auto", "air" (>= 0.9.0), or "arity" (>= 0.18.0)
 
 # Syntax highlighting colors
 [colors.r]
@@ -550,6 +550,9 @@ symbol = { insert = "", normal = "" }
 
 arf supports three reprex modes: `off`, `on`, and `format`. The `format` mode
 formats R code before reprex evaluation using the configured formatter backend.
+The default `formatter = "auto"` selector prefers Air and then Arity when both
+are available. Explicit `air` and `arity` selections are strict and never
+fall back to the other backend.
 The supported backends are [Air](https://github.com/posit-dev/air) 0.9.0 or later
 and [Arity](https://github.com/jolars/arity) 0.18.0 or later. Air receives code
 over stdin with the virtual path `arf-reprex.R` and `--force`, preserving project
@@ -580,7 +583,7 @@ Select the mode during a session using the explicit meta command:
 ```
 :reprex on
 :reprex off
-:reprex format  # Requires the configured formatter (Air >= 0.9.0 or Arity >= 0.18.0)
+:reprex format  # Requires the configured formatter (auto prefers Air, then Arity)
 ```
 
 ## R Source Configuration

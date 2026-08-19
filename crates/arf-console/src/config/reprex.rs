@@ -6,18 +6,37 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Formatter backend used by reprex format mode.
-///
-/// Supported external formatter backends for reprex format mode.
+/// Formatter backend selector used by reprex format mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReprexFormatter {
     #[default]
+    Auto,
     Air,
     Arity,
 }
 
-impl ReprexFormatter {
+impl fmt::Display for ReprexFormatter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Auto => "auto",
+            Self::Air => "air",
+            Self::Arity => "arity",
+        })
+    }
+}
+
+/// Resolved executable formatter backend.
+///
+/// This type deliberately has no `Auto` variant: command invocation and code
+/// formatting always operate on a concrete backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatterBackend {
+    Air,
+    Arity,
+}
+
+impl FormatterBackend {
     /// Human-readable backend name for diagnostics.
     pub const fn display_name(self) -> &'static str {
         match self {
@@ -51,7 +70,7 @@ impl ReprexFormatter {
     }
 }
 
-impl fmt::Display for ReprexFormatter {
+impl fmt::Display for FormatterBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.command())
     }
@@ -65,7 +84,7 @@ impl fmt::Display for ReprexFormatter {
 pub struct ReprexConfig {
     /// Comment prefix for output (default: "#> ").
     pub comment: String,
-    /// Formatter backend (`air` or `arity`).
+    /// Formatter selector (`auto`, `air`, or `arity`).
     pub formatter: ReprexFormatter,
 }
 
@@ -73,7 +92,7 @@ impl Default for ReprexConfig {
     fn default() -> Self {
         ReprexConfig {
             comment: "#> ".to_string(),
-            formatter: ReprexFormatter::Air,
+            formatter: ReprexFormatter::Auto,
         }
     }
 }

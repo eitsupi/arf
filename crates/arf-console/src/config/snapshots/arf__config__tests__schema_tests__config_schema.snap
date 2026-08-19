@@ -153,7 +153,7 @@ expression: schema
       "$ref": "#/$defs/ReprexConfig",
       "default": {
         "comment": "#> ",
-        "formatter": "air"
+        "formatter": "auto"
       }
     },
     "startup": {
@@ -1976,16 +1976,17 @@ expression: schema
           "default": "#> "
         },
         "formatter": {
-          "description": "Formatter backend (`air` or `arity`).",
+          "description": "Formatter selector (`auto`, `air`, or `arity`).",
           "$ref": "#/$defs/ReprexFormatter",
-          "default": "air"
+          "default": "auto"
         }
       }
     },
     "ReprexFormatter": {
-      "description": "Formatter backend used by reprex format mode.\n\nSupported external formatter backends for reprex format mode.",
+      "description": "Formatter backend selector used by reprex format mode.",
       "type": "string",
       "enum": [
+        "auto",
         "air",
         "arity"
       ]

@@ -25,7 +25,7 @@ pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
 pub use r::RConfig;
-pub use reprex::{ReprexConfig, ReprexFormatter};
+pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
     RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,
 };
@@ -420,6 +420,7 @@ mod tests {
             RSource::Mode(RSourceMode::Auto)
         ));
         assert!(config.startup.show_banner);
+        assert_eq!(config.reprex.formatter, ReprexFormatter::Auto);
     }
 
     #[test]
@@ -513,8 +514,9 @@ formatter = "air"
     }
 
     #[test]
-    fn reprex_formatter_accepts_supported_backends() {
+    fn reprex_formatter_accepts_supported_selectors() {
         for (source, expected) in [
+            ("[reprex]\nformatter = \"auto\"", ReprexFormatter::Auto),
             ("[reprex]\nformatter = \"air\"", ReprexFormatter::Air),
             ("[reprex]\nformatter = \"arity\"", ReprexFormatter::Arity),
         ] {
@@ -531,7 +533,7 @@ formatter = "air"
 
     #[test]
     fn reprex_formatter_metadata_describes_air_backend() {
-        let formatter = ReprexFormatter::Air;
+        let formatter = FormatterBackend::Air;
         assert_eq!(formatter.display_name(), "Air");
         assert_eq!(formatter.command(), "air");
         assert_eq!(formatter.install_url(), "https://github.com/posit-dev/air");
@@ -541,7 +543,7 @@ formatter = "air"
 
     #[test]
     fn reprex_formatter_metadata_describes_arity_backend() {
-        let formatter = ReprexFormatter::Arity;
+        let formatter = FormatterBackend::Arity;
         assert_eq!(formatter.display_name(), "Arity");
         assert_eq!(formatter.command(), "arity");
         assert_eq!(formatter.install_url(), "https://github.com/jolars/arity");

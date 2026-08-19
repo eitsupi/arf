@@ -77,17 +77,24 @@ pub fn process_meta_command(
                 Some(MetaCommandResult::Handled)
             }
             "format" => {
-                if reprex.mode != ReprexMode::Format
-                    && !formatter::is_formatter_available(reprex.formatter)
-                {
-                    arf_println!(
-                        "{}",
-                        formatter::unavailable_message(
-                            reprex.formatter,
-                            formatter::FormatterUnavailableContext::MetaCommand
-                        )
-                    );
+                if reprex.mode != ReprexMode::Format {
+                    let resolved = formatter::resolve_formatter(reprex.formatter_selector);
+                    if let Some(backend) = resolved {
+                        reprex.formatter = Some(backend);
+                        reprex.set_mode(ReprexMode::Format);
+                        arf_println!("Reprex: format");
+                    } else {
+                        arf_println!(
+                            "{}",
+                            formatter::unavailable_message(
+                                reprex.formatter_selector,
+                                formatter::FormatterUnavailableContext::MetaCommand
+                            )
+                        );
+                    }
                 } else {
+                    // Repeating the command is idempotent and does not probe
+                    // the formatter again.
                     reprex.set_mode(ReprexMode::Format);
                     arf_println!("Reprex: format");
                 }
@@ -539,7 +546,7 @@ mod tests {
     ) -> Option<MetaCommandResult> {
         let mut dir_stack = Vec::new();
         let mut reprex =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
         process_meta_command(
             input,
             config,
@@ -601,7 +608,7 @@ mod tests {
         let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
         let mut reprex =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
         let status = default_r_source_status();
         assert!(!reprex.is_enabled());
 
@@ -938,7 +945,7 @@ mod tests {
         let result = process_meta_command(
             &format!(":cd {}", tmp.path().display()),
             &mut config,
-            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
@@ -967,7 +974,7 @@ mod tests {
         let result = process_meta_command(
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
-            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
@@ -987,7 +994,7 @@ mod tests {
         let result = process_meta_command(
             ":popd",
             &mut config,
-            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,

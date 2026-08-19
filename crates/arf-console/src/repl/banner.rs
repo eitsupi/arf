@@ -1,6 +1,6 @@
 //! Startup banner formatting.
 
-use crate::config::{Config, RSourceOverrideInfo, ReprexMode};
+use crate::config::{Config, FormatterBackend, RSourceOverrideInfo, ReprexMode};
 use crate::editor::prompt::get_r_version;
 
 /// Format the startup banner.
@@ -16,6 +16,7 @@ pub fn format_banner(
     config: &Config,
     r_initialized: bool,
     override_info: Option<&RSourceOverrideInfo>,
+    formatter_backend: Option<FormatterBackend>,
 ) -> String {
     let mut lines = Vec::new();
 
@@ -29,9 +30,17 @@ pub fn format_banner(
             config.reprex.comment
         )),
         ReprexMode::Format => {
+            let formatter_label = match (config.reprex.formatter, formatter_backend) {
+                (crate::config::ReprexFormatter::Auto, Some(backend)) => {
+                    format!("auto ({})", backend.command())
+                }
+                (crate::config::ReprexFormatter::Auto, None) => "auto (unavailable)".to_string(),
+                (selector, Some(backend)) => format!("{selector} ({})", backend.command()),
+                (selector, None) => format!("{selector} (unavailable)"),
+            };
             lines.push(format!(
                 "# Reprex: format | Comment: {:?} | Formatter: {}",
-                config.reprex.comment, config.reprex.formatter
+                config.reprex.comment, formatter_label
             ));
         }
     }
@@ -68,14 +77,14 @@ mod tests {
     #[test]
     fn test_banner_default_r_initialized() {
         let config = Config::default();
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_default_r_initialized", banner);
     }
 
     #[test]
     fn test_banner_default_r_not_initialized() {
         let config = Config::default();
-        let banner = format_banner(&config, false, None);
+        let banner = format_banner(&config, false, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_default_r_not_initialized", banner);
     }
 
@@ -83,7 +92,7 @@ mod tests {
     fn test_banner_reprex_mode() {
         let mut config = Config::default();
         config.startup.reprex = ReprexMode::On;
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_reprex_mode", banner);
     }
 
@@ -92,7 +101,7 @@ mod tests {
         let mut config = Config::default();
         config.startup.reprex = ReprexMode::On;
         config.reprex.comment = "## ".to_string();
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_reprex_custom_comment", banner);
     }
 
@@ -100,7 +109,7 @@ mod tests {
     fn test_banner_reprex_format_mode() {
         let mut config = Config::default();
         config.startup.reprex = ReprexMode::Format;
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_reprex_format_mode", banner);
     }
 
@@ -108,14 +117,14 @@ mod tests {
     fn test_banner_vi_mode() {
         let mut config = Config::default();
         config.editor.mode = crate::config::EditorMode::Vi;
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         insta::assert_snapshot!("banner_vi_mode", banner);
     }
 
     #[test]
     fn test_banner_all_lines_start_with_comment() {
         let config = Config::default();
-        let banner = format_banner(&config, true, None);
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
         for line in banner.lines() {
             if !line.is_empty() {
                 assert!(
@@ -137,7 +146,7 @@ mod tests {
             requested_version: "4.4".to_string(),
             resolved_version: "4.4.2".to_string(),
         };
-        let banner = format_banner(&config, true, Some(&info));
+        let banner = format_banner(&config, true, Some(&info), Some(FormatterBackend::Air));
         assert!(
             banner.contains(
                 "# R source override: toml-key rproject.toml:project.r_version = \"4.4\""

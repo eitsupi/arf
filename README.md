@@ -217,8 +217,9 @@ auto_width = true       # Sync options(width) with terminal size
 # Reprex static configuration
 [reprex]
 comment = "#> "
-# Formatter for format mode: "air" (>= 0.9.0) or "arity" (>= 0.18.0)
-formatter = "air"
+# Formatter for format mode: "auto", "air" (>= 0.9.0), or "arity" (>= 0.18.0)
+# "auto" prefers Air, then Arity.
+formatter = "auto"
 
 # Syntax highlighting colors
 [colors.r]

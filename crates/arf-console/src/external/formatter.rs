@@ -2,7 +2,7 @@
 //!
 //! This module provides formatting of R code using external formatter backends.
 
-use crate::config::ReprexFormatter;
+use crate::config::{FormatterBackend, ReprexFormatter};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
@@ -27,16 +27,15 @@ pub fn unavailable_message(
     formatter: ReprexFormatter,
     context: FormatterUnavailableContext,
 ) -> String {
-    let backend = format!(
-        "{} CLI ('{}' command)",
-        formatter.display_name(),
-        formatter.command()
-    );
+    let backend = match formatter {
+        ReprexFormatter::Auto => "Air and Arity formatter CLIs".to_string(),
+        ReprexFormatter::Air => "Air CLI ('air' command)".to_string(),
+        ReprexFormatter::Arity => "Arity CLI ('arity' command)".to_string(),
+    };
     match context {
         FormatterUnavailableContext::ExplicitCli => format!(
-            "Cannot use --reprex=format: {backend} not found in PATH.\nInstall {} CLI from {}",
-            formatter.display_name(),
-            formatter.install_url()
+            "Cannot use --reprex=format: {backend} not found in PATH.\n{}",
+            install_guidance(formatter)
         ),
         FormatterUnavailableContext::ConfiguredMode => format!(
             "Warning: Reprex format mode is configured but {backend} was not found; using reprex on mode."
@@ -47,10 +46,50 @@ pub fn unavailable_message(
     }
 }
 
-/// Check if a formatter backend is available on the system.
-pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
+fn install_guidance(formatter: ReprexFormatter) -> String {
     match formatter {
-        ReprexFormatter::Air => {
+        ReprexFormatter::Auto => {
+            "Install Air CLI from https://github.com/posit-dev/air or Arity CLI from https://github.com/jolars/arity".to_string()
+        }
+        ReprexFormatter::Air => format!(
+            "Install Air CLI from {}",
+            FormatterBackend::Air.install_url()
+        ),
+        ReprexFormatter::Arity => format!(
+            "Install Arity CLI from {}",
+            FormatterBackend::Arity.install_url()
+        ),
+    }
+}
+
+/// Resolve a configured formatter selector to a concrete backend.
+pub fn resolve_formatter(selector: ReprexFormatter) -> Option<FormatterBackend> {
+    resolve_formatter_with(selector, is_formatter_available)
+}
+
+/// Resolve a formatter using an injected availability function.
+///
+/// The injected form keeps selector precedence deterministic in tests without
+/// mutating process-global PATH state or the availability cache.
+pub fn resolve_formatter_with(
+    selector: ReprexFormatter,
+    mut available: impl FnMut(FormatterBackend) -> bool,
+) -> Option<FormatterBackend> {
+    match selector {
+        ReprexFormatter::Auto => [FormatterBackend::Air, FormatterBackend::Arity]
+            .into_iter()
+            .find(|backend| available(*backend)),
+        ReprexFormatter::Air => available(FormatterBackend::Air).then_some(FormatterBackend::Air),
+        ReprexFormatter::Arity => {
+            available(FormatterBackend::Arity).then_some(FormatterBackend::Arity)
+        }
+    }
+}
+
+/// Check if a formatter backend is available on the system.
+pub fn is_formatter_available(formatter: FormatterBackend) -> bool {
+    match formatter {
+        FormatterBackend::Air => {
             static AIR_AVAILABLE: OnceLock<bool> = OnceLock::new();
             *AIR_AVAILABLE.get_or_init(|| {
                 Command::new(formatter.command())
@@ -60,7 +99,7 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
                     .unwrap_or(false)
             })
         }
-        ReprexFormatter::Arity => {
+        FormatterBackend::Arity => {
             static ARITY_AVAILABLE: OnceLock<bool> = OnceLock::new();
             *ARITY_AVAILABLE.get_or_init(|| {
                 Command::new(formatter.command())
@@ -80,13 +119,13 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
 ///
 /// The current backend reads code from stdin and writes formatted code to stdout.
 /// Its virtual path lets the backend discover project configuration from the cwd.
-pub fn format_code(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
+pub fn format_code(formatter: FormatterBackend, code: &str) -> Result<String, FormatterError> {
     match formatter {
-        ReprexFormatter::Air | ReprexFormatter::Arity => format_backend(formatter, code),
+        FormatterBackend::Air | FormatterBackend::Arity => format_backend(formatter, code),
     }
 }
 
-fn format_backend(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
+fn format_backend(formatter: FormatterBackend, code: &str) -> Result<String, FormatterError> {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
         return Ok(code.to_string());
@@ -116,19 +155,19 @@ fn format_backend(formatter: ReprexFormatter, code: &str) -> Result<String, Form
     }
 }
 
-fn formatter_args(formatter: ReprexFormatter, virtual_path: &Path) -> Vec<String> {
+fn formatter_args(formatter: FormatterBackend, virtual_path: &Path) -> Vec<String> {
     match formatter {
-        ReprexFormatter::Air => vec![
+        FormatterBackend::Air => vec![
             "format".to_string(),
             "--stdin-file-path".to_string(),
             virtual_path.display().to_string(),
             "--force".to_string(),
         ],
-        ReprexFormatter::Arity => vec!["format".to_string(), "-".to_string()],
+        FormatterBackend::Arity => vec!["format".to_string(), "-".to_string()],
     }
 }
 
-fn format_via_stdin(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
+fn format_via_stdin(formatter: FormatterBackend, code: &str) -> Result<String, FormatterError> {
     run_formatter_command(
         formatter,
         OsStr::new(formatter.command()),
@@ -138,7 +177,7 @@ fn format_via_stdin(formatter: ReprexFormatter, code: &str) -> Result<String, Fo
 }
 
 fn run_formatter_command(
-    formatter: ReprexFormatter,
+    formatter: FormatterBackend,
     command: &OsStr,
     virtual_path: &Path,
     code: &str,
@@ -211,12 +250,15 @@ fn preserve_newline_style(original: &str, mut formatted: String) -> String {
 /// Errors that can occur during formatting.
 #[derive(Debug)]
 pub enum FormatterError {
+    Unavailable {
+        selector: ReprexFormatter,
+    },
     Io {
-        formatter: ReprexFormatter,
+        formatter: FormatterBackend,
         source: std::io::Error,
     },
     FormatFailed {
-        formatter: ReprexFormatter,
+        formatter: FormatterBackend,
         stderr: String,
     },
 }
@@ -224,6 +266,10 @@ pub enum FormatterError {
 impl std::fmt::Display for FormatterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            FormatterError::Unavailable { selector } => write!(
+                f,
+                "No formatter backend is available for selector '{selector}'."
+            ),
             FormatterError::Io { formatter, source } => write!(
                 f,
                 "{} formatting could not be started: {}\nEnsure {} CLI {} or later is installed.",
@@ -252,17 +298,17 @@ mod tests {
 
     #[test]
     fn test_format_empty_code() {
-        let result = format_code(ReprexFormatter::Air, "").unwrap();
+        let result = format_code(FormatterBackend::Air, "").unwrap();
         assert_eq!(result, "");
 
-        let result = format_code(ReprexFormatter::Air, "   ").unwrap();
+        let result = format_code(FormatterBackend::Air, "   ").unwrap();
         assert_eq!(result, "   ");
     }
 
     #[test]
     fn formatter_args_use_air_stdin_contract() {
         assert_eq!(
-            formatter_args(ReprexFormatter::Air, Path::new("arf-reprex.R")),
+            formatter_args(FormatterBackend::Air, Path::new("arf-reprex.R")),
             ["format", "--stdin-file-path", "arf-reprex.R", "--force"]
         );
     }
@@ -270,8 +316,62 @@ mod tests {
     #[test]
     fn formatter_args_use_arity_stdin_contract() {
         assert_eq!(
-            formatter_args(ReprexFormatter::Arity, Path::new("arf-reprex.R")),
+            formatter_args(FormatterBackend::Arity, Path::new("arf-reprex.R")),
             ["format", "-"]
+        );
+    }
+
+    #[test]
+    fn formatter_resolution_prefers_air_when_both_are_available() {
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Auto, |backend| {
+                matches!(backend, FormatterBackend::Air | FormatterBackend::Arity)
+            }),
+            Some(FormatterBackend::Air)
+        );
+    }
+
+    #[test]
+    fn formatter_resolution_uses_air_when_only_air_is_available() {
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Auto, |backend| {
+                backend == FormatterBackend::Air
+            }),
+            Some(FormatterBackend::Air)
+        );
+    }
+
+    #[test]
+    fn formatter_resolution_uses_arity_when_air_is_unavailable() {
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Auto, |backend| {
+                backend == FormatterBackend::Arity
+            }),
+            Some(FormatterBackend::Arity)
+        );
+    }
+
+    #[test]
+    fn formatter_resolution_returns_none_when_no_backend_is_available() {
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Auto, |_| false),
+            None
+        );
+    }
+
+    #[test]
+    fn explicit_formatter_selection_does_not_fallback() {
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Air, |backend| {
+                backend == FormatterBackend::Arity
+            }),
+            None
+        );
+        assert_eq!(
+            resolve_formatter_with(ReprexFormatter::Arity, |backend| {
+                backend == FormatterBackend::Air
+            }),
+            None
         );
     }
 
@@ -292,7 +392,7 @@ mod tests {
         std::fs::set_permissions(&command, permissions).unwrap();
 
         let result = run_formatter_command(
-            ReprexFormatter::Air,
+            FormatterBackend::Air,
             command.as_os_str(),
             Path::new("virtual.R"),
             "x <- 1",
@@ -317,7 +417,7 @@ mod tests {
         std::fs::set_permissions(&command, permissions).unwrap();
 
         let result = run_formatter_command(
-            ReprexFormatter::Arity,
+            FormatterBackend::Arity,
             command.as_os_str(),
             Path::new("virtual.R"),
             "x <- 1",
@@ -338,7 +438,7 @@ mod tests {
         std::fs::set_permissions(&command, permissions).unwrap();
 
         let result = run_formatter_command(
-            ReprexFormatter::Air,
+            FormatterBackend::Air,
             command.as_os_str(),
             Path::new("virtual.R"),
             "x <- 1",
@@ -351,7 +451,7 @@ mod tests {
     #[test]
     fn formatter_failure_message_includes_stderr_and_version_guidance() {
         let error = FormatterError::FormatFailed {
-            formatter: ReprexFormatter::Air,
+            formatter: FormatterBackend::Air,
             stderr: "stdin parse error\n".to_string(),
         };
         insta::assert_snapshot!(format!("{error}"), @r###"
@@ -363,7 +463,7 @@ Ensure Air CLI 0.9.0 or later is installed.
     #[test]
     fn arity_failure_message_includes_stderr_and_version_guidance() {
         let error = FormatterError::FormatFailed {
-            formatter: ReprexFormatter::Arity,
+            formatter: FormatterBackend::Arity,
             stderr: "stdin parse error\n".to_string(),
         };
         insta::assert_snapshot!(format!("{error}"), @r###"
@@ -430,10 +530,24 @@ Install Arity CLI from https://github.com/jolars/arity
     }
 
     #[test]
+    fn unavailable_auto_explicit_cli_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Auto,
+                FormatterUnavailableContext::ExplicitCli
+            ),
+            @r###"
+Cannot use --reprex=format: Air and Arity formatter CLIs not found in PATH.
+Install Air CLI from https://github.com/posit-dev/air or Arity CLI from https://github.com/jolars/arity
+"###
+        );
+    }
+
+    #[test]
     #[ignore] // Requires air to be installed
     fn test_format_simple_assignment() {
         let code = "x<-1+2";
-        let result = format_code(ReprexFormatter::Air, code).unwrap();
+        let result = format_code(FormatterBackend::Air, code).unwrap();
         assert_eq!(result, "x <- 1 + 2");
     }
 
@@ -441,7 +555,7 @@ Install Arity CLI from https://github.com/jolars/arity
     #[ignore] // Requires air to be installed
     fn test_format_function_definition() {
         let code = "f=function(x,y){x+y}";
-        let result = format_code(ReprexFormatter::Air, code).unwrap();
+        let result = format_code(FormatterBackend::Air, code).unwrap();
         // air formats this with proper spacing and indentation
         assert!(result.contains("function(x, y)"));
         assert!(result.contains("x + y"));
@@ -452,12 +566,12 @@ Install Arity CLI from https://github.com/jolars/arity
     fn test_format_preserves_trailing_newline_style() {
         // Without trailing newline
         let code = "x <- 1";
-        let result = format_code(ReprexFormatter::Air, code).unwrap();
+        let result = format_code(FormatterBackend::Air, code).unwrap();
         assert!(!result.ends_with('\n'));
 
         // With trailing newline
         let code = "x <- 1\n";
-        let result = format_code(ReprexFormatter::Air, code).unwrap();
+        let result = format_code(FormatterBackend::Air, code).unwrap();
         assert!(result.ends_with('\n'));
     }
 
@@ -465,7 +579,7 @@ Install Arity CLI from https://github.com/jolars/arity
     #[ignore] // Requires Arity >=0.18.0 to be installed
     fn test_arity_format_simple_assignment() {
         let code = "x<-1+2";
-        let result = format_code(ReprexFormatter::Arity, code).unwrap();
+        let result = format_code(FormatterBackend::Arity, code).unwrap();
         assert_eq!(result, "x <- 1 + 2");
     }
 
@@ -474,12 +588,12 @@ Install Arity CLI from https://github.com/jolars/arity
     fn test_arity_format_preserves_trailing_newline_style() {
         // Without trailing newline
         let code = "x <- 1";
-        let result = format_code(ReprexFormatter::Arity, code).unwrap();
+        let result = format_code(FormatterBackend::Arity, code).unwrap();
         assert!(!result.ends_with('\n'));
 
         // With trailing newline
         let code = "x <- 1\n";
-        let result = format_code(ReprexFormatter::Arity, code).unwrap();
+        let result = format_code(FormatterBackend::Arity, code).unwrap();
         assert!(result.ends_with('\n'));
     }
 }

@@ -4,6 +4,6 @@ expression: banner
 ---
 # arf console v0.5.0-rc.1
 # Edit mode: emacs
-# Reprex: format | Comment: "#> " | Formatter: air
+# Reprex: format | Comment: "#> " | Formatter: auto (air)
 # R is ready.
 # Type :cmds for meta commands list, Ctrl+D to exit.

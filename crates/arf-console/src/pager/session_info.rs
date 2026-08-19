@@ -3,7 +3,7 @@
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
 use crate::config::{ConfigStatus, RSourceStatus, mask_home_path};
 use crate::editor::prompt::get_r_version;
-use crate::external::{formatter, rig};
+use crate::external::rig;
 use crate::history::HistoryRuntime;
 use crate::ipc::policy::{IpcPolicy, SilentPolicy, VisiblePolicy, policy};
 use crate::ipc::session::SessionType;
@@ -170,15 +170,15 @@ fn generate_info_lines(
         crate::config::ReprexMode::Format => "format",
     };
     lines.push(format!("Reprex:         {}", reprex_mode));
-    let formatter_state = if formatter::is_formatter_available(reprex.formatter) {
-        "installed"
-    } else {
-        "missing"
+    let formatter_label = match (reprex.formatter_selector, reprex.formatter) {
+        (crate::config::ReprexFormatter::Auto, Some(backend)) => {
+            format!("auto ({} installed)", backend.command())
+        }
+        (crate::config::ReprexFormatter::Auto, None) => "auto (unavailable)".to_string(),
+        (selector, Some(backend)) => format!("{selector} ({} installed)", backend.command()),
+        (selector, None) => format!("{selector} (missing)"),
     };
-    lines.push(format!(
-        "Formatter:      {} ({})",
-        reprex.formatter, formatter_state
-    ));
+    lines.push(format!("Formatter:      {formatter_label}"));
 
     lines.push(String::new());
 
@@ -560,7 +560,7 @@ mod tests {
         ReprexRuntime::new(
             crate::config::ReprexMode::Off,
             "#> ",
-            crate::config::ReprexFormatter::Air,
+            crate::config::FormatterBackend::Air,
         )
     }
 

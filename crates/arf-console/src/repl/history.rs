@@ -363,7 +363,7 @@ mod tests {
                 &mut ReprexRuntime::new(
                     crate::config::ReprexMode::Off,
                     "#> ",
-                    crate::config::ReprexFormatter::Air,
+                    crate::config::FormatterBackend::Air,
                 ),
                 &HistoryRuntime::Unavailable {
                     failure: HistoryFailureDetail::test_memory(),

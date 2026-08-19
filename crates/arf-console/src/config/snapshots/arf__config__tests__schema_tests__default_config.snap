@@ -63,7 +63,7 @@ auto_width = true
 
 [reprex]
 comment = "#> "
-formatter = "air"
+formatter = "auto"
 
 [colors.r]
 comment = "DarkGray"
