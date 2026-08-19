@@ -21,7 +21,7 @@
 //!   (which reveal PIDs) would be visible to other users.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const ARF_IPC_SESSIONS_DIR: &str = "ARF_IPC_SESSIONS_DIR";
 
@@ -37,10 +37,8 @@ pub struct SessionInfo {
     pub r_home: Option<String>,
     pub cwd: String,
     pub started_at: String,
-    /// Whether this session is headless or interactive, or `None` for session
-    /// files written by an older arf that did not record this.
-    #[serde(default)]
-    pub session_type: Option<SessionType>,
+    /// Whether this session is headless or interactive.
+    pub session_type: SessionType,
     /// Log file path, or `None` if no log file is configured.
     #[serde(default)]
     pub log_file: Option<String>,
@@ -173,19 +171,49 @@ pub fn list_sessions() -> Vec<SessionInfo> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "json")
-            && let Ok(contents) = std::fs::read_to_string(&path)
-            && let Ok(info) = serde_json::from_str::<SessionInfo>(&contents)
-        {
-            if is_process_alive(info.pid) {
-                sessions.push(info);
-            } else {
+        if !path.extension().is_some_and(|ext| ext == "json") {
+            continue;
+        }
+
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        match serde_json::from_str::<SessionInfo>(&contents) {
+            Ok(info) if is_process_alive(info.pid) => sessions.push(info),
+            Ok(_) => {
                 let _ = std::fs::remove_file(&path);
             }
+            Err(_) => cleanup_invalid_session_file(&path, &contents),
         }
     }
 
     sessions
+}
+
+/// Remove an invalid session file only when its JSON identifies the same dead
+/// PID as its filename. Invalid files for live processes remain hidden but are
+/// left untouched, as are files whose contents and names disagree.
+fn cleanup_invalid_session_file(path: &Path, contents: &str) {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(contents) else {
+        return;
+    };
+    let Some(pid) = json
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok())
+    else {
+        return;
+    };
+    let Some(filename_pid) = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.parse::<u32>().ok())
+    else {
+        return;
+    };
+    if pid == filename_pid && !is_process_alive(pid) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Find a session by PID, or return the only running session if PID is not specified.
@@ -239,7 +267,7 @@ fn is_process_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
-    fn session_info(session_type: Option<SessionType>) -> SessionInfo {
+    fn session_info(session_type: SessionType) -> SessionInfo {
         SessionInfo {
             pid: 12345,
             socket_path: "/tmp/arf.sock".to_string(),
@@ -255,7 +283,7 @@ mod tests {
 
     #[test]
     fn session_type_serializes_and_round_trips() {
-        let mut info = session_info(Some(SessionType::Headless));
+        let mut info = session_info(SessionType::Headless);
         info.r_home = Some("/opt/R/4.4.1/lib/R".to_string());
         let json = serde_json::to_value(&info).unwrap();
 
@@ -275,12 +303,12 @@ mod tests {
 }"###);
 
         let restored: SessionInfo = serde_json::from_value(json).unwrap();
-        assert_eq!(restored.session_type, Some(SessionType::Headless));
+        assert_eq!(restored.session_type, SessionType::Headless);
         assert_eq!(restored.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
     }
 
     #[test]
-    fn legacy_session_without_session_type_deserializes_as_unknown() {
+    fn session_type_is_required_in_session_files() {
         let json = serde_json::json!({
             "pid": 12345,
             "socket_path": "/tmp/arf.sock",
@@ -289,8 +317,94 @@ mod tests {
             "started_at": "2026-01-01T00:00:00+00:00",
         });
 
-        let info: SessionInfo = serde_json::from_value(json).unwrap();
-        assert_eq!(info.session_type, None);
+        assert!(serde_json::from_value::<SessionInfo>(json).is_err());
+    }
+
+    #[test]
+    fn null_session_type_is_rejected() {
+        let json = serde_json::json!({
+            "pid": 12345,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": "4.4.1",
+            "cwd": "/tmp",
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "session_type": null,
+        });
+
+        assert!(serde_json::from_value::<SessionInfo>(json).is_err());
+    }
+
+    #[test]
+    fn list_sessions_removes_dead_legacy_session_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut guard = crate::test_utils::lock_env();
+        guard.set(ARF_IPC_SESSIONS_DIR, temp_dir.path());
+
+        let pid = std::process::id().saturating_add(1_000_000);
+        let path = temp_dir.path().join(format!("{pid}.json"));
+        let json = serde_json::json!({
+            "pid": pid,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": null,
+            "cwd": "/tmp",
+            "started_at": "1970-01-01T00:00:00Z",
+            "r_home": null,
+            "log_file": null,
+            "history_session_id": null,
+        });
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        assert!(list_sessions().is_empty());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn list_sessions_hides_but_keeps_live_legacy_session_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut guard = crate::test_utils::lock_env();
+        guard.set(ARF_IPC_SESSIONS_DIR, temp_dir.path());
+
+        let pid = std::process::id();
+        let path = temp_dir.path().join(format!("{pid}.json"));
+        let json = serde_json::json!({
+            "pid": pid,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": null,
+            "cwd": "/tmp",
+            "started_at": "1970-01-01T00:00:00Z",
+            "r_home": null,
+            "log_file": null,
+            "history_session_id": null,
+        });
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        assert!(list_sessions().is_empty());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn list_sessions_keeps_legacy_file_when_pid_does_not_match_filename() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut guard = crate::test_utils::lock_env();
+        guard.set(ARF_IPC_SESSIONS_DIR, temp_dir.path());
+
+        let pid = std::process::id();
+        let filename_pid = pid.saturating_add(1_000_000);
+        let path = temp_dir.path().join(format!("{filename_pid}.json"));
+        let json = serde_json::json!({
+            "pid": pid,
+            "socket_path": "/tmp/arf.sock",
+            "r_version": null,
+            "cwd": "/tmp",
+            "started_at": "1970-01-01T00:00:00Z",
+            "r_home": null,
+            "log_file": null,
+            "history_session_id": null,
+        });
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        assert!(list_sessions().is_empty());
+        assert!(path.exists());
     }
 
     #[test]
@@ -301,6 +415,7 @@ mod tests {
             "r_version": "4.4.1",
             "cwd": "/tmp",
             "started_at": "2026-01-01T00:00:00+00:00",
+            "session_type": "interactive",
         });
 
         let info: SessionInfo = serde_json::from_value(json).unwrap();
@@ -321,7 +436,7 @@ mod tests {
         let pid = std::process::id();
         let info = SessionInfo {
             pid,
-            ..session_info(Some(SessionType::Interactive))
+            ..session_info(SessionType::Interactive)
         };
         write_session(&info).unwrap();
 
@@ -331,6 +446,6 @@ mod tests {
             std::fs::read_to_string(temp_dir.path().join(format!("{pid}.json"))).unwrap();
         let cleared: SessionInfo = serde_json::from_str(&contents).unwrap();
         assert_eq!(cleared.history_session_id, None);
-        assert_eq!(cleared.session_type, Some(SessionType::Interactive));
+        assert_eq!(cleared.session_type, SessionType::Interactive);
     }
 }

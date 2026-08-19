@@ -95,6 +95,7 @@ fn test_ipc_exit_code_transport_error() {
         "r_version": null,
         "cwd": ".",
         "started_at": "1970-01-01T00:00:00Z",
+        "session_type": "interactive",
         "log_file": null,
         "history_session_id": null
     });

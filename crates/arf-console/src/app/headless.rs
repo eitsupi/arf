@@ -503,7 +503,7 @@ mod tests {
             r_home: Some("/opt/R/4.4.1/lib/R".to_string()),
             cwd: "/tmp".to_string(),
             started_at: "2026-01-01T00:00:00+00:00".to_string(),
-            session_type: Some(SessionType::Headless),
+            session_type: SessionType::Headless,
             log_file: None,
             history_session_id: None,
         };

@@ -436,10 +436,8 @@ arf ipc list
 When no sessions are running, returns `{"sessions": []}` (exit 0).
 
 The `session_type` field is `"headless"` for sessions started with
-`arf headless` and `"interactive"` for sessions running an interactive
-REPL. A `null` value means the session was created by an older arf that did not
-record its type. Clients must treat `null` as unknown and must not send
-`shutdown` to that session.
+`arf headless` and `"interactive"` for sessions running an interactive REPL.
+The field is always present in current session metadata.
 
 The `r_home` field is the R installation the session is using. A `null` value
 means either that the session has no R, or that it was created by an older arf
@@ -447,10 +445,9 @@ that did not record the path: a session file written before this field existed
 is listed with `r_home` set to `null`, like any other unset field. Clients must
 treat `null` as unknown and must not assume an R installation is available.
 
-`r_version`, `r_home`, `session_type`, `log_file`, and `history_session_id` may
-all be `null`. The list is discovery metadata only; it does not include the
-effective IPC policy. Query `arf ipc session` to obtain the live policy at the
-time of the request.
+`r_version`, `r_home`, `log_file`, and `history_session_id` may be `null`. The
+list is discovery metadata only; it does not include the effective IPC policy.
+Query `arf ipc session` to obtain the live policy at the time of the request.
 
 ### `arf ipc history` — Query Command History
 
