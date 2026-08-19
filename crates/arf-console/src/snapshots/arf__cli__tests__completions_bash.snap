@@ -201,7 +201,7 @@ _arf() {
 
     case "${cmd}" in
         arf)
-            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --auto-format --config --r-home --with-r-version --no-r-source-overrides --no-r-auto-discovery --no-banner --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --quiet --no-save --save --no-restore --no-restore-data --restore-data --interactive --no-echo --slave --restore --verbose --encoding --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --ipc-eval-allow-function --ipc-eval-unrestricted --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r help"
+            opts="-e -f -c -q -d -g -h -V --eval --file --reprex --config --r-home --with-r-version --no-r-source-overrides --no-r-auto-discovery --no-banner --vanilla --no-environ --no-site-file --no-init-file --max-connections --max-ppsize --min-nsize --min-vsize --quiet --no-save --save --no-restore --no-restore-data --restore-data --interactive --no-echo --slave --restore --verbose --encoding --debugger --debugger-args --gui --arch --args --no-readline --no-restore-history --with-ipc --ipc-bind --ipc-pid-file --ipc-eval-allow-function --ipc-eval-unrestricted --no-auto-match --no-completion --history-dir --no-history --help --version completions config history ipc headless r help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -243,6 +243,10 @@ _arf() {
                     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
                         compopt -o filenames
                     fi
+                    return 0
+                    ;;
+                --reprex)
+                    COMPREPLY=($(compgen -W "off on format" -- "${cur}"))
                     return 0
                     ;;
                 --config)

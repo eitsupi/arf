@@ -2,10 +2,10 @@
 
 use crate::config::{
     ConfigStatus, HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig,
-    RSourceStatus, SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig, ViConfig,
+    RSourceStatus, ReprexMode, SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig,
+    ViConfig,
 };
 use crate::editor::prompt::PromptFormatter;
-use crate::external::formatter;
 use nu_ansi_term::Color;
 use reedline::{HistoryItemId, HistorySessionId, Reedline};
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ mod sponge_tests;
 pub use sponge::SpongeQueue;
 
 use super::prompt::RPrompt;
+use super::reprex::ReprexRuntime;
 
 /// Identifies which history entry should receive the result of the command
 /// that just finished evaluating.
@@ -57,6 +58,7 @@ pub struct ReplState {
     /// Line editor for shell mode (with separate history).
     pub shell_line_editor: Reedline,
     pub prompt_config: PromptRuntimeConfig,
+    pub reprex: ReprexRuntime,
     pub should_exit: bool,
     /// Path to the config file (for :info command).
     pub config_path: Option<PathBuf>,
@@ -93,11 +95,7 @@ pub struct PromptRuntimeConfig {
     /// Shell mode prompt template (unexpanded, e.g., "[{shell}] $ ").
     shell_template: String,
     mode_indicator_position: ModeIndicatorPosition,
-    reprex_enabled: bool,
-    pub reprex_comment: String,
     indicators: Indicators,
-    /// Auto-format R code before execution (using air).
-    autoformat_enabled: bool,
     /// Shell mode enabled (input goes to system shell instead of R).
     shell_enabled: bool,
     /// Color for the main R prompt.
@@ -149,7 +147,7 @@ impl PromptRuntimeConfig {
         )
     }
 
-    pub fn build_main_prompt(&self) -> RPrompt {
+    pub fn build_main_prompt(&self, reprex_mode: ReprexMode) -> RPrompt {
         if self.shell_enabled {
             // In shell mode, use shell_template as the main prompt (no mode indicator)
             // Expand placeholders (including {cwd}) dynamically each time
@@ -168,7 +166,7 @@ impl PromptRuntimeConfig {
             // Expand placeholders (including {cwd}) dynamically each time
             let main_format = self.prompt_formatter.format(&self.main_template);
             let cont_format = self.prompt_formatter.format(&self.continuation_template);
-            let mode_indicator = self.current_mode_indicator();
+            let mode_indicator = self.current_mode_indicator(reprex_mode);
 
             // Determine prompt color based on status mode
             let prompt_color = self.get_status_prompt_color();
@@ -317,9 +315,9 @@ impl PromptRuntimeConfig {
         template.replace("{duration}", &duration_str)
     }
 
-    pub fn build_cont_prompt(&self) -> RPrompt {
+    pub fn build_cont_prompt(&self, reprex_mode: ReprexMode) -> RPrompt {
         let cont_format = self.prompt_formatter.format(&self.continuation_template);
-        let mode_indicator = self.current_mode_indicator();
+        let mode_indicator = self.current_mode_indicator(reprex_mode);
         RPrompt::new(cont_format.clone(), cont_format)
             .with_mode_indicator(mode_indicator, self.mode_indicator_position)
             .with_colors(
@@ -329,18 +327,15 @@ impl PromptRuntimeConfig {
             )
     }
 
-    fn current_mode_indicator(&self) -> Option<String> {
+    fn current_mode_indicator(&self, reprex_mode: ReprexMode) -> Option<String> {
         if self.mode_indicator_position == ModeIndicatorPosition::None {
             return None;
         }
         // Note: shell mode uses shell_format directly, so no indicator here
-        if self.reprex_enabled && self.autoformat_enabled {
-            // Show autoformat indicator when both reprex and autoformat are enabled
-            Some(self.indicators.autoformat.clone())
-        } else if self.reprex_enabled {
-            Some(self.indicators.reprex.clone())
-        } else {
-            None
+        match reprex_mode {
+            ReprexMode::Off => None,
+            ReprexMode::On => Some(self.indicators.reprex.clone()),
+            ReprexMode::Format => Some(self.indicators.reprex_format.clone()),
         }
     }
 
@@ -351,45 +346,6 @@ impl PromptRuntimeConfig {
     pub fn set_shell(&mut self, enabled: bool) {
         self.shell_enabled = enabled;
         crate::ipc::set_in_alternate_mode(enabled);
-    }
-
-    pub fn is_reprex_enabled(&self) -> bool {
-        self.reprex_enabled
-    }
-
-    pub fn set_reprex(&mut self, enabled: bool, comment: Option<&str>) {
-        self.reprex_enabled = enabled;
-        if let Some(c) = comment {
-            self.reprex_comment = c.to_string();
-        }
-        arf_libr::set_reprex_mode(self.reprex_enabled, &self.reprex_comment);
-    }
-
-    pub fn toggle_reprex(&mut self) {
-        self.set_reprex(!self.reprex_enabled, None);
-    }
-
-    pub fn is_autoformat_enabled(&self) -> bool {
-        self.autoformat_enabled
-    }
-
-    pub fn toggle_autoformat(&mut self) {
-        self.autoformat_enabled = !self.autoformat_enabled;
-    }
-
-    /// Format R code if autoformat is enabled and reprex mode is active.
-    ///
-    /// Formatting only applies in reprex mode where the formatted code is displayed.
-    /// In normal mode, formatting would be invisible to the user, so we skip it
-    /// to avoid unnecessary resource usage.
-    ///
-    /// Returns the formatted code, or the original code if formatting is skipped or fails.
-    pub fn maybe_format_code(&self, code: &str) -> String {
-        if self.autoformat_enabled && self.reprex_enabled {
-            formatter::format_code(code)
-        } else {
-            code.to_string()
-        }
     }
 
     /// Start the spinner if enabled and not in shell mode.
@@ -463,10 +419,7 @@ pub struct PromptRuntimeConfigBuilder {
     continuation_template: String,
     shell_template: String,
     mode_indicator_position: ModeIndicatorPosition,
-    reprex_enabled: bool,
-    reprex_comment: String,
     indicators: Indicators,
-    autoformat_enabled: bool,
     main_color: Color,
     continuation_color: Color,
     shell_color: Color,
@@ -493,10 +446,7 @@ impl PromptRuntimeConfigBuilder {
             continuation_template: continuation_template.into(),
             shell_template: shell_template.into(),
             mode_indicator_position: ModeIndicatorPosition::default(),
-            reprex_enabled: false,
-            reprex_comment: "#> ".to_string(),
             indicators: Indicators::default(),
-            autoformat_enabled: false,
             main_color: Color::Default,
             continuation_color: Color::Default,
             shell_color: Color::Default,
@@ -516,19 +466,8 @@ impl PromptRuntimeConfigBuilder {
         self
     }
 
-    pub fn reprex(mut self, enabled: bool, comment: impl Into<String>) -> Self {
-        self.reprex_enabled = enabled;
-        self.reprex_comment = comment.into();
-        self
-    }
-
     pub fn indicators(mut self, indicators: Indicators) -> Self {
         self.indicators = indicators;
-        self
-    }
-
-    pub fn autoformat(mut self, enabled: bool) -> Self {
-        self.autoformat_enabled = enabled;
         self
     }
 
@@ -587,10 +526,7 @@ impl PromptRuntimeConfigBuilder {
             continuation_template: self.continuation_template,
             shell_template: self.shell_template,
             mode_indicator_position: self.mode_indicator_position,
-            reprex_enabled: self.reprex_enabled,
-            reprex_comment: self.reprex_comment,
             indicators: self.indicators,
-            autoformat_enabled: self.autoformat_enabled,
             shell_enabled: false,
             main_color: self.main_color,
             continuation_color: self.continuation_color,
@@ -616,19 +552,16 @@ mod tests {
     use crate::config::StatusSymbol;
     use reedline::Prompt;
 
-    fn create_test_config(reprex: bool, autoformat: bool) -> PromptRuntimeConfig {
-        create_test_config_with_indicators(reprex, autoformat, Indicators::default())
+    fn create_test_config(mode: ReprexMode) -> PromptRuntimeConfig {
+        create_test_config_with_indicators(mode, Indicators::default())
     }
 
     fn create_test_config_with_indicators(
-        reprex: bool,
-        autoformat: bool,
+        _mode: ReprexMode,
         indicators: Indicators,
     ) -> PromptRuntimeConfig {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ")
-            .reprex(reprex, "#> ")
             .indicators(indicators)
-            .autoformat(autoformat)
             .build()
     }
 
@@ -636,8 +569,8 @@ mod tests {
     fn test_prompt_runtime_config_build_main_prompt() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let config = create_test_config(false, false);
-        let prompt = config.build_main_prompt();
+        let config = create_test_config(ReprexMode::Off);
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
@@ -645,110 +578,115 @@ mod tests {
     fn test_prompt_runtime_config_reprex_mode_indicator() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let config = create_test_config(true, false);
-        let prompt = config.build_main_prompt();
+        let config = create_test_config(ReprexMode::On);
+        let prompt = config.build_main_prompt(ReprexMode::On);
         assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
     }
 
     #[test]
-    fn test_prompt_runtime_config_toggle_reprex() {
+    fn test_prompt_runtime_config_set_reprex_mode() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let mut config = create_test_config(false, false);
+        let mut runtime =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
 
-        assert!(!config.is_reprex_enabled());
-        config.toggle_reprex();
-        assert!(config.is_reprex_enabled());
-        config.toggle_reprex();
-        assert!(!config.is_reprex_enabled());
+        assert!(!runtime.is_enabled());
+        runtime.set_mode(ReprexMode::On);
+        assert!(runtime.is_enabled());
+        runtime.set_mode(ReprexMode::Off);
+        assert!(!runtime.is_enabled());
     }
 
     #[test]
     fn test_prompt_runtime_config_set_reprex_with_comment() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let mut config = create_test_config(false, false);
+        let mut runtime =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
 
-        config.set_reprex(true, Some("## "));
-        assert!(config.is_reprex_enabled());
-        assert_eq!(config.reprex_comment, "## ");
+        runtime.set_mode(ReprexMode::On);
+        assert!(runtime.is_enabled());
     }
 
     #[test]
     fn test_prompt_runtime_config_shell_mode_prompt() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let mut config = create_test_config(false, false);
+        let mut config = create_test_config(ReprexMode::Off);
+        let mut runtime =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
 
         // Initially R mode prompt
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
         // Enable shell mode - uses shell_format as prompt
         config.set_shell(true);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[bash] $ ");
 
         // Shell mode prompt ignores reprex mode
-        config.set_reprex(true, None);
-        let prompt = config.build_main_prompt();
+        runtime.set_mode(ReprexMode::On);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[bash] $ ");
 
         // Disable shell mode, reprex shows
         config.set_shell(false);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
     }
 
     #[test]
-    fn test_prompt_runtime_config_autoformat_mode_indicator() {
+    fn test_prompt_runtime_config_format_mode_indicator() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let mut config = create_test_config(false, false);
+        let config = create_test_config(ReprexMode::Off);
+        let mut runtime =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
 
         // Initially no indicator
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
         // Enable reprex mode - shows reprex indicator
-        config.set_reprex(true, None);
-        let prompt = config.build_main_prompt();
+        runtime.set_mode(ReprexMode::On);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
 
-        // Enable autoformat - now shows autoformat indicator instead
-        config.toggle_autoformat();
-        let prompt = config.build_main_prompt();
+        // Enable format mode - now shows the format indicator instead
+        runtime.set_mode(ReprexMode::Format);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[format] r> ");
 
-        // Disable reprex - no indicator (autoformat alone doesn't show)
-        config.set_reprex(false, None);
-        let prompt = config.build_main_prompt();
+        // Disable reprex - no mode indicator.
+        runtime.set_mode(ReprexMode::Off);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
-        // Re-enable reprex - autoformat indicator shows again
-        config.set_reprex(true, None);
-        let prompt = config.build_main_prompt();
+        // Re-enable format mode - the format indicator shows again.
+        runtime.set_mode(ReprexMode::Format);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[format] r> ");
 
-        // Disable autoformat - back to reprex indicator
-        config.toggle_autoformat();
-        let prompt = config.build_main_prompt();
+        // Switch back to reprex mode
+        runtime.set_mode(ReprexMode::On);
+        let prompt = config.build_main_prompt(runtime.mode);
         assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
     }
 
     #[test]
-    fn test_prompt_runtime_config_custom_autoformat_indicator() {
+    fn test_prompt_runtime_config_custom_format_indicator() {
         // create_test_config_with_indicators reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
         let indicators = Indicators {
-            autoformat: "[AIR] ".to_string(),
+            reprex_format: "[AIR] ".to_string(),
             ..Indicators::default()
         };
 
-        let config = create_test_config_with_indicators(true, true, indicators);
+        let config = create_test_config_with_indicators(ReprexMode::Format, indicators);
 
-        // Shows custom autoformat indicator
-        let prompt = config.build_main_prompt();
+        // Shows the custom format indicator.
+        let prompt = config.build_main_prompt(ReprexMode::Format);
         assert_eq!(prompt.render_prompt_left(), "[AIR] r> ");
     }
 
@@ -765,7 +703,7 @@ mod tests {
         )
         .build();
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left().to_string();
 
         // The cwd_short should be expanded to the current directory's basename
@@ -795,7 +733,7 @@ mod tests {
 
         // Get the current directory
         let original_cwd = std::env::current_dir().unwrap();
-        let prompt1 = config.build_main_prompt();
+        let prompt1 = config.build_main_prompt(ReprexMode::Off);
         let rendered1 = prompt1.render_prompt_left().to_string();
 
         // Change to a temporary directory
@@ -803,7 +741,7 @@ mod tests {
         std::env::set_current_dir(&temp_dir).unwrap();
 
         // Build prompt again - should reflect the new directory
-        let prompt2 = config.build_main_prompt();
+        let prompt2 = config.build_main_prompt(ReprexMode::Off);
         let rendered2 = prompt2.render_prompt_left().to_string();
 
         // The two prompts should be different if cwd changed
@@ -848,12 +786,12 @@ mod tests {
                 .build();
 
         // Initially no error - empty status symbol
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
         // After command failure - shows error symbol (with color)
         config.set_last_command_failed(true);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Symbol should contain "✗ " (possibly with ANSI color codes)
         assert!(
@@ -869,7 +807,7 @@ mod tests {
 
         // After successful command - back to empty
         config.set_last_command_failed(false);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
@@ -892,12 +830,12 @@ mod tests {
                 .build();
 
         // With empty symbols, status placeholder should expand to empty string
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
         // Even after failure, still empty
         config.set_last_command_failed(true);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
@@ -924,11 +862,11 @@ mod tests {
         .build();
 
         // Prompt stays the same regardless of status
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
 
         config.set_last_command_failed(true);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
@@ -955,7 +893,7 @@ mod tests {
                 .build();
 
         // On success, prompt should use success color (Green)
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // The prompt text "r> " should be colored with Green
         assert!(
@@ -966,7 +904,7 @@ mod tests {
 
         // On failure, prompt should use error color (Red)
         config.set_last_command_failed(true);
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Should contain both the error symbol and prompt
         assert!(
@@ -980,7 +918,7 @@ mod tests {
     fn test_spinner_not_started_in_shell_mode() {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
-        let mut config = create_test_config(false, false);
+        let mut config = create_test_config(ReprexMode::Off);
         config.set_shell(true);
         // In shell mode, start_spinner should be a no-op (no panic, etc.)
         config.start_spinner();
@@ -993,7 +931,7 @@ mod tests {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
         // Create config with empty spinner frames (disabled by default)
-        let config = create_test_config(false, false);
+        let config = create_test_config(ReprexMode::Off);
         // Should not panic when spinner is disabled
         config.start_spinner();
     }
@@ -1046,7 +984,7 @@ mod tests {
         // Simulate a fast command (below default 2000ms threshold)
         config.last_command_duration = Some(Duration::from_millis(500));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         // Below threshold -> {duration} should be empty
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
@@ -1061,7 +999,7 @@ mod tests {
                 .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Above threshold -> should contain "5s" with default format "{value} "
         assert!(
@@ -1085,7 +1023,7 @@ mod tests {
                 .mode_indicator_position(ModeIndicatorPosition::None)
                 .build();
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         // No duration data -> {duration} should be empty
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
@@ -1101,7 +1039,7 @@ mod tests {
         // Set a duration above the default threshold
         config.last_command_duration = Some(Duration::from_secs(5));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         assert!(
             rendered.contains("5s"),
@@ -1111,7 +1049,7 @@ mod tests {
 
         // Clear and verify duration is no longer rendered
         config.clear_command_duration();
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
 
@@ -1125,7 +1063,7 @@ mod tests {
                 .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         // No {duration} in template -> prompt unchanged
         assert_eq!(prompt.render_prompt_left(), "r> ");
     }
@@ -1146,7 +1084,7 @@ mod tests {
         // 600ms > 500ms threshold, sub-second shows milliseconds
         config.last_command_duration = Some(Duration::from_millis(600));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         assert!(
             rendered.contains("600ms"),
@@ -1170,7 +1108,7 @@ mod tests {
                 .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Custom format "took {value} " should produce "took 5s "
         assert!(
@@ -1200,7 +1138,7 @@ mod tests {
                 .build();
         config.last_command_duration = Some(Duration::from_secs(90));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Custom format "({value}) " should produce "(1m30s) "
         assert!(
@@ -1225,7 +1163,7 @@ mod tests {
                 .build();
         config.last_command_duration = Some(Duration::from_secs(5));
 
-        let prompt = config.build_main_prompt();
+        let prompt = config.build_main_prompt(ReprexMode::Off);
         let rendered = prompt.render_prompt_left();
         // Format without {value}: only static text "slow! " is shown
         assert!(

@@ -6,7 +6,7 @@ mod meta_command;
 mod pager_ui;
 mod prompt;
 mod read_console;
-mod reprex;
+pub(crate) mod reprex;
 mod shell;
 pub(crate) mod state;
 
@@ -15,7 +15,7 @@ use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
     AutoSuggestions, Config, ConfigStatus, EditorMode, ModeIndicatorPosition, RSourceStatus,
-    history_dir_for_mode,
+    ReprexMode, history_dir_for_mode,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
@@ -53,6 +53,7 @@ use meta_command::{MetaCommandResult, process_meta_command};
 use pager_ui::{run_pager_help_browser, run_pager_history_browser, with_ipc_alternate_guard};
 use prompt::RPrompt;
 use read_console::read_console_callback;
+use reprex::ReprexRuntime;
 use reprex::{clear_input_lines, strip_reprex_output};
 use shell::{execute_shell_command, restart_process};
 use state::{PendingHistoryContext, PromptRuntimeConfig, ReplState};
@@ -262,8 +263,8 @@ impl Repl {
         let prompt_formatter = PromptFormatter::new();
 
         // Set up reprex mode if enabled
-        if config.startup.mode.reprex {
-            arf_libr::set_reprex_mode(true, &config.mode.reprex.comment);
+        if config.startup.reprex != ReprexMode::Off {
+            arf_libr::set_reprex_mode(true, &config.reprex.comment);
         }
 
         Ok(Repl {
@@ -581,12 +582,7 @@ impl Repl {
             self.config.prompt.shell_format.clone(),
         )
         .mode_indicator_position(self.config.prompt.mode_indicator)
-        .reprex(
-            self.config.startup.mode.reprex,
-            self.config.mode.reprex.comment.clone(),
-        )
         .indicators(self.config.prompt.indicators.clone())
-        .autoformat(self.config.startup.mode.autoformat)
         .main_color(self.config.colors.prompt.main)
         .continuation_color(self.config.colors.prompt.continuation)
         .shell_color(self.config.colors.prompt.shell)
@@ -613,6 +609,11 @@ impl Repl {
                 line_editor,
                 shell_line_editor,
                 prompt_config,
+                reprex: ReprexRuntime::new(
+                    self.config.startup.reprex,
+                    self.config.reprex.comment.clone(),
+                    self.config.reprex.formatter,
+                ),
                 should_exit: false,
                 config_path: self.config_path.clone(),
                 config_status: self.config_status,
@@ -779,12 +780,16 @@ impl Repl {
 
         // Mode indicator for special modes (reprex, etc.)
         let mode_position = self.config.prompt.mode_indicator;
-        let mode_indicator =
-            if self.config.startup.mode.reprex && mode_position != ModeIndicatorPosition::None {
+        let mode_indicator = match self.config.startup.reprex {
+            ReprexMode::Off => None,
+            ReprexMode::On if mode_position != ModeIndicatorPosition::None => {
                 Some(self.config.prompt.indicators.reprex.clone())
-            } else {
-                None
-            };
+            }
+            ReprexMode::Format if mode_position != ModeIndicatorPosition::None => {
+                Some(self.config.prompt.indicators.reprex_format.clone())
+            }
+            _ => None,
+        };
 
         let prompt = RPrompt::new(
             self.prompt_formatter.format(&self.config.prompt.format),
@@ -820,6 +825,11 @@ impl Repl {
                     self.config.colors.prompt.vi.clone(),
                 )
                 .build();
+        let mut standalone_reprex = ReprexRuntime::new(
+            self.config.startup.reprex,
+            self.config.reprex.comment.clone(),
+            self.config.reprex.formatter,
+        );
         // Separate dir_stack for standalone mode (R not initialized).
         // The R mainloop path stores its own dir_stack in ReplState.
         // These two paths are mutually exclusive, so no sharing is needed.
@@ -843,6 +853,7 @@ impl Repl {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut prompt_config,
+                        &mut standalone_reprex,
                         &history_handle,
                         &shell_history_handle,
                         &self.r_source_status,
@@ -856,6 +867,7 @@ impl Repl {
                         prompt_config.clear_command_duration();
                         let ctx = SessionInfoContext {
                             prompt_config: &prompt_config,
+                            reprex: &standalone_reprex,
                             config_path: &self.config_path,
                             config_status: self.config_status,
                             r_history: &history_handle,
@@ -1009,6 +1021,7 @@ enum MetaAction {
 /// Context for displaying session info in the pager.
 struct SessionInfoContext<'a> {
     prompt_config: &'a PromptRuntimeConfig,
+    reprex: &'a ReprexRuntime,
     config_path: &'a Option<std::path::PathBuf>,
     config_status: ConfigStatus,
     r_history: &'a HistoryRuntime,
@@ -1047,6 +1060,7 @@ fn handle_meta_command_result(
             with_ipc_alternate_guard(|| {
                 crate::pager::display_session_info(
                     ctx.prompt_config,
+                    ctx.reprex,
                     ctx.config_path,
                     ctx.config_status,
                     ctx.r_history,

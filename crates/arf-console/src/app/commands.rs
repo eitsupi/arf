@@ -53,6 +53,9 @@ fn handle_config_check(path: Option<&std::path::Path>) -> Result<()> {
         Err(ConfigLoadError::Read { source, .. }) => {
             anyhow::bail!("Could not read config file: {}", source);
         }
+        Err(ConfigLoadError::Validation { message, .. }) => {
+            anyhow::bail!("Config file has errors:\n\n  {}", message);
+        }
     }
 }
 

@@ -7,6 +7,7 @@ use crate::external::{formatter, rig};
 use crate::history::HistoryRuntime;
 use crate::ipc::policy::{IpcPolicy, SilentPolicy, VisiblePolicy, policy};
 use crate::ipc::session::SessionType;
+use crate::repl::reprex::ReprexRuntime;
 use crate::repl::state::PromptRuntimeConfig;
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -17,6 +18,7 @@ use std::path::PathBuf;
 /// Display session information for the :info command in a pager.
 pub fn display_session_info(
     prompt_config: &PromptRuntimeConfig,
+    reprex: &ReprexRuntime,
     config_path: &Option<PathBuf>,
     config_status: ConfigStatus,
     r_history: &HistoryRuntime,
@@ -25,6 +27,7 @@ pub fn display_session_info(
 ) {
     let lines = generate_info_lines(
         prompt_config,
+        reprex,
         config_path,
         config_status,
         r_history,
@@ -48,6 +51,7 @@ pub fn display_session_info(
 /// Generate the session information as a vector of lines.
 fn generate_info_lines(
     prompt_config: &PromptRuntimeConfig,
+    reprex: &ReprexRuntime,
     config_path: &Option<PathBuf>,
     config_status: ConfigStatus,
     r_history: &HistoryRuntime,
@@ -152,34 +156,29 @@ fn generate_info_lines(
         }
     }
 
-    // Air (formatter) status
-    if formatter::is_formatter_available() {
-        lines.push("air:            installed".to_string());
-    } else {
-        lines.push("air:            not installed".to_string());
-    }
-
-    lines.push(String::new());
-
     // Current mode
     let mode = if prompt_config.is_shell_enabled() {
         "Shell"
-    } else if prompt_config.is_reprex_enabled() {
-        "R (reprex)"
     } else {
         "R"
     };
     lines.push(format!("Current mode:   {}", mode));
 
-    // Autoformat status (only relevant in reprex mode)
-    if prompt_config.is_reprex_enabled() {
-        let autoformat = if prompt_config.is_autoformat_enabled() {
-            "enabled"
-        } else {
-            "disabled"
-        };
-        lines.push(format!("Auto-format:    {}", autoformat));
-    }
+    let reprex_mode = match reprex.mode {
+        crate::config::ReprexMode::Off => "off",
+        crate::config::ReprexMode::On => "on",
+        crate::config::ReprexMode::Format => "format",
+    };
+    lines.push(format!("Reprex:         {}", reprex_mode));
+    let formatter_state = if formatter::is_formatter_available(reprex.formatter) {
+        "installed"
+    } else {
+        "missing"
+    };
+    lines.push(format!(
+        "Formatter:      {} ({})",
+        reprex.formatter, formatter_state
+    ));
 
     lines.push(String::new());
 
@@ -557,6 +556,14 @@ mod tests {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
     }
 
+    fn default_reprex_runtime() -> ReprexRuntime {
+        ReprexRuntime::new(
+            crate::config::ReprexMode::Off,
+            "#> ",
+            crate::config::ReprexFormatter::Air,
+        )
+    }
+
     fn unavailable_history() -> HistoryRuntime {
         HistoryRuntime::Unavailable {
             failure: HistoryFailureDetail::test_memory(),
@@ -571,6 +578,7 @@ mod tests {
         let config = default_prompt_config();
         let lines = generate_info_lines(
             &config,
+            &default_reprex_runtime(),
             &None,
             ConfigStatus::Ok,
             &unavailable_history(),
@@ -606,6 +614,7 @@ mod tests {
         let masked = mask_home_path(&path);
         let lines = generate_info_lines(
             &config,
+            &default_reprex_runtime(),
             &Some(path),
             ConfigStatus::Ok,
             &unavailable_history(),
@@ -642,6 +651,7 @@ mod tests {
         let path = temp_dir.path().join("nonexistent_config.toml");
         let lines = generate_info_lines(
             &config,
+            &default_reprex_runtime(),
             &Some(path),
             ConfigStatus::Ok,
             &unavailable_history(),
@@ -668,6 +678,7 @@ mod tests {
         let path = temp_file.path().to_path_buf();
         let lines = generate_info_lines(
             &config,
+            &default_reprex_runtime(),
             &Some(path),
             ConfigStatus::ParseError,
             &unavailable_history(),
@@ -694,6 +705,7 @@ mod tests {
         let path = temp_file.path().to_path_buf();
         let lines = generate_info_lines(
             &config,
+            &default_reprex_runtime(),
             &Some(path),
             ConfigStatus::ReadError,
             &unavailable_history(),

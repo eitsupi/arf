@@ -1,5 +1,6 @@
 //! Startup configuration.
 
+use clap::ValueEnum;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -16,9 +17,9 @@ pub struct StartupConfig {
     /// Show startup banner.
     #[serde(default = "default_true")]
     pub show_banner: bool,
-    /// Initial mode settings (reprex, autoformat).
+    /// Initial reprex mode.
     #[serde(default)]
-    pub mode: StartupModeConfig,
+    pub reprex: ReprexMode,
 }
 
 fn default_true() -> bool {
@@ -30,23 +31,24 @@ impl Default for StartupConfig {
         StartupConfig {
             r_source: RSource::default(),
             show_banner: true,
-            mode: StartupModeConfig::default(),
+            reprex: ReprexMode::Off,
         }
     }
 }
 
-/// Initial mode configuration.
-///
-/// These modes can be toggled at runtime via meta commands, but
-/// this configuration determines their initial state at startup.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-#[derive(Default)]
-pub struct StartupModeConfig {
-    /// Enable reprex mode (no prompt, output prefixed with comment).
-    pub reprex: bool,
-    /// Enable auto-formatting of R code in reprex mode (requires Air CLI).
-    pub autoformat: bool,
+/// Reprex execution mode.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ValueEnum, Default,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ReprexMode {
+    /// Evaluate normally.
+    #[default]
+    Off,
+    /// Evaluate and show reprex output.
+    On,
+    /// Format code with the configured formatter before reprex evaluation.
+    Format,
 }
 
 /// How to locate the R installation.

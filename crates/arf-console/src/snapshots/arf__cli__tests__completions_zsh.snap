@@ -23,6 +23,9 @@ _arf() {
 '--eval=[Evaluate R expression and exit]:EVAL:_default' \
 '(-e --eval)-f+[\[R\] Take input from FILE]:FILE:_files' \
 '(-e --eval)--file=[\[R\] Take input from FILE]:FILE:_files' \
+'--reprex=[Set reprex mode (off, on, or format)]:MODE:((off\:"Evaluate normally"
+on\:"Evaluate and show reprex output"
+format\:"Format code with the configured formatter before reprex evaluation"))' \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
 '(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
@@ -42,8 +45,6 @@ _arf() {
 '--ipc-pid-file=[Write server PID to a file on startup (requires --with-ipc)]:IPC_PID_FILE:_files' \
 '*--ipc-eval-allow-function=[Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use \`package\:\:function\`]:IPC_EVAL_ALLOW_FUNCTION:_default' \
 '--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
-'--reprex[Enable reprex mode (no prompt, output prefixed with #>)]' \
-'--auto-format[Enable auto-formatting of R code in reprex mode (requires Air CLI)]' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '--no-banner[Suppress the startup banner]' \

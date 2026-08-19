@@ -36,7 +36,7 @@ use base64::{Engine as _, engine::general_purpose};
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use cli::{Cli, Commands, RArgsBuilder, RCommand};
-use config::ensure_directories;
+use config::{ReprexMode, ensure_directories};
 use logging::init_logger;
 use pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
@@ -259,17 +259,16 @@ fn run() -> Result<()> {
     log::debug!("Loaded config: {:?}", config);
 
     // Apply CLI overrides
-    if cli.reprex {
-        config.startup.mode.reprex = true;
-    }
-    if cli.auto_format {
-        if !external::formatter::is_formatter_available() {
+    if let Some(mode) = cli.reprex {
+        if mode == ReprexMode::Format
+            && !external::formatter::is_formatter_available(config.reprex.formatter)
+        {
             anyhow::bail!(
-                "Cannot enable auto-format: Air CLI ('air' command) not found in PATH.\n\
+                "Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.\n\
                  Install Air CLI from https://github.com/posit-dev/air"
             );
         }
-        config.startup.mode.autoformat = true;
+        config.startup.reprex = mode;
     }
     if cli.no_banner {
         config.startup.show_banner = false;
@@ -294,18 +293,15 @@ fn run() -> Result<()> {
         };
     }
 
-    // Warn if auto-format is enabled (via config) but Air CLI is not available
-    if config.startup.mode.autoformat
-        && !cli.auto_format
-        && !external::formatter::is_formatter_available()
+    // Configured format mode degrades to on when Air is unavailable.
+    if config.startup.reprex == ReprexMode::Format
+        && cli.reprex.is_none()
+        && !external::formatter::is_formatter_available(config.reprex.formatter)
     {
         eprintln!(
-            "Warning: Auto-format is enabled in config but Air CLI ('air' command) not found in PATH."
+            "Warning: Reprex format mode is configured but Air CLI ('air' command) was not found; using reprex on mode."
         );
-        eprintln!(
-            "         Auto-format has been disabled. Install Air CLI from https://github.com/posit-dev/air"
-        );
-        config.startup.mode.autoformat = false;
+        config.startup.reprex = ReprexMode::On;
     }
 
     // Set up R based on r_source config (with optional CLI override)

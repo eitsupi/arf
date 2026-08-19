@@ -1,6 +1,6 @@
 //! R code formatter integration.
 //!
-//! This module provides auto-formatting of R code using external formatters like `air`.
+//! This module provides formatting of R code using external formatters like `air`.
 //!
 //! # TODO
 //! Currently uses a temp file workaround because `air format` doesn't support stdin/stdout.
@@ -9,6 +9,7 @@
 //! When air adds stdin support (e.g., `echo "x<-1" | air format --stdin`), this module
 //! should be updated to pipe directly to the formatter process, avoiding disk I/O overhead.
 
+use crate::config::ReprexFormatter;
 use std::io::Write;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -21,14 +22,16 @@ const FORMATTER_COMMAND: &str = "air";
 static FORMATTER_AVAILABLE: OnceLock<bool> = OnceLock::new();
 
 /// Check if the air formatter is available on the system.
-pub fn is_formatter_available() -> bool {
-    *FORMATTER_AVAILABLE.get_or_init(|| {
-        Command::new(FORMATTER_COMMAND)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    })
+pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
+    match formatter {
+        ReprexFormatter::Air => *FORMATTER_AVAILABLE.get_or_init(|| {
+            Command::new(FORMATTER_COMMAND)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }),
+    }
 }
 
 /// Format R code using air.
@@ -50,14 +53,20 @@ pub fn is_formatter_available() -> bool {
 /// output.stdin.write_all(code.as_bytes())?;
 /// let formatted = String::from_utf8(output.wait_with_output()?.stdout)?;
 /// ```
-pub fn format_code(code: &str) -> String {
+pub fn format_code(formatter: ReprexFormatter, code: &str) -> String {
+    match formatter {
+        ReprexFormatter::Air => format_air_code(code),
+    }
+}
+
+fn format_air_code(code: &str) -> String {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
         return code.to_string();
     }
 
     // Check if formatter is available
-    if !is_formatter_available() {
+    if !is_formatter_available(ReprexFormatter::Air) {
         log::debug!(
             "Formatter '{}' not available, skipping format",
             FORMATTER_COMMAND
@@ -155,10 +164,10 @@ mod tests {
 
     #[test]
     fn test_format_empty_code() {
-        let result = format_code("");
+        let result = format_code(ReprexFormatter::Air, "");
         assert_eq!(result, "");
 
-        let result = format_code("   ");
+        let result = format_code(ReprexFormatter::Air, "   ");
         assert_eq!(result, "   ");
     }
 
@@ -166,7 +175,7 @@ mod tests {
     #[ignore] // Requires air to be installed
     fn test_format_simple_assignment() {
         let code = "x<-1+2";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert_eq!(result, "x <- 1 + 2");
     }
 
@@ -174,7 +183,7 @@ mod tests {
     #[ignore] // Requires air to be installed
     fn test_format_function_definition() {
         let code = "f=function(x,y){x+y}";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         // air formats this with proper spacing and indentation
         assert!(result.contains("function(x, y)"));
         assert!(result.contains("x + y"));
@@ -185,12 +194,12 @@ mod tests {
     fn test_format_preserves_trailing_newline_style() {
         // Without trailing newline
         let code = "x <- 1";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert!(!result.ends_with('\n'));
 
         // With trailing newline
         let code = "x <- 1\n";
-        let result = format_code(code);
+        let result = format_code(ReprexFormatter::Air, code);
         assert!(result.ends_with('\n'));
     }
 }

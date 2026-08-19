@@ -44,9 +44,7 @@ If no configuration file exists, arf uses these defaults:
 r_source = "auto"       # How to locate R: "auto", "rig", or { path = "..." }
 show_banner = true      # Show startup banner
 
-[startup.mode]
-reprex = false          # Enable reprex mode
-autoformat = false      # Enable auto-formatting (requires air)
+reprex = "off"          # "off", "on", or "format" (requires air)
 
 [ipc.eval]
 # Exact direct function/operator targets permitted by `arf ipc eval`; empty by default.
@@ -84,7 +82,7 @@ non_vi = ""                # Non-vi modes (Emacs, etc.)
 
 [prompt.indicators]
 reprex = "[reprex] "       # Indicator text for reprex mode
-autoformat = "[format] "   # Indicator text for autoformat mode
+reprex_format = "[format] " # Indicator text for formatted reprex mode
 
 [completion]
 enabled = true             # Enable tab completion
@@ -101,8 +99,9 @@ mode = "persistent"        # "persistent" or session-only "volatile"
 [r]
 auto_width = true          # Sync R's options(width) with terminal size
 
-[mode.reprex]
+[reprex]
 comment = "#> "            # Comment prefix for reprex output
+formatter = "air"          # Formatter backend for format mode
 
 # Syntax highlighting colors
 [colors.r]
@@ -547,34 +546,33 @@ symbol = { insert = "", normal = "" }
 > [!NOTE]
 > To disable the vi mode indicator entirely, set the symbols to empty strings as shown above.
 
-## Auto-Formatting (Reprex Mode)
+## Reprex Modes and Formatting
 
-arf supports auto-formatting of R code using [air](https://github.com/posit-dev/air).
-
-**Note:** Auto-formatting only applies in reprex mode.
+arf supports three reprex modes: `off`, `on`, and `format`. The `format` mode
+formats R code with [air](https://github.com/posit-dev/air) before reprex evaluation.
 
 ### Configuration
 
 ```toml
-[startup.mode]
-reprex = true       # Enable reprex mode
-autoformat = true   # Enable auto-formatting
+[startup]
+reprex = "format"  # "off", "on", or "format"
 ```
 
 ### CLI Option
 
 ```bash
-# Enable reprex mode with auto-formatting
-arf --reprex --auto-format
+# Enable reprex mode with formatting
+arf --reprex=format
 ```
 
-### Runtime Toggle
+### Runtime Selection
 
-Toggle during a session using meta commands:
+Select the mode during a session using the explicit meta command:
 
 ```
-:autoformat   # Toggle auto-formatting
-:format       # Same as :autoformat
+:reprex on
+:reprex off
+:reprex format  # Requires Air
 ```
 
 ## R Source Configuration
@@ -950,13 +948,12 @@ Command-line options take precedence over their corresponding config file settin
 | CLI Option | Config Setting |
 |------------|----------------|
 | `--no-banner` | `startup.show_banner` |
-| `--reprex` | `startup.mode.reprex` |
-| `--auto-format` | `startup.mode.autoformat` |
+| `--reprex=<off\|on\|format>` | `startup.reprex` |
 | `--no-history` | `history.mode = "volatile"` |
 | `--history-dir` / `ARF_HISTORY_DIR` | `history.mode = { dir = "..." }` |
 
 Example:
 ```bash
-# Enable reprex mode with auto-formatting
-arf --reprex --auto-format
+# Enable reprex mode with formatting
+arf --reprex=format
 ```

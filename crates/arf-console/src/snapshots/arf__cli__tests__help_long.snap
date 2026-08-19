@@ -22,15 +22,15 @@ Options:
   -f, --file <FILE>
           [R] Take input from FILE
 
-      --reprex
-          Enable reprex mode (no prompt, output prefixed with #>)
+      --reprex <MODE>
+          Set reprex mode (off, on, or format).
           
-          Config: startup.mode.reprex
+          Config: startup.reprex
 
-      --auto-format
-          Enable auto-formatting of R code in reprex mode (requires Air CLI)
-          
-          Config: startup.mode.autoformat
+          Possible values:
+          - off:    Evaluate normally
+          - on:     Evaluate and show reprex output
+          - format: Format code with the configured formatter before reprex evaluation
 
   -c, --config <CONFIG>
           Path to configuration file

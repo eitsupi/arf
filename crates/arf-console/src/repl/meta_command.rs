@@ -1,12 +1,13 @@
 //! Meta command processing.
 
 use crate::completion::path::expand_tilde;
-use crate::config::RSourceStatus;
+use crate::config::{RSourceStatus, ReprexMode};
 use crate::external::formatter;
 use crate::history::{HistoryRuntime, HistoryStore};
 use crate::pager::HistoryDbMode;
 use std::path::PathBuf;
 
+use super::reprex::ReprexRuntime;
 use super::shell::confirm_action;
 use super::state::PromptRuntimeConfig;
 use super::{ARF_PREFIX, arf_println};
@@ -47,6 +48,7 @@ pub enum MetaCommandResult {
 pub fn process_meta_command(
     input: &str,
     prompt_config: &mut PromptRuntimeConfig,
+    reprex: &mut ReprexRuntime,
     r_history: &HistoryRuntime,
     shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
@@ -63,46 +65,37 @@ pub fn process_meta_command(
     let cmd = parts.first().copied().unwrap_or("");
 
     match cmd {
+        "reprex" if parts.len() == 2 => match parts[1] {
+            "on" => {
+                reprex.set_mode(ReprexMode::On);
+                arf_println!("Reprex: on");
+                Some(MetaCommandResult::Handled)
+            }
+            "off" => {
+                reprex.set_mode(ReprexMode::Off);
+                arf_println!("Reprex: off");
+                Some(MetaCommandResult::Handled)
+            }
+            "format" => {
+                if reprex.mode != ReprexMode::Format
+                    && !formatter::is_formatter_available(reprex.formatter)
+                {
+                    arf_println!(
+                        "Error: Cannot use reprex format mode - Air CLI ('air' command) not found in PATH."
+                    );
+                } else {
+                    reprex.set_mode(ReprexMode::Format);
+                    arf_println!("Reprex: format");
+                }
+                Some(MetaCommandResult::Handled)
+            }
+            _ => {
+                arf_println!("Usage: :reprex on|off|format");
+                Some(MetaCommandResult::Handled)
+            }
+        },
         "reprex" => {
-            prompt_config.toggle_reprex();
-            if prompt_config.is_reprex_enabled() {
-                if prompt_config.is_autoformat_enabled() {
-                    println!(
-                        "# Reprex mode enabled (comment: {:?}, auto-format: on)",
-                        prompt_config.reprex_comment
-                    );
-                } else {
-                    arf_println!(
-                        "Reprex mode enabled (comment: {:?})",
-                        prompt_config.reprex_comment
-                    );
-                }
-            } else {
-                arf_println!("Reprex mode disabled");
-            }
-            Some(MetaCommandResult::Handled)
-        }
-        "autoformat" | "format" => {
-            if prompt_config.is_autoformat_enabled() {
-                // Disabling - always allowed
-                prompt_config.toggle_autoformat();
-                arf_println!("Autoformat disabled");
-            } else {
-                // Enabling - check if Air is available
-                if formatter::is_formatter_available() {
-                    prompt_config.toggle_autoformat();
-                    if prompt_config.is_reprex_enabled() {
-                        arf_println!("Autoformat enabled");
-                    } else {
-                        arf_println!("Autoformat enabled (activate reprex mode to use)");
-                    }
-                } else {
-                    arf_println!(
-                        "Error: Cannot enable autoformat - Air CLI ('air' command) not found in PATH."
-                    );
-                    arf_println!("Install Air CLI from https://github.com/posit-dev/air");
-                }
-            }
+            arf_println!("Usage: :reprex on|off|format");
             Some(MetaCommandResult::Handled)
         }
         "shell" => {
@@ -311,10 +304,7 @@ pub fn process_meta_command(
             println!("#   :cd <path>     - Change working directory");
             println!("#   :pushd <path>  - Push directory and change to it");
             println!("#   :popd          - Pop directory from stack");
-            println!("#   :reprex        - Toggle reprex mode");
-            println!(
-                "#   :autoformat    - Toggle auto-formatting in reprex mode (requires Air CLI)"
-            );
+            println!("#   :reprex <on|off|format> - Set reprex mode");
             println!("#   :history       - History management (browse, clear, schema)");
             println!("#   :restart       - Restart R session");
             println!("#   :restart!      - Restart without confirmation");
@@ -524,6 +514,7 @@ mod tests {
     use super::*;
     use crate::editor::prompt::PromptFormatter;
     use crate::history::HistoryFailureDetail;
+    use crate::repl::reprex::ReprexRuntime;
 
     fn create_test_prompt_config() -> PromptRuntimeConfig {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
@@ -543,9 +534,38 @@ mod tests {
         status: &RSourceStatus,
     ) -> Option<MetaCommandResult> {
         let mut dir_stack = Vec::new();
+        let mut reprex =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
         process_meta_command(
             input,
             config,
+            &mut reprex,
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            status,
+            &mut dir_stack,
+            None,
+            None,
+        )
+    }
+
+    fn call_meta_with_runtime(
+        input: &str,
+        config: &mut PromptRuntimeConfig,
+        reprex: &mut ReprexRuntime,
+        status: &RSourceStatus,
+    ) -> Option<MetaCommandResult> {
+        let mut dir_stack = Vec::new();
+        process_meta_command(
+            input,
+            config,
+            reprex,
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
@@ -572,20 +592,37 @@ mod tests {
     }
 
     #[test]
-    fn test_process_meta_command_reprex_toggle() {
+    fn test_process_meta_command_reprex_explicit_mode() {
         // create_test_prompt_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
         let mut config = create_test_prompt_config();
+        let mut reprex =
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
         let status = default_r_source_status();
-        assert!(!config.is_reprex_enabled());
+        assert!(!reprex.is_enabled());
 
-        let result = call_meta(":reprex", &mut config, &None, &None, &status);
+        let result = call_meta_with_runtime(":reprex on", &mut config, &mut reprex, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
-        assert!(config.is_reprex_enabled());
+        assert!(reprex.is_enabled());
 
-        let result = call_meta(":reprex", &mut config, &None, &None, &status);
+        let result = call_meta_with_runtime(":reprex off", &mut config, &mut reprex, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
-        assert!(!config.is_reprex_enabled());
+        assert!(!reprex.is_enabled());
+
+        let result = call_meta_with_runtime(":reprex", &mut config, &mut reprex, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        assert!(!reprex.is_enabled());
+
+        // Once already in format mode, repeating the command is idempotent
+        // and does not require probing the formatter again.
+        reprex.set_mode(ReprexMode::Format);
+        let result = call_meta_with_runtime(":reprex format", &mut config, &mut reprex, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        assert_eq!(reprex.mode, ReprexMode::Format);
+
+        let result = call_meta_with_runtime(":reprex on extra", &mut config, &mut reprex, &status);
+        assert!(matches!(result, Some(MetaCommandResult::Handled)));
+        assert!(reprex.is_enabled());
     }
 
     #[test]
@@ -657,7 +694,7 @@ mod tests {
         let status = default_r_source_status();
         let result = call_meta("  :reprex  ", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Handled)));
-        assert!(config.is_reprex_enabled());
+        // Bare commands do not change the independent runtime state.
     }
 
     #[test]
@@ -897,6 +934,7 @@ mod tests {
         let result = process_meta_command(
             &format!(":cd {}", tmp.path().display()),
             &mut config,
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
@@ -925,6 +963,7 @@ mod tests {
         let result = process_meta_command(
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
@@ -944,6 +983,7 @@ mod tests {
         let result = process_meta_command(
             ":popd",
             &mut config,
+            &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air),
             &HistoryRuntime::Unavailable {
                 failure: HistoryFailureDetail::test_memory(),
                 previous_failure: None,
