@@ -17,7 +17,7 @@ pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
 };
-pub use history::HistoryConfig;
+pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;
 pub use mode::ModeConfig;
 #[allow(unused_imports)]
@@ -64,6 +64,7 @@ pub enum ConfigLoadError {
 pub(crate) struct ConfigLoadProvenance {
     pub(crate) path: PathBuf,
     pub(crate) startup_r_source_present: bool,
+    pub(crate) history_migration_warning: Option<String>,
 }
 
 impl std::fmt::Display for ConfigLoadError {
@@ -121,6 +122,8 @@ pub struct Config {
     pub colors: ColorsConfig,
     #[serde(default)]
     pub experimental: ExperimentalConfig,
+    #[serde(skip)]
+    pub(crate) history_migration_warning: Option<String>,
 }
 
 /// Get the XDG config directory for this application.
@@ -150,6 +153,18 @@ pub fn config_file_path() -> Option<PathBuf> {
 /// - Shell mode: `history/shell.db`
 pub fn history_dir() -> Option<PathBuf> {
     data_dir().map(|p| p.join("history"))
+}
+
+/// Resolve the on-disk history directory for a configured mode.
+///
+/// Volatile history deliberately has no path: it must not expose, read, or
+/// create the persistent XDG directory. Persistent mode uses its explicit
+/// directory when present and otherwise the XDG default.
+pub fn history_dir_for_mode(mode: &HistoryMode) -> Option<PathBuf> {
+    match mode {
+        HistoryMode::Persistent { .. } => mode.persistent_dir().cloned().or_else(history_dir),
+        HistoryMode::Volatile => None,
+    }
 }
 
 /// Mask home directory in path with `~` for privacy.
@@ -212,18 +227,33 @@ pub(crate) fn load_config_from_path_with_provenance(
         .get("startup")
         .and_then(|startup| startup.get("r_source"))
         .is_some();
-    let config = toml::from_str::<Config>(&content).map_err(|e| ConfigLoadError::Parse {
+    let mut config = toml::from_str::<Config>(&content).map_err(|e| ConfigLoadError::Parse {
         source: e,
         path: path.to_path_buf(),
     })?;
+    config.history_migration_warning = history_migration_warning(&document);
+    let migration_warning = config.history_migration_warning.clone();
 
     Ok((
         config,
         Some(ConfigLoadProvenance {
             path: path.to_path_buf(),
             startup_r_source_present,
+            history_migration_warning: migration_warning,
         }),
     ))
+}
+
+fn history_migration_warning(document: &toml::Value) -> Option<String> {
+    let history = document.get("history")?.as_table()?;
+    let has_mode = history.contains_key("mode");
+    let disabled = history.get("disabled").and_then(toml::Value::as_bool);
+    match (has_mode, disabled) {
+        (true, Some(_)) => Some("Config key history.disabled is deprecated and ignored because history.mode is set; use history.mode only.".to_string()),
+        (false, Some(true)) => Some("Config key history.disabled is deprecated; use history.mode = \"volatile\" instead.".to_string()),
+        (false, Some(false)) => Some("Config key history.disabled is deprecated; use history.mode = \"persistent\" instead.".to_string()),
+        _ => None,
+    }
 }
 
 /// Generate default configuration as a TOML string with comments.
@@ -502,13 +532,94 @@ mode_indicator = "none"
     }
 
     #[test]
-    fn test_parse_history_disabled() {
+    fn test_parse_history_mode_volatile() {
         let toml_str = r#"
 [history]
-disabled = true
+mode = "volatile"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(config.history.disabled);
+        assert!(matches!(config.history.mode, HistoryMode::Volatile));
+    }
+
+    #[test]
+    fn test_legacy_history_disabled_migrates_with_warning() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        fs::write(&path, "[history]\ndisabled = true\n").unwrap();
+        let (config, provenance) = load_config_from_path_with_provenance(&path).unwrap();
+        assert!(matches!(config.history.mode, HistoryMode::Volatile));
+        assert!(config.history_migration_warning.is_some());
+        assert!(provenance.unwrap().history_migration_warning.is_some());
+    }
+
+    #[test]
+    fn test_legacy_history_disabled_false_preserves_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        fs::write(
+            &path,
+            "[history]\ndisabled = false\ndir = \"/tmp/arf-history\"\n",
+        )
+        .unwrap();
+        let (loaded, provenance) = load_config_from_path_with_provenance(&path).unwrap();
+        assert!(
+            provenance
+                .unwrap()
+                .history_migration_warning
+                .unwrap()
+                .contains("persistent")
+        );
+        assert!(matches!(
+            loaded.history.mode,
+            HistoryMode::Persistent { .. }
+        ));
+
+        let config: Config =
+            toml::from_str("[history]\ndisabled = false\ndir = \"/tmp/arf-history\"\n").unwrap();
+        assert!(matches!(
+            config.history.mode,
+            HistoryMode::Persistent { dir: Some(ref dir) } if dir == std::path::Path::new("/tmp/arf-history")
+        ));
+    }
+
+    #[test]
+    fn test_history_mode_wins_over_legacy_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        fs::write(&path, "[history]\nmode = \"volatile\"\ndisabled = false\n").unwrap();
+        let (config, provenance) = load_config_from_path_with_provenance(&path).unwrap();
+        assert!(
+            provenance
+                .unwrap()
+                .history_migration_warning
+                .unwrap()
+                .contains("ignored")
+        );
+        assert!(matches!(config.history.mode, HistoryMode::Volatile));
+    }
+
+    #[test]
+    fn test_history_mode_wrong_type_is_parse_error() {
+        let result = toml::from_str::<Config>("[history]\nmode = 1\n");
+        assert!(result.is_err());
+        let result = toml::from_str::<Config>("[history]\ndisabled = \"true\"\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_history_dir_for_mode_never_exposes_a_volatile_path() {
+        assert_eq!(
+            history_dir_for_mode(&HistoryMode::Volatile),
+            None,
+            "volatile history must not expose the persistent XDG directory"
+        );
+        let explicit = std::path::PathBuf::from("/tmp/arf-history");
+        assert_eq!(
+            history_dir_for_mode(&HistoryMode::Persistent {
+                dir: Some(explicit.clone()),
+            }),
+            Some(explicit)
+        );
     }
 
     #[test]
@@ -767,6 +878,14 @@ allowed_functions = ["mean", "stats::median", "+"]
         assert!(
             config_str.contains("[editor]"),
             "Should have [editor] section"
+        );
+        assert!(
+            config_str.contains("mode = \"persistent\""),
+            "History should default to persistent mode"
+        );
+        assert!(
+            !config_str.contains("disabled"),
+            "Deprecated history.disabled must not be serialized"
         );
     }
 

@@ -20,8 +20,8 @@ use serde::Serialize;
 ///
 /// Contains session connection info and any warnings collected during startup.
 /// All keys are always present in the JSON output; `r_version`, `r_home`, `log_file`,
-/// and `history_session_id` may be `null`. `warnings` is an array that may be
-/// empty.
+/// and `history_session_id` may be `null` only when history initialization is
+/// unavailable. `warnings` is an array that may be empty.
 #[derive(Debug, Serialize)]
 struct HeadlessInfo {
     pid: u32,
@@ -190,38 +190,59 @@ pub(crate) fn run_headless(
 
     // Apply CLI history overrides (same logic as the REPL path in main())
     if no_history {
-        config.history.disabled = true;
+        config.history.mode = crate::config::HistoryMode::Volatile;
     } else if let Some(history_dir) = cli_history_dir {
-        config.history.dir = Some(history_dir.to_path_buf());
+        config.history.mode = crate::config::HistoryMode::Persistent {
+            dir: Some(history_dir.to_path_buf()),
+        };
     }
 
     let mut eval_allowlist = config.ipc.eval.allowed_functions.clone();
     eval_allowlist.extend(ipc_eval_allow_function.iter().cloned());
     ipc::policy::set_policy(eval_allowlist, ipc_eval_unrestricted);
 
-    // Initialize history for headless mode (same SQLite database as the REPL).
-    // Only advertise history_session_id to IPC if the backend was actually opened.
+    // Initialize the single history owner for headless mode. Volatile history
+    // is still queryable through IPC during this process but never touches disk.
     let session_id = create_session_id(&config);
     let mut session_id_raw = None;
     if let Some(sid) = session_id {
         let history_path = {
-            let dir = config.history.dir.clone().or_else(config::history_dir);
+            let dir = config::history_dir_for_mode(&config.history.mode);
             dir.map(|d| d.join("r.db"))
         };
-        if let Some(path) = history_path {
-            match crate::history::HistoryStore::open(
-                path.clone(),
-                Some(sid),
-                Some(chrono::Utc::now()),
-            ) {
-                Ok(history) => {
-                    ipc::set_headless_history(history);
-                    ipc::set_history_db_info(path.clone(), Some(sid));
-                    session_id_raw = Some(i64::from(sid));
-                    log::info!("Headless history enabled: {}", path.display());
-                }
-                Err(e) => {
-                    log::warn!("Failed to open history database {}: {}", path.display(), e);
+        let opened = if matches!(config.history.mode, crate::config::HistoryMode::Volatile) {
+            crate::history::HistoryStore::in_memory(Some(sid), Some(chrono::Utc::now()))
+        } else if let Some(path) = history_path.clone() {
+            crate::history::HistoryStore::open(path, Some(sid), Some(chrono::Utc::now()))
+        } else {
+            Err(reedline::ReedlineError(
+                reedline::ReedlineErrorVariants::HistoryDatabaseError(
+                    "no history directory available".to_string(),
+                ),
+            ))
+        };
+        match opened {
+            Ok(history) => {
+                ipc::set_headless_history(history);
+                session_id_raw = Some(i64::from(sid));
+                log::info!("Headless history enabled");
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to open history database: {}; using volatile fallback",
+                    e
+                );
+                match crate::history::HistoryStore::in_memory(Some(sid), Some(chrono::Utc::now())) {
+                    Ok(history) => {
+                        ipc::set_headless_history(history);
+                        session_id_raw = Some(i64::from(sid));
+                    }
+                    Err(fallback_error) => {
+                        log::warn!(
+                            "Failed to create volatile history fallback: {}",
+                            fallback_error
+                        );
+                    }
                 }
             }
         }

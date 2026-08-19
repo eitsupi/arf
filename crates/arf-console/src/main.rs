@@ -287,9 +287,11 @@ fn run() -> Result<()> {
 
     // History configuration: CLI flag overrides default XDG location
     if cli.history.no_history {
-        config.history.disabled = true;
+        config.history.mode = config::HistoryMode::Volatile;
     } else if let Some(history_dir) = &cli.history.history_dir {
-        config.history.dir = Some(history_dir.clone());
+        config.history.mode = config::HistoryMode::Persistent {
+            dir: Some(history_dir.clone()),
+        };
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
@@ -437,25 +439,14 @@ fn run() -> Result<()> {
     let session_id = create_session_id(&config);
     let session_id_raw = session_id.map(i64::from);
 
-    // Register history DB path for IPC history queries.
-    // Note: the DB file may not exist yet at this point (first run); that's OK
-    // because SqliteBackedHistory::with_file creates it on open. In the REPL
-    // path, reedline opens the DB later in Repl::run_*, which also creates it.
-    if !config.history.disabled {
-        let history_dir = config.history.dir.clone().or_else(config::history_dir);
-        if let Some(dir) = history_dir {
-            ipc::set_history_db_info(dir.join("r.db"), session_id);
-        }
-    }
-
     // Start IPC server if requested.
     //
     // NOTE: The IPC server is started before history databases are opened (which
-    // happens inside `Repl::run_*`).  This means there is a brief window where
-    // the on-disk session file advertises a non-null `history_session_id` even
-    // though history has not been confirmed yet.  If history initialization later
-    // fails, `clear_history_session_id()` is called to set it back to `null`.
-    // In practice the window is negligibly short (milliseconds).
+    // happens inside `Repl::run_*`). This means there is a brief window where the
+    // on-disk session file advertises a non-null `history_session_id` even though
+    // history has not been confirmed yet. A session ID remains advertised for
+    // persistent and volatile stores, and is cleared only if initialization
+    // ultimately becomes unavailable.
     if cli.with_ipc {
         match ipc::start_server(
             cli.ipc_bind.as_deref(),

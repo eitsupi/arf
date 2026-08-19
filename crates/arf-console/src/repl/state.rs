@@ -62,9 +62,9 @@ pub struct ReplState {
     pub config_path: Option<PathBuf>,
     /// Status of config file loading (for :info display).
     pub config_status: ConfigStatus,
-    /// Path to the R history database (for :history commands).
+    /// Resolved R history database path for :info; `None` for volatile history.
     pub r_history_path: Option<PathBuf>,
-    /// Path to the Shell history database (for :history commands).
+    /// Resolved shell history database path for :info; `None` for volatile history.
     pub shell_history_path: Option<PathBuf>,
     /// How R was resolved at startup (for :info display and :switch gating).
     pub r_source_status: RSourceStatus,
@@ -78,10 +78,10 @@ pub struct ReplState {
     pub dir_stack: Vec<PathBuf>,
     /// History session ID for R history entries and IPC metadata.
     pub history_session_id: Option<HistorySessionId>,
-    /// Persistent R history store and adapter save receipt.
-    pub r_history: Option<crate::history::HistoryHandle>,
-    /// Persistent shell history store and adapter save receipt.
-    pub shell_history: Option<crate::history::HistoryHandle>,
+    /// R history store and adapter save receipt for the active runtime.
+    pub r_history: crate::history::HistoryRuntime,
+    /// Shell history store and adapter save receipt for the active runtime.
+    pub shell_history: crate::history::HistoryRuntime,
     /// History context for the command whose evaluation just completed.
     pub pending_history_context: PendingHistoryContext,
 }

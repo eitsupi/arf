@@ -144,7 +144,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         setup_visible_eval(reply, timeout);
-                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
+                        let store = state.r_history.store();
                         let history_id = save_ipc_history(
                             state.line_editor.history_mut(),
                             store,
@@ -153,7 +153,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         );
                         if !op.code.trim().is_empty() {
                             state.pending_history_context = PendingHistoryContext::Command {
-                                store: state.r_history.as_ref().map(|handle| handle.store.clone()),
+                                store: state.r_history.store(),
                                 history_id,
                             };
                         }
@@ -172,7 +172,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         approve_interactive_ipc_operation(&op.code, reply)
                     {
                         accept_user_input(reply);
-                        let store = state.r_history.as_ref().map(|handle| handle.store.clone());
+                        let store = state.r_history.store();
                         let history_id = save_ipc_history(
                             state.line_editor.history_mut(),
                             store,
@@ -181,7 +181,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         );
                         if !op.code.trim().is_empty() {
                             state.pending_history_context = PendingHistoryContext::Command {
-                                store: state.r_history.as_ref().map(|handle| handle.store.clone()),
+                                store: state.r_history.store(),
                                 history_id,
                             };
                         }
@@ -237,9 +237,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
 
             match editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
-                    let save_outcome = history_handle
-                        .as_ref()
-                        .and_then(|handle| handle.receipt.take());
+                    let save_outcome = history_handle.receipt_outcome();
 
                     // For non-standard prompts (menus, etc.), pass input directly to R
                     // without any processing (meta commands, shell mode, reprex, autoformat)
@@ -252,7 +250,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         // an exit status, which matters most when that entry
                         // came from IPC and cannot be recovered from reedline's
                         // own last-command context.
-                        finalize_history(history_handle.as_ref(), save_outcome, false);
+                        finalize_history(Some(&history_handle), save_outcome, false);
                         return Some(line);
                     }
 
@@ -260,14 +258,14 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut state.prompt_config,
-                        &state.r_history_path,
-                        &state.shell_history_path,
+                        &state.r_history,
+                        &state.shell_history,
                         &state.r_source_status,
                         &mut state.dir_stack,
                         state.history_session_id.map(i64::from),
                         state.r_home.as_deref(),
                     ) {
-                        finalize_history(history_handle.as_ref(), save_outcome, true);
+                        finalize_history(Some(&history_handle), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         state.prompt_config.clear_command_duration();
@@ -288,7 +286,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         }
                     }
 
-                    finalize_history(history_handle.as_ref(), save_outcome, false);
+                    finalize_history(Some(&history_handle), save_outcome, false);
 
                     // Shell mode: execute as shell command instead of R
                     if is_shell_mode {
@@ -355,7 +353,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                             _ => None,
                         };
                         state.pending_history_context = PendingHistoryContext::Command {
-                            store: history_handle.map(|handle| handle.store),
+                            store: history_handle.store(),
                             history_id,
                         };
                     }
@@ -463,13 +461,13 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
 
                         let history_id = save_ipc_history(
                             editor.history_mut(),
-                            history_handle.as_ref().map(|handle| handle.store.clone()),
+                            history_handle.store(),
                             &op.code,
                             state.history_session_id,
                         );
                         if !op.code.trim().is_empty() {
                             state.pending_history_context = PendingHistoryContext::Command {
-                                store: history_handle.as_ref().map(|handle| handle.store.clone()),
+                                store: history_handle.store(),
                                 history_id,
                             };
                         }

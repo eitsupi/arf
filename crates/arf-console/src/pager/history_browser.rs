@@ -12,7 +12,7 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use chrono::TimeZone;
+use crate::history::HistoryStore;
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -21,9 +21,7 @@ use crossterm::{
     terminal::{self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate},
 };
 use reedline::{HistoryItem, HistoryItemId};
-use rusqlite::{Connection, OpenFlags, params_from_iter};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Maximum number of history entries to load from database.
@@ -148,8 +146,8 @@ struct HistoryBrowser {
     feedback_message: Option<String>,
     /// Database mode (R or Shell).
     db_mode: HistoryDbMode,
-    /// Path to the history database.
-    db_path: PathBuf,
+    /// The already-open arf-owned history store.
+    store: HistoryStore,
     /// Scroll animation state for the selected item's long text.
     text_scroll: TextScrollState,
     /// Whether we're showing the delete confirmation dialog.
@@ -164,7 +162,7 @@ struct HistoryBrowser {
 
 impl HistoryBrowser {
     /// Create a new history browser.
-    fn new(entries: Vec<HistoryItem>, db_mode: HistoryDbMode, db_path: PathBuf) -> Self {
+    fn new(entries: Vec<HistoryItem>, db_mode: HistoryDbMode, store: HistoryStore) -> Self {
         let browsable: Vec<BrowsableHistoryItem> = entries
             .into_iter()
             .map(|item| BrowsableHistoryItem {
@@ -183,7 +181,7 @@ impl HistoryBrowser {
             scroll_offset: 0,
             feedback_message: None,
             db_mode,
-            db_path,
+            store,
             text_scroll: TextScrollState::new(),
             show_delete_dialog: false,
             filter_active: false,
@@ -299,10 +297,8 @@ impl HistoryBrowser {
 
     /// Delete all selected items from the database.
     ///
-    /// Opens a separate read-write connection and executes a single batch DELETE.
-    /// This avoids using `SqliteBackedHistory::with_file()` which would create a
-    /// competing WAL connection alongside the main REPL's history connection,
-    /// risking cache inconsistency and database corruption.
+    /// Deletes through the already-open arf-owned store. The browser owns no
+    /// database connection and never holds the store lock during UI input.
     fn delete_selected(&mut self) -> io::Result<()> {
         // Collect IDs to delete
         let ids_to_delete: Vec<i64> = self
@@ -317,22 +313,26 @@ impl HistoryBrowser {
             return Ok(());
         }
 
-        // Open a direct connection for the delete operation only.
-        // We intentionally avoid SqliteBackedHistory::with_file() here because it
-        // sets journal_mode=wal and runs DDL (CREATE TABLE IF NOT EXISTS), which
-        // conflicts with the main REPL's active WAL connection to the same database.
-        let db = Connection::open(&self.db_path).map_err(io::Error::other)?;
-        db.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(io::Error::other)?;
-
-        // Batch delete in a single statement
-        let placeholders: Vec<&str> = ids_to_delete.iter().map(|_| "?").collect();
-        let sql = format!(
-            "DELETE FROM history WHERE id IN ({})",
-            placeholders.join(", ")
-        );
-        db.execute(&sql, params_from_iter(&ids_to_delete))
-            .map_err(io::Error::other)?;
+        let ids: Vec<HistoryItemId> = ids_to_delete
+            .iter()
+            .copied()
+            .map(HistoryItemId::new)
+            .collect();
+        if let Err(error) = self.store.delete_many(&ids) {
+            // A backend error can occur after a prefix of ids was deleted.
+            // Reload from the owner before returning so the UI cannot retain
+            // rows that no longer exist (or hide rows that were not deleted).
+            self.entries = load_history(&self.store)?
+                .into_iter()
+                .map(|item| BrowsableHistoryItem {
+                    item,
+                    selected: false,
+                })
+                .collect();
+            self.cached_selected_count = 0;
+            self.update_filter();
+            return Err(io::Error::other(error));
+        }
 
         // Remove deleted entries from our list
         let feedback = format!("Deleted {} entries", ids_to_delete.len());
@@ -970,49 +970,13 @@ impl HistoryBrowser {
     }
 }
 
-/// Load history entries from the database in read-only mode.
+/// Load history entries through the already-open arf-owned store.
 ///
-/// Using read-only mode avoids WAL (Write-Ahead Logging) conflicts with the
-/// main REPL's history connection. This prevents "database disk image is malformed"
-/// errors when browsing history while the REPL is actively using the database.
-fn load_history(db_path: &Path) -> io::Result<Vec<HistoryItem>> {
-    // Open in read-only mode to avoid WAL conflicts
-    let db = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(io::Error::other)?;
-
-    let mut stmt = db
-        .prepare(
-            "SELECT id, command_line, start_timestamp, hostname, cwd, duration_ms, exit_status
-             FROM history
-             ORDER BY id DESC
-             LIMIT ?",
-        )
-        .map_err(io::Error::other)?;
-
-    let items = stmt
-        .query_map([MAX_ENTRIES], |row| {
-            Ok(HistoryItem {
-                id: Some(HistoryItemId::new(row.get(0)?)),
-                command_line: row.get(1)?,
-                start_timestamp: row
-                    .get::<_, Option<i64>>(2)?
-                    .and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single()),
-                session_id: None,
-                hostname: row.get(3)?,
-                cwd: row.get(4)?,
-                duration: row
-                    .get::<_, Option<i64>>(5)?
-                    .and_then(|ms| u64::try_from(ms).ok())
-                    .map(std::time::Duration::from_millis),
-                exit_status: row.get(6)?,
-                more_info: None,
-            })
-        })
-        .map_err(io::Error::other)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(io::Error::other)?;
-
-    Ok(items)
+/// The browser keeps no database lock while its UI loop is running.
+fn load_history(store: &HistoryStore) -> io::Result<Vec<HistoryItem>> {
+    let mut query = reedline::SearchQuery::everything(reedline::SearchDirection::Backward, None);
+    query.limit = Some(MAX_ENTRIES);
+    store.search(query).map_err(io::Error::other)
 }
 
 /// Calculate layout widths for the history browser columns.
@@ -1050,24 +1014,24 @@ fn flatten_multiline(s: &str) -> String {
 /// Run the history browser.
 ///
 /// # Arguments
-/// * `db_path` - Path to the SQLite history database
+/// * `store` - The already-open arf-owned history store
 /// * `mode` - The database mode (R or Shell)
 ///
 /// # Returns
 /// The result of the browser interaction.
 pub fn run_history_browser(
-    db_path: &Path,
+    store: &HistoryStore,
     mode: HistoryDbMode,
 ) -> io::Result<HistoryBrowserResult> {
     // Load history entries
-    let entries = load_history(db_path)?;
+    let entries = load_history(store)?;
 
     if entries.is_empty() {
         println!("# No history entries found.");
         return Ok(HistoryBrowserResult::Cancelled);
     }
 
-    let mut browser = HistoryBrowser::new(entries, mode, db_path.to_path_buf());
+    let mut browser = HistoryBrowser::new(entries, mode, store.clone());
     browser.run()
 }
 

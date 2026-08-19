@@ -39,7 +39,7 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--ipc-pid-file <PATH>` | Write PID to file (removed on shutdown) |
 | `--log-file <PATH>` | Redirect log output to file instead of stderr |
 | `--history-dir <PATH>` | Override history database directory |
-| `--no-history` | Disable command history |
+| `--no-history` | Keep command history in memory for this session only (no disk load/save) |
 | `--quiet` | Suppress status messages on stderr |
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
@@ -73,7 +73,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, `log_file`, and `history_session_id` may be `null`. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 
@@ -489,7 +489,7 @@ When both a human and an external tool use the same session, arf prevents confli
 - If R is busy (not at the prompt), `evaluate` requests are rejected immediately with `R_BUSY`
 - If R is not at the prompt, `user_input` / `send` requests are rejected with `R_NOT_AT_PROMPT`
 - Clients are expected to handle these errors by retrying later (for example, with backoff). In interactive/REPL mode, the server accepts at most one pending request — additional requests are rejected with `INPUT_ALREADY_PENDING`. In headless mode, requests are queued and processed sequentially
-- The `session` and `history` methods do not touch R and can be called even when R is busy or not at the prompt. `session` always succeeds; `history` may fail if history is disabled or the history database cannot be accessed
+- The `session` and `history` methods do not touch R and can be called even when R is busy or not at the prompt. `session` always succeeds; `history` may fail only when no history owner is available or the store cannot be queried
 - `list` reads local session files and does not connect to any server, so it always works regardless of R state
 
 ## Transport & Security

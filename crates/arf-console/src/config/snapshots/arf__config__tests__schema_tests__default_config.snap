@@ -56,7 +56,7 @@ auto_paren_limit = 50
 
 [history]
 menu_max_height = 15
-disabled = false
+mode = "persistent"
 
 [ipc.eval]
 allowed_functions = []

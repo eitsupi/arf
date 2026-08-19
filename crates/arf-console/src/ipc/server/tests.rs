@@ -255,7 +255,7 @@ fn test_session_result_includes_history_session_id() {
     let json = serde_json::to_value(&result).unwrap();
     assert_eq!(json["history_session_id"], session_id);
 
-    // Without history_session_id (headless mode)
+    // Without history_session_id (history initialization unavailable)
     super::super::set_session_meta(
         "/tmp/test.sock".to_string(),
         "2026-01-01T00:00:00+00:00".to_string(),

@@ -4,6 +4,9 @@
 
 ### Changed
 
+- History storage now has explicit persistent and volatile modes. `--no-history` selects volatile in-memory history (including IPC and session recall) without loading or writing a database; persistent open failures degrade to a volatile fallback.
+- Legacy `history.disabled` is accepted with a migration warning: `true` maps to volatile, `false` maps to persistent, and an explicit `history.mode` takes priority when both are present.
+
 - Command history now records whether each entry was a meta command (`:cd`, `:help`, ...) as determined by the REPL itself, laying groundwork for excluding them from history search (#312).
 
 ### Fixed

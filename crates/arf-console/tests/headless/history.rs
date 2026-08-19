@@ -560,20 +560,22 @@ fn test_ipc_history_all_sessions() {
     );
 }
 
-/// Test that history returns an error when history is disabled.
+/// Volatile history remains queryable in-process but is never written to disk.
 #[test]
-fn test_ipc_history_disabled() {
+fn test_ipc_history_volatile() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     let history_dir = tmp.path().to_str().unwrap();
 
     let process = HeadlessProcess::spawn_with_args(&["--history-dir", history_dir, "--no-history"])
         .expect("spawn headless");
 
+    process.ipc_eval("1 + 1").expect("eval should run");
     let result = process.ipc_history(&[]).expect("history query");
-    // Should fail because history is not configured
+    // The volatile in-memory owner is available for the lifetime of the process.
     assert!(
-        !result.success,
-        "history should fail when disabled: stdout={}, stderr={}",
+        result.success,
+        "history should be queryable in volatile mode: stdout={}, stderr={}",
         result.stdout, result.stderr
     );
+    assert!(result.stdout.contains("1 + 1"));
 }

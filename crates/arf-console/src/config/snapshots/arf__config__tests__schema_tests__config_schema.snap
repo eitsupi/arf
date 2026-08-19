@@ -102,8 +102,8 @@ expression: schema
       "$ref": "#/$defs/HistoryConfig",
       "default": {
         "dir": null,
-        "disabled": false,
-        "menu_max_height": 15
+        "menu_max_height": 15,
+        "mode": "persistent"
       }
     },
     "ipc": {
@@ -1653,19 +1653,6 @@ expression: schema
       "description": "History configuration.",
       "type": "object",
       "properties": {
-        "dir": {
-          "description": "Custom history directory (overrides default XDG location).\nR history will be stored at `{dir}/r.db`, Shell at `{dir}/shell.db`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "disabled": {
-          "description": "Disable history entirely.",
-          "type": "boolean",
-          "default": false
-        },
         "menu_max_height": {
           "description": "Maximum height (rows) for the history search menu (Ctrl+R).\nThe actual height is the minimum of this value and the terminal height minus overhead.",
           "type": "integer",
@@ -1674,7 +1661,40 @@ expression: schema
           "maximum": 65535,
           "minimum": 0
         }
-      }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "dir": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "mode": {
+              "type": "string",
+              "const": "persistent"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "volatile"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        }
+      ]
     },
     "HistoryForgetConfig": {
       "description": "Configuration for automatic removal of failed commands from history.",

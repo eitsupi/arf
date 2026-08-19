@@ -70,7 +70,7 @@ _arf() {
 '--ipc-eval-unrestricted[Disable the IPC evaluate allowlist for this server startup only]' \
 '--no-auto-match[Disable auto-matching of brackets and quotes (for testing)]' \
 '--no-completion[Disable completion menu (for testing)]' \
-'--no-history[Disable history (no history saved or loaded)]' \
+'--no-history[Keep history only in memory for this session (no history loaded or saved)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 '-V[Print version]' \
@@ -178,7 +178,7 @@ _arguments "${_arguments_options[@]}" : \
 '--from=[Source format to import from]:FROM:((radian\:"radian history file (~/.radian_history)"
 r\:"R native history file (.Rhistory)"
 arf\:"Another arf SQLite history database"))' \
-'--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db]:FILE:_files' \
+'--file=[Path to the history file/database to import. Defaults\: radian=~/.radian_history, r=.Rhistory, arf=persistent history \`dir\`/r.db]:FILE:_files' \
 '--hostname=[Override hostname for imported entries. Marks entries to distinguish them from native arf history]:HOSTNAME:_default' \
 '--r-table=[Table name for R history when importing from unified export file]:R_TABLE:_default' \
 '--shell-table=[Table name for shell history when importing from unified export file]:SHELL_TABLE:_default' \
@@ -370,7 +370,7 @@ _arguments "${_arguments_options[@]}" : \
 '--no-environ[\[R\] Don'\''t read the site and user environment files]' \
 '--no-site-file[\[R\] Don'\''t read the site-wide Rprofile]' \
 '--no-init-file[\[R\] Don'\''t read the user'\''s .Rprofile]' \
-'--no-history[Disable history (no history saved or loaded)]' \
+'--no-history[Keep history only in memory for this session (no history loaded or saved)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0

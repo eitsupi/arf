@@ -151,8 +151,8 @@ pub struct SessionResult {
     pub started_at: String,
     /// Log file path, or `null` if no log file is configured and output is sent to stderr.
     pub log_file: Option<String>,
-    /// History session ID (nanosecond timestamp), or `null` in headless mode,
-    /// when history is disabled, or when no history directory is available.
+    /// History session ID (nanosecond timestamp), or `null` only when history
+    /// initialization is unavailable.
     pub history_session_id: Option<i64>,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
@@ -202,8 +202,8 @@ pub struct HistoryEntry {
 
 /// Result of the `history` method.
 ///
-/// All fields are always present. `session_id` is `null` when history is
-/// disabled or no session ID is available.
+/// All fields are always present. `session_id` is `null` only when no history
+/// session is available.
 #[derive(Debug, Serialize)]
 pub struct HistoryResult {
     pub entries: Vec<HistoryEntry>,

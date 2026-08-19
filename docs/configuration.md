@@ -95,8 +95,8 @@ auto_paren_limit = 50      # Max packages to check for function paren insertion
 
 [history]
 menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
-disabled = false           # Disable history entirely
-# dir = "/custom/path"     # Custom history directory (optional)
+mode = "persistent"        # "persistent" or session-only "volatile"
+# dir = "/custom/path"     # Custom directory when mode is persistent (optional)
 
 [r]
 auto_width = true          # Sync R's options(width) with terminal size
@@ -663,9 +663,15 @@ Rig selectors are separate from version specifications:
 ```toml
 [history]
 menu_max_height = 15   # Maximum height of Ctrl+R menu
-disabled = false       # Disable history
+mode = "persistent"   # "persistent" loads/saves SQLite; "volatile" is session-only
 dir = "/custom/path"   # Custom history directory (optional)
 ```
+
+Older configurations using `history.disabled` are accepted for migration. arf
+prints a startup warning and maps `disabled = true` to `mode = "volatile"`, or
+`disabled = false` to `mode = "persistent"`; an explicit `mode` takes priority
+when both keys are present. Update the file to use `history.mode` and remove
+`history.disabled`.
 
 ### Environment Variable
 
@@ -687,7 +693,7 @@ The history directory is resolved with the following priority (highest first):
 ### CLI Options
 
 ```bash
-arf --no-history              # Disable history
+arf --no-history              # Use volatile session-only history (no disk load/save)
 arf --history-dir /path/to   # Custom history directory
 ```
 
@@ -951,8 +957,8 @@ Command-line options take precedence over their corresponding config file settin
 | `--no-banner` | `startup.show_banner` |
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |
-| `--no-history` | `history.disabled` |
-| `--history-dir` / `ARF_HISTORY_DIR` | `history.dir` |
+| `--no-history` | `history.mode = "volatile"` |
+| `--history-dir` / `ARF_HISTORY_DIR` | `history.mode = "persistent"` with `dir` |
 
 Example:
 ```bash

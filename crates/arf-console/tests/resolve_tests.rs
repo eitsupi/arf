@@ -66,7 +66,7 @@ exit 1
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
+        let mut command = isolated_command(self._temp.path());
         command
             .env("PATH", &self.bin_dir)
             .env("FAKE_R_HOME", &self.fake_r_home)
@@ -75,6 +75,19 @@ exit 1
             .env_remove("ARF_R_VERSION");
         command
     }
+}
+
+/// Build a resolve command that cannot see the developer's global arf config.
+fn isolated_command(temp_path: &std::path::Path) -> Command {
+    let home_dir = temp_path.join("home");
+    std::fs::create_dir_all(&home_dir).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
+    command
+        .env("HOME", home_dir)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CACHE_HOME");
+    command
 }
 
 #[cfg(unix)]
@@ -165,7 +178,7 @@ exit 1
 #[test]
 fn resolve_found_emits_descriptor_with_target() {
     let temp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = isolated_command(temp.path())
         .args(["r", "resolve", "--r-home"])
         .arg(temp.path())
         .output()
@@ -208,7 +221,7 @@ fn resolve_relative_r_home_uses_one_absolute_path_representation() {
     let r_home = temp.path().join("rh");
     std::fs::create_dir(&r_home).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = isolated_command(temp.path())
         .args(["r", "resolve", "--r-home", "rh"])
         .current_dir(temp.path())
         .output()
@@ -586,7 +599,7 @@ fn resolve_broken_config_falls_back_with_diagnostic() {
     let r_home = temp.path().join("r-home");
     std::fs::create_dir(&r_home).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = isolated_command(temp.path())
         .args(["r", "resolve", "--config"])
         .arg(&config)
         .args(["--r-home"])
@@ -615,7 +628,7 @@ fn resolve_broken_config_falls_back_with_diagnostic() {
 #[test]
 fn resolve_environment_source_reports_environment_origin() {
     let temp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = isolated_command(temp.path())
         .args(["r", "resolve"])
         .env("ARF_R_HOME", temp.path())
         .output()
@@ -792,7 +805,7 @@ fn resolve_r_binary_failure_is_internal_error() {
 fn resolve_missing_r_home_returns_invalid_params_exit_code() {
     let temp = tempfile::tempdir().unwrap();
     let missing_r_home = temp.path().join("missing-r-home");
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+    let output = isolated_command(temp.path())
         .args(["r", "resolve", "--r-home"])
         .arg(missing_r_home)
         .output()

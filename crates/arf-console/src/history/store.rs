@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct HistoryStore {
     inner: Arc<Mutex<SqliteBackedHistory>>,
-    path: PathBuf,
+    path: Option<PathBuf>,
+    session: Option<HistorySessionId>,
 }
 
 /// The result of the most recent adapter save.
@@ -62,6 +63,60 @@ pub struct HistoryHandle {
     pub receipt: HistorySaveReceipt,
 }
 
+/// Runtime history lifecycle. Keeping this state explicit prevents a failed
+/// persistent open from being confused with an intentional volatile session.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub enum HistoryRuntime {
+    Persistent(HistoryHandle),
+    Volatile {
+        handle: HistoryHandle,
+        reason: VolatileHistoryReason,
+    },
+    Unavailable {
+        requested_path: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VolatileHistoryReason {
+    Configured,
+    Fallback { requested_path: PathBuf },
+}
+
+impl HistoryRuntime {
+    pub fn handle(&self) -> Option<&HistoryHandle> {
+        match self {
+            Self::Persistent(handle) | Self::Volatile { handle, .. } => Some(handle),
+            Self::Unavailable { .. } => None,
+        }
+    }
+
+    pub fn store(&self) -> Option<HistoryStore> {
+        self.handle().map(|handle| handle.store.clone())
+    }
+
+    pub fn receipt_outcome(&self) -> Option<HistorySaveOutcome> {
+        self.handle().and_then(|handle| handle.receipt.take())
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.handle().is_some()
+    }
+
+    #[allow(dead_code)]
+    pub fn requested_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Persistent(handle) => handle.store.path(),
+            Self::Volatile { reason, .. } => match reason {
+                VolatileHistoryReason::Configured => None,
+                VolatileHistoryReason::Fallback { requested_path } => Some(requested_path),
+            },
+            Self::Unavailable { requested_path } => requested_path.as_deref(),
+        }
+    }
+}
+
 impl HistoryStore {
     /// Open or create a history database.
     pub fn open(
@@ -75,16 +130,38 @@ impl HistoryStore {
                 session_id,
                 session_timestamp,
             )?)),
-            path,
+            path: Some(path),
+            session: session_id,
         })
     }
 
-    pub(crate) fn path(&self) -> &std::path::Path {
-        &self.path
+    /// Create an arf-owned in-memory SQLite history store.
+    pub fn in_memory(
+        session_id: Option<HistorySessionId>,
+        _session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: Arc::new(Mutex::new(SqliteBackedHistory::in_memory()?)),
+            path: None,
+            session: session_id,
+        })
+    }
+
+    /// Compare ownership identity without opening another backend.
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
     }
 
     /// Save an item with SQL `NULL` in `more_info`.
     pub fn save_unknown(&self, item: HistoryItem) -> Result<HistoryItem> {
+        let mut item = item;
+        if item.session_id.is_none() {
+            item.session_id = self.session;
+        }
         let typed = convert_history_item(item, None::<HistoryExtraInfo>);
         let saved = self
             .inner
@@ -96,6 +173,10 @@ impl HistoryStore {
 
     /// Save an item with metadata already determined by arf.
     pub fn save_known(&self, item: HistoryItem, metadata: HistoryExtraInfo) -> Result<HistoryItem> {
+        let mut item = item;
+        if item.session_id.is_none() {
+            item.session_id = self.session;
+        }
         let typed = convert_history_item(item, Some(metadata));
         let saved = self
             .inner
@@ -110,6 +191,10 @@ impl HistoryStore {
         &self,
         item: HistoryItem<HistoryExtraInfo>,
     ) -> Result<HistoryItem<HistoryExtraInfo>> {
+        let mut item = item;
+        if item.session_id.is_none() {
+            item.session_id = self.session;
+        }
         self.inner
             .lock()
             .map_err(|_| lock_error())?
@@ -122,7 +207,22 @@ impl HistoryStore {
         id: HistoryItemId,
         source: HistoryItem<HistoryExtraInfo>,
     ) -> Result<bool> {
-        let _history = self.inner.lock().map_err(|_| lock_error())?;
+        // This is the one import-only escape hatch from reedline's typed API.
+        // Holding the store mutex prevents the raw transaction from racing an
+        // adapter write; the helper itself never escapes this ownership boundary.
+        let _store_lock = self.inner.lock().map_err(|_| lock_error())?;
+        self.set_missing_fields_with_raw_transaction(id, source)
+    }
+
+    /// Backfill legacy rows whose `more_info` may contain malformed JSON.
+    ///
+    /// Reedline's typed loader intentionally rejects malformed metadata, so
+    /// import repair must use SQL COALESCE while the owning store is locked.
+    fn set_missing_fields_with_raw_transaction(
+        &self,
+        id: HistoryItemId,
+        source: HistoryItem<HistoryExtraInfo>,
+    ) -> Result<bool> {
         let serialized_metadata = source
             .more_info
             .as_ref()
@@ -133,7 +233,10 @@ impl HistoryStore {
                     format!("could not serialize more_info: {error}"),
                 ))
             })?;
-        let mut connection = rusqlite::Connection::open(&self.path).map_err(sqlite_error)?;
+        let Some(path) = self.path.as_ref() else {
+            return Ok(false);
+        };
+        let mut connection = rusqlite::Connection::open(path).map_err(sqlite_error)?;
         connection
             .busy_timeout(std::time::Duration::from_secs(5))
             .map_err(sqlite_error)?;
@@ -210,10 +313,18 @@ impl HistoryStore {
         self.inner
             .lock()
             .map_err(|_| lock_error())?
-            .update(id, &|mut item| {
+            .update_with_extra::<HistoryExtraInfo>(id, &|mut item| {
                 item.exit_status = Some(exit_status);
                 item
             })
+    }
+
+    /// Count all rows without exposing the concrete reedline backend.
+    pub fn count_all(&self) -> Result<i64> {
+        self.count(SearchQuery::everything(
+            reedline::SearchDirection::Backward,
+            None,
+        ))
     }
 
     pub fn load(&self, id: HistoryItemId) -> Result<HistoryItem> {
@@ -236,6 +347,64 @@ impl HistoryStore {
         self.inner.lock().map_err(|_| lock_error())?.search(query)
     }
 
+    /// Search with an exact session scope and a result limit.
+    ///
+    /// Reedline's session filter intentionally includes rows from before the
+    /// current session, which is useful for interactive recall but not for the
+    /// IPC contract. This owned API applies exact filtering after each bounded
+    /// backend page and keeps scanning by ID until the requested number of rows
+    /// is collected. Callers never need to materialize the whole database.
+    pub(crate) fn search_strict_session<F>(
+        &self,
+        mut make_query: F,
+        session_id: Option<HistorySessionId>,
+        all_sessions: bool,
+        limit: i64,
+        start_time: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<HistoryItem>>
+    where
+        F: FnMut(Option<HistoryItemId>) -> SearchQuery,
+    {
+        const PAGE_SIZE: i64 = 128;
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+
+        if all_sessions && start_time.is_none() {
+            let mut query = make_query(None);
+            query.limit = Some(limit);
+            return self.search(query);
+        }
+
+        let mut matched = Vec::new();
+        let mut start_id = None;
+        loop {
+            let mut query = make_query(start_id);
+            // Never let reedline apply its two-stage session semantics here.
+            query.filter.session = None;
+            query.limit = Some(PAGE_SIZE);
+            let page = self.search(query)?;
+            let page_len = page.len();
+            let next_start_id = page.last().and_then(|item| item.id);
+            matched.extend(page.into_iter().filter(|item| {
+                (all_sessions || item.session_id == session_id)
+                    && start_time.is_none_or(|start| {
+                        item.start_timestamp
+                            .is_some_and(|timestamp| timestamp >= start)
+                    })
+            }));
+            if matched.len() >= limit as usize || page_len < PAGE_SIZE as usize {
+                matched.truncate(limit as usize);
+                return Ok(matched);
+            }
+            let Some(next_start_id) = next_start_id else {
+                matched.truncate(limit as usize);
+                return Ok(matched);
+            };
+            start_id = Some(next_start_id);
+        }
+    }
+
     pub fn update(
         &self,
         id: HistoryItemId,
@@ -255,6 +424,17 @@ impl HistoryStore {
         self.inner.lock().map_err(|_| lock_error())?.delete(id)
     }
 
+    /// Delete several rows while holding the owning backend lock once.
+    pub(crate) fn delete_many(&self, ids: &[HistoryItemId]) -> Result<usize> {
+        let mut history = self.inner.lock().map_err(|_| lock_error())?;
+        let mut deleted = 0;
+        for id in ids {
+            history.delete(*id)?;
+            deleted += 1;
+        }
+        Ok(deleted)
+    }
+
     pub fn sync(&self) -> std::io::Result<()> {
         self.inner
             .lock()
@@ -263,7 +443,7 @@ impl HistoryStore {
     }
 
     pub fn session(&self) -> Option<HistorySessionId> {
-        self.inner.lock().ok().and_then(|history| history.session())
+        self.session
     }
 
     #[cfg(test)]
@@ -343,6 +523,72 @@ mod tests {
             .unwrap();
         assert_eq!(unknown_typed.more_info, None);
         assert_eq!(known_typed.more_info, Some(HistoryExtraInfo::default()));
+    }
+
+    #[test]
+    fn strict_session_search_pages_before_applying_limit() {
+        let current = reedline::Reedline::create_history_session_id().unwrap();
+        let other = reedline::Reedline::create_history_session_id().unwrap();
+        let store = HistoryStore::in_memory(Some(current), None).unwrap();
+
+        for command in ["current old", "current new"] {
+            let mut item = HistoryItem::from_command_line(command);
+            item.session_id = Some(current);
+            store.save_unknown(item).unwrap();
+        }
+        for index in 0..128 {
+            let mut item = HistoryItem::from_command_line(format!("other {index}"));
+            item.session_id = Some(other);
+            store.save_unknown(item).unwrap();
+        }
+
+        let rows = store
+            .search_strict_session(
+                |start_id| SearchQuery {
+                    direction: reedline::SearchDirection::Backward,
+                    start_time: None,
+                    end_time: None,
+                    start_id,
+                    end_id: None,
+                    limit: None,
+                    filter: reedline::SearchFilter::anything(None),
+                },
+                Some(current),
+                false,
+                2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|item| item.session_id == Some(current)));
+    }
+
+    #[test]
+    fn strict_session_search_handles_future_time_without_rows() {
+        let current = reedline::Reedline::create_history_session_id().unwrap();
+        let store = HistoryStore::in_memory(Some(current), None).unwrap();
+        let rows = store
+            .search_strict_session(
+                |start_id| SearchQuery {
+                    direction: reedline::SearchDirection::Backward,
+                    start_time: None,
+                    end_time: None,
+                    start_id,
+                    end_id: None,
+                    limit: None,
+                    filter: reedline::SearchFilter::anything(None),
+                },
+                Some(current),
+                false,
+                50,
+                Some(
+                    chrono::DateTime::parse_from_rfc3339("2999-01-01T00:00:00Z")
+                        .unwrap()
+                        .with_timezone(&chrono::Utc),
+                ),
+            )
+            .unwrap();
+        assert!(rows.is_empty());
     }
 
     #[test]

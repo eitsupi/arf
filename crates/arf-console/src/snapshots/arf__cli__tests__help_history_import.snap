@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/src/cli.rs
+source: crates/arf-console/src/cli/mod.rs
 expression: help
 ---
 Import history from another source (experimental)
@@ -18,7 +18,7 @@ Options:
           - arf:    Another arf SQLite history database
 
       --file <FILE>
-          Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db
+          Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=persistent history `dir`/r.db
 
       --hostname <HOSTNAME>
           Override hostname for imported entries. Marks entries to distinguish them from native arf history

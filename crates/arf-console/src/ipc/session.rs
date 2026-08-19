@@ -44,9 +44,8 @@ pub struct SessionInfo {
     /// Log file path, or `None` if no log file is configured.
     #[serde(default)]
     pub log_file: Option<String>,
-    /// History session ID (nanosecond timestamp), or `None` when history is
-    /// disabled, when no history directory is available, or when the history
-    /// database failed to open.
+    /// History session ID (nanosecond timestamp), or `None` when history
+    /// initialization is unavailable.
     #[serde(default)]
     pub history_session_id: Option<i64>,
 }

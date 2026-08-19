@@ -129,7 +129,7 @@ fn duplicate_repair_preserves_hostname_set_by_hostname_override() {
 fn stale_duplicate_repair_skips_when_command_line_changed() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("selected")]);
-    let path = fixture.targets.r_history.path().to_owned();
+    let path = fixture.targets.r_history.path().unwrap().to_owned();
     let r_dedup = DedupSet::from_db(&path).unwrap();
     rusqlite::Connection::open(&path)
         .unwrap()
@@ -160,7 +160,7 @@ fn stale_duplicate_repair_skips_when_timestamp_changed() {
     let changed_timestamp = timestamp("2024-06-15T14:30:46Z");
     let mut fixture = ImportFixture::new();
     fixture.import([r("timestamp selected").at(original_timestamp)]);
-    let path = fixture.targets.r_history.path().to_owned();
+    let path = fixture.targets.r_history.path().unwrap().to_owned();
     let r_dedup = DedupSet::from_db(&path).unwrap();
     rusqlite::Connection::open(&path)
         .unwrap()
@@ -328,7 +328,7 @@ fn repeated_repairs_have_the_same_dry_run_and_real_counts() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("repeated repair").at(timestamp)]);
 
-    let dedup = DedupSet::from_db(fixture.targets.r_history.path()).unwrap();
+    let dedup = DedupSet::from_db(fixture.targets.r_history.path().unwrap()).unwrap();
     let dry = import_entries_dry_run(&entries, Some(&dedup), None);
     let real = fixture.import_with(
         entries,

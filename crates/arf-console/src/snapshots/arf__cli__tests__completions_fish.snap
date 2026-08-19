@@ -73,7 +73,7 @@ complete -c arf -n "__fish_arf_needs_command" -l with-ipc -d 'Enable IPC server 
 complete -c arf -n "__fish_arf_needs_command" -l ipc-eval-unrestricted -d 'Disable the IPC evaluate allowlist for this server startup only'
 complete -c arf -n "__fish_arf_needs_command" -l no-auto-match -d 'Disable auto-matching of brackets and quotes (for testing)'
 complete -c arf -n "__fish_arf_needs_command" -l no-completion -d 'Disable completion menu (for testing)'
-complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Disable history (no history saved or loaded)'
+complete -c arf -n "__fish_arf_needs_command" -l no-history -d 'Keep history only in memory for this session (no history loaded or saved)'
 complete -c arf -n "__fish_arf_needs_command" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_needs_command" -s V -l version -d 'Print version'
 complete -c arf -n "__fish_arf_needs_command" -f -a "completions" -d 'Generate shell completion scripts'
@@ -104,7 +104,7 @@ complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcomm
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l from -d 'Source format to import from' -r -f -a "radian\t'radian history file (~/.radian_history)'
 r\t'R native history file (.Rhistory)'
 arf\t'Another arf SQLite history database'"
-complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l file -d 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=history.dir/r.db' -r -F
+complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l file -d 'Path to the history file/database to import. Defaults: radian=~/.radian_history, r=.Rhistory, arf=persistent history `dir`/r.db' -r -F
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l hostname -d 'Override hostname for imported entries. Marks entries to distinguish them from native arf history' -r
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l r-table -d 'Table name for R history when importing from unified export file' -r
 complete -c arf -n "__fish_arf_using_subcommand history; and __fish_seen_subcommand_from import" -l shell-table -d 'Table name for shell history when importing from unified export file' -r
@@ -174,7 +174,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l vanilla -d 'Start R
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-environ -d '[R] Don\'t read the site and user environment files'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-site-file -d '[R] Don\'t read the site-wide Rprofile'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-init-file -d '[R] Don\'t read the user\'s .Rprofile'
-complete -c arf -n "__fish_arf_using_subcommand headless" -l no-history -d 'Disable history (no history saved or loaded)'
+complete -c arf -n "__fish_arf_using_subcommand headless" -l no-history -d 'Keep history only in memory for this session (no history loaded or saved)'
 complete -c arf -n "__fish_arf_using_subcommand headless" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c arf -n "__fish_arf_using_subcommand r; and not __fish_seen_subcommand_from resolve help" -s h -l help -d 'Print help'
 complete -c arf -n "__fish_arf_using_subcommand r; and not __fish_seen_subcommand_from resolve help" -f -a "resolve" -d 'Resolve the R installation arf would use without starting R'

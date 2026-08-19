@@ -150,8 +150,7 @@ fn handle_history_import(
     // Required for actual imports and for dry-run with dedup (needs DB access)
     let history_dir = cli_history_dir
         .cloned()
-        .or(config.history.dir.clone())
-        .or_else(config::history_dir);
+        .or_else(|| config::history_dir_for_mode(&config.history.mode));
 
     // Determine source file path
     // Note: --from arf requires --file to avoid self-import (source = target)
@@ -382,8 +381,7 @@ fn handle_history_export(
     // Resolve effective history directory
     let history_dir = cli_history_dir
         .cloned()
-        .or(config.history.dir.clone())
-        .or_else(config::history_dir)
+        .or_else(|| config::history_dir_for_mode(&config.history.mode))
         .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
 
     let r_path = history_dir.join("r.db");

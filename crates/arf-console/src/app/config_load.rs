@@ -6,6 +6,11 @@ use crate::config::{
     load_config_from_path, load_config_from_path_with_provenance, mask_home_path,
 };
 
+fn report_history_migration_warning(warning: &str) {
+    eprintln!("Warning: {warning}");
+    log::warn!("{warning}");
+}
+
 /// A config load warning with stable machine-readable classification.
 #[derive(Debug)]
 pub(crate) struct ConfigLoadWarning {
@@ -29,7 +34,12 @@ pub(crate) fn load_config_with_fallback(
     };
 
     match result {
-        Ok(config) => (config, config_path, ConfigStatus::Ok),
+        Ok(mut config) => {
+            if let Some(warning) = config.history_migration_warning.take() {
+                report_history_migration_warning(&warning);
+            }
+            (config, config_path, ConfigStatus::Ok)
+        }
         Err(e) => {
             let (raw_path, masked_path, source_msg, status) = match &e {
                 ConfigLoadError::Read { path, source } => (
@@ -70,7 +80,12 @@ pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> C
         load_config()
     };
     match result {
-        Ok(config) => config,
+        Ok(mut config) => {
+            if let Some(warning) = config.history_migration_warning.take() {
+                report_history_migration_warning(&warning);
+            }
+            config
+        }
         Err(e) => {
             let (path_display, source_msg) = match &e {
                 ConfigLoadError::Read { path, source } => {
@@ -104,7 +119,13 @@ pub(crate) fn load_config_collecting_warnings(
         load_config()
     };
     match result {
-        Ok(config) => config,
+        Ok(mut config) => {
+            if let Some(warning) = config.history_migration_warning.take() {
+                log::warn!("{warning}");
+                warnings.push(warning);
+            }
+            config
+        }
         Err(e) => {
             let (path_display, source_msg) = match &e {
                 ConfigLoadError::Read { path, source } => {
@@ -136,7 +157,22 @@ pub(crate) fn load_config_collecting_diagnostics(
     };
 
     match result {
-        Ok((config, provenance)) => (config, provenance),
+        Ok((mut config, provenance)) => {
+            let warning = config.history_migration_warning.take();
+            if let (Some(warning), Some(provenance)) = (&warning, provenance.as_ref()) {
+                log::warn!("{warning}");
+                warnings.push(ConfigLoadWarning {
+                    code: "config.history_disabled_deprecated",
+                    message: warning.clone(),
+                    path: provenance.path.clone(),
+                });
+            }
+            let provenance = provenance.map(|mut provenance| {
+                provenance.history_migration_warning = warning;
+                provenance
+            });
+            (config, provenance)
+        }
         Err(error) => {
             let (code, path, message) = match error {
                 ConfigLoadError::Read { path, source } => {
@@ -157,5 +193,45 @@ pub(crate) fn load_config_collecting_diagnostics(
             });
             (Config::default(), None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deprecated_history_disabled_is_collected_for_headless_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        std::fs::write(&path, "[history]\ndisabled = true\n").unwrap();
+        let mut warnings = Vec::new();
+        let config = load_config_collecting_warnings(Some(&path), &mut warnings);
+
+        assert!(matches!(
+            config.history.mode,
+            crate::config::HistoryMode::Volatile
+        ));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("history.mode = \"volatile\""));
+    }
+
+    #[test]
+    fn deprecated_history_disabled_has_a_stable_diagnostic_code() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        std::fs::write(&path, "[history]\ndisabled = false\n").unwrap();
+        let mut warnings = Vec::new();
+        let (_, provenance) = load_config_collecting_diagnostics(Some(&path), &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "config.history_disabled_deprecated");
+        assert!(
+            provenance
+                .unwrap()
+                .history_migration_warning
+                .unwrap()
+                .contains("persistent")
+        );
     }
 }

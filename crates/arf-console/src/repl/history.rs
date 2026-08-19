@@ -1,22 +1,60 @@
 //! REPL history setup and persistence helpers.
 
+use crate::config::HistoryMode;
 use crate::history::{
-    HistoryExtraInfo, HistoryHandle, HistorySaveOutcome, HistoryStore, ReedlineHistoryAdapter,
+    HistoryExtraInfo, HistoryHandle, HistoryRuntime, HistorySaveOutcome, HistoryStore,
+    ReedlineHistoryAdapter, VolatileHistoryReason,
 };
 use reedline::{History, HistoryItem, HistoryItemId, HistorySessionId, Reedline};
 
 /// Set up history for a line editor with a specific database path.
 ///
-/// The optional handle is absent when no persistent path was configured or
-/// when the database could not be opened.  Reedline still retains its default
-/// history implementation in either case.
+/// Every available runtime uses an arf-owned SQLite backend. Persistent open
+/// failures explicitly degrade to an in-memory backend; no reedline default
+/// backend is installed implicitly.
 pub(super) fn setup_history(
     line_editor: Reedline,
     history_path: Option<std::path::PathBuf>,
     session_id: Option<HistorySessionId>,
-) -> (Reedline, Option<HistoryHandle>) {
+
+    mode: &HistoryMode,
+) -> (Reedline, HistoryRuntime) {
+    if matches!(mode, HistoryMode::Volatile) {
+        match HistoryStore::in_memory(session_id, Some(chrono::Utc::now())) {
+            Ok(store) => {
+                let receipt = crate::history::HistorySaveReceipt::new();
+                let adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
+                let handle = HistoryHandle { store, receipt };
+                return (
+                    line_editor
+                        .with_history_session_id(session_id)
+                        .with_history(Box::new(adapter)),
+                    HistoryRuntime::Volatile {
+                        handle,
+                        reason: VolatileHistoryReason::Configured,
+                    },
+                );
+            }
+            Err(error) => {
+                log::warn!("Failed to create volatile history database: {error}");
+                return (
+                    line_editor,
+                    HistoryRuntime::Unavailable {
+                        requested_path: None,
+                    },
+                );
+            }
+        }
+    }
+
     let Some(path) = history_path else {
-        return (line_editor, None);
+        log::warn!("Persistent history requested but no history path is available");
+        return (
+            line_editor,
+            HistoryRuntime::Unavailable {
+                requested_path: None,
+            },
+        );
     };
 
     match HistoryStore::open(path.clone(), session_id, Some(chrono::Utc::now())) {
@@ -27,7 +65,7 @@ pub(super) fn setup_history(
             let editor = line_editor
                 .with_history_session_id(session_id)
                 .with_history(Box::new(adapter));
-            (editor, Some(handle))
+            (editor, HistoryRuntime::Persistent(handle))
         }
         Err(error) => {
             log::warn!(
@@ -35,7 +73,34 @@ pub(super) fn setup_history(
                 path.display(),
                 error
             );
-            (line_editor, None)
+            match HistoryStore::in_memory(session_id, Some(chrono::Utc::now())) {
+                Ok(store) => {
+                    let receipt = crate::history::HistorySaveReceipt::new();
+                    let adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
+                    let handle = HistoryHandle { store, receipt };
+                    let editor = line_editor
+                        .with_history_session_id(session_id)
+                        .with_history(Box::new(adapter));
+                    (
+                        editor,
+                        HistoryRuntime::Volatile {
+                            handle,
+                            reason: VolatileHistoryReason::Fallback {
+                                requested_path: path,
+                            },
+                        },
+                    )
+                }
+                Err(fallback_error) => {
+                    log::warn!("Failed to create volatile history fallback: {fallback_error}");
+                    (
+                        line_editor,
+                        HistoryRuntime::Unavailable {
+                            requested_path: Some(path),
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -43,12 +108,11 @@ pub(super) fn setup_history(
 /// Save code injected into an interactive session with known ordinary-command
 /// metadata.  History failures are non-fatal to the IPC operation.
 ///
-/// Without a persistent store, reedline keeps its own default backend — an
-/// in-memory ring buffer — and ordinary typed input still lands there, so IPC
-/// code must too or it silently drops out of in-session recall. That backend is
-/// the only writer in that case, so the two branches must stay exclusive:
-/// saving through the editor while the adapter is installed would write to
-/// SQLite a second time.
+/// When the runtime reaches the final unavailable state, the caller may supply
+/// a non-owned in-memory backend. Ordinary typed input still lands there, so
+/// IPC code must use the same backend or it silently drops out of in-session
+/// recall. The two branches stay exclusive: saving through the editor while an
+/// owned adapter is installed would write to SQLite a second time.
 ///
 /// No ID is returned for the in-memory branch. `FileBackedHistory` hands back a
 /// deque index that shifts as the buffer evicts old entries, refuses `update`
@@ -97,7 +161,7 @@ pub(super) fn save_ipc_history(
 /// means "arf does not know".  Writing `false` would claim that arf knows the
 /// row was an ordinary command when the adapter did not save one successfully.
 pub(super) fn finalize_history(
-    handle: Option<&HistoryHandle>,
+    handle: Option<&HistoryRuntime>,
     outcome: Option<HistorySaveOutcome>,
     is_meta_command: bool,
 ) {
@@ -108,7 +172,9 @@ pub(super) fn finalize_history(
         return;
     };
 
-    if let Err(error) = handle.store.finalize_meta_command(id, is_meta_command) {
+    if let Some(store) = handle.store()
+        && let Err(error) = store.finalize_meta_command(id, is_meta_command)
+    {
         log::warn!("Failed to finalize history metadata for {id}: {error}");
     }
 }
@@ -116,7 +182,7 @@ pub(super) fn finalize_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::RSourceStatus;
+    use crate::config::{HistoryMode, RSourceStatus};
     use crate::editor::prompt::PromptFormatter;
     use crate::history::HistorySaveReceipt;
     use crate::repl::meta_command::process_meta_command;
@@ -127,6 +193,64 @@ mod tests {
 
     fn everything_query() -> SearchQuery {
         SearchQuery::everything(SearchDirection::Forward, None)
+    }
+
+    #[test]
+    fn setup_history_explicit_volatile_is_configured_runtime() {
+        let session_id = Reedline::create_history_session_id();
+        let (_, runtime) =
+            setup_history(Reedline::create(), None, session_id, &HistoryMode::Volatile);
+
+        assert!(matches!(
+            &runtime,
+            HistoryRuntime::Volatile {
+                reason: VolatileHistoryReason::Configured,
+                ..
+            }
+        ));
+        assert!(runtime.store().is_some());
+    }
+
+    #[test]
+    fn setup_history_persistent_open_failure_is_fallback_runtime() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let requested_path = temp_dir.path().to_path_buf();
+        let (_, runtime) = setup_history(
+            Reedline::create(),
+            Some(requested_path.clone()),
+            Reedline::create_history_session_id(),
+            &HistoryMode::Persistent {
+                dir: Some(requested_path.clone()),
+            },
+        );
+
+        match runtime {
+            HistoryRuntime::Volatile {
+                handle,
+                reason:
+                    VolatileHistoryReason::Fallback {
+                        requested_path: path,
+                    },
+            } => {
+                assert_eq!(path, requested_path);
+                assert!(handle.store.session().is_some());
+            }
+            other => panic!(
+                "expected persistent open fallback, got {}",
+                runtime_name(&other)
+            ),
+        }
+    }
+
+    fn runtime_name(runtime: &HistoryRuntime) -> &'static str {
+        match runtime {
+            HistoryRuntime::Persistent(_) => "persistent",
+            HistoryRuntime::Volatile { reason, .. } => match reason {
+                VolatileHistoryReason::Configured => "configured volatile",
+                VolatileHistoryReason::Fallback { .. } => "fallback volatile",
+            },
+            HistoryRuntime::Unavailable { .. } => "unavailable",
+        }
     }
 
     #[test]
@@ -166,6 +290,7 @@ mod tests {
             store: store.clone(),
             receipt: receipt.clone(),
         };
+        let runtime = HistoryRuntime::Persistent(handle.clone());
 
         let mut adapter = ReedlineHistoryAdapter::new(store, receipt.clone());
         let saved = adapter
@@ -173,7 +298,7 @@ mod tests {
             .unwrap();
         let id = saved.id.unwrap();
 
-        finalize_history(Some(&handle), receipt.take(), false);
+        finalize_history(Some(&runtime), receipt.take(), false);
         let reopened = SqliteBackedHistory::with_file(path.clone(), None, None).unwrap();
         assert_eq!(
             reopened
@@ -185,7 +310,7 @@ mod tests {
 
         // An empty line is never saved by reedline, so its empty receipt
         // outcome must not re-finalize the previous row.
-        finalize_history(Some(&handle), receipt.take(), true);
+        finalize_history(Some(&runtime), receipt.take(), true);
         let reopened = SqliteBackedHistory::with_file(path, None, None).unwrap();
         assert_eq!(
             reopened
@@ -205,6 +330,7 @@ mod tests {
             store: store.clone(),
             receipt: receipt.clone(),
         };
+        let runtime = HistoryRuntime::Persistent(handle.clone());
         let mut adapter = ReedlineHistoryAdapter::new(store.clone(), receipt);
         let id = adapter
             .save(HistoryItem::from_command_line(r"ordinary command"))
@@ -215,7 +341,7 @@ mod tests {
 
         // The same taken value is passed to both consumers, as it is on the
         // ordinary top-level R path: finalization and pending exit status.
-        finalize_history(Some(&handle), outcome, false);
+        finalize_history(Some(&runtime), outcome, false);
         let pending_history_context = PendingHistoryContext::Command {
             store: Some(store.clone()),
             history_id: match outcome {
@@ -236,12 +362,10 @@ mod tests {
         assert_eq!(stored.exit_status, Some(0));
     }
 
-    /// Without a persistent store, reedline keeps an in-memory backend that
-    /// ordinary typed input still reaches, so IPC code has to reach it too --
-    /// otherwise injected commands vanish from in-session recall under
-    /// `--no-history` or when the database fails to open.
+    /// Without an owned store, a caller-provided in-memory backend still
+    /// receives ordinary typed input, so IPC code has to reach it too.
     #[test]
-    fn ipc_history_falls_back_to_the_in_memory_backend_without_a_store() {
+    fn ipc_history_uses_the_caller_backend_without_an_owned_store() {
         let mut memory = FileBackedHistory::default();
 
         assert!(save_ipc_history(&mut memory, None, r#"print("hi")"#, None).is_none());
@@ -291,8 +415,12 @@ mod tests {
             process_meta_command(
                 input,
                 &mut prompt,
-                &None,
-                &None,
+                &HistoryRuntime::Unavailable {
+                    requested_path: None,
+                },
+                &HistoryRuntime::Unavailable {
+                    requested_path: None,
+                },
                 &RSourceStatus::Path,
                 &mut dir_stack,
                 None,
