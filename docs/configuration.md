@@ -44,7 +44,7 @@ If no configuration file exists, arf uses these defaults:
 r_source = "auto"       # How to locate R: "auto", "rig", or { path = "..." }
 show_banner = true      # Show startup banner
 
-reprex = "off"          # "off", "on", or "format" (requires Air >= 0.9.0)
+reprex = "off"          # "off", "on", or "format"
 
 [ipc.eval]
 # Exact direct function/operator targets permitted by `arf ipc eval`; empty by default.
@@ -101,7 +101,7 @@ auto_width = true          # Sync R's options(width) with terminal size
 
 [reprex]
 comment = "#> "            # Comment prefix for reprex output
-formatter = "air"          # Air >= 0.9.0; formatter backend for format mode
+formatter = "air"          # "air" (>= 0.9.0) or "arity" (>= 0.18.0)
 
 # Syntax highlighting colors
 [colors.r]
@@ -549,12 +549,15 @@ symbol = { insert = "", normal = "" }
 ## Reprex Modes and Formatting
 
 arf supports three reprex modes: `off`, `on`, and `format`. The `format` mode
-formats R code with [Air](https://github.com/posit-dev/air) 0.9.0 or later before
-reprex evaluation. arf sends code to Air over stdin with the virtual path
-`arf-reprex.R`, preserving project configuration discovery from the current
-working directory and avoiding temporary files. The `--force` flag prevents
-exclusion rules from silently bypassing formatting. If formatting fails, arf
-reports Air's stderr and does not evaluate the unformatted code.
+formats R code before reprex evaluation using the configured formatter backend.
+The supported backends are [Air](https://github.com/posit-dev/air) 0.9.0 or later
+and [Arity](https://github.com/jolars/arity) 0.18.0 or later. Air receives code
+over stdin with the virtual path `arf-reprex.R` and `--force`, preserving project
+configuration discovery from the current working directory and avoiding
+temporary files. Arity receives code over stdin with `arity format -` and also
+uses the current working directory for configuration discovery. If formatting
+fails, arf reports the backend's stderr and does not evaluate the unformatted
+code.
 
 ### Configuration
 
@@ -577,7 +580,7 @@ Select the mode during a session using the explicit meta command:
 ```
 :reprex on
 :reprex off
-:reprex format  # Requires Air >= 0.9.0
+:reprex format  # Requires the configured formatter (Air >= 0.9.0 or Arity >= 0.18.0)
 ```
 
 ## R Source Configuration

@@ -1976,17 +1976,18 @@ expression: schema
           "default": "#> "
         },
         "formatter": {
-          "description": "Formatter backend (currently only `air` is supported).",
+          "description": "Formatter backend (`air` or `arity`).",
           "$ref": "#/$defs/ReprexFormatter",
           "default": "air"
         }
       }
     },
     "ReprexFormatter": {
-      "description": "Formatter backend used by reprex format mode.\n\nAir is the only supported backend for now; additional backends are\nintentionally deferred until their integration is designed.",
+      "description": "Formatter backend used by reprex format mode.\n\nSupported external formatter backends for reprex format mode.",
       "type": "string",
       "enum": [
-        "air"
+        "air",
+        "arity"
       ]
     },
     "ReprexMode": {

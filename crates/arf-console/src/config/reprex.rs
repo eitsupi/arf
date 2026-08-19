@@ -8,13 +8,13 @@ use std::fmt;
 
 /// Formatter backend used by reprex format mode.
 ///
-/// Air is the only supported backend for now; additional backends are
-/// intentionally deferred until their integration is designed.
+/// Supported external formatter backends for reprex format mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReprexFormatter {
     #[default]
     Air,
+    Arity,
 }
 
 impl ReprexFormatter {
@@ -22,6 +22,7 @@ impl ReprexFormatter {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Air => "Air",
+            Self::Arity => "Arity",
         }
     }
 
@@ -29,6 +30,7 @@ impl ReprexFormatter {
     pub const fn command(self) -> &'static str {
         match self {
             Self::Air => "air",
+            Self::Arity => "arity",
         }
     }
 
@@ -36,6 +38,7 @@ impl ReprexFormatter {
     pub const fn install_url(self) -> &'static str {
         match self {
             Self::Air => "https://github.com/posit-dev/air",
+            Self::Arity => "https://github.com/jolars/arity",
         }
     }
 
@@ -43,6 +46,7 @@ impl ReprexFormatter {
     pub const fn minimum_version(self) -> &'static str {
         match self {
             Self::Air => "0.9.0",
+            Self::Arity => "0.18.0",
         }
     }
 }
@@ -61,7 +65,7 @@ impl fmt::Display for ReprexFormatter {
 pub struct ReprexConfig {
     /// Comment prefix for output (default: "#> ").
     pub comment: String,
-    /// Formatter backend (currently only `air` is supported).
+    /// Formatter backend (`air` or `arity`).
     pub formatter: ReprexFormatter,
 }
 

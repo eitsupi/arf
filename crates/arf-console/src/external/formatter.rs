@@ -60,6 +60,16 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
                     .unwrap_or(false)
             })
         }
+        ReprexFormatter::Arity => {
+            static ARITY_AVAILABLE: OnceLock<bool> = OnceLock::new();
+            *ARITY_AVAILABLE.get_or_init(|| {
+                Command::new(formatter.command())
+                    .arg("--version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
+        }
     }
 }
 
@@ -72,11 +82,11 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
 /// Its virtual path lets the backend discover project configuration from the cwd.
 pub fn format_code(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     match formatter {
-        ReprexFormatter::Air => format_air_code(formatter, code),
+        ReprexFormatter::Air | ReprexFormatter::Arity => format_backend(formatter, code),
     }
 }
 
-fn format_air_code(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
+fn format_backend(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
         return Ok(code.to_string());
@@ -106,13 +116,16 @@ fn format_air_code(formatter: ReprexFormatter, code: &str) -> Result<String, For
     }
 }
 
-fn formatter_args(virtual_path: &Path) -> [String; 4] {
-    [
-        "format".to_string(),
-        "--stdin-file-path".to_string(),
-        virtual_path.display().to_string(),
-        "--force".to_string(),
-    ]
+fn formatter_args(formatter: ReprexFormatter, virtual_path: &Path) -> Vec<String> {
+    match formatter {
+        ReprexFormatter::Air => vec![
+            "format".to_string(),
+            "--stdin-file-path".to_string(),
+            virtual_path.display().to_string(),
+            "--force".to_string(),
+        ],
+        ReprexFormatter::Arity => vec!["format".to_string(), "-".to_string()],
+    }
 }
 
 fn format_via_stdin(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
@@ -130,7 +143,7 @@ fn run_formatter_command(
     virtual_path: &Path,
     code: &str,
 ) -> Result<String, FormatterError> {
-    let args = formatter_args(virtual_path);
+    let args = formatter_args(formatter, virtual_path);
     let mut child = Command::new(command)
         .args(&args)
         .stdin(Stdio::piped())
@@ -249,8 +262,16 @@ mod tests {
     #[test]
     fn formatter_args_use_air_stdin_contract() {
         assert_eq!(
-            formatter_args(Path::new("arf-reprex.R")),
+            formatter_args(ReprexFormatter::Air, Path::new("arf-reprex.R")),
             ["format", "--stdin-file-path", "arf-reprex.R", "--force"]
+        );
+    }
+
+    #[test]
+    fn formatter_args_use_arity_stdin_contract() {
+        assert_eq!(
+            formatter_args(ReprexFormatter::Arity, Path::new("arf-reprex.R")),
+            ["format", "-"]
         );
     }
 
@@ -272,6 +293,31 @@ mod tests {
 
         let result = run_formatter_command(
             ReprexFormatter::Air,
+            command.as_os_str(),
+            Path::new("virtual.R"),
+            "x <- 1",
+        );
+        assert_eq!(result.unwrap(), "x <- 1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn arity_process_receives_stdin_and_expected_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let command = directory.path().join("fake-arity");
+        std::fs::write(
+            &command,
+            "#!/bin/sh\n[ \"$1\" = format ] || exit 10\n[ \"$2\" = - ] || exit 11\n[ -z \"$3\" ] || exit 12\ncat\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&command, permissions).unwrap();
+
+        let result = run_formatter_command(
+            ReprexFormatter::Arity,
             command.as_os_str(),
             Path::new("virtual.R"),
             "x <- 1",
@@ -311,6 +357,18 @@ mod tests {
         insta::assert_snapshot!(format!("{error}"), @r###"
 Air formatting failed: stdin parse error
 Ensure Air CLI 0.9.0 or later is installed.
+"###);
+    }
+
+    #[test]
+    fn arity_failure_message_includes_stderr_and_version_guidance() {
+        let error = FormatterError::FormatFailed {
+            formatter: ReprexFormatter::Arity,
+            stderr: "stdin parse error\n".to_string(),
+        };
+        insta::assert_snapshot!(format!("{error}"), @r###"
+Arity formatting failed: stdin parse error
+Ensure Arity CLI 0.18.0 or later is installed.
 "###);
     }
 
@@ -358,6 +416,20 @@ Install Air CLI from https://github.com/posit-dev/air
     }
 
     #[test]
+    fn unavailable_arity_explicit_cli_message_snapshot() {
+        insta::assert_snapshot!(
+            unavailable_message(
+                ReprexFormatter::Arity,
+                FormatterUnavailableContext::ExplicitCli
+            ),
+            @r###"
+Cannot use --reprex=format: Arity CLI ('arity' command) not found in PATH.
+Install Arity CLI from https://github.com/jolars/arity
+"###
+        );
+    }
+
+    #[test]
     #[ignore] // Requires air to be installed
     fn test_format_simple_assignment() {
         let code = "x<-1+2";
@@ -386,6 +458,28 @@ Install Air CLI from https://github.com/posit-dev/air
         // With trailing newline
         let code = "x <- 1\n";
         let result = format_code(ReprexFormatter::Air, code).unwrap();
+        assert!(result.ends_with('\n'));
+    }
+
+    #[test]
+    #[ignore] // Requires Arity >=0.18.0 to be installed
+    fn test_arity_format_simple_assignment() {
+        let code = "x<-1+2";
+        let result = format_code(ReprexFormatter::Arity, code).unwrap();
+        assert_eq!(result, "x <- 1 + 2");
+    }
+
+    #[test]
+    #[ignore] // Requires Arity >=0.18.0 to be installed
+    fn test_arity_format_preserves_trailing_newline_style() {
+        // Without trailing newline
+        let code = "x <- 1";
+        let result = format_code(ReprexFormatter::Arity, code).unwrap();
+        assert!(!result.ends_with('\n'));
+
+        // With trailing newline
+        let code = "x <- 1\n";
+        let result = format_code(ReprexFormatter::Arity, code).unwrap();
         assert!(result.ends_with('\n'));
     }
 }
