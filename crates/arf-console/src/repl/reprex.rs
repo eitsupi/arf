@@ -35,11 +35,11 @@ impl ReprexRuntime {
         arf_libr::set_reprex_mode(mode != ReprexMode::Off, &self.comment);
     }
 
-    pub fn maybe_format_code(&self, code: &str) -> String {
+    pub fn maybe_format_code(&self, code: &str) -> Result<String, formatter::FormatterError> {
         if self.mode == ReprexMode::Format {
             formatter::format_code(self.formatter, code)
         } else {
-            code.to_string()
+            Ok(code.to_string())
         }
     }
 }

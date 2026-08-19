@@ -44,7 +44,7 @@ If no configuration file exists, arf uses these defaults:
 r_source = "auto"       # How to locate R: "auto", "rig", or { path = "..." }
 show_banner = true      # Show startup banner
 
-reprex = "off"          # "off", "on", or "format" (requires air)
+reprex = "off"          # "off", "on", or "format" (requires Air >= 0.9.0)
 
 [ipc.eval]
 # Exact direct function/operator targets permitted by `arf ipc eval`; empty by default.
@@ -101,7 +101,7 @@ auto_width = true          # Sync R's options(width) with terminal size
 
 [reprex]
 comment = "#> "            # Comment prefix for reprex output
-formatter = "air"          # Formatter backend for format mode
+formatter = "air"          # Air >= 0.9.0; formatter backend for format mode
 
 # Syntax highlighting colors
 [colors.r]
@@ -549,7 +549,12 @@ symbol = { insert = "", normal = "" }
 ## Reprex Modes and Formatting
 
 arf supports three reprex modes: `off`, `on`, and `format`. The `format` mode
-formats R code with [air](https://github.com/posit-dev/air) before reprex evaluation.
+formats R code with [Air](https://github.com/posit-dev/air) 0.9.0 or later before
+reprex evaluation. arf sends code to Air over stdin with the virtual path
+`arf-reprex.R`, preserving project configuration discovery from the current
+working directory and avoiding temporary files. The `--force` flag prevents
+exclusion rules from silently bypassing formatting. If formatting fails, arf
+reports Air's stderr and does not evaluate the unformatted code.
 
 ### Configuration
 
@@ -572,7 +577,7 @@ Select the mode during a session using the explicit meta command:
 ```
 :reprex on
 :reprex off
-:reprex format  # Requires Air
+:reprex format  # Requires Air >= 0.9.0
 ```
 
 ## R Source Configuration

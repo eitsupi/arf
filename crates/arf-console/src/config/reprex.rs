@@ -38,6 +38,13 @@ impl ReprexFormatter {
             Self::Air => "https://github.com/posit-dev/air",
         }
     }
+
+    /// Minimum backend version required by arf's stdin integration.
+    pub const fn minimum_version(self) -> &'static str {
+        match self {
+            Self::Air => "0.9.0",
+        }
+    }
 }
 
 impl fmt::Display for ReprexFormatter {

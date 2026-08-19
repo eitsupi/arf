@@ -1,18 +1,15 @@
 //! R code formatter integration.
 //!
-//! This module provides formatting of R code using external formatters like `air`.
-//!
-//! # TODO
-//! Currently uses a temp file workaround because `air format` doesn't support stdin/stdout.
-//! See: <https://github.com/posit-dev/air/issues/202>
-//!
-//! When air adds stdin support (e.g., `echo "x<-1" | air format --stdin`), this module
-//! should be updated to pipe directly to the formatter process, avoiding disk I/O overhead.
+//! This module provides formatting of R code using external formatter backends.
 
 use crate::config::ReprexFormatter;
+use std::ffi::OsStr;
 use std::io::Write;
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+
+const AIR_STDIN_FILE_PATH: &str = "arf-reprex.R";
 
 /// The user-facing context for a missing formatter diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,35 +63,23 @@ pub fn is_formatter_available(formatter: ReprexFormatter) -> bool {
     }
 }
 
-/// Format R code using air.
+/// Format R code using the selected backend.
 ///
-/// Returns the formatted code on success, or the original code if formatting fails.
-/// Errors are logged but not propagated to avoid disrupting the REPL flow.
+/// Returns the formatted code on success, or a formatting error.
+/// Callers must not evaluate the unformatted code when an error is returned.
 ///
-/// # TODO
-/// This implementation writes to a temp file because `air format` doesn't support stdin.
-/// See: <https://github.com/posit-dev/air/issues/202>
-///
-/// Once air supports stdin, replace this with:
-/// ```ignore
-/// let output = Command::new("<formatter command>")
-///     .args(["format", "--stdin"])
-///     .stdin(Stdio::piped())
-///     .stdout(Stdio::piped())
-///     .spawn()?;
-/// output.stdin.write_all(code.as_bytes())?;
-/// let formatted = String::from_utf8(output.wait_with_output()?.stdout)?;
-/// ```
-pub fn format_code(formatter: ReprexFormatter, code: &str) -> String {
+/// The current backend reads code from stdin and writes formatted code to stdout.
+/// Its virtual path lets the backend discover project configuration from the cwd.
+pub fn format_code(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     match formatter {
         ReprexFormatter::Air => format_air_code(formatter, code),
     }
 }
 
-fn format_air_code(formatter: ReprexFormatter, code: &str) -> String {
+fn format_air_code(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
     // Skip empty or whitespace-only input
     if code.trim().is_empty() {
-        return code.to_string();
+        return Ok(code.to_string());
     }
 
     // Check if formatter is available
@@ -103,39 +88,69 @@ fn format_air_code(formatter: ReprexFormatter, code: &str) -> String {
             "Formatter '{}' not available, skipping format",
             formatter.command()
         );
-        return code.to_string();
+        return Err(FormatterError::Io {
+            formatter,
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} command is unavailable", formatter.command()),
+            ),
+        });
     }
 
-    // Create temp file for formatting
-    // TODO: Replace with stdin pipe when air supports it (posit-dev/air#202)
-    match format_via_temp_file(formatter, code) {
-        Ok(formatted) => formatted,
+    match format_via_stdin(formatter, code) {
+        Ok(formatted) => Ok(formatted),
         Err(e) => {
-            log::debug!("Formatting failed: {}, using original code", e);
-            code.to_string()
+            log::debug!("Formatting failed: {}", e);
+            Err(e)
         }
     }
 }
 
-/// Format code by writing to a temp file and running the formatter.
-///
-/// This is a workaround for formatters that don't support stdin.
-fn format_via_temp_file(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
-    // Create a temp file with .R extension so the formatter recognizes it
-    let temp_dir = std::env::temp_dir();
-    let temp_path = temp_dir.join("arf-format.R");
+fn formatter_args(virtual_path: &Path) -> [String; 4] {
+    [
+        "format".to_string(),
+        "--stdin-file-path".to_string(),
+        virtual_path.display().to_string(),
+        "--force".to_string(),
+    ]
+}
 
-    // Write code to temp file
-    let mut file = std::fs::File::create(&temp_path)?;
-    file.write_all(code.as_bytes())?;
-    file.flush()?;
-    drop(file); // Ensure file is closed before formatter reads it
+fn format_via_stdin(formatter: ReprexFormatter, code: &str) -> Result<String, FormatterError> {
+    run_formatter_command(
+        formatter,
+        OsStr::new(formatter.command()),
+        Path::new(AIR_STDIN_FILE_PATH),
+        code,
+    )
+}
 
-    // Run formatter
-    let output = Command::new(formatter.command())
-        .arg("format")
-        .arg(&temp_path)
-        .output()?;
+fn run_formatter_command(
+    formatter: ReprexFormatter,
+    command: &OsStr,
+    virtual_path: &Path,
+    code: &str,
+) -> Result<String, FormatterError> {
+    let args = formatter_args(virtual_path);
+    let mut child = Command::new(command)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| FormatterError::Io { formatter, source })?;
+
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| FormatterError::Io {
+            formatter,
+            source: std::io::Error::other("formatter stdin unavailable"),
+        })?
+        .write_all(code.as_bytes())
+        .map_err(|source| FormatterError::Io { formatter, source })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|source| FormatterError::Io { formatter, source })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -148,47 +163,75 @@ fn format_via_temp_file(formatter: ReprexFormatter, code: &str) -> Result<String
         } else {
             log::debug!("Formatter returned error: {}", stderr);
         }
-        return Err(FormatterError::FormatFailed(stderr.to_string()));
+        return Err(FormatterError::FormatFailed {
+            formatter,
+            stderr: stderr.to_string(),
+        });
     }
 
-    // Read formatted code back
-    let formatted = std::fs::read_to_string(&temp_path)?;
+    let formatted =
+        String::from_utf8(output.stdout).map_err(|error| FormatterError::FormatFailed {
+            formatter,
+            stderr: error.to_string(),
+        })?;
+    Ok(preserve_newline_style(code, formatted))
+}
 
-    // Clean up temp file (ignore errors)
-    let _ = std::fs::remove_file(&temp_path);
+fn preserve_newline_style(original: &str, mut formatted: String) -> String {
+    let original_crlf = original.ends_with("\r\n");
+    let original_has_newline = original.ends_with('\n');
+    let formatted_has_newline = formatted.ends_with('\n');
 
-    // air adds a trailing newline, but we want to preserve the original style
-    // If the original didn't end with newline, strip the added one
-    let formatted = if !code.ends_with('\n') && formatted.ends_with('\n') {
-        formatted.trim_end_matches('\n').to_string()
-    } else {
-        formatted
-    };
-
-    Ok(formatted)
+    if !original_has_newline && formatted_has_newline {
+        formatted.pop();
+        if formatted.ends_with('\r') {
+            formatted.pop();
+        }
+    } else if original_crlf {
+        formatted = formatted.replace("\r\n", "\n").replace('\n', "\r\n");
+    } else if original_has_newline {
+        formatted = formatted.replace("\r\n", "\n");
+    }
+    formatted
 }
 
 /// Errors that can occur during formatting.
 #[derive(Debug)]
-enum FormatterError {
-    Io(std::io::Error),
-    FormatFailed(String),
-}
-
-impl From<std::io::Error> for FormatterError {
-    fn from(e: std::io::Error) -> Self {
-        FormatterError::Io(e)
-    }
+pub enum FormatterError {
+    Io {
+        formatter: ReprexFormatter,
+        source: std::io::Error,
+    },
+    FormatFailed {
+        formatter: ReprexFormatter,
+        stderr: String,
+    },
 }
 
 impl std::fmt::Display for FormatterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FormatterError::Io(e) => write!(f, "I/O error: {}", e),
-            FormatterError::FormatFailed(msg) => write!(f, "Format failed: {}", msg),
+            FormatterError::Io { formatter, source } => write!(
+                f,
+                "{} formatting could not be started: {}\nEnsure {} CLI {} or later is installed.",
+                formatter.display_name(),
+                source,
+                formatter.display_name(),
+                formatter.minimum_version()
+            ),
+            FormatterError::FormatFailed { formatter, stderr } => write!(
+                f,
+                "{} formatting failed: {}\nEnsure {} CLI {} or later is installed.",
+                formatter.display_name(),
+                stderr.trim(),
+                formatter.display_name(),
+                formatter.minimum_version()
+            ),
         }
     }
 }
+
+impl std::error::Error for FormatterError {}
 
 #[cfg(test)]
 mod tests {
@@ -196,11 +239,86 @@ mod tests {
 
     #[test]
     fn test_format_empty_code() {
-        let result = format_code(ReprexFormatter::Air, "");
+        let result = format_code(ReprexFormatter::Air, "").unwrap();
         assert_eq!(result, "");
 
-        let result = format_code(ReprexFormatter::Air, "   ");
+        let result = format_code(ReprexFormatter::Air, "   ").unwrap();
         assert_eq!(result, "   ");
+    }
+
+    #[test]
+    fn formatter_args_use_air_stdin_contract() {
+        assert_eq!(
+            formatter_args(Path::new("arf-reprex.R")),
+            ["format", "--stdin-file-path", "arf-reprex.R", "--force"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn formatter_process_receives_stdin_and_expected_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let command = directory.path().join("fake-air");
+        std::fs::write(
+            &command,
+            "#!/bin/sh\n[ \"$1\" = format ] || exit 10\n[ \"$2\" = --stdin-file-path ] || exit 11\n[ \"$3\" = virtual.R ] || exit 12\n[ \"$4\" = --force ] || exit 13\ncat\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&command, permissions).unwrap();
+
+        let result = run_formatter_command(
+            ReprexFormatter::Air,
+            command.as_os_str(),
+            Path::new("virtual.R"),
+            "x <- 1",
+        );
+        assert_eq!(result.unwrap(), "x <- 1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn formatter_process_failure_is_returned_as_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let command = directory.path().join("fake-air");
+        std::fs::write(&command, "#!/bin/sh\necho formatter failed >&2\nexit 17\n").unwrap();
+        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&command, permissions).unwrap();
+
+        let result = run_formatter_command(
+            ReprexFormatter::Air,
+            command.as_os_str(),
+            Path::new("virtual.R"),
+            "x <- 1",
+        );
+        assert!(
+            matches!(result, Err(FormatterError::FormatFailed { stderr, .. }) if stderr.contains("formatter failed"))
+        );
+    }
+
+    #[test]
+    fn formatter_failure_message_includes_stderr_and_version_guidance() {
+        let error = FormatterError::FormatFailed {
+            formatter: ReprexFormatter::Air,
+            stderr: "stdin parse error\n".to_string(),
+        };
+        insta::assert_snapshot!(format!("{error}"), @r###"
+Air formatting failed: stdin parse error
+Ensure Air CLI 0.9.0 or later is installed.
+"###);
+    }
+
+    #[test]
+    fn preserve_newline_style_keeps_trailing_style() {
+        assert_eq!(preserve_newline_style("x", "x\n".to_string()), "x");
+        assert_eq!(preserve_newline_style("x\n", "x\r\n".to_string()), "x\n");
+        assert_eq!(preserve_newline_style("x\r\n", "x\n".to_string()), "x\r\n");
     }
 
     #[test]
@@ -243,7 +361,7 @@ Install Air CLI from https://github.com/posit-dev/air
     #[ignore] // Requires air to be installed
     fn test_format_simple_assignment() {
         let code = "x<-1+2";
-        let result = format_code(ReprexFormatter::Air, code);
+        let result = format_code(ReprexFormatter::Air, code).unwrap();
         assert_eq!(result, "x <- 1 + 2");
     }
 
@@ -251,7 +369,7 @@ Install Air CLI from https://github.com/posit-dev/air
     #[ignore] // Requires air to be installed
     fn test_format_function_definition() {
         let code = "f=function(x,y){x+y}";
-        let result = format_code(ReprexFormatter::Air, code);
+        let result = format_code(ReprexFormatter::Air, code).unwrap();
         // air formats this with proper spacing and indentation
         assert!(result.contains("function(x, y)"));
         assert!(result.contains("x + y"));
@@ -262,12 +380,12 @@ Install Air CLI from https://github.com/posit-dev/air
     fn test_format_preserves_trailing_newline_style() {
         // Without trailing newline
         let code = "x <- 1";
-        let result = format_code(ReprexFormatter::Air, code);
+        let result = format_code(ReprexFormatter::Air, code).unwrap();
         assert!(!result.ends_with('\n'));
 
         // With trailing newline
         let code = "x <- 1\n";
-        let result = format_code(ReprexFormatter::Air, code);
+        let result = format_code(ReprexFormatter::Air, code).unwrap();
         assert!(result.ends_with('\n'));
     }
 }

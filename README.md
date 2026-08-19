@@ -35,7 +35,7 @@
 - Command status indicator (shows error symbol when previous command failed)
 - Fuzzy help browser with `:help` or `:h` — search across all installed packages
 - Tree-sitter based syntax highlighting with customizable colors
-- Reprex mode with optional formatting via [Air](https://github.com/posit-dev/air)
+- Reprex mode with optional formatting via [Air](https://github.com/posit-dev/air) 0.9.0+
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - SQLite-backed persistent history with import/export support
@@ -186,7 +186,7 @@ arf config init
 r_source = "auto"       # "auto", "rig", or { path = "/path/to/R" }
 show_banner = true
 
-# Initial reprex mode: "off", "on", or "format" (requires Air)
+# Initial reprex mode: "off", "on", or "format" (requires Air >= 0.9.0)
 reprex = "off"
 
 [editor]

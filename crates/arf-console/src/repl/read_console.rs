@@ -325,7 +325,13 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     };
 
                     // Format code when format mode is enabled.
-                    let code = state.reprex.maybe_format_code(&line);
+                    let code = match state.reprex.maybe_format_code(&line) {
+                        Ok(code) => code,
+                        Err(error) => {
+                            arf_println!("{}", error);
+                            continue;
+                        }
+                    };
 
                     // In reprex mode, clear the prompt and input lines
                     // Show the (possibly formatted) code

@@ -88,7 +88,7 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     }
     if reprex_mode != ReprexMode::Off {
         let code = if reprex_mode == ReprexMode::Format {
-            formatter::format_code(formatter_backend, &code)
+            formatter::format_code(formatter_backend, &code)?
         } else {
             code
         };
