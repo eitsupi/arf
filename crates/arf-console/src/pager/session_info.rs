@@ -5,6 +5,8 @@ use crate::config::{ConfigStatus, RSourceStatus, mask_home_path};
 use crate::editor::prompt::get_r_version;
 use crate::external::{formatter, rig};
 use crate::history::HistoryRuntime;
+use crate::ipc::policy::{IpcPolicy, SilentPolicy, VisiblePolicy, policy};
+use crate::ipc::session::SessionType;
 use crate::repl::state::PromptRuntimeConfig;
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -219,7 +221,67 @@ fn generate_info_lines(
         }
     }
 
+    append_section_separator(&mut lines);
+
+    // IPC policy. Keep each allowlist target on its own line so a
+    // long list remains fully visible in the pager's vertical scroll view.
+    append_ipc_info_lines(
+        &mut lines,
+        &policy(SessionType::Interactive),
+        crate::ipc::server::is_server_running(),
+    );
+
     lines
+}
+
+fn append_ipc_info_lines(lines: &mut Vec<String>, ipc_policy: &IpcPolicy, server_enabled: bool) {
+    lines.push("## IPC".to_string());
+    lines.push(String::new());
+    lines.push(format!(
+        "Server: {}",
+        if server_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    ));
+    if !server_enabled {
+        return;
+    }
+
+    match &ipc_policy.silent {
+        SilentPolicy::Restricted { allowed_functions } => {
+            lines.push("Silent eval:    restricted".to_string());
+            lines.push("Allowed functions:".to_string());
+            if allowed_functions.is_empty() {
+                lines.push("  (none; bare literals and identifiers remain allowed)".to_string());
+            } else {
+                for function in allowed_functions {
+                    lines.push(format!("  {function}"));
+                }
+            }
+        }
+        SilentPolicy::Unrestricted => {
+            lines.push("Silent eval:    unrestricted".to_string());
+        }
+    }
+    lines.push(format!(
+        "Visible requests: approval {}",
+        visible_approval_label(&ipc_policy.visible)
+    ));
+}
+
+fn visible_approval_label(policy: &VisiblePolicy) -> &'static str {
+    match policy {
+        VisiblePolicy::ApprovalRequired => "required",
+        VisiblePolicy::ApprovalNotRequired => "not required",
+    }
+}
+
+fn append_section_separator(lines: &mut Vec<String>) {
+    if !matches!(lines.last(), Some(line) if line.is_empty()) {
+        lines.push(String::new());
+    }
 }
 
 fn history_runtime_label(runtime: &HistoryRuntime) -> String {
@@ -515,6 +577,14 @@ mod tests {
             &unavailable_history(),
             &RSourceStatus::Path,
         );
+        let ipc_index = lines.iter().position(|line| line == "## IPC").unwrap();
+        let shell_history_index = lines
+            .iter()
+            .position(|line| line.starts_with("Shell history:"))
+            .unwrap();
+        assert!(ipc_index > shell_history_index);
+        assert_eq!(lines[ipc_index - 1], "");
+        assert_ne!(lines[ipc_index - 2], "");
         let config_line = lines
             .iter()
             .find(|l| l.starts_with("Config file:"))
@@ -689,5 +759,63 @@ mod tests {
             history_runtime_label(&fallback_without_path).contains("fallback; no persistent path")
         );
         assert!(history_runtime_label(&unavailable).starts_with("unavailable"));
+    }
+
+    #[test]
+    fn ipc_info_shows_server_state_and_policy() {
+        let mut lines = Vec::new();
+        append_ipc_info_lines(
+            &mut lines,
+            &IpcPolicy {
+                silent: SilentPolicy::Restricted {
+                    allowed_functions: vec!["+".to_string(), "stats::median".to_string()],
+                },
+                visible: crate::ipc::policy::VisiblePolicy::ApprovalRequired,
+            },
+            true,
+        );
+
+        insta::assert_snapshot!(lines.join("\n"), @r###"
+## IPC
+
+Server: enabled
+Silent eval:    restricted
+Allowed functions:
+  +
+  stats::median
+Visible requests: approval required
+"###);
+
+        let mut unrestricted_lines = Vec::new();
+        append_ipc_info_lines(
+            &mut unrestricted_lines,
+            &IpcPolicy {
+                silent: SilentPolicy::Unrestricted,
+                visible: crate::ipc::policy::VisiblePolicy::ApprovalNotRequired,
+            },
+            true,
+        );
+        insta::assert_snapshot!(unrestricted_lines.join("\n"), @r###"
+## IPC
+
+Server: enabled
+Silent eval:    unrestricted
+Visible requests: approval not required
+"###);
+
+        let mut disabled_lines = Vec::new();
+        append_ipc_info_lines(
+            &mut disabled_lines,
+            &IpcPolicy {
+                silent: SilentPolicy::Unrestricted,
+                visible: crate::ipc::policy::VisiblePolicy::ApprovalNotRequired,
+            },
+            false,
+        );
+        insta::assert_snapshot!(disabled_lines.join("\n"), @r###"
+## IPC
+
+Server: disabled
+"###);
     }
 }

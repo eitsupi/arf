@@ -18,6 +18,13 @@ fn test_headless_starts_and_ipc_ready() {
         "session should show correct PID: {}",
         result.stdout
     );
+    assert_eq!(
+        json["ipc_policy"],
+        serde_json::json!({
+            "silent": {"mode": "unrestricted"},
+            "visible": {"mode": "approval_not_required"}
+        })
+    );
 }
 
 /// Test that `arf ipc eval` returns a visible R value.
@@ -44,6 +51,18 @@ fn test_headless_eval_value() {
 fn test_headless_eval_allowlist() {
     let process = HeadlessProcess::spawn_with_args(&["--ipc-eval-allow-function", "+"])
         .expect("Failed to spawn restricted headless session");
+
+    let session = process.ipc_session().expect("session should run");
+    let session_json = parse_ipc_json(&session);
+    assert_eq!(session_json["ipc_policy"]["silent"]["mode"], "restricted");
+    assert_eq!(
+        session_json["ipc_policy"]["silent"]["allowed_functions"],
+        serde_json::json!(["+"])
+    );
+    assert_eq!(
+        session_json["ipc_policy"]["visible"],
+        serde_json::json!({"mode": "approval_not_required"})
+    );
 
     let allowed = process.ipc_eval("1 + 1").expect("allowed eval should run");
     assert!(

@@ -120,6 +120,8 @@ pub struct ShutdownResult {
     pub accepted: bool,
 }
 
+use super::policy::IpcPolicy;
+
 /// R session information collected from base R functions.
 ///
 /// Only available when R is idle (at the prompt). When R is busy,
@@ -154,6 +156,8 @@ pub struct SessionResult {
     /// History session ID (nanosecond timestamp), or `null` only when history
     /// initialization is unavailable.
     pub history_session_id: Option<i64>,
+    /// Complete IPC policy advertised by this session.
+    pub ipc_policy: IpcPolicy,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
     /// Reason why R information is unavailable, or `null` if available.

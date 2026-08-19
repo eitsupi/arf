@@ -5,6 +5,7 @@
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
 
 use crate::editor::validator::RValidator;
+use crate::ipc::policy::policy;
 use crate::ipc::protocol::{
     EvaluateParams, HistoryParams, INCOMPLETE_INPUT, INTERNAL_ERROR, INVALID_PARAMS,
     INVALID_REQUEST, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
@@ -18,6 +19,19 @@ use tokio_util::sync::CancellationToken;
 
 /// Global shutdown token and join handle for the server thread.
 static SERVER_HANDLE: OnceLock<Mutex<Option<ServerState>>> = OnceLock::new();
+
+/// Return whether the IPC server is currently running.
+pub fn is_server_running() -> bool {
+    let handle_store = match SERVER_HANDLE.get() {
+        Some(handle_store) => handle_store,
+        None => return false,
+    };
+    handle_store
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .is_some_and(|state| !state.join_handle.is_finished())
+}
 
 struct ServerState {
     cancel_token: CancellationToken,
@@ -132,6 +146,7 @@ pub fn start_server(
     let r_home_clone = r_home.clone();
     let log_file_clone = log_file.clone();
     let history_session_id_clone = history_session_id;
+    let session_type_clone = session_type;
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
 
@@ -154,6 +169,7 @@ pub fn start_server(
                     r_home_clone,
                     log_file_clone,
                     history_session_id_clone,
+                    session_type_clone,
                     tx,
                     token_clone,
                     bind_tx,
@@ -224,6 +240,7 @@ pub fn start_server(
         session_type: Some(session_type),
         log_file,
         history_session_id,
+        ipc_policy: policy(session_type),
     };
 
     if let Err(e) = write_session(&session) {
@@ -422,6 +439,7 @@ async fn run_server(
     r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: SessionType,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -456,6 +474,7 @@ async fn run_server(
                 r_home,
                 log_file,
                 history_session_id,
+                session_type,
             );
             let _ = bind_tx.send(Ok(()));
             l
@@ -504,6 +523,7 @@ async fn run_server(
     r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: SessionType,
     tx: mpsc::Sender<IpcRequest>,
     cancel: CancellationToken,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
@@ -524,6 +544,7 @@ async fn run_server(
                 r_home,
                 log_file,
                 history_session_id,
+                session_type,
             );
             let _ = bind_tx.send(Ok(()));
             s

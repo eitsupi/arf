@@ -96,7 +96,14 @@ fn test_ipc_exit_code_transport_error() {
         "cwd": ".",
         "started_at": "1970-01-01T00:00:00Z",
         "log_file": null,
-        "history_session_id": null
+        "history_session_id": null,
+        "ipc_policy": {
+            "silent": {
+                "mode": "restricted",
+                "allowed_functions": []
+            },
+            "visible": {"mode": "approval_not_required"}
+        }
     });
     std::fs::write(
         &session_path,

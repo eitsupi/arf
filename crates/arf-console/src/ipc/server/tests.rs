@@ -172,6 +172,7 @@ fn test_session_result_includes_log_file() {
         Some("/opt/R/4.4.1/lib/R".to_string()),
         Some("/tmp/arf.log".to_string()),
         None,
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.log_file.as_deref(), Some("/tmp/arf.log"));
@@ -183,6 +184,7 @@ fn test_session_result_includes_log_file() {
         None,
         None,
         None,
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.log_file, None);
@@ -211,6 +213,7 @@ fn test_session_result_includes_r_home() {
         Some("/opt/R/4.4.1/lib/R".to_string()),
         None,
         None,
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
@@ -224,6 +227,7 @@ fn test_session_result_includes_r_home() {
         None,
         None,
         None,
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.r_home, None);
@@ -247,13 +251,21 @@ fn test_session_result_includes_history_session_id() {
         None,
         None,
         Some(session_id),
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.history_session_id, Some(session_id));
+    assert_eq!(
+        result.ipc_policy.silent,
+        crate::ipc::policy::SilentPolicy::Restricted {
+            allowed_functions: Vec::new()
+        }
+    );
 
     // Verify JSON serialization includes the value
     let json = serde_json::to_value(&result).unwrap();
     assert_eq!(json["history_session_id"], session_id);
+    assert_eq!(json["ipc_policy"]["silent"]["mode"], "restricted");
 
     // Without history_session_id (history initialization unavailable)
     super::super::set_session_meta(
@@ -262,6 +274,7 @@ fn test_session_result_includes_history_session_id() {
         None,
         None,
         None,
+        SessionType::Interactive,
     );
     let result = super::super::collect_session_result(false, "test");
     assert_eq!(result.history_session_id, None);

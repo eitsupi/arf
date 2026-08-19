@@ -9,6 +9,7 @@ use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::history::HistoryRuntime;
 use crate::ipc;
+use crate::ipc::policy::IpcPolicy;
 use crate::ipc::session::{SessionInfo, SessionType};
 use crate::output::write_json;
 use crate::pid_file::{
@@ -33,6 +34,7 @@ struct HeadlessInfo {
     started_at: String,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    ipc_policy: IpcPolicy,
     history_runtime: HeadlessHistoryRuntime,
     r_source_override: HeadlessRSourceOverride,
     warnings: Vec<String>,
@@ -108,6 +110,7 @@ impl HeadlessInfo {
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
             history_session_id: session.history_session_id,
+            ipc_policy: session.ipc_policy.clone(),
             history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
             r_source_override: HeadlessRSourceOverride::from_report(resolution),
             warnings,
@@ -503,6 +506,7 @@ mod tests {
             session_type: Some(SessionType::Headless),
             log_file: None,
             history_session_id: None,
+            ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
         };
 
         let output = HeadlessInfo::from_session(

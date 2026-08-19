@@ -152,6 +152,8 @@ fn test_headless_json_output() {
         json["r_version"].is_string() || json["r_version"].is_null(),
         "JSON r_version should be a string or null: {json}"
     );
+    assert!(json["ipc_policy"].is_object());
+    assert!(json["ipc_policy"]["silent"].is_object());
     assert!(json["cwd"].is_string(), "JSON should have cwd: {json}");
     assert!(
         json["started_at"].is_string(),
