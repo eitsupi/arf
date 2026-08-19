@@ -668,12 +668,6 @@ mode = "persistent"   # "persistent" loads/saves SQLite; "volatile" is session-o
 # mode = { dir = "/custom/path" }
 ```
 
-Older configurations using `history.disabled` or top-level `history.dir` are accepted for migration. arf
-prints a startup warning and maps `disabled = true` to `mode = "volatile"`, or
-`disabled = false` to `mode = "persistent"`; an explicit `mode` takes priority
-when both keys are present. Update the file to use `history.mode` and remove
-`history.disabled` and top-level `history.dir`.
-
 ### Environment Variable
 
 The `ARF_HISTORY_DIR` environment variable can be used to override the history directory. This is useful for devcontainer Features that persist history via Docker volumes.
