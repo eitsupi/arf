@@ -588,7 +588,7 @@ mod tests {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
         let mut runtime =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
 
         assert!(!runtime.is_enabled());
         runtime.set_mode(ReprexMode::On);
@@ -602,7 +602,7 @@ mod tests {
         // create_test_config reads SHELL through PromptFormatter::new.
         let _guard = crate::test_utils::lock_env();
         let mut runtime =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
 
         runtime.set_mode(ReprexMode::On);
         assert!(runtime.is_enabled());
@@ -614,7 +614,7 @@ mod tests {
         let _guard = crate::test_utils::lock_env();
         let mut config = create_test_config(ReprexMode::Off);
         let mut runtime =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
 
         // Initially R mode prompt
         let prompt = config.build_main_prompt(runtime.mode);
@@ -642,7 +642,7 @@ mod tests {
         let _guard = crate::test_utils::lock_env();
         let config = create_test_config(ReprexMode::Off);
         let mut runtime =
-            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::ReprexFormatter::Air);
+            ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
 
         // Initially no indicator
         let prompt = config.build_main_prompt(runtime.mode);

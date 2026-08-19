@@ -261,7 +261,8 @@ fn run() -> Result<()> {
     // Apply CLI overrides
     if let Some(mode) = cli.reprex {
         let formatter = config.reprex.formatter;
-        if mode == ReprexMode::Format && !external::formatter::is_formatter_available(formatter) {
+        if mode == ReprexMode::Format && external::formatter::resolve_formatter(formatter).is_none()
+        {
             anyhow::bail!(
                 "{}",
                 external::formatter::unavailable_message(
@@ -299,7 +300,7 @@ fn run() -> Result<()> {
     let formatter = config.reprex.formatter;
     if config.startup.reprex == ReprexMode::Format
         && cli.reprex.is_none()
-        && !external::formatter::is_formatter_available(formatter)
+        && external::formatter::resolve_formatter(formatter).is_none()
     {
         eprintln!(
             "{}",

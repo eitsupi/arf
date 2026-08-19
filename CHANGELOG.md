@@ -5,6 +5,9 @@
 ### Changed
 
 - Reprex configuration now uses `[startup] reprex = "off"|"on"|"format"` and top-level `[reprex]` settings. The CLI uses `--reprex=<off|on|format>`, and runtime selection is explicit via `:reprex on|off|format`; the former auto-format switches and legacy mode tables are removed.
+- Reprex format mode now uses Air 0.9.0+'s stdin interface (`--stdin-file-path arf-reprex.R --force`) without creating temporary files. Air configuration is discovered from the current working directory; formatting failures report stderr and do not evaluate unformatted code.
+- Reprex format mode also supports Arity 0.18.0+'s `arity format -` stdin interface; select it with `[reprex] formatter = "arity"`.
+- Reprex formatter selection now defaults to `auto`, preferring Air and then Arity; explicit backend selections remain strict.
 - History storage now has explicit persistent and volatile modes. `--no-history` selects volatile in-memory history (including IPC and session recall) without loading or writing a database; persistent open failures degrade to a volatile fallback. Fallback and unavailable runtimes retain and report their concrete initialization cause, including it as `history_runtime.detail` in headless JSON.
 - Legacy `history.disabled` and top-level `history.dir` are accepted with a migration warning when `history.mode` is omitted: `disabled = false` with `dir` preserves the custom persistent directory, while `disabled = true` selects volatile even when `dir` is present. With an explicit `mode`, legacy `disabled` is ignored in favor of that mode, but top-level `dir` is a parse error. Migrate to a string mode or `history.mode = { dir = "..." }`.
 

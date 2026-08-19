@@ -66,13 +66,14 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
 
     // Evaluate the code using the CLI override or configured reprex mode.
     let mut reprex_mode = cli.reprex.unwrap_or(config.startup.reprex);
-    let formatter_backend = config.reprex.formatter;
-    if reprex_mode == ReprexMode::Format && !formatter::is_formatter_available(formatter_backend) {
+    let formatter_selector = config.reprex.formatter;
+    let formatter_backend = formatter::resolve_formatter(formatter_selector);
+    if reprex_mode == ReprexMode::Format && formatter_backend.is_none() {
         if cli.reprex.is_some() {
             anyhow::bail!(
                 "{}",
                 formatter::unavailable_message(
-                    formatter_backend,
+                    formatter_selector,
                     formatter::FormatterUnavailableContext::ExplicitCli
                 )
             );
@@ -80,7 +81,7 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
         eprintln!(
             "{}",
             formatter::unavailable_message(
-                formatter_backend,
+                formatter_selector,
                 formatter::FormatterUnavailableContext::ConfiguredMode
             )
         );
@@ -88,7 +89,10 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     }
     if reprex_mode != ReprexMode::Off {
         let code = if reprex_mode == ReprexMode::Format {
-            formatter::format_code(formatter_backend, &code)
+            formatter::format_code(
+                formatter_backend.expect("format mode requires a resolved formatter"),
+                &code,
+            )?
         } else {
             code
         };

@@ -149,7 +149,7 @@
       "$ref": "#/$defs/ReprexConfig",
       "default": {
         "comment": "#> ",
-        "formatter": "air"
+        "formatter": "auto"
       }
     },
     "startup": {
@@ -1972,17 +1972,19 @@
           "default": "#> "
         },
         "formatter": {
-          "description": "Formatter backend (currently only `air` is supported).",
+          "description": "Formatter selector (`auto`, `air`, or `arity`).",
           "$ref": "#/$defs/ReprexFormatter",
-          "default": "air"
+          "default": "auto"
         }
       }
     },
     "ReprexFormatter": {
-      "description": "Formatter backend used by reprex format mode.\n\nAir is the only supported backend for now; additional backends are\nintentionally deferred until their integration is designed.",
+      "description": "Formatter backend selector used by reprex format mode.",
       "type": "string",
       "enum": [
-        "air"
+        "auto",
+        "air",
+        "arity"
       ]
     },
     "ReprexMode": {

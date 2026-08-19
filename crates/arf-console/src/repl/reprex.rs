@@ -1,6 +1,6 @@
 //! Reprex mode utilities.
 
-use crate::config::{ReprexFormatter, ReprexMode};
+use crate::config::{FormatterBackend, ReprexFormatter, ReprexMode};
 use crate::external::formatter;
 
 use crossterm::{
@@ -14,15 +14,40 @@ use std::io::{self, Write};
 pub struct ReprexRuntime {
     pub mode: ReprexMode,
     pub comment: String,
-    pub formatter: ReprexFormatter,
+    /// Concrete backend selected for execution, if one is available.
+    pub formatter: Option<FormatterBackend>,
+    /// Config selector retained for diagnostics and future `:reprex format` resolution.
+    pub formatter_selector: ReprexFormatter,
 }
 
 impl ReprexRuntime {
-    pub fn new(mode: ReprexMode, comment: impl Into<String>, formatter: ReprexFormatter) -> Self {
+    /// Construct runtime state from a concrete backend, primarily for tests and
+    /// callers that already performed resolution.
+    #[cfg(test)]
+    pub fn new(mode: ReprexMode, comment: impl Into<String>, formatter: FormatterBackend) -> Self {
+        Self {
+            mode,
+            comment: comment.into(),
+            formatter: Some(formatter),
+            formatter_selector: match formatter {
+                FormatterBackend::Air => ReprexFormatter::Air,
+                FormatterBackend::Arity => ReprexFormatter::Arity,
+            },
+        }
+    }
+
+    /// Construct runtime state from a backend resolved during startup.
+    pub fn from_resolved(
+        mode: ReprexMode,
+        comment: impl Into<String>,
+        formatter_selector: ReprexFormatter,
+        formatter: Option<FormatterBackend>,
+    ) -> Self {
         Self {
             mode,
             comment: comment.into(),
             formatter,
+            formatter_selector,
         }
     }
 
@@ -35,11 +60,16 @@ impl ReprexRuntime {
         arf_libr::set_reprex_mode(mode != ReprexMode::Off, &self.comment);
     }
 
-    pub fn maybe_format_code(&self, code: &str) -> String {
+    pub fn maybe_format_code(&self, code: &str) -> Result<String, formatter::FormatterError> {
         if self.mode == ReprexMode::Format {
-            formatter::format_code(self.formatter, code)
+            let backend = self
+                .formatter
+                .ok_or(formatter::FormatterError::Unavailable {
+                    selector: self.formatter_selector,
+                })?;
+            formatter::format_code(backend, code)
         } else {
-            code.to_string()
+            Ok(code.to_string())
         }
     }
 }

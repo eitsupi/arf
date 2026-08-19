@@ -35,7 +35,7 @@
 - Command status indicator (shows error symbol when previous command failed)
 - Fuzzy help browser with `:help` or `:h` — search across all installed packages
 - Tree-sitter based syntax highlighting with customizable colors
-- Reprex mode with optional formatting via [Air](https://github.com/posit-dev/air)
+- Reprex mode with optional formatting via [Air](https://github.com/posit-dev/air) 0.9.0+ or [Arity](https://github.com/jolars/arity) 0.18.0+
 - Shell mode (`:shell` to enter, `:r` to return)
 - Configurable prompts and colors with placeholders (`{version}`, `{cwd}`, `{status}`)
 - SQLite-backed persistent history with import/export support
@@ -147,7 +147,7 @@ arf extends R with `:` prefixed meta commands:
 | `:shell` | Enter shell mode |
 | `:r` | Return to R mode |
 | `:system <cmd>` | Execute a single shell command inline |
-| `:reprex <on|off|format>` | Set reprex mode (format requires Air) |
+| `:reprex <on|off|format>` | Set reprex mode (format requires the configured formatter) |
 | `:switch <version>` | Restart with different R version (requires rig) |
 | `:restart` | Restart R session |
 | `:cd [path]` | Change working directory (no args → home) |
@@ -186,7 +186,7 @@ arf config init
 r_source = "auto"       # "auto", "rig", or { path = "/path/to/R" }
 show_banner = true
 
-# Initial reprex mode: "off", "on", or "format" (requires Air)
+# Initial reprex mode: "off", "on", or "format"
 reprex = "off"
 
 [editor]
@@ -217,7 +217,9 @@ auto_width = true       # Sync options(width) with terminal size
 # Reprex static configuration
 [reprex]
 comment = "#> "
-formatter = "air"
+# Formatter for format mode: "auto", "air" (>= 0.9.0), or "arity" (>= 0.18.0)
+# "auto" prefers Air, then Arity.
+formatter = "auto"
 
 # Syntax highlighting colors
 [colors.r]

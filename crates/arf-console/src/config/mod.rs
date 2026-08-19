@@ -25,7 +25,7 @@ pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
 pub use r::RConfig;
-pub use reprex::{ReprexConfig, ReprexFormatter};
+pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
     RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,
 };
@@ -420,6 +420,7 @@ mod tests {
             RSource::Mode(RSourceMode::Auto)
         ));
         assert!(config.startup.show_banner);
+        assert_eq!(config.reprex.formatter, ReprexFormatter::Auto);
     }
 
     #[test]
@@ -513,23 +514,41 @@ formatter = "air"
     }
 
     #[test]
-    fn reprex_formatter_rejects_unsupported_backends() {
-        for formatter in ["arity", "unknown"] {
-            let source = format!("[reprex]\nformatter = \"{formatter}\"");
-            assert!(
-                toml::from_str::<Config>(&source).is_err(),
-                "unsupported formatter should be rejected: {formatter}"
-            );
+    fn reprex_formatter_accepts_supported_selectors() {
+        for (source, expected) in [
+            ("[reprex]\nformatter = \"auto\"", ReprexFormatter::Auto),
+            ("[reprex]\nformatter = \"air\"", ReprexFormatter::Air),
+            ("[reprex]\nformatter = \"arity\"", ReprexFormatter::Arity),
+        ] {
+            let config: Config = toml::from_str(source).unwrap();
+            assert_eq!(config.reprex.formatter, expected);
         }
     }
 
     #[test]
+    fn reprex_formatter_rejects_unknown_backends() {
+        let source = "[reprex]\nformatter = \"unknown\"";
+        assert!(toml::from_str::<Config>(source).is_err());
+    }
+
+    #[test]
     fn reprex_formatter_metadata_describes_air_backend() {
-        let formatter = ReprexFormatter::Air;
+        let formatter = FormatterBackend::Air;
         assert_eq!(formatter.display_name(), "Air");
         assert_eq!(formatter.command(), "air");
         assert_eq!(formatter.install_url(), "https://github.com/posit-dev/air");
+        assert_eq!(formatter.minimum_version(), "0.9.0");
         assert_eq!(formatter.to_string(), "air");
+    }
+
+    #[test]
+    fn reprex_formatter_metadata_describes_arity_backend() {
+        let formatter = FormatterBackend::Arity;
+        assert_eq!(formatter.display_name(), "Arity");
+        assert_eq!(formatter.command(), "arity");
+        assert_eq!(formatter.install_url(), "https://github.com/jolars/arity");
+        assert_eq!(formatter.minimum_version(), "0.18.0");
+        assert_eq!(formatter.to_string(), "arity");
     }
 
     #[test]

@@ -14,8 +14,8 @@ use crate::completion::completer::CombinedCompleter;
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
-    AutoSuggestions, Config, ConfigStatus, EditorMode, ModeIndicatorPosition, RSourceStatus,
-    ReprexMode, history_dir_for_mode,
+    AutoSuggestions, Config, ConfigStatus, EditorMode, FormatterBackend, ModeIndicatorPosition,
+    RSourceStatus, ReprexMode, history_dir_for_mode,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
@@ -223,6 +223,8 @@ pub(crate) use arf_println;
 /// The main REPL structure.
 pub struct Repl {
     config: Config,
+    /// Formatter backend resolved once from the configured selector at startup.
+    formatter_backend: Option<FormatterBackend>,
     /// Path to the config file (if specified via --config, or the default XDG path).
     config_path: Option<std::path::PathBuf>,
     /// Status of config file loading (for :info display).
@@ -256,6 +258,8 @@ impl Repl {
         r_home: Option<std::path::PathBuf>,
         session_id: Option<HistorySessionId>,
     ) -> Result<Self> {
+        let formatter_backend =
+            crate::external::formatter::resolve_formatter(config.reprex.formatter);
         // Check if R is initialized
         let r_initialized = arf_libr::r_library().is_ok();
 
@@ -269,6 +273,7 @@ impl Repl {
 
         Ok(Repl {
             config,
+            formatter_backend,
             config_path,
             config_status,
             r_source_status,
@@ -389,6 +394,7 @@ impl Repl {
                 &self.config,
                 self.r_initialized,
                 self.r_source_status.override_info(),
+                self.formatter_backend,
             );
             // Apply color to the "not initialized" warning if present
             if !self.r_initialized {
@@ -609,10 +615,11 @@ impl Repl {
                 line_editor,
                 shell_line_editor,
                 prompt_config,
-                reprex: ReprexRuntime::new(
+                reprex: ReprexRuntime::from_resolved(
                     self.config.startup.reprex,
                     self.config.reprex.comment.clone(),
                     self.config.reprex.formatter,
+                    self.formatter_backend,
                 ),
                 should_exit: false,
                 config_path: self.config_path.clone(),
@@ -825,10 +832,11 @@ impl Repl {
                     self.config.colors.prompt.vi.clone(),
                 )
                 .build();
-        let mut standalone_reprex = ReprexRuntime::new(
+        let mut standalone_reprex = ReprexRuntime::from_resolved(
             self.config.startup.reprex,
             self.config.reprex.comment.clone(),
             self.config.reprex.formatter,
+            self.formatter_backend,
         );
         // Separate dir_stack for standalone mode (R not initialized).
         // The R mainloop path stores its own dir_stack in ReplState.
