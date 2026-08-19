@@ -234,7 +234,7 @@ pub(crate) fn load_config_from_path_with_provenance(
         .get("startup")
         .and_then(|startup| startup.get("r_source"))
         .is_some();
-    if let Some(message) = removed_reprex_key(&document) {
+    if let Some(message) = removed_reprex_keys(&document) {
         return Err(ConfigLoadError::Validation {
             message,
             path: path.to_path_buf(),
@@ -257,32 +257,31 @@ pub(crate) fn load_config_from_path_with_provenance(
     ))
 }
 
-fn removed_reprex_key(document: &toml::Value) -> Option<String> {
+fn removed_reprex_keys(document: &toml::Value) -> Option<String> {
+    let mut messages = Vec::new();
+
     if document
         .get("startup")
         .and_then(|value| value.get("mode"))
         .is_some()
     {
-        return Some(
-            "[startup.mode] was removed; use [startup] reprex = \"off\"|\"on\"|\"format\""
-                .to_string(),
-        );
+        messages
+            .push("[startup.mode] was removed; use [startup] reprex = \"off\"|\"on\"|\"format\"");
     }
     if document
         .get("mode")
         .and_then(|value| value.get("reprex"))
         .is_some()
     {
-        return Some("[mode.reprex] was removed; use [reprex]".to_string());
+        messages.push("[mode.reprex] was removed; use [reprex]");
     }
-    if document
-        .get("reprex")
-        .and_then(toml::Value::as_table)
-        .is_some_and(|table| table.contains_key("enabled") || table.contains_key("autoformat"))
-    {
-        return Some(
-            "reprex.enabled and reprex.autoformat were removed; use startup.reprex".to_string(),
-        );
+    if let Some(table) = document.get("reprex").and_then(toml::Value::as_table) {
+        if table.contains_key("enabled") {
+            messages.push("reprex.enabled was removed; use startup.reprex");
+        }
+        if table.contains_key("autoformat") {
+            messages.push("reprex.autoformat was removed; use startup.reprex");
+        }
     }
     if document
         .get("prompt")
@@ -290,12 +289,11 @@ fn removed_reprex_key(document: &toml::Value) -> Option<String> {
         .and_then(toml::Value::as_table)
         .is_some_and(|table| table.contains_key("autoformat"))
     {
-        return Some(
-            "prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format"
-                .to_string(),
-        );
+        messages
+            .push("prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format");
     }
-    None
+
+    (!messages.is_empty()).then(|| messages.join("\n  "))
 }
 
 fn history_migration_warning(document: &toml::Value) -> Option<String> {
@@ -536,9 +534,37 @@ comment = "#> ""##,
 enabled = true"#,
         ] {
             let document: toml::Value = toml::from_str(source).unwrap();
-            let message = removed_reprex_key(&document).expect("removed key should be found");
+            let message = removed_reprex_keys(&document).expect("removed key should be found");
             assert!(!message.is_empty());
         }
+    }
+
+    #[test]
+    fn removed_reprex_configuration_keys_are_all_reported() {
+        let source = r##"
+[startup.mode]
+reprex = true
+
+[mode.reprex]
+comment = "#> "
+
+[reprex]
+enabled = true
+autoformat = true
+
+[prompt.indicators]
+autoformat = true
+"##;
+        let document: toml::Value = toml::from_str(source).unwrap();
+        let message = removed_reprex_keys(&document).expect("removed keys should be found");
+
+        insta::assert_snapshot!(message, @r###"
+[startup.mode] was removed; use [startup] reprex = "off"|"on"|"format"
+  [mode.reprex] was removed; use [reprex]
+  reprex.enabled was removed; use startup.reprex
+  reprex.autoformat was removed; use startup.reprex
+  prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format
+"###);
     }
 
     #[test]

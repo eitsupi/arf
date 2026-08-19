@@ -366,6 +366,50 @@ fn test_top_level_config_before_config_check_rejected_with_nested_corrected_form
 }
 
 #[test]
+fn test_config_check_reports_all_removed_reprex_keys() {
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(
+        config_file,
+        r##"[startup.mode]
+reprex = true
+
+[mode.reprex]
+comment = "#> "
+
+[reprex]
+enabled = true
+autoformat = true
+
+[prompt.indicators]
+autoformat = true
+"##
+    )
+    .expect("Failed to write config file");
+
+    let output = sanitized_arf_command()
+        .args([
+            "config",
+            "check",
+            "--config",
+            config_file.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf config check");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    insta::assert_snapshot!(stderr, @r###"
+Error: Config file has errors:
+
+  [startup.mode] was removed; use [startup] reprex = "off"|"on"|"format"
+  [mode.reprex] was removed; use [reprex]
+  reprex.enabled was removed; use startup.reprex
+  reprex.autoformat was removed; use startup.reprex
+  prompt.indicators.autoformat was removed; use prompt.indicators.reprex_format
+"###);
+}
+
+#[test]
 fn test_top_level_no_banner_before_nested_ipc_rejected() {
     assert_top_level_scope_error(
         &["--no-banner", "ipc", "list"],
