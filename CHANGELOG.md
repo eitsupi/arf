@@ -2,16 +2,90 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-19
+
+### Added
+
+- **Experimental:** `arf ipc session` and `arf headless --json` now report an `ipc_policy` object describing the policy in effect: whether silent `arf ipc eval` is restricted (with the complete allowlist) or unrestricted, and whether visible requests (`arf ipc send`, `arf ipc eval --visible`) require human approval. `:info` shows the same information for the running session. `arf ipc list` stays discovery-only and does not report the policy. Query `arf ipc session` for it (#316).
+
 ### Changed
 
-- Reprex configuration now uses `[startup] reprex = "off"|"on"|"format"` and top-level `[reprex]` settings. The CLI uses `--reprex=<off|on|format>`, and runtime selection is explicit via `:reprex on|off|format`; the former auto-format switches and legacy mode tables are removed.
-- Reprex format mode now uses Air 0.9.0+'s stdin interface (`--stdin-file-path arf-reprex.R --force`) without creating temporary files. Air configuration is discovered from the current working directory; formatting failures report stderr and do not evaluate unformatted code.
-- Reprex format mode also supports Arity 0.18.0+'s `arity format -` stdin interface; select it with `[reprex] formatter = "arity"`.
-- Reprex formatter selection now defaults to `auto`, preferring Air and then Arity; explicit backend selections remain strict.
-- History storage now has explicit persistent and volatile modes. `--no-history` selects volatile in-memory history (including IPC and session recall) without loading or writing a database; persistent open failures degrade to a volatile fallback. Fallback and unavailable runtimes retain and report their concrete initialization cause, including it as `history_runtime.detail` in headless JSON.
-- Legacy `history.disabled` and top-level `history.dir` are accepted with a migration warning when `history.mode` is omitted: `disabled = false` with `dir` preserves the custom persistent directory, while `disabled = true` selects volatile even when `dir` is present. With an explicit `mode`, legacy `disabled` is ignored in favor of that mode, but top-level `dir` is a parse error. Migrate to a string mode or `history.mode = { dir = "..." }`.
-
+- **Breaking:** Reprex mode is now a single three-state setting (`off`, `on`, or `format`) instead of separate reprex and auto-format switches (#318, #319).
+  - Set the startup mode with `[startup] reprex`, start arf in it with `--reprex=<off|on|format>`, and switch during a session with `:reprex on|off|format`.
+  - Static reprex settings moved from `[mode.reprex]` to a top-level `[reprex]` table, which also gained `formatter`.
+  - `format` mode now passes code to the formatter over stdin instead of writing a temporary file, and supports the [Arity](https://github.com/jolars/arity) CLI alongside the [Air](https://github.com/posit-dev/air) CLI. One of them must be on `PATH`: the `air` command at 0.9.0 or later, or the `arity` command at 0.18.0 or later. Both read their configuration from arf's working directory.
+  - `formatter = "auto"` (the default) prefers the Air CLI and falls back to the Arity CLI; an explicit `"air"` or `"arity"` never falls back to the other.
+  - If formatting fails, arf reports the formatter's stderr and does not evaluate the unformatted code.
+  - The old keys and the `--auto-format`, `:autoformat`, and `:format` interfaces are gone without compatibility aliases. `arf config check` reports every removed key in a single run.
+- **Breaking:** History storage now has explicit persistent and volatile modes, selected with `[history] mode` (#314).
+  - `--no-history` now means volatile, session-only history rather than no history: recall, search, the browser, metadata, and IPC history queries all keep working, but nothing is read from or written to disk.
+  - When a persistent database cannot be opened, arf falls back to volatile history and reports why, instead of silently continuing without history. `:info`, startup warnings, and the `history_runtime` object in headless JSON carry the cause.
+  - `history.disabled` and top-level `history.dir` are still accepted with a migration warning when `mode` is omitted. Alongside an explicit `mode`, `disabled` is ignored and reported, and top-level `dir` is an error.
 - Command history now records whether each entry was a meta command (`:cd`, `:help`, ...) as determined by the REPL itself, laying groundwork for excluding them from history search (#312).
+- **Experimental/Breaking:** `arf ipc eval` without `--visible` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session; literals and object references still evaluate without configuration. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic, not an R sandbox (#303).
+- **Experimental/Breaking:** `arf ipc send` and `arf ipc eval --visible` now show the code and ask for confirmation before running it in an interactive REPL; `:ipc send-policy allow` suspends the prompt until arf restarts. Headless sessions run immediately, and the eval allowlist does not apply to either path (#303).
+- **Experimental/Breaking:** `session_type` is now required in session metadata. Session files written by an older arf, which lack the field, are no longer accepted by `arf ipc list` and the other client commands; such a file is deleted once its process is gone, and left alone while it is still running (#317).
+
+#### Migration Guide
+
+If you have a configuration file from 0.4.x, apply the following changes.
+`arf config check` reports the removed reprex keys, and arf warns at startup
+about the deprecated history keys.
+
+| 0.4.x key | 0.5.0 key |
+|-----------|-----------|
+| `startup.mode.reprex = true` | `startup.reprex = "on"` |
+| `startup.mode.reprex = true` + `startup.mode.autoformat = true` | `startup.reprex = "format"` |
+| `mode.reprex.comment` | `reprex.comment` |
+| `prompt.indicators.autoformat` | `prompt.indicators.reprex_format` |
+| `history.disabled = true` | `history.mode = "volatile"` |
+| `history.dir = "/custom/path"` | `history.mode = { dir = "/custom/path" }` |
+
+**Before (0.4.x):**
+
+```toml
+[startup.mode]
+reprex = true
+autoformat = true
+
+[mode.reprex]
+comment = "#> "
+
+[prompt.indicators]
+reprex = "[reprex] "
+autoformat = "[format] "
+
+[history]
+disabled = false
+dir = "/custom/path"
+```
+
+**After (0.5.0):**
+
+```toml
+[startup]
+reprex = "format"   # "off", "on", or "format"
+
+[reprex]
+comment = "#> "
+formatter = "auto"  # "auto", "air" (Air CLI), or "arity" (Arity CLI)
+
+[prompt.indicators]
+reprex = "[reprex] "
+reprex_format = "[format] "
+
+[history]
+mode = { dir = "/custom/path" }   # or "persistent" / "volatile"
+```
+
+The command-line and meta-command interfaces changed the same way:
+
+| 0.4.x | 0.5.0 |
+|-------|-------|
+| `--reprex` | `--reprex=on` |
+| `--reprex --auto-format` | `--reprex=format` |
+| `:reprex` (toggle) | `:reprex on`, `:reprex off` |
+| `:autoformat`, `:format` | `:reprex format` |
 
 ### Fixed
 
@@ -21,17 +95,8 @@
 - Re-importing a source repairs those columns on entries an earlier import left empty, without replacing values already recorded (#313).
 - Importing a history database no longer writes to the source database (#313).
 - Importing a file that is not an arf history database now reports an error instead of silently importing nothing (#313).
-
-## [0.5.0-rc.1] - 2026-08-12
-
-### Changed
-
-- **Experimental/Breaking:** `arf ipc eval` without `--visible` now refuses R code unless every function it calls is allowlisted, so a program with access to the socket can no longer run arbitrary code in the session; literals and object references still evaluate without configuration. Allow calls with `[ipc.eval].allowed_functions` or `--ipc-eval-allow-function`, or opt out for a session with `--ipc-eval-unrestricted` at startup. The check is syntactic, not an R sandbox. (#303)
-- **Experimental/Breaking:** `arf ipc send` and `arf ipc eval --visible` now show the code and ask for confirmation before running it in an interactive REPL; `:ipc send-policy allow` suspends the prompt until arf restarts. Headless sessions run immediately, and the eval allowlist does not apply to either path. (#303)
-
-### Fixed
-
 - macOS binaries no longer fail to start with a missing `liblzma` library error (#304).
+- **Experimental:** IPC approval prompts showed only the first few hundred characters of the submitted code while arf ran all of it, so a client could hide executable code past the visible part. The prompt now shows the complete code, escaped (#315).
 
 ## [0.4.5] - 2026-08-01
 
@@ -74,7 +139,7 @@
   For now, it seems neither of these formats is widely adopted, so arf introduces a generic `toml-key` type that allows us to specify the filename and key path and supports Cargo-style version ranges.
   Of course, we can also support other TOML files with different names and keys for specifying the R version.
 
-- **Experimental:** `arf ipc list` now reports a required `session_type` field (`"headless"` or `"interactive"`) for each current session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Session files from older arf versions that lack this field are not accepted by the current schema (#283).
+- **Experimental:** `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown (#283).
 - **Experimental:** `arf ipc session`, `arf ipc list`, and `arf headless --json` now report `r_home`, the R installation the session is using, so an editor can use the same R instead of discovering one for itself. Sessions started by an older arf omit it, which clients should treat as unknown (#294).
 - **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON on success (#290, #291, #293).
 
@@ -248,7 +313,7 @@
 - Matching bracket highlighting: when cursor is on or after a bracket (`()`, `[]`, `{}`), both brackets are highlighted with a background color. Syntax-aware via tree-sitter (skips brackets in strings/comments). Configurable via `[editor] highlight_matching_bracket` (default: `false`) and `[colors.r] matching_bracket` (default: `"LightYellow"`) (#106)
 - R's `options(width)` is now synced with the terminal width at startup and dynamically on resize, configurable via `[r] auto_width` (default: `true`) (#104)
 - `:changelog` meta command to view the arf changelog in the built-in Markdown pager
-- `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `history.mode = { dir = "..." }` > XDG default)
+- `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `[history] dir` > XDG default)
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 - `:restart!` and `:switch!` commands to skip confirmation prompt
