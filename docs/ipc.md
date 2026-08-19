@@ -60,7 +60,12 @@ When `--json` is specified, arf prints session connection info to stdout as a si
   "cwd": "/workspace",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
-  "history_session_id": null,
+  "history_session_id": 1742601600000000000,
+  "history_runtime": {
+    "state": "persistent",
+    "path": "/home/user/.local/share/arf/history/r.db",
+    "reason": null
+  },
   "r_source_override": {
     "state": "applied",
     "provider": "toml-key",
@@ -73,7 +78,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or R source override diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization). `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 

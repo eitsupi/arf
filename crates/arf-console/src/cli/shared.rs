@@ -111,7 +111,7 @@ pub struct HistoryOptions {
     /// R history is stored at `{dir}/r.db`. The interactive console also
     /// stores shell history at `{dir}/shell.db`.
     ///
-    /// Config: history.mode = "persistent" and its `dir` field
+    /// Config: history.mode = { dir = "..." }
     #[arg(
         long = "history-dir",
         value_hint = ValueHint::DirPath,

@@ -248,10 +248,14 @@ fn history_migration_warning(document: &toml::Value) -> Option<String> {
     let history = document.get("history")?.as_table()?;
     let has_mode = history.contains_key("mode");
     let disabled = history.get("disabled").and_then(toml::Value::as_bool);
-    match (has_mode, disabled) {
-        (true, Some(_)) => Some("Config key history.disabled is deprecated and ignored because history.mode is set; use history.mode only.".to_string()),
-        (false, Some(true)) => Some("Config key history.disabled is deprecated; use history.mode = \"volatile\" instead.".to_string()),
-        (false, Some(false)) => Some("Config key history.disabled is deprecated; use history.mode = \"persistent\" instead.".to_string()),
+    let has_legacy_dir = history.contains_key("dir");
+    match (has_mode, has_legacy_dir, disabled) {
+        (true, _, Some(_)) => Some("Config key history.disabled is deprecated and ignored because history.mode is set; use history.mode only.".to_string()),
+        (false, true, Some(true)) => Some("Config keys history.disabled and history.dir are deprecated; use history.mode = \"volatile\" instead.".to_string()),
+        (false, true, Some(false)) => Some("Config keys history.disabled and history.dir are deprecated; use persistent history.mode = { dir = \"...\" } instead.".to_string()),
+        (false, true, None) => Some("Config key history.dir is deprecated; use history.mode = { dir = \"...\" } instead.".to_string()),
+        (false, false, Some(true)) => Some("Config key history.disabled is deprecated; use history.mode = \"volatile\" instead.".to_string()),
+        (false, false, Some(false)) => Some("Config key history.disabled is deprecated; use history.mode = \"persistent\" instead.".to_string()),
         _ => None,
     }
 }
@@ -542,6 +546,41 @@ mode = "volatile"
     }
 
     #[test]
+    fn test_parse_history_mode_with_directory_object() {
+        let config: Config =
+            toml::from_str("[history]\nmode = { dir = \"/custom/history\" }\n").unwrap();
+        assert!(matches!(
+            config.history.mode,
+            HistoryMode::Persistent { dir: Some(ref dir) }
+                if dir == std::path::Path::new("/custom/history")
+        ));
+
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(
+            serialized.contains("[history.mode]")
+                && serialized.contains("dir = \"/custom/history\""),
+            "serialized history config used an unexpected TOML shape: {serialized}"
+        );
+        assert!(!serialized.contains("[history]\ndir = "));
+    }
+
+    #[test]
+    fn test_history_mode_object_requires_dir_and_rejects_unknown_fields() {
+        assert!(toml::from_str::<Config>("[history]\nmode = {}\n").is_err());
+        assert!(
+            toml::from_str::<Config>("[history]\nmode = { dir = \"/tmp\", extra = true }\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_history_mode_rejects_legacy_dir_when_explicit() {
+        let result =
+            toml::from_str::<Config>("[history]\nmode = \"persistent\"\ndir = \"/tmp/history\"\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_legacy_history_disabled_migrates_with_warning() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("arf.toml");
@@ -583,6 +622,26 @@ mode = "volatile"
     }
 
     #[test]
+    fn test_legacy_history_dir_without_disabled_migrates_to_persistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        fs::write(&path, "[history]\ndir = \"/tmp/arf-history\"\n").unwrap();
+        let (config, provenance) = load_config_from_path_with_provenance(&path).unwrap();
+        assert!(matches!(
+            config.history.mode,
+            HistoryMode::Persistent { dir: Some(ref dir) }
+                if dir == std::path::Path::new("/tmp/arf-history")
+        ));
+        assert!(
+            provenance
+                .unwrap()
+                .history_migration_warning
+                .unwrap()
+                .contains("deprecated")
+        );
+    }
+
+    #[test]
     fn test_history_mode_wins_over_legacy_disabled() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("arf.toml");
@@ -596,6 +655,34 @@ mode = "volatile"
                 .contains("ignored")
         );
         assert!(matches!(config.history.mode, HistoryMode::Volatile));
+    }
+
+    #[test]
+    fn test_history_mode_object_wins_over_legacy_disabled() {
+        for disabled in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("arf.toml");
+            fs::write(
+                &path,
+                format!(
+                    "[history]\nmode = {{ dir = \"/tmp/payload-history\" }}\ndisabled = {disabled}\n"
+                ),
+            )
+            .unwrap();
+            let (config, provenance) = load_config_from_path_with_provenance(&path).unwrap();
+            assert!(matches!(
+                config.history.mode,
+                HistoryMode::Persistent { dir: Some(ref dir) }
+                    if dir == std::path::Path::new("/tmp/payload-history")
+            ));
+            assert!(
+                provenance
+                    .unwrap()
+                    .history_migration_warning
+                    .unwrap()
+                    .contains("ignored")
+            );
+        }
     }
 
     #[test]
@@ -964,6 +1051,47 @@ allowed_functions = ["mean", "stats::median", "+"]
             let properties = parsed
                 .get("properties")
                 .expect("Schema should have properties");
+
+            let history = properties
+                .get("history")
+                .and_then(|value| value.get("$ref"))
+                .and_then(|value| value.as_str())
+                .and_then(|reference| reference.strip_prefix("#/$defs/"))
+                .and_then(|name| parsed.get("$defs").and_then(|defs| defs.get(name)))
+                .expect("Schema should define history");
+            let history_properties = history
+                .get("properties")
+                .expect("History schema should have properties");
+            assert!(history_properties.get("disabled").is_none());
+            assert!(history_properties.get("dir").is_none());
+            let mode = history_properties
+                .get("mode")
+                .expect("History mode should be present in schema");
+            assert!(
+                history
+                    .get("required")
+                    .and_then(|required| required.as_array())
+                    .is_none_or(|required| !required.iter().any(|name| name == "mode")),
+                "History mode must remain optional for the default persistent mode"
+            );
+            assert_eq!(mode["default"], "persistent");
+            let variants = mode
+                .get("oneOf")
+                .and_then(|variants| variants.as_array())
+                .expect("History mode should have string and object variants");
+            assert!(variants.iter().any(|variant| {
+                variant["type"] == "string"
+                    && variant["enum"]
+                        .as_array()
+                        .is_some_and(|values| values.iter().any(|value| value == "persistent"))
+            }));
+            assert!(variants.iter().any(|variant| {
+                variant["type"] == "object"
+                    && variant["additionalProperties"] == false
+                    && variant["required"]
+                        .as_array()
+                        .is_some_and(|required| required.iter().any(|name| name == "dir"))
+            }));
 
             // Should have startup section (contains r_source, show_banner, mode)
             assert!(

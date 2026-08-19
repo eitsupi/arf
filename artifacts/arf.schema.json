@@ -97,7 +97,6 @@
     "history": {
       "$ref": "#/$defs/HistoryConfig",
       "default": {
-        "dir": null,
         "menu_max_height": 15,
         "mode": "persistent"
       }
@@ -1650,47 +1649,38 @@
       "type": "object",
       "properties": {
         "menu_max_height": {
-          "description": "Maximum height (rows) for the history search menu (Ctrl+R).\nThe actual height is the minimum of this value and the terminal height minus overhead.",
+          "description": "Maximum height (rows) for the history search menu (Ctrl+R).",
           "type": "integer",
           "format": "uint16",
           "default": 15,
           "maximum": 65535,
           "minimum": 0
-        }
-      },
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "dir": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "default": null
-            },
-            "mode": {
-              "type": "string",
-              "const": "persistent"
-            }
-          },
-          "required": [
-            "mode"
-          ]
         },
-        {
-          "type": "object",
-          "properties": {
-            "mode": {
+        "mode": {
+          "default": "persistent",
+          "oneOf": [
+            {
               "type": "string",
-              "const": "volatile"
+              "enum": [
+                "persistent",
+                "volatile"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "dir": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "dir"
+              ]
             }
-          },
-          "required": [
-            "mode"
           ]
         }
-      ]
+      }
     },
     "HistoryForgetConfig": {
       "description": "Configuration for automatic removal of failed commands from history.",

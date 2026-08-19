@@ -273,8 +273,8 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                             prompt_config: &state.prompt_config,
                             config_path: &state.config_path,
                             config_status: state.config_status,
-                            r_history_path: &state.r_history_path,
-                            shell_history_path: &state.shell_history_path,
+                            r_history: &state.r_history,
+                            shell_history: &state.shell_history,
                             r_source_status: &state.r_source_status,
                         };
                         match handle_meta_command_result(result, &ctx) {

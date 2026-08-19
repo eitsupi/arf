@@ -1,17 +1,14 @@
 //! REPL history setup and persistence helpers.
 
+#[cfg(test)]
 use crate::config::HistoryMode;
-use crate::history::{
-    HistoryExtraInfo, HistoryHandle, HistoryRuntime, HistorySaveOutcome, HistoryStore,
-    ReedlineHistoryAdapter, VolatileHistoryReason,
-};
-use reedline::{History, HistoryItem, HistoryItemId, HistorySessionId, Reedline};
+use crate::history::{HistoryExtraInfo, HistoryRuntime, HistorySaveOutcome, HistoryStore};
+#[cfg(test)]
+use reedline::Reedline;
+use reedline::{History, HistoryItem, HistoryItemId, HistorySessionId};
 
-/// Set up history for a line editor with a specific database path.
-///
-/// Every available runtime uses an arf-owned SQLite backend. Persistent open
-/// failures explicitly degrade to an in-memory backend; no reedline default
-/// backend is installed implicitly.
+/// Set up an editor using the shared history lifecycle factory.
+#[cfg(test)]
 pub(super) fn setup_history(
     line_editor: Reedline,
     history_path: Option<std::path::PathBuf>,
@@ -19,90 +16,10 @@ pub(super) fn setup_history(
 
     mode: &HistoryMode,
 ) -> (Reedline, HistoryRuntime) {
-    if matches!(mode, HistoryMode::Volatile) {
-        match HistoryStore::in_memory(session_id, Some(chrono::Utc::now())) {
-            Ok(store) => {
-                let receipt = crate::history::HistorySaveReceipt::new();
-                let adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
-                let handle = HistoryHandle { store, receipt };
-                return (
-                    line_editor
-                        .with_history_session_id(session_id)
-                        .with_history(Box::new(adapter)),
-                    HistoryRuntime::Volatile {
-                        handle,
-                        reason: VolatileHistoryReason::Configured,
-                    },
-                );
-            }
-            Err(error) => {
-                log::warn!("Failed to create volatile history database: {error}");
-                return (
-                    line_editor,
-                    HistoryRuntime::Unavailable {
-                        requested_path: None,
-                    },
-                );
-            }
-        }
-    }
-
-    let Some(path) = history_path else {
-        log::warn!("Persistent history requested but no history path is available");
-        return (
-            line_editor,
-            HistoryRuntime::Unavailable {
-                requested_path: None,
-            },
-        );
-    };
-
-    match HistoryStore::open(path.clone(), session_id, Some(chrono::Utc::now())) {
-        Ok(store) => {
-            let receipt = crate::history::HistorySaveReceipt::new();
-            let adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
-            let handle = HistoryHandle { store, receipt };
-            let editor = line_editor
-                .with_history_session_id(session_id)
-                .with_history(Box::new(adapter));
-            (editor, HistoryRuntime::Persistent(handle))
-        }
-        Err(error) => {
-            log::warn!(
-                "Failed to open history database {}: {}",
-                path.display(),
-                error
-            );
-            match HistoryStore::in_memory(session_id, Some(chrono::Utc::now())) {
-                Ok(store) => {
-                    let receipt = crate::history::HistorySaveReceipt::new();
-                    let adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
-                    let handle = HistoryHandle { store, receipt };
-                    let editor = line_editor
-                        .with_history_session_id(session_id)
-                        .with_history(Box::new(adapter));
-                    (
-                        editor,
-                        HistoryRuntime::Volatile {
-                            handle,
-                            reason: VolatileHistoryReason::Fallback {
-                                requested_path: path,
-                            },
-                        },
-                    )
-                }
-                Err(fallback_error) => {
-                    log::warn!("Failed to create volatile history fallback: {fallback_error}");
-                    (
-                        line_editor,
-                        HistoryRuntime::Unavailable {
-                            requested_path: Some(path),
-                        },
-                    )
-                }
-            }
-        }
-    }
+    let runtime =
+        HistoryRuntime::initialize(mode, history_path, session_id, Some(chrono::Utc::now()));
+    let line_editor = runtime.attach_to_editor(line_editor);
+    (line_editor, runtime)
 }
 
 /// Save code injected into an interactive session with known ordinary-command
@@ -184,7 +101,9 @@ mod tests {
     use super::*;
     use crate::config::{HistoryMode, RSourceStatus};
     use crate::editor::prompt::PromptFormatter;
-    use crate::history::HistorySaveReceipt;
+    use crate::history::{
+        HistoryHandle, HistorySaveReceipt, ReedlineHistoryAdapter, VolatileHistoryReason,
+    };
     use crate::repl::meta_command::process_meta_command;
     use crate::repl::state::{PendingHistoryContext, PromptRuntimeConfig};
     use reedline::{
@@ -232,7 +151,7 @@ mod tests {
                         requested_path: path,
                     },
             } => {
-                assert_eq!(path, requested_path);
+                assert_eq!(path.as_deref(), Some(requested_path.as_path()));
                 assert!(handle.store.session().is_some());
             }
             other => panic!(
@@ -240,6 +159,25 @@ mod tests {
                 runtime_name(&other)
             ),
         }
+    }
+
+    #[test]
+    fn setup_history_persistent_without_path_is_fallback_without_requested_path() {
+        let (_, runtime) = setup_history(
+            Reedline::create(),
+            None,
+            Reedline::create_history_session_id(),
+            &HistoryMode::Persistent { dir: None },
+        );
+        assert!(matches!(
+            runtime,
+            HistoryRuntime::Volatile {
+                reason: VolatileHistoryReason::Fallback {
+                    requested_path: None
+                },
+                ..
+            }
+        ));
     }
 
     fn runtime_name(runtime: &HistoryRuntime) -> &'static str {

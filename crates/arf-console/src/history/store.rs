@@ -8,7 +8,7 @@
 
 use super::metadata::HistoryExtraInfo;
 use reedline::{
-    History, HistoryItem, HistoryItemExtraInfo, HistoryItemId, HistorySessionId, Result,
+    History, HistoryItem, HistoryItemExtraInfo, HistoryItemId, HistorySessionId, Reedline, Result,
     SearchQuery, SqliteBackedHistory,
 };
 use std::path::PathBuf;
@@ -66,7 +66,6 @@ pub struct HistoryHandle {
 /// Runtime history lifecycle. Keeping this state explicit prevents a failed
 /// persistent open from being confused with an intentional volatile session.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub enum HistoryRuntime {
     Persistent(HistoryHandle),
     Volatile {
@@ -81,10 +80,63 @@ pub enum HistoryRuntime {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VolatileHistoryReason {
     Configured,
-    Fallback { requested_path: PathBuf },
+    Fallback { requested_path: Option<PathBuf> },
 }
 
 impl HistoryRuntime {
+    /// Construct the complete history lifecycle decision for one runtime.
+    ///
+    /// Persistent open failures (including an unavailable default path) are
+    /// deliberately represented as volatile fallbacks.  Only failure to
+    /// create that fallback reaches `Unavailable`.
+    pub fn initialize(
+        mode: &crate::config::HistoryMode,
+        requested_path: Option<PathBuf>,
+        session_id: Option<HistorySessionId>,
+        session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Self {
+        let make_handle = |store: HistoryStore| HistoryHandle {
+            store,
+            receipt: HistorySaveReceipt::new(),
+        };
+
+        if matches!(mode, crate::config::HistoryMode::Volatile) {
+            return match HistoryStore::in_memory(session_id, session_timestamp) {
+                Ok(store) => Self::Volatile {
+                    handle: make_handle(store),
+                    reason: VolatileHistoryReason::Configured,
+                },
+                Err(_) => Self::Unavailable { requested_path },
+            };
+        }
+
+        if let Some(path) = requested_path.clone()
+            && let Ok(store) = HistoryStore::open(path, session_id, session_timestamp)
+        {
+            return Self::Persistent(make_handle(store));
+        }
+
+        match HistoryStore::in_memory(session_id, session_timestamp) {
+            Ok(store) => Self::Volatile {
+                handle: make_handle(store),
+                reason: VolatileHistoryReason::Fallback { requested_path },
+            },
+            Err(_) => Self::Unavailable { requested_path },
+        }
+    }
+
+    /// Install this runtime's owned adapter on an editor, if available.
+    pub fn attach_to_editor(&self, line_editor: Reedline) -> Reedline {
+        let Some(handle) = self.handle() else {
+            return line_editor;
+        };
+        let adapter =
+            super::ReedlineHistoryAdapter::new(handle.store.clone(), handle.receipt.clone());
+        line_editor
+            .with_history_session_id(handle.store.session())
+            .with_history(Box::new(adapter))
+    }
+
     pub fn handle(&self) -> Option<&HistoryHandle> {
         match self {
             Self::Persistent(handle) | Self::Volatile { handle, .. } => Some(handle),
@@ -104,13 +156,54 @@ impl HistoryRuntime {
         self.handle().is_some()
     }
 
-    #[allow(dead_code)]
+    /// Stable state label for diagnostics and machine-readable startup info.
+    pub fn state_name(&self) -> &'static str {
+        match self {
+            Self::Persistent(_) => "persistent",
+            Self::Volatile { .. } => "volatile",
+            Self::Unavailable { .. } => "unavailable",
+        }
+    }
+
+    /// Stable machine-readable reason for a non-persistent runtime.
+    pub fn reason_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Persistent(_) => None,
+            Self::Volatile { reason, .. } => Some(match reason {
+                VolatileHistoryReason::Configured => "configured",
+                VolatileHistoryReason::Fallback { .. } => "fallback",
+            }),
+            Self::Unavailable { .. } => Some("initialization_failed"),
+        }
+    }
+
+    /// Human-readable startup warning for degraded runtimes.
+    ///
+    /// Persistent and intentionally configured volatile runtimes are healthy
+    /// states and therefore do not produce a warning.
+    pub fn startup_warning(&self) -> Option<String> {
+        match self {
+            Self::Persistent(_) => None,
+            Self::Volatile { reason, .. } => match reason {
+                VolatileHistoryReason::Configured => None,
+                VolatileHistoryReason::Fallback { requested_path } => Some(match requested_path {
+                    Some(path) => format!("fallback; requested path: {}", path.display()),
+                    None => "fallback; no persistent path".to_string(),
+                }),
+            },
+            Self::Unavailable { requested_path } => Some(match requested_path {
+                Some(path) => format!("history unavailable; requested path: {}", path.display()),
+                None => "history unavailable; no persistent path".to_string(),
+            }),
+        }
+    }
+
     pub fn requested_path(&self) -> Option<&std::path::Path> {
         match self {
             Self::Persistent(handle) => handle.store.path(),
             Self::Volatile { reason, .. } => match reason {
                 VolatileHistoryReason::Configured => None,
-                VolatileHistoryReason::Fallback { requested_path } => Some(requested_path),
+                VolatileHistoryReason::Fallback { requested_path } => requested_path.as_deref(),
             },
             Self::Unavailable { requested_path } => requested_path.as_deref(),
         }

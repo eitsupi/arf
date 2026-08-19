@@ -437,7 +437,19 @@ fn run() -> Result<()> {
     }
 
     let session_id = create_session_id(&config);
-    let session_id_raw = session_id.map(i64::from);
+
+    // Prepare both owned history runtimes before IPC advertises the session.
+    // The server then exposes a store that is already the same owner used by
+    // typed input and the interactive editor.
+    let mut repl = Repl::new(
+        config,
+        config_path,
+        config_status,
+        r_source_status,
+        r_home,
+        session_id,
+    )?;
+    repl.prepare_history();
 
     // Start IPC server if requested.
     //
@@ -450,9 +462,9 @@ fn run() -> Result<()> {
     if cli.with_ipc {
         match ipc::start_server(
             cli.ipc_bind.as_deref(),
-            r_home.as_ref().map(|path| path.display().to_string()),
+            repl.r_home_for_ipc(),
             None,
-            session_id_raw,
+            repl.history_session_id_raw(),
             ipc::session::SessionType::Interactive,
         ) {
             Ok(session) => {
@@ -472,15 +484,7 @@ fn run() -> Result<()> {
         }
     }
 
-    // Create and run the REPL
-    let mut repl = Repl::new(
-        config,
-        config_path,
-        config_status,
-        r_source_status,
-        r_home,
-        session_id,
-    )?;
+    // Run the REPL with runtimes prepared above.
     let repl_result = repl.run();
 
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).

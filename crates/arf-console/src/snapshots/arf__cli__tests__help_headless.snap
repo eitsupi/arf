@@ -85,7 +85,7 @@ Options:
           
           R history is stored at `{dir}/r.db`. The interactive console also stores shell history at `{dir}/shell.db`.
           
-          Config: history.mode = "persistent" and its `dir` field
+          Config: history.mode = { dir = "..." }
           
           [env: ARF_HISTORY_DIR=]
 

@@ -62,10 +62,6 @@ pub struct ReplState {
     pub config_path: Option<PathBuf>,
     /// Status of config file loading (for :info display).
     pub config_status: ConfigStatus,
-    /// Resolved R history database path for :info; `None` for volatile history.
-    pub r_history_path: Option<PathBuf>,
-    /// Resolved shell history database path for :info; `None` for volatile history.
-    pub shell_history_path: Option<PathBuf>,
     /// How R was resolved at startup (for :info display and :switch gating).
     pub r_source_status: RSourceStatus,
     /// R_HOME reported by the running R at startup, if R initialized successfully.
