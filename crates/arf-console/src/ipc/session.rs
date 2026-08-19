@@ -261,6 +261,18 @@ mod tests {
 
         assert_eq!(json["session_type"], "headless");
         assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+        insta::assert_snapshot!(serde_json::to_string_pretty(&json).unwrap(), @r###"
+{
+  "cwd": "/tmp",
+  "history_session_id": 42,
+  "log_file": null,
+  "pid": 12345,
+  "r_home": "/opt/R/4.4.1/lib/R",
+  "r_version": "4.4.1",
+  "session_type": "headless",
+  "socket_path": "/tmp/arf.sock",
+  "started_at": "2026-01-01T00:00:00+00:00"
+}"###);
 
         let restored: SessionInfo = serde_json::from_value(json).unwrap();
         assert_eq!(restored.session_type, Some(SessionType::Headless));
@@ -269,39 +281,31 @@ mod tests {
 
     #[test]
     fn legacy_session_without_session_type_deserializes_as_unknown() {
-        let json = r#"
-        {
+        let json = serde_json::json!({
             "pid": 12345,
             "socket_path": "/tmp/arf.sock",
             "r_version": "4.4.1",
             "cwd": "/tmp",
-            "started_at": "2026-01-01T00:00:00+00:00"
-        }
-        "#;
+            "started_at": "2026-01-01T00:00:00+00:00",
+        });
 
-        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        let info: SessionInfo = serde_json::from_value(json).unwrap();
         assert_eq!(info.session_type, None);
     }
 
     #[test]
     fn legacy_session_without_r_home_deserializes_as_unknown() {
-        let json = r#"
-        {
+        let json = serde_json::json!({
             "pid": 12345,
             "socket_path": "/tmp/arf.sock",
             "r_version": "4.4.1",
             "cwd": "/tmp",
-            "started_at": "2026-01-01T00:00:00+00:00"
-        }
-        "#;
+            "started_at": "2026-01-01T00:00:00+00:00",
+        });
 
-        let info: SessionInfo = serde_json::from_str(json).unwrap();
+        let info: SessionInfo = serde_json::from_value(json).unwrap();
         assert_eq!(info.r_home, None);
 
-        // Listing such a session reports `r_home` as null rather than omitting
-        // it, so a client sees one shape whether the path is unknown because
-        // the session predates the field or because the session has no R. Both
-        // mean the same thing to a caller: no R installation to rely on.
         let listed = serde_json::to_value(&info).unwrap();
         assert!(listed.as_object().unwrap().contains_key("r_home"));
         assert!(listed["r_home"].is_null());

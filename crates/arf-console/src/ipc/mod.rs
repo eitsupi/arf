@@ -609,6 +609,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
         started_at: meta.started_at.clone(),
         log_file: meta.log_file.clone(),
         history_session_id: meta.history_session_id,
+        ipc_policy: policy::policy(meta.session_type),
         r: None,
         r_unavailable_reason: None,
         hint: None,
@@ -624,6 +625,7 @@ struct SessionMeta {
     r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: session::SessionType,
 }
 
 static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
@@ -801,6 +803,7 @@ pub(in crate::ipc) fn set_session_meta(
     r_home: Option<String>,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    session_type: session::SessionType,
 ) {
     let meta = SessionMeta {
         socket_path,
@@ -808,6 +811,7 @@ pub(in crate::ipc) fn set_session_meta(
         r_home,
         log_file,
         history_session_id,
+        session_type,
     };
     match SESSION_META.get() {
         Some(m) => *m.lock().unwrap_or_else(|e| e.into_inner()) = meta,
@@ -831,6 +835,7 @@ fn current_session_meta() -> SessionMeta {
             r_home: None,
             log_file: None,
             history_session_id: None,
+            session_type: session::SessionType::Interactive,
         },
     }
 }

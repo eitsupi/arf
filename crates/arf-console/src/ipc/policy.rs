@@ -6,32 +6,92 @@
 use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
 
+use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
+
+use super::approval::send_policy_is_allow;
+use super::session::SessionType;
 
 fn is_inert_kind(kind: &str) -> bool {
     matches!(kind, "comment" | "comma")
 }
 
+/// Public description of the effective policy applied to IPC operations.
+///
+/// This is the live representation shared by IPC session results, headless
+/// readiness output, and `:info`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcPolicy {
+    pub silent: SilentPolicy,
+    /// Policy for both `send` and `eval --visible` operations.
+    pub visible: VisiblePolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum SilentPolicy {
+    Restricted { allowed_functions: Vec<String> },
+    Unrestricted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum VisiblePolicy {
+    ApprovalRequired,
+    ApprovalNotRequired,
+}
+
 #[derive(Debug, Clone, Default)]
-pub struct EvalPolicy {
+struct PolicyState {
     pub allowlist: HashSet<String>,
     pub unrestricted: bool,
 }
 
-static POLICY: OnceLock<RwLock<EvalPolicy>> = OnceLock::new();
+static POLICY: OnceLock<RwLock<PolicyState>> = OnceLock::new();
 
 pub fn set_policy(targets: impl IntoIterator<Item = String>, unrestricted: bool) {
-    let policy = EvalPolicy {
+    let policy = PolicyState {
         allowlist: targets.into_iter().collect(),
         unrestricted,
     };
-    let lock = POLICY.get_or_init(|| RwLock::new(EvalPolicy::default()));
+    let lock = POLICY.get_or_init(|| RwLock::new(PolicyState::default()));
     *lock.write().unwrap_or_else(|e| e.into_inner()) = policy;
 }
 
-pub fn policy() -> EvalPolicy {
+/// Return the effective policy description for a session type.
+pub fn policy(session_type: SessionType) -> IpcPolicy {
+    let state = POLICY
+        .get_or_init(|| RwLock::new(PolicyState::default()))
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    policy_description(&state, session_type, send_policy_is_allow())
+}
+
+fn policy_description(
+    state: &PolicyState,
+    session_type: SessionType,
+    send_policy_allow: bool,
+) -> IpcPolicy {
+    let mut allowed_functions: Vec<_> = state.allowlist.iter().cloned().collect();
+    allowed_functions.sort();
+
+    IpcPolicy {
+        silent: if state.unrestricted {
+            SilentPolicy::Unrestricted
+        } else {
+            SilentPolicy::Restricted { allowed_functions }
+        },
+        visible: match session_type {
+            SessionType::Interactive if send_policy_allow => VisiblePolicy::ApprovalNotRequired,
+            SessionType::Interactive => VisiblePolicy::ApprovalRequired,
+            SessionType::Headless => VisiblePolicy::ApprovalNotRequired,
+        },
+    }
+}
+
+fn policy_state() -> PolicyState {
     POLICY
-        .get_or_init(|| RwLock::new(EvalPolicy::default()))
+        .get_or_init(|| RwLock::new(PolicyState::default()))
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
@@ -39,11 +99,11 @@ pub fn policy() -> EvalPolicy {
 
 /// Validate an IPC evaluation before it reaches R.
 pub fn validate(code: &str) -> Result<(), String> {
-    let policy = policy();
+    let policy = policy_state();
     validate_with_policy(code, &policy)
 }
 
-fn validate_with_policy(code: &str, policy: &EvalPolicy) -> Result<(), String> {
+fn validate_with_policy(code: &str, policy: &PolicyState) -> Result<(), String> {
     let tree =
         crate::r_parser::parse_r(code).ok_or_else(|| "R code could not be parsed".to_string())?;
     let root = tree.root_node();
@@ -275,7 +335,7 @@ mod tests {
     use super::*;
 
     fn check(code: &str, targets: &[&str]) -> Result<(), String> {
-        let policy = EvalPolicy {
+        let policy = PolicyState {
             allowlist: targets.iter().map(|s| (*s).to_string()).collect(),
             unrestricted: false,
         };
@@ -370,11 +430,89 @@ mod tests {
 
     #[test]
     fn unrestricted_still_requires_parse_success() {
-        let policy = EvalPolicy {
+        let policy = PolicyState {
             allowlist: HashSet::new(),
             unrestricted: true,
         };
         assert!(validate_with_policy("x <- 1", &policy).is_ok());
         assert!(validate_with_policy("x <-", &policy).is_err());
+    }
+
+    #[test]
+    fn public_policy_describes_restricted_allowlist_in_sorted_order() {
+        let policy = policy_description(
+            &PolicyState {
+                allowlist: ["z", "a", "m"].into_iter().map(str::to_string).collect(),
+                unrestricted: false,
+            },
+            SessionType::Interactive,
+            false,
+        );
+
+        assert_eq!(
+            policy.silent,
+            SilentPolicy::Restricted {
+                allowed_functions: vec!["a".to_string(), "m".to_string(), "z".to_string()]
+            }
+        );
+        assert_eq!(policy.visible, VisiblePolicy::ApprovalRequired);
+    }
+
+    #[test]
+    fn public_policy_reflects_interactive_send_policy_state() {
+        let state = PolicyState::default();
+        let required = policy_description(&state, SessionType::Interactive, false);
+        let not_required = policy_description(&state, SessionType::Interactive, true);
+
+        assert_eq!(required.visible, VisiblePolicy::ApprovalRequired);
+        assert_eq!(not_required.visible, VisiblePolicy::ApprovalNotRequired);
+    }
+
+    #[test]
+    fn public_policy_keeps_empty_restricted_allowlist_distinct_from_unrestricted() {
+        let restricted =
+            policy_description(&PolicyState::default(), SessionType::Interactive, false);
+        let unrestricted = policy_description(
+            &PolicyState {
+                allowlist: HashSet::new(),
+                unrestricted: true,
+            },
+            SessionType::Headless,
+            false,
+        );
+
+        assert_eq!(
+            restricted.silent,
+            SilentPolicy::Restricted {
+                allowed_functions: Vec::new()
+            }
+        );
+        assert_eq!(unrestricted.silent, SilentPolicy::Unrestricted);
+        assert_eq!(unrestricted.visible, VisiblePolicy::ApprovalNotRequired);
+
+        let json = serde_json::to_string_pretty(&restricted).unwrap();
+        insta::assert_snapshot!(json, @r###"
+{
+  "silent": {
+    "mode": "restricted",
+    "allowed_functions": []
+  },
+  "visible": {
+    "mode": "approval_required"
+  }
+}"###);
+
+        insta::assert_snapshot!(
+            serde_json::to_string_pretty(&unrestricted).unwrap(),
+            @r###"
+{
+  "silent": {
+    "mode": "unrestricted"
+  },
+  "visible": {
+    "mode": "approval_not_required"
+  }
+}"###
+        );
     }
 }
