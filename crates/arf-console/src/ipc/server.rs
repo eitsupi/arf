@@ -236,7 +236,7 @@ pub fn start_server(
         r_home,
         cwd,
         started_at: started_at.to_string(),
-        session_type: Some(session_type),
+        session_type,
         log_file,
         history_session_id,
     };

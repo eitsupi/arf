@@ -70,7 +70,7 @@
   For now, it seems neither of these formats is widely adopted, so arf introduces a generic `toml-key` type that allows us to specify the filename and key path and supports Cargo-style version ranges.
   Of course, we can also support other TOML files with different names and keys for specifying the R version.
 
-- **Experimental:** `arf ipc list` now reports a `session_type` field (`"headless"` or `"interactive"`) for each session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Sessions started by an older arf report `null`, which clients should treat as unknown (#283).
+- **Experimental:** `arf ipc list` now reports a required `session_type` field (`"headless"` or `"interactive"`) for each current session, so external clients can tell an agent-started headless session from an interactive REPL a person is using before sending it a `shutdown`. Session files from older arf versions that lack this field are not accepted by the current schema (#283).
 - **Experimental:** `arf ipc session`, `arf ipc list`, and `arf headless --json` now report `r_home`, the R installation the session is using, so an editor can use the same R instead of discovering one for itself. Sessions started by an older arf omit it, which clients should treat as unknown (#294).
 - **Experimental:** `arf r resolve` lets external tools such as editors learn which R arf would use without starting R. It always emits JSON on success (#290, #291, #293).
 
