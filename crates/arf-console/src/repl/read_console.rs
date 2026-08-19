@@ -350,19 +350,25 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         Ok(code) => code,
                         Err(error) => {
                             arf_println!("{}", error);
-                            let history_id = match save_outcome {
-                                Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
-                                _ => None,
-                            };
-                            record_command_outcome(
-                                history_handle.store(),
-                                history_id,
-                                true,
-                                &state.forget_config,
-                                &mut state.sponge_queue,
-                            );
-                            state.prompt_config.set_last_command_failed(true);
-                            state.prompt_config.clear_command_duration();
+                            // A continuation input still belongs to the outer
+                            // command. It must not finalize that command's
+                            // history or sponge state merely because formatting
+                            // this piece failed.
+                            if formatter_failure_updates_lifecycle(r_prompt) {
+                                let history_id = match save_outcome {
+                                    Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
+                                    _ => None,
+                                };
+                                record_command_outcome(
+                                    history_handle.store(),
+                                    history_id,
+                                    true,
+                                    &state.forget_config,
+                                    &mut state.sponge_queue,
+                                );
+                                state.prompt_config.set_last_command_failed(true);
+                                state.prompt_config.clear_command_duration();
+                            }
                             continue;
                         }
                     };
@@ -584,5 +590,21 @@ fn is_r_command_prompt(prompt: &str) -> bool {
             // R's default prompt ends with "> ", menu prompts end with ": "
             prompt.ends_with("> ")
         }
+    }
+}
+
+/// Formatter failures only finalize lifecycle state for top-level commands.
+/// Continuation prompts belong to the outer command and retain its context.
+fn formatter_failure_updates_lifecycle(prompt: &str) -> bool {
+    is_r_command_prompt(prompt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::formatter_failure_updates_lifecycle;
+
+    #[test]
+    fn continuation_formatter_failure_keeps_outer_lifecycle_context() {
+        assert!(!formatter_failure_updates_lifecycle("+ "));
     }
 }
