@@ -168,7 +168,7 @@ mod ipc_tests {
     fn ipc_approval_prompt(code: &str) -> String {
         let sgr = r"\x1b\[[0-9;]*m";
         format!(
-            r"{sgr}# \[arf\] IPC send request:{sgr}\r\r\n  {sgr}{}{sgr}\r\r\n(?:{sgr})+# \[arf\] Press y to approve, any other key declines: {sgr}",
+            r"{sgr}# \[arf\] IPC send request:{sgr}\r\r\n  {sgr}{}{sgr}\r\r\n(?:{sgr})+# \[arf\] (?:{sgr})+(?:{sgr})+Press y to approve, any other key declines: {sgr}",
             escape(code)
         )
     }
@@ -632,7 +632,9 @@ mod ipc_tests {
             .expect(&format!("\x1b[38;5;11m{code}\x1b[39m"))
             .expect("approval code should be yellow and fully visible");
         terminal
-            .expect("\x1b[38;5;11m\x1b[1m# [arf] Press y to approve, any other key declines:")
+            .expect(
+                "\x1b[38;5;6m# [arf] \x1b[39m\x1b[38;5;11m\x1b[1mPress y to approve, any other key declines:",
+            )
             .expect("approval confirmation should be bold");
         terminal.send_line("y").expect("approve IPC send");
         request

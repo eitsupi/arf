@@ -127,10 +127,11 @@ fn approval_prompt(code: &str) -> String {
 
     let escaped = user_input_display(code);
     format!(
-        "{}\r\n  {}\r\n{}",
+        "{}\r\n  {}\r\n{}{}",
         "# [arf] IPC send request:".dark_cyan(),
         escaped.yellow(),
-        "# [arf] Press y to approve, any other key declines: "
+        "# [arf] ".dark_cyan(),
+        "Press y to approve, any other key declines: "
             .yellow()
             .bold(),
     )
