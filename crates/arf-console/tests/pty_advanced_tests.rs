@@ -80,6 +80,188 @@ fn test_pty_reprex_paste_strips_output_lines() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Formatter failures must be treated as failed commands even though R never
+/// evaluates the input.  This covers prompt status/duration, history metadata,
+/// and the sponge queue on the same path.
+#[test]
+#[cfg(unix)]
+fn test_pty_formatter_failure_updates_lifecycle_without_evaluation() {
+    use reedline::{History, SearchDirection, SearchQuery, SqliteBackedHistory};
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = tempfile::tempdir().expect("create temporary test directory");
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).expect("create fake formatter directory");
+    let arity = bin_dir.join("arity");
+    std::fs::write(
+        &arity,
+        r##"#!/bin/sh
+case "$1" in
+  --version) echo 'arity 0.19.1'; exit 0 ;;
+  format)
+    input=$(cat)
+    if [ "$input" = 42 ]; then
+      echo 'synthetic formatter failure' >&2
+      exit 17
+    fi
+    printf '%s' "$input"
+    exit 0
+    ;;
+  *) exit 18 ;;
+esac
+"##,
+    )
+    .expect("write fake formatter");
+    let mut permissions = std::fs::metadata(&arity)
+        .expect("stat fake formatter")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&arity, permissions).expect("make fake formatter executable");
+
+    let config_path = temp_dir.path().join("arf.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[startup]
+reprex = "format"
+
+[reprex]
+formatter = "arity"
+
+[prompt]
+format = "{status}{duration}R> "
+
+[prompt.status.symbol]
+error = "ERR "
+
+[experimental.prompt_duration]
+threshold_ms = 0
+
+[experimental.prompt_spinner]
+frames = ""
+
+[experimental.history_forget]
+enabled = true
+delay = 1
+on_exit_only = false
+"#,
+    )
+    .expect("write test config");
+
+    let history_dir = temp_dir.path().join("history");
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").expect("PATH should be set")
+    );
+    let config_path = config_path.to_string_lossy().into_owned();
+    let history_dir = history_dir.to_string_lossy().into_owned();
+    let mut terminal = Terminal::spawn_with_args_and_env(
+        &["--config", &config_path, "--history-dir", &history_dir],
+        &[("PATH", &path)],
+    )
+    .expect("spawn arf with fake formatter");
+
+    terminal.wait_for_prompt().expect("show initial prompt");
+
+    // Establish a visible previous duration, then trigger a formatter error.
+    terminal
+        .clear_buffer()
+        .expect("clear initial prompt output");
+    terminal.send_line("1").expect("send successful command");
+    terminal
+        .expect("[1] 1")
+        .expect("successful command should run");
+    terminal
+        .expect("R> ")
+        .expect("successful command should reach the next prompt");
+    let screen = terminal
+        .screen()
+        .expect("read screen after successful command");
+    let current_line = screen
+        .lines
+        .get(screen.cursor_row as usize)
+        .expect("cursor row should exist");
+    assert!(
+        current_line.contains("ms"),
+        "successful command should leave a visible duration: {current_line:?}"
+    );
+
+    terminal
+        .clear_buffer()
+        .expect("clear successful command output");
+    terminal
+        .send_line("42")
+        .expect("send command that formatter rejects");
+    terminal
+        .expect("Arity formatting failed: synthetic formatter failure")
+        .expect("formatter error should be shown");
+    terminal
+        .expect("R> ")
+        .expect("formatter failure should reach the failed prompt");
+
+    let screen = terminal
+        .screen()
+        .expect("read screen after formatter failure");
+    let current_line = screen
+        .lines
+        .get(screen.cursor_row as usize)
+        .expect("cursor row should exist");
+    assert!(
+        current_line.contains("ERR "),
+        "formatter failure should mark the next prompt failed: {current_line:?}"
+    );
+    assert!(
+        !current_line.contains("ms"),
+        "formatter failure should clear the previous duration: {current_line:?}"
+    );
+    assert!(
+        !terminal
+            .get_output()
+            .expect("read terminal output")
+            .contains("[1] 42"),
+        "formatter-rejected code must not be evaluated"
+    );
+
+    let history_path = temp_dir.path().join("history").join("r.db");
+    {
+        let history = SqliteBackedHistory::with_file(history_path.clone(), None, None)
+            .expect("open history while session is running");
+        let entries = history
+            .search(SearchQuery::everything(SearchDirection::Forward, None))
+            .expect("search history after formatter failure");
+        let failed_entry = entries
+            .iter()
+            .find(|entry| entry.command_line == "42")
+            .expect("formatter-rejected command should be in history");
+        assert_eq!(failed_entry.exit_status, Some(1));
+    }
+
+    // A following successful command advances the sponge queue and removes
+    // the failed formatter command after the configured delay.
+    terminal
+        .clear_buffer()
+        .expect("clear failed command output");
+    terminal.send_line("1").expect("send follow-up command");
+    terminal
+        .expect("[1] 1")
+        .expect("follow-up command should run");
+    terminal
+        .expect("R> ")
+        .expect("follow-up command should reach the next prompt");
+    let history = SqliteBackedHistory::with_file(history_path, None, None)
+        .expect("reopen history after sponge update");
+    let entries = history
+        .search(SearchQuery::everything(SearchDirection::Forward, None))
+        .expect("search history after sponge update");
+    assert!(
+        !entries.iter().any(|entry| entry.command_line == "42"),
+        "failed formatter command should be removed by history forget"
+    );
+
+    terminal.quit().expect("quit cleanly");
+}
+
 /// Test Ctrl+D behavior: does not exit when buffer has content.
 ///
 /// This is the expected behavior matching radian and standard readline behavior:

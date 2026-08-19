@@ -1,15 +1,17 @@
 //! ReadConsole callback and prompt handling.
 
+use crate::config::HistoryForgetConfig;
+use crate::history::HistoryStore;
 use crossterm::{
     ExecutableCommand,
     style::Stylize,
     terminal::{self, ClearType},
 };
-use reedline::Signal;
+use reedline::{HistoryItemId, Signal};
 use std::io::{self, Write};
 
 use super::history::{finalize_history, save_ipc_history};
-use super::state::PendingHistoryContext;
+use super::state::{PendingHistoryContext, SpongeQueue};
 use super::{
     MetaAction, REPL_STATE, RPrompt, SessionInfoContext, arf_println, clear_input_lines,
     execute_shell_command, handle_meta_command_result, meta_command, process_meta_command,
@@ -19,6 +21,40 @@ use super::{
 struct ApprovedInteractiveIpcOperation {
     reply: tokio::sync::oneshot::Sender<crate::ipc::protocol::IpcResponse>,
     wrote_newline: bool,
+}
+
+/// Record the outcome for a command that has already been saved by reedline.
+///
+/// R normally reports this outcome when the next top-level prompt is requested.
+/// Formatter failures never reach R, so they use the same persistence and
+/// sponge bookkeeping immediately before returning to the input loop.
+fn record_command_outcome(
+    store: Option<HistoryStore>,
+    history_id: Option<HistoryItemId>,
+    failed: bool,
+    forget_config: &HistoryForgetConfig,
+    sponge_queue: &mut SpongeQueue,
+) {
+    if let (Some(store), Some(history_id)) = (&store, history_id) {
+        let exit_status = if failed { 1i64 } else { 0i64 };
+        if let Err(error) = store.set_exit_status(history_id, exit_status) {
+            log::warn!("Failed to update history exit status: {error}");
+        }
+    }
+
+    if forget_config.enabled {
+        let effective_delay = if forget_config.on_exit_only {
+            usize::MAX
+        } else {
+            forget_config.delay
+        };
+        if let Some(id_to_delete) = sponge_queue.record_command(failed, history_id, effective_delay)
+            && let Some(store) = &store
+            && let Err(error) = store.delete(id_to_delete)
+        {
+            log::warn!("Failed to remove forgotten history entry {id_to_delete}: {error}");
+        }
+    }
 }
 
 /// Ask for approval for an operation that executes in the user's interactive
@@ -84,28 +120,13 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
             let had_error = match pending_history_context {
                 PendingHistoryContext::Command { store, history_id } => {
                     let had_error = arf_libr::command_had_error();
-                    if let (Some(store), Some(history_id)) = (&store, history_id) {
-                        let exit_status = if had_error { 1i64 } else { 0i64 };
-                        if let Err(error) = store.set_exit_status(history_id, exit_status) {
-                            log::warn!("Failed to update history exit status: {error}");
-                        }
-                    }
-
-                    if state.forget_config.enabled {
-                        let effective_delay = if state.forget_config.on_exit_only {
-                            usize::MAX
-                        } else {
-                            state.forget_config.delay
-                        };
-                        if let Some(id_to_delete) = state.sponge_queue.record_command(
-                            had_error,
-                            history_id,
-                            effective_delay,
-                        ) && let Some(store) = &store
-                        {
-                            let _ = store.delete(id_to_delete);
-                        }
-                    }
+                    record_command_outcome(
+                        store,
+                        history_id,
+                        had_error,
+                        &state.forget_config,
+                        &mut state.sponge_queue,
+                    );
                     had_error
                 }
                 PendingHistoryContext::None => false,
@@ -329,6 +350,19 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                         Ok(code) => code,
                         Err(error) => {
                             arf_println!("{}", error);
+                            let history_id = match save_outcome {
+                                Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
+                                _ => None,
+                            };
+                            record_command_outcome(
+                                history_handle.store(),
+                                history_id,
+                                true,
+                                &state.forget_config,
+                                &mut state.sponge_queue,
+                            );
+                            state.prompt_config.set_last_command_failed(true);
+                            state.prompt_config.clear_command_duration();
                             continue;
                         }
                     };
