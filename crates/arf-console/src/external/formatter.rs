@@ -432,7 +432,15 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let command = directory.path().join("fake-air");
-        std::fs::write(&command, "#!/bin/sh\necho formatter failed >&2\nexit 17\n").unwrap();
+        std::fs::write(
+            &command,
+            r###"#!/bin/sh
+cat >/dev/null
+echo formatter failed >&2
+exit 17
+"###,
+        )
+        .unwrap();
         let mut permissions = std::fs::metadata(&command).unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&command, permissions).unwrap();
