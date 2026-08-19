@@ -102,7 +102,8 @@ mod tests {
     use crate::config::{HistoryMode, RSourceStatus};
     use crate::editor::prompt::PromptFormatter;
     use crate::history::{
-        HistoryHandle, HistorySaveReceipt, ReedlineHistoryAdapter, VolatileHistoryReason,
+        HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, ReedlineHistoryAdapter,
+        VolatileHistoryReason,
     };
     use crate::repl::meta_command::process_meta_command;
     use crate::repl::state::{PendingHistoryContext, PromptRuntimeConfig};
@@ -142,16 +143,18 @@ mod tests {
                 dir: Some(requested_path.clone()),
             },
         );
+        assert!(
+            runtime
+                .startup_warning()
+                .is_some_and(|warning| warning.contains("persistent history open failed"))
+        );
 
+        assert_eq!(runtime.requested_path(), Some(requested_path.as_path()));
         match runtime {
             HistoryRuntime::Volatile {
                 handle,
-                reason:
-                    VolatileHistoryReason::Fallback {
-                        requested_path: path,
-                    },
+                reason: VolatileHistoryReason::Fallback { .. },
             } => {
-                assert_eq!(path.as_deref(), Some(requested_path.as_path()));
                 assert!(handle.store.session().is_some());
             }
             other => panic!(
@@ -169,12 +172,15 @@ mod tests {
             Reedline::create_history_session_id(),
             &HistoryMode::Persistent { dir: None },
         );
+        assert!(
+            runtime
+                .startup_warning()
+                .is_some_and(|warning| warning.contains("path resolution failed"))
+        );
         assert!(matches!(
             runtime,
             HistoryRuntime::Volatile {
-                reason: VolatileHistoryReason::Fallback {
-                    requested_path: None
-                },
+                reason: VolatileHistoryReason::Fallback { .. },
                 ..
             }
         ));
@@ -354,10 +360,12 @@ mod tests {
                 input,
                 &mut prompt,
                 &HistoryRuntime::Unavailable {
-                    requested_path: None,
+                    failure: HistoryFailureDetail::test_memory(),
+                    previous_failure: None,
                 },
                 &HistoryRuntime::Unavailable {
-                    requested_path: None,
+                    failure: HistoryFailureDetail::test_memory(),
+                    previous_failure: None,
                 },
                 &RSourceStatus::Path,
                 &mut dir_stack,

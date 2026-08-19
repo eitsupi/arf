@@ -13,6 +13,6 @@ pub use metadata::HistoryExtraInfo;
 pub use reedline_adapter::ReedlineHistoryAdapter;
 #[allow(unused_imports)]
 pub use store::{
-    HistoryHandle, HistoryRuntime, HistorySaveOutcome, HistorySaveReceipt, HistoryStore,
-    VolatileHistoryReason,
+    HistoryFailureDetail, HistoryHandle, HistoryRuntime, HistorySaveOutcome, HistorySaveReceipt,
+    HistoryStore, VolatileHistoryReason,
 };

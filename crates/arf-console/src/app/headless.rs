@@ -43,6 +43,7 @@ struct HeadlessHistoryRuntime {
     state: String,
     path: Option<String>,
     reason: Option<String>,
+    detail: Option<String>,
 }
 
 impl HeadlessHistoryRuntime {
@@ -53,6 +54,7 @@ impl HeadlessHistoryRuntime {
                 .requested_path()
                 .map(|path| path.display().to_string()),
             reason: runtime.reason_name().map(str::to_string),
+            detail: runtime.diagnostic_detail(),
         }
     }
 }
@@ -528,7 +530,8 @@ mod tests {
     #[test]
     fn headless_history_runtime_uses_stable_reason_and_separate_path() {
         use crate::history::{
-            HistoryHandle, HistorySaveReceipt, HistoryStore, VolatileHistoryReason,
+            HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, HistoryStore,
+            VolatileHistoryReason,
         };
 
         let store = HistoryStore::in_memory(None, None).unwrap();
@@ -543,17 +546,22 @@ mod tests {
         let fallback = HistoryRuntime::Volatile {
             handle: handle(),
             reason: VolatileHistoryReason::Fallback {
-                requested_path: Some("/tmp/history.db".into()),
+                persistent_failure: HistoryFailureDetail::test_persistent_open(
+                    "/tmp/history.db".into(),
+                ),
             },
         };
         let fallback_without_path = HistoryRuntime::Volatile {
             handle: handle(),
             reason: VolatileHistoryReason::Fallback {
-                requested_path: None,
+                persistent_failure: HistoryFailureDetail::test_path_resolution(),
             },
         };
         let unavailable = HistoryRuntime::Unavailable {
-            requested_path: Some("/tmp/history.db".into()),
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: Some(HistoryFailureDetail::test_persistent_open(
+                "/tmp/history.db".into(),
+            )),
         };
         let persistent_dir = tempfile::tempdir().unwrap();
         let persistent_path = persistent_dir.path().join("history.db");
@@ -579,11 +587,13 @@ mod tests {
         assert_eq!(configured_json["state"], "volatile");
         assert_eq!(configured_json["reason"], "configured");
         assert!(configured_json["path"].is_null());
+        assert!(configured_json["detail"].is_null());
 
         let fallback_json =
             serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback)).unwrap();
         assert_eq!(fallback_json["reason"], "fallback");
         assert_eq!(fallback_json["path"], "/tmp/history.db");
+        assert!(!fallback_json["detail"].as_str().unwrap().is_empty());
         let no_path_json =
             serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback_without_path))
                 .unwrap();
@@ -595,6 +605,12 @@ mod tests {
         assert_eq!(unavailable_json["state"], "unavailable");
         assert_eq!(unavailable_json["reason"], "initialization_failed");
         assert_eq!(unavailable_json["path"], "/tmp/history.db");
+        assert!(
+            unavailable_json["detail"]
+                .as_str()
+                .unwrap()
+                .contains("memory initialization failure")
+        );
     }
 
     #[test]

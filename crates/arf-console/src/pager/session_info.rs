@@ -223,7 +223,7 @@ fn generate_info_lines(
 }
 
 fn history_runtime_label(runtime: &HistoryRuntime) -> String {
-    match runtime {
+    let label = match runtime {
         HistoryRuntime::Persistent(_) => runtime
             .requested_path()
             .map(|path| format!("persistent ({})", mask_home_path(path)))
@@ -232,8 +232,8 @@ fn history_runtime_label(runtime: &HistoryRuntime) -> String {
             crate::history::VolatileHistoryReason::Configured => {
                 "volatile (session only)".to_string()
             }
-            crate::history::VolatileHistoryReason::Fallback { requested_path } => {
-                match requested_path {
+            crate::history::VolatileHistoryReason::Fallback { .. } => {
+                match runtime.requested_path() {
                     Some(path) => format!(
                         "volatile (fallback; requested path: {})",
                         mask_home_path(path)
@@ -242,10 +242,14 @@ fn history_runtime_label(runtime: &HistoryRuntime) -> String {
                 }
             }
         },
-        HistoryRuntime::Unavailable { requested_path } => match requested_path {
+        HistoryRuntime::Unavailable { .. } => match runtime.requested_path() {
             Some(path) => format!("unavailable (requested path: {})", mask_home_path(path)),
             None => "unavailable".to_string(),
         },
+    };
+    match runtime.diagnostic_detail() {
+        Some(detail) if !label.contains(&detail) => format!("{label}; {detail}"),
+        _ => label,
     }
 }
 
@@ -351,6 +355,7 @@ fn style_info_line(line: &str) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::HistoryFailureDetail;
 
     #[test]
     fn test_mask_env_value_with_home() {
@@ -492,7 +497,8 @@ mod tests {
 
     fn unavailable_history() -> HistoryRuntime {
         HistoryRuntime::Unavailable {
-            requested_path: None,
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: None,
         }
     }
 
@@ -638,7 +644,8 @@ mod tests {
     #[test]
     fn history_runtime_labels_cover_all_lifecycle_states() {
         use crate::history::{
-            HistoryHandle, HistorySaveReceipt, HistoryStore, VolatileHistoryReason,
+            HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, HistoryStore,
+            VolatileHistoryReason,
         };
 
         let store = HistoryStore::in_memory(None, None).unwrap();
@@ -653,17 +660,20 @@ mod tests {
         let fallback_with_path = HistoryRuntime::Volatile {
             handle: handle(),
             reason: VolatileHistoryReason::Fallback {
-                requested_path: Some("/tmp/history.db".into()),
+                persistent_failure: HistoryFailureDetail::test_persistent_open(
+                    "/tmp/history.db".into(),
+                ),
             },
         };
         let fallback_without_path = HistoryRuntime::Volatile {
             handle: handle(),
             reason: VolatileHistoryReason::Fallback {
-                requested_path: None,
+                persistent_failure: HistoryFailureDetail::test_path_resolution(),
             },
         };
         let unavailable = HistoryRuntime::Unavailable {
-            requested_path: None,
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: None,
         };
         let persistent_dir = tempfile::tempdir().unwrap();
         let persistent_path = persistent_dir.path().join("history.db");
@@ -678,6 +688,6 @@ mod tests {
         assert!(
             history_runtime_label(&fallback_without_path).contains("fallback; no persistent path")
         );
-        assert_eq!(history_runtime_label(&unavailable), "unavailable");
+        assert!(history_runtime_label(&unavailable).starts_with("unavailable"));
     }
 }

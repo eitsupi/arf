@@ -453,12 +453,9 @@ fn run() -> Result<()> {
 
     // Start IPC server if requested.
     //
-    // NOTE: The IPC server is started before history databases are opened (which
-    // happens inside `Repl::run_*`). This means there is a brief window where the
-    // on-disk session file advertises a non-null `history_session_id` even though
-    // history has not been confirmed yet. A session ID remains advertised for
-    // persistent and volatile stores, and is cleared only if initialization
-    // ultimately becomes unavailable.
+    // History runtimes and the R-owned IPC store were prepared above, so the
+    // server advertises a session ID only after the R runtime is confirmed
+    // available. The REPL later attaches those same owners to its editors.
     if cli.with_ipc {
         match ipc::start_server(
             cli.ipc_bind.as_deref(),

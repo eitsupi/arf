@@ -523,6 +523,7 @@ pub(crate) fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::editor::prompt::PromptFormatter;
+    use crate::history::HistoryFailureDetail;
 
     fn create_test_prompt_config() -> PromptRuntimeConfig {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
@@ -546,10 +547,12 @@ mod tests {
             input,
             config,
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             status,
             &mut dir_stack,
@@ -895,10 +898,12 @@ mod tests {
             &format!(":cd {}", tmp.path().display()),
             &mut config,
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &status,
             &mut dir_stack,
@@ -921,10 +926,12 @@ mod tests {
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &status,
             &mut dir_stack,
@@ -938,10 +945,12 @@ mod tests {
             ":popd",
             &mut config,
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &HistoryRuntime::Unavailable {
-                requested_path: None,
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
             },
             &status,
             &mut dir_stack,
