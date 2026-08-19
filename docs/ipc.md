@@ -274,13 +274,23 @@ Sends code as if the user typed it at the prompt. Output goes to the session's o
 shown for human approval; in headless mode it runs immediately because there is
 no human to ask. It is not governed by the silent-eval allowlist.
 
-In an interactive REPL, `send` displays a bounded, escaped preview in this
-format and requires an explicit `y` or `Y` key for each request by default:
+In an interactive REPL, `send` displays the complete escaped code that will be
+executed after approval. Control and other non-printing characters are escaped
+so they cannot alter or spoof the terminal display. The approval block is
+shown as three separate lines and requires an explicit `y` or `Y` key for each
+request by default:
 
 ```text
-# [arf] IPC send request: [<preview>]
+# [arf] IPC send request:
+  <escaped code>
 # [arf] Press y to approve, any other key declines:
 ```
+
+The heading and `# [arf]` prefix are dark cyan, the escaped code is yellow,
+and the confirmation text is bold yellow. The three-line structure carries the
+meaning independently of color. Long code is not shortened; it remains
+available in the terminal scrollback, so the displayed escaped code corresponds
+to the complete code being approved.
 
 Any other key, including Enter, `n`, Ctrl+C, Ctrl+D, or Esc, rejects the
 request. Non-key terminal events are ignored while waiting. A read error or a

@@ -556,7 +556,7 @@ fn test_ipc_evaluate_visible() {
         )
     });
     process
-        .wait_for_output("# [arf] Press y to approve, any other key declines: ")
+        .wait_for_output("Press y to approve, any other key declines: ")
         .expect("approval prompt should appear on the PTY");
     {
         let mut writer = process
@@ -603,7 +603,7 @@ fn test_ipc_user_input() {
         )
     });
     process
-        .wait_for_output("# [arf] Press y to approve, any other key declines: ")
+        .wait_for_output("Press y to approve, any other key declines: ")
         .expect("approval prompt should appear on the PTY");
     {
         let mut writer = process
