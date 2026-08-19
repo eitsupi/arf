@@ -38,8 +38,12 @@ pub(super) fn run_pager_help_browser(query: &str) {
 }
 
 /// Run the history browser pager, wrapping with IPC alternate mode.
-pub(super) fn run_pager_history_browser(path: &std::path::Path, mode: crate::pager::HistoryDbMode) {
-    let browser_result = with_ipc_alternate_guard(|| crate::pager::run_history_browser(path, mode));
+pub(super) fn run_pager_history_browser(
+    store: &crate::history::HistoryStore,
+    mode: crate::pager::HistoryDbMode,
+) {
+    let browser_result =
+        with_ipc_alternate_guard(|| crate::pager::run_history_browser(store, mode));
 
     match browser_result {
         Ok(crate::pager::HistoryBrowserResult::Copied(cmd)) => {

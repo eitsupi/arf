@@ -15,12 +15,13 @@ use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
     AutoSuggestions, Config, ConfigStatus, EditorMode, ModeIndicatorPosition, RSourceStatus,
-    history_dir,
+    history_dir_for_mode,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
 use crate::editor::prompt::PromptFormatter;
 use crate::highlighter::{CombinedHighlighter, MetaCommandHighlighter};
+use crate::history::HistoryRuntime;
 use anyhow::Result;
 use crossterm::{
     ExecutableCommand,
@@ -44,7 +45,10 @@ use crate::editor::keybindings::{
 };
 use crate::editor::validator::RValidator;
 use banner::{format_banner, format_override_line};
-use history::{finalize_history, setup_history};
+use history::finalize_history;
+#[cfg(test)]
+#[allow(unused_imports)]
+use history::setup_history;
 use meta_command::{MetaCommandResult, process_meta_command};
 use pager_ui::{run_pager_help_browser, run_pager_history_browser, with_ipc_alternate_guard};
 use prompt::RPrompt;
@@ -230,6 +234,9 @@ pub struct Repl {
     prompt_formatter: PromptFormatter,
     /// Session ID for history isolation (shared across R and shell history).
     session_id: Option<HistorySessionId>,
+    /// History runtimes prepared before the IPC server advertises this session.
+    prepared_r_history: Option<HistoryRuntime>,
+    prepared_shell_history: Option<HistoryRuntime>,
 }
 
 impl Repl {
@@ -268,29 +275,88 @@ impl Repl {
             r_initialized,
             prompt_formatter,
             session_id,
+            prepared_r_history: None,
+            prepared_shell_history: None,
         })
     }
 
+    /// Initialize both owned runtimes before IPC becomes reachable.
+    pub(crate) fn prepare_history(&mut self) {
+        if self.prepared_r_history.is_some() {
+            return;
+        }
+        let (r_runtime, shell_runtime) = self.initialize_history_runtimes();
+        Self::report_history_runtime("R", &r_runtime);
+        Self::report_history_runtime("Shell", &shell_runtime);
+        if let Some(store) = r_runtime.store() {
+            crate::ipc::set_history_store(store);
+        }
+        if !r_runtime.is_available() {
+            crate::ipc::clear_history_session_id();
+        }
+        self.prepared_r_history = Some(r_runtime);
+        self.prepared_shell_history = Some(shell_runtime);
+    }
+
+    /// Build the independent R and shell owners without registering either
+    /// one globally. This keeps construction testable and makes global IPC
+    /// registration an explicit responsibility of `prepare_history`.
+    fn initialize_history_runtimes(&self) -> (HistoryRuntime, HistoryRuntime) {
+        let r_runtime = HistoryRuntime::initialize(
+            &self.config.history.mode,
+            self.r_history_path(),
+            self.session_id,
+            Some(chrono::Utc::now()),
+        );
+        let shell_runtime = HistoryRuntime::initialize(
+            &self.config.history.mode,
+            self.shell_history_path(),
+            self.session_id,
+            Some(chrono::Utc::now()),
+        );
+        (r_runtime, shell_runtime)
+    }
+
+    fn report_history_runtime(label: &str, runtime: &HistoryRuntime) {
+        if let Some(diagnostic) = runtime.startup_warning() {
+            eprintln!("Warning: {label} history: {diagnostic}");
+            log::warn!("{label} history: {diagnostic}");
+        }
+    }
+
+    fn prepared_r_history(&self) -> HistoryRuntime {
+        self.prepared_r_history
+            .clone()
+            .expect("history runtimes must be prepared before the REPL starts")
+    }
+
+    fn prepared_shell_history(&self) -> HistoryRuntime {
+        self.prepared_shell_history
+            .clone()
+            .expect("history runtimes must be prepared before the REPL starts")
+    }
+
     /// Get the history session ID as an i64 (for IPC).
-    fn history_session_id_raw(&self) -> Option<i64> {
-        self.session_id.map(i64::from)
+    pub(crate) fn history_session_id_raw(&self) -> Option<i64> {
+        self.prepared_r_history()
+            .store()
+            .and_then(|store| store.session())
+            .map(i64::from)
+    }
+
+    pub(crate) fn r_home_for_ipc(&self) -> Option<String> {
+        self.r_home.as_ref().map(|path| path.display().to_string())
     }
 
     /// Get the R history database path based on configuration.
     fn r_history_path(&self) -> Option<std::path::PathBuf> {
-        if self.config.history.disabled {
-            return None;
-        }
-        let dir = self.config.history.dir.clone().or_else(history_dir);
+        let dir = history_dir_for_mode(&self.config.history.mode);
         dir.map(|d| d.join("r.db"))
     }
 
     /// Get the Shell history database path based on configuration.
     fn shell_history_path(&self) -> Option<std::path::PathBuf> {
-        if self.config.history.disabled {
-            return None;
-        }
-        let dir = self.config.history.dir.clone().or_else(history_dir);
+        let dir = history_dir_for_mode(&self.config.history.mode);
         dir.map(|d| d.join("shell.db"))
     }
 
@@ -313,6 +379,9 @@ impl Repl {
 
     /// Run the REPL main loop.
     pub fn run(&mut self) -> Result<()> {
+        // Keep direct callers safe while preserving the invariant that all
+        // runtime consumers use the owners registered before IPC startup.
+        self.prepare_history();
         // Show startup banner unless disabled
         if self.config.startup.show_banner {
             let banner = format_banner(
@@ -360,8 +429,8 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let (mut line_editor, r_history_handle) =
-            setup_history(line_editor, self.r_history_path(), self.session_id);
+        let r_history_handle = self.prepared_r_history();
+        let mut line_editor = r_history_handle.attach_to_editor(line_editor);
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
@@ -500,11 +569,8 @@ impl Repl {
         // Create shell line editor with separate history
         let (shell_line_editor, shell_history_handle) = self.create_shell_line_editor();
 
-        // If neither history DB was opened, clear the session ID from IPC metadata
-        // so clients are not misled about history isolation being active.
-        if r_history_handle.is_none() && shell_history_handle.is_none() {
-            crate::ipc::clear_history_session_id();
-        }
+        // The R runtime was registered before the IPC server started; shell
+        // history remains a separate owner for shell-mode commands.
 
         // Create prompt runtime config with unexpanded templates
         // Templates are expanded dynamically in build_main_prompt() to track cwd changes
@@ -541,9 +607,6 @@ impl Repl {
         .build();
 
         // Get history paths for :history commands
-        let r_history_path = self.r_history_path();
-        let shell_history_path = self.shell_history_path();
-
         // Store state in thread-local
         REPL_STATE.with(|state| {
             *state.borrow_mut() = Some(ReplState {
@@ -553,16 +616,14 @@ impl Repl {
                 should_exit: false,
                 config_path: self.config_path.clone(),
                 config_status: self.config_status,
-                r_history_path,
-                shell_history_path,
                 r_source_status: self.r_source_status.clone(),
                 r_home: self.r_home.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
-                // Only expose session ID if at least one history DB was opened
-                history_session_id: if r_history_handle.is_some() || shell_history_handle.is_some()
-                {
+                // IPC advertises the R runtime's session only; shell history
+                // remains separately owned and is not an IPC filter source.
+                history_session_id: if r_history_handle.is_available() {
                     self.session_id
                 } else {
                     None
@@ -629,12 +690,12 @@ impl Repl {
                 && !repl_state.sponge_queue.is_empty()
             {
                 for id_to_delete in repl_state.sponge_queue.drain_failed_ids() {
-                    if let Some(handle) = &repl_state.r_history {
-                        let _ = handle.store.delete(id_to_delete);
+                    if let Some(store) = repl_state.r_history.store() {
+                        let _ = store.delete(id_to_delete);
                     }
                 }
-                if let Some(handle) = &repl_state.r_history {
-                    let _ = handle.store.sync();
+                if let Some(store) = repl_state.r_history.store() {
+                    let _ = store.sync();
                 }
             }
         });
@@ -653,14 +714,15 @@ impl Repl {
         let line_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for R mode
-        let (mut line_editor, history_handle) =
-            setup_history(line_editor, self.r_history_path(), self.session_id);
-
-        // If history DB failed to open, clear the session ID from IPC metadata
-        if history_handle.is_none() {
+        let history_handle = self.prepared_r_history();
+        let mut line_editor = history_handle.attach_to_editor(line_editor);
+        // Meta commands use the already-prepared shell owner directly.
+        let shell_history_handle = self.prepared_shell_history();
+        // Only an available R runtime is advertised for IPC history filtering.
+        if !history_handle.is_available() {
             crate::ipc::clear_history_session_id();
         }
-        let history_session_id = if history_handle.is_some() {
+        let history_session_id = if history_handle.is_available() {
             self.history_session_id_raw()
         } else {
             None
@@ -758,8 +820,6 @@ impl Repl {
                     self.config.colors.prompt.vi.clone(),
                 )
                 .build();
-        let r_history_path = self.r_history_path();
-        let shell_history_path = self.shell_history_path();
         // Separate dir_stack for standalone mode (R not initialized).
         // The R mainloop path stores its own dir_stack in ReplState.
         // These two paths are mutually exclusive, so no sharing is needed.
@@ -768,15 +828,13 @@ impl Repl {
         loop {
             match line_editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
-                    let save_outcome = history_handle
-                        .as_ref()
-                        .and_then(|handle| handle.receipt.take());
+                    let save_outcome = history_handle.receipt_outcome();
 
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         // A whitespace-only buffer is still saved by reedline,
                         // so record that it is an ordinary line before skipping.
-                        finalize_history(history_handle.as_ref(), save_outcome, false);
+                        finalize_history(Some(&history_handle), save_outcome, false);
                         continue;
                     }
 
@@ -785,14 +843,14 @@ impl Repl {
                     if let Some(result) = process_meta_command(
                         &line,
                         &mut prompt_config,
-                        &r_history_path,
-                        &shell_history_path,
+                        &history_handle,
+                        &shell_history_handle,
                         &self.r_source_status,
                         &mut dir_stack,
                         history_session_id,
                         self.r_home.as_deref(),
                     ) {
-                        finalize_history(history_handle.as_ref(), save_outcome, true);
+                        finalize_history(Some(&history_handle), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.
                         prompt_config.clear_command_duration();
@@ -800,8 +858,8 @@ impl Repl {
                             prompt_config: &prompt_config,
                             config_path: &self.config_path,
                             config_status: self.config_status,
-                            r_history_path: &r_history_path,
-                            shell_history_path: &shell_history_path,
+                            r_history: &history_handle,
+                            shell_history: &shell_history_handle,
                             r_source_status: &self.r_source_status,
                         };
                         match handle_meta_command_result(result, &ctx) {
@@ -813,7 +871,7 @@ impl Repl {
                         }
                     }
 
-                    finalize_history(history_handle.as_ref(), save_outcome, false);
+                    finalize_history(Some(&history_handle), save_outcome, false);
 
                     // Not a meta command - show R not initialized message
                     println!("{}", format!("[R not initialized] {}", line).dark_grey());
@@ -847,13 +905,13 @@ impl Repl {
     /// Create a shell mode line editor with separate history.
     ///
     /// Shell mode uses a separate SQLite history database from R mode.
-    fn create_shell_line_editor(&self) -> (Reedline, Option<crate::history::HistoryHandle>) {
+    fn create_shell_line_editor(&self) -> (Reedline, crate::history::HistoryRuntime) {
         // Create shell editor with bracketed paste enabled
         let shell_editor = Reedline::create().use_bracketed_paste(true);
 
         // Set up SQLite-backed history for Shell mode (separate from R)
-        let (mut shell_editor, history_handle) =
-            setup_history(shell_editor, self.shell_history_path(), self.session_id);
+        let history_handle = self.prepared_shell_history();
+        let mut shell_editor = history_handle.attach_to_editor(shell_editor);
 
         // Use same edit mode as R editor
         shell_editor = match self.config.editor.mode {
@@ -953,8 +1011,8 @@ struct SessionInfoContext<'a> {
     prompt_config: &'a PromptRuntimeConfig,
     config_path: &'a Option<std::path::PathBuf>,
     config_status: ConfigStatus,
-    r_history_path: &'a Option<std::path::PathBuf>,
-    shell_history_path: &'a Option<std::path::PathBuf>,
+    r_history: &'a HistoryRuntime,
+    shell_history: &'a HistoryRuntime,
     r_source_status: &'a RSourceStatus,
 }
 
@@ -991,8 +1049,8 @@ fn handle_meta_command_result(
                     ctx.prompt_config,
                     ctx.config_path,
                     ctx.config_status,
-                    ctx.r_history_path,
-                    ctx.shell_history_path,
+                    ctx.r_history,
+                    ctx.shell_history,
                     ctx.r_source_status,
                 );
             });
@@ -1002,8 +1060,23 @@ fn handle_meta_command_result(
             with_ipc_alternate_guard(crate::pager::display_changelog);
             MetaAction::Continue
         }
-        MetaCommandResult::ShowHistoryBrowser { path, mode } => {
-            run_pager_history_browser(&path, mode);
+        MetaCommandResult::ShowHistoryBrowser { store, mode } => {
+            run_pager_history_browser(&store, mode);
+            MetaAction::Continue
+        }
+        MetaCommandResult::ClearHistory { stores } => {
+            let mut cleared_count = 0i64;
+            for (name, store) in stores {
+                match store.count_all() {
+                    Ok(count) if count > 0 => match store.clear() {
+                        Ok(()) => cleared_count += count,
+                        Err(error) => arf_println!("Failed to clear {} history: {}", name, error),
+                    },
+                    Ok(_) => {}
+                    Err(error) => arf_println!("Failed to read {} history: {}", name, error),
+                }
+            }
+            arf_println!("Cleared {} history entries.", cleared_count);
             MetaAction::Continue
         }
         MetaCommandResult::ShowHistorySchema => {
@@ -1014,5 +1087,33 @@ fn handle_meta_command_result(
             }
             MetaAction::Continue
         }
+    }
+}
+
+#[cfg(test)]
+mod history_runtime_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_r_and_shell_histories_are_distinct_stable_owners() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.history.mode = crate::config::HistoryMode::Persistent {
+            dir: Some(temp_dir.path().to_path_buf()),
+        };
+        let repl = Repl::new(
+            config,
+            None,
+            ConfigStatus::Ok,
+            RSourceStatus::Path,
+            None,
+            Reedline::create_history_session_id(),
+        )
+        .unwrap();
+        let (r_runtime, shell_runtime) = repl.initialize_history_runtimes();
+        let r_store = r_runtime.store().unwrap();
+        let shell_store = shell_runtime.store().unwrap();
+        assert!(!r_store.same_owner(&shell_store));
+        assert!(shell_runtime.store().unwrap().same_owner(&shell_store));
     }
 }

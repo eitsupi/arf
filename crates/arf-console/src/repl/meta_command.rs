@@ -3,8 +3,8 @@
 use crate::completion::path::expand_tilde;
 use crate::config::RSourceStatus;
 use crate::external::formatter;
+use crate::history::{HistoryRuntime, HistoryStore};
 use crate::pager::HistoryDbMode;
-use reedline::{History, SqliteBackedHistory};
 use std::path::PathBuf;
 
 use super::shell::confirm_action;
@@ -30,7 +30,14 @@ pub enum MetaCommandResult {
     /// Display changelog (caller runs pager)
     ShowChangelog,
     /// Open the history browser (caller runs pager)
-    ShowHistoryBrowser { path: PathBuf, mode: HistoryDbMode },
+    ShowHistoryBrowser {
+        store: HistoryStore,
+        mode: HistoryDbMode,
+    },
+    /// Clear stores after the caller has finalized the command provenance.
+    ClearHistory {
+        stores: Vec<(&'static str, HistoryStore)>,
+    },
     /// Display history schema (caller runs pager)
     ShowHistorySchema,
 }
@@ -40,8 +47,8 @@ pub enum MetaCommandResult {
 pub fn process_meta_command(
     input: &str,
     prompt_config: &mut PromptRuntimeConfig,
-    r_history_path: &Option<PathBuf>,
-    shell_history_path: &Option<PathBuf>,
+    r_history: &HistoryRuntime,
+    shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
     dir_stack: &mut Vec<PathBuf>,
     history_session_id: Option<i64>,
@@ -179,8 +186,8 @@ pub fn process_meta_command(
                 "browse" => {
                     let target = parts.get(2).copied().unwrap_or("");
                     process_history_browse(
-                        r_history_path,
-                        shell_history_path,
+                        r_history,
+                        shell_history,
                         target,
                         prompt_config.is_shell_enabled(),
                     )
@@ -188,8 +195,8 @@ pub fn process_meta_command(
                 "clear" => {
                     let target = parts.get(2).copied().unwrap_or("");
                     process_history_clear(
-                        r_history_path,
-                        shell_history_path,
+                        r_history,
+                        shell_history,
                         target,
                         prompt_config.is_shell_enabled(),
                     )
@@ -333,44 +340,41 @@ pub fn process_meta_command(
 
 /// Process :history browse command.
 fn process_history_browse(
-    r_history_path: &Option<PathBuf>,
-    shell_history_path: &Option<PathBuf>,
+    r_history: &HistoryRuntime,
+    shell_history: &HistoryRuntime,
     target: &str,
     is_shell_mode: bool,
 ) -> Option<MetaCommandResult> {
     // Determine which database to browse
-    let (mode, path) = match target {
+    let (mode, runtime) = match target {
         "" => {
             // Default: browse based on current mode
             if is_shell_mode {
-                (HistoryDbMode::Shell, shell_history_path.as_ref())
+                (HistoryDbMode::Shell, shell_history)
             } else {
-                (HistoryDbMode::R, r_history_path.as_ref())
+                (HistoryDbMode::R, r_history)
             }
         }
-        "r" | "R" => (HistoryDbMode::R, r_history_path.as_ref()),
-        "shell" => (HistoryDbMode::Shell, shell_history_path.as_ref()),
+        "r" | "R" => (HistoryDbMode::R, r_history),
+        "shell" => (HistoryDbMode::Shell, shell_history),
         _ => {
             arf_println!("Unknown target: {}. Use r or shell.", target);
             return Some(MetaCommandResult::Handled);
         }
     };
 
-    let Some(db_path) = path else {
-        arf_println!("History is disabled for {} mode.", mode.display_name());
+    let Some(store) = runtime.store() else {
+        arf_println!("History is unavailable for {} mode.", mode.display_name());
         return Some(MetaCommandResult::Handled);
     };
 
-    Some(MetaCommandResult::ShowHistoryBrowser {
-        path: db_path.clone(),
-        mode,
-    })
+    Some(MetaCommandResult::ShowHistoryBrowser { store, mode })
 }
 
 /// Process :history clear command.
 fn process_history_clear(
-    r_history_path: &Option<PathBuf>,
-    shell_history_path: &Option<PathBuf>,
+    r_history: &HistoryRuntime,
+    shell_history: &HistoryRuntime,
     target: &str,
     is_shell_mode: bool,
 ) -> Option<MetaCommandResult> {
@@ -390,30 +394,24 @@ fn process_history_clear(
     };
 
     // Collect paths to clear based on target
-    let paths_to_clear: Vec<(&str, &PathBuf)> = match clear_target {
-        "r" => r_history_path
-            .as_ref()
-            .map(|p| vec![("R", p)])
-            .unwrap_or_default(),
-        "shell" => shell_history_path
-            .as_ref()
-            .map(|p| vec![("Shell", p)])
-            .unwrap_or_default(),
+    let runtimes: Vec<(&str, &HistoryRuntime)> = match clear_target {
+        "r" => vec![("R", r_history)],
+        "shell" => vec![("Shell", shell_history)],
         "all" => {
-            let mut paths = Vec::new();
-            if let Some(p) = r_history_path.as_ref() {
-                paths.push(("R", p));
-            }
-            if let Some(p) = shell_history_path.as_ref() {
-                paths.push(("Shell", p));
-            }
-            paths
+            vec![("R", r_history), ("Shell", shell_history)]
         }
         _ => unreachable!(),
     };
 
-    if paths_to_clear.is_empty() {
-        arf_println!("History is disabled.");
+    let stores = dedup_history_stores(
+        runtimes
+            .into_iter()
+            .filter_map(|(name, runtime)| runtime.store().map(|store| (name, store)))
+            .collect(),
+    );
+
+    if stores.is_empty() {
+        arf_println!("History is unavailable.");
         return Some(MetaCommandResult::Handled);
     }
 
@@ -421,18 +419,13 @@ fn process_history_clear(
     let mut total_count = 0i64;
     let mut counts: Vec<(&str, i64)> = Vec::new();
 
-    for (name, path) in &paths_to_clear {
-        match SqliteBackedHistory::with_file((*path).clone(), None, None) {
-            Ok(history) => {
-                if let Ok(count) = history.count_all() {
-                    counts.push((name, count));
-                    total_count += count;
-                }
+    for (name, store) in &stores {
+        match store.count_all() {
+            Ok(count) => {
+                counts.push((name, count));
+                total_count += count;
             }
-            Err(_) => {
-                // Database doesn't exist yet, treat as 0 entries
-                counts.push((name, 0));
-            }
+            Err(error) => arf_println!("Failed to read {} history: {}", name, error),
         }
     }
 
@@ -458,29 +451,21 @@ fn process_history_clear(
         return Some(MetaCommandResult::Handled);
     }
 
-    // Perform clear on each database
-    let mut cleared_count = 0i64;
-    for (name, path) in &paths_to_clear {
-        match SqliteBackedHistory::with_file((*path).clone(), None, None) {
-            Ok(mut history) => {
-                if let Ok(count) = history.count_all()
-                    && count > 0
-                {
-                    if let Err(e) = history.clear() {
-                        arf_println!("Failed to clear {} history: {}", name, e);
-                    } else {
-                        cleared_count += count;
-                    }
-                }
-            }
-            Err(_) => {
-                // Database doesn't exist, nothing to clear
-            }
-        }
-    }
+    Some(MetaCommandResult::ClearHistory { stores })
+}
 
-    arf_println!("Cleared {} history entries.", cleared_count);
-    Some(MetaCommandResult::Handled)
+fn dedup_history_stores(stores: Vec<(&str, HistoryStore)>) -> Vec<(&str, HistoryStore)> {
+    let mut unique: Vec<(&str, HistoryStore)> = Vec::new();
+    for (name, store) in stores {
+        if unique
+            .iter()
+            .any(|(_, existing)| existing.same_owner(&store))
+        {
+            continue;
+        }
+        unique.push((name, store));
+    }
+    unique
 }
 
 /// Change the current working directory.
@@ -538,6 +523,7 @@ pub(crate) fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::editor::prompt::PromptFormatter;
+    use crate::history::HistoryFailureDetail;
 
     fn create_test_prompt_config() -> PromptRuntimeConfig {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
@@ -552,16 +538,22 @@ mod tests {
     fn call_meta(
         input: &str,
         config: &mut PromptRuntimeConfig,
-        r_history_path: &Option<PathBuf>,
-        shell_history_path: &Option<PathBuf>,
+        _r_history_path: &Option<PathBuf>,
+        _shell_history_path: &Option<PathBuf>,
         status: &RSourceStatus,
     ) -> Option<MetaCommandResult> {
         let mut dir_stack = Vec::new();
         process_meta_command(
             input,
             config,
-            r_history_path,
-            shell_history_path,
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
             status,
             &mut dir_stack,
             None,
@@ -905,8 +897,14 @@ mod tests {
         let result = process_meta_command(
             &format!(":cd {}", tmp.path().display()),
             &mut config,
-            &None,
-            &None,
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
             &status,
             &mut dir_stack,
             None,
@@ -927,8 +925,14 @@ mod tests {
         let result = process_meta_command(
             &format!(":pushd {}", tmp.path().display()),
             &mut config,
-            &None,
-            &None,
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
             &status,
             &mut dir_stack,
             None,
@@ -940,8 +944,14 @@ mod tests {
         let result = process_meta_command(
             ":popd",
             &mut config,
-            &None,
-            &None,
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
+            &HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            },
             &status,
             &mut dir_stack,
             None,
@@ -1099,5 +1109,16 @@ mod tests {
         // :shell! is not a valid command (! only supported on restart/switch)
         let result = call_meta(":shell!", &mut config, &None, &None, &status);
         assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
+    }
+
+    #[test]
+    fn history_clear_deduplicates_shared_store_owners() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::open(dir.path().join("history.db"), None, None).unwrap();
+        let unique = HistoryStore::open(dir.path().join("other.db"), None, None).unwrap();
+        let stores =
+            dedup_history_stores(vec![("R", store.clone()), ("Shell", store), ("R", unique)]);
+        assert_eq!(stores.len(), 2);
+        assert_eq!(stores[0].0, "R");
     }
 }

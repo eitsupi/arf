@@ -132,7 +132,7 @@ impl Terminal {
 
         // Build command
         let mut cmd = CommandBuilder::new(bin_path);
-        // Disable history by default to avoid writing to user's actual history file during tests.
+        // Use volatile history by default to avoid writing to user's actual history file during tests.
         // Skip this if --history-dir is explicitly provided (for history-related tests).
         let has_history_dir = args.contains(&"--history-dir");
         if !has_history_dir {

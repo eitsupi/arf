@@ -95,8 +95,8 @@ auto_paren_limit = 50      # Max packages to check for function paren insertion
 
 [history]
 menu_max_height = 15       # Maximum height of history search menu (Ctrl+R)
-disabled = false           # Disable history entirely
-# dir = "/custom/path"     # Custom history directory (optional)
+mode = "persistent"        # "persistent" or session-only "volatile"
+# mode = { dir = "/custom/path" }  # Custom directory when mode is persistent
 
 [r]
 auto_width = true          # Sync R's options(width) with terminal size
@@ -663,8 +663,9 @@ Rig selectors are separate from version specifications:
 ```toml
 [history]
 menu_max_height = 15   # Maximum height of Ctrl+R menu
-disabled = false       # Disable history
-dir = "/custom/path"   # Custom history directory (optional)
+mode = "persistent"   # "persistent" loads/saves SQLite; "volatile" is session-only
+# For a custom persistent directory, use instead:
+# mode = { dir = "/custom/path" }
 ```
 
 ### Environment Variable
@@ -681,13 +682,13 @@ The history directory is resolved with the following priority (highest first):
 
 1. CLI `--history-dir`
 2. `ARF_HISTORY_DIR` environment variable
-3. TOML `[history] dir`
+3. TOML `[history] mode = { dir = "..." }`
 4. XDG default
 
 ### CLI Options
 
 ```bash
-arf --no-history              # Disable history
+arf --no-history              # Use volatile session-only history (no disk load/save)
 arf --history-dir /path/to   # Custom history directory
 ```
 
@@ -951,8 +952,8 @@ Command-line options take precedence over their corresponding config file settin
 | `--no-banner` | `startup.show_banner` |
 | `--reprex` | `startup.mode.reprex` |
 | `--auto-format` | `startup.mode.autoformat` |
-| `--no-history` | `history.disabled` |
-| `--history-dir` / `ARF_HISTORY_DIR` | `history.dir` |
+| `--no-history` | `history.mode = "volatile"` |
+| `--history-dir` / `ARF_HISTORY_DIR` | `history.mode = { dir = "..." }` |
 
 Example:
 ```bash

@@ -7,6 +7,7 @@ use crate::app::session_id::create_session_id;
 use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, setup_r};
 use crate::cli::RArgsBuilder;
 use crate::config;
+use crate::history::HistoryRuntime;
 use crate::ipc;
 use crate::ipc::session::{SessionInfo, SessionType};
 use crate::output::write_json;
@@ -20,8 +21,8 @@ use serde::Serialize;
 ///
 /// Contains session connection info and any warnings collected during startup.
 /// All keys are always present in the JSON output; `r_version`, `r_home`, `log_file`,
-/// and `history_session_id` may be `null`. `warnings` is an array that may be
-/// empty.
+/// and `history_session_id` may be `null` only when history initialization is
+/// unavailable. `warnings` is an array that may be empty.
 #[derive(Debug, Serialize)]
 struct HeadlessInfo {
     pid: u32,
@@ -32,8 +33,30 @@ struct HeadlessInfo {
     started_at: String,
     log_file: Option<String>,
     history_session_id: Option<i64>,
+    history_runtime: HeadlessHistoryRuntime,
     r_source_override: HeadlessRSourceOverride,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct HeadlessHistoryRuntime {
+    state: String,
+    path: Option<String>,
+    reason: Option<String>,
+    detail: Option<String>,
+}
+
+impl HeadlessHistoryRuntime {
+    fn from_runtime(runtime: &HistoryRuntime) -> Self {
+        Self {
+            state: runtime.state_name().to_string(),
+            path: runtime
+                .requested_path()
+                .map(|path| path.display().to_string()),
+            reason: runtime.reason_name().map(str::to_string),
+            detail: runtime.diagnostic_detail(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -65,6 +88,7 @@ impl HeadlessRSourceOverride {
 impl HeadlessInfo {
     fn from_session(
         session: &SessionInfo,
+        history_runtime: &HistoryRuntime,
         warnings: Vec<String>,
         resolution: &RSourceResolutionReport,
     ) -> Self {
@@ -84,6 +108,7 @@ impl HeadlessInfo {
             started_at: session.started_at.clone(),
             log_file: session.log_file.clone(),
             history_session_id: session.history_session_id,
+            history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
             r_source_override: HeadlessRSourceOverride::from_report(resolution),
             warnings,
         }
@@ -190,42 +215,54 @@ pub(crate) fn run_headless(
 
     // Apply CLI history overrides (same logic as the REPL path in main())
     if no_history {
-        config.history.disabled = true;
+        config.history.mode = crate::config::HistoryMode::Volatile;
     } else if let Some(history_dir) = cli_history_dir {
-        config.history.dir = Some(history_dir.to_path_buf());
+        config.history.mode = crate::config::HistoryMode::Persistent {
+            dir: Some(history_dir.to_path_buf()),
+        };
     }
 
     let mut eval_allowlist = config.ipc.eval.allowed_functions.clone();
     eval_allowlist.extend(ipc_eval_allow_function.iter().cloned());
     ipc::policy::set_policy(eval_allowlist, ipc_eval_unrestricted);
 
-    // Initialize history for headless mode (same SQLite database as the REPL).
-    // Only advertise history_session_id to IPC if the backend was actually opened.
+    // Initialize the single history owner for headless mode. Volatile history
+    // is still queryable through IPC during this process but never touches disk.
     let session_id = create_session_id(&config);
-    let mut session_id_raw = None;
-    if let Some(sid) = session_id {
-        let history_path = {
-            let dir = config.history.dir.clone().or_else(config::history_dir);
-            dir.map(|d| d.join("r.db"))
-        };
-        if let Some(path) = history_path {
-            match crate::history::HistoryStore::open(
-                path.clone(),
-                Some(sid),
-                Some(chrono::Utc::now()),
-            ) {
-                Ok(history) => {
-                    ipc::set_headless_history(history);
-                    ipc::set_history_db_info(path.clone(), Some(sid));
-                    session_id_raw = Some(i64::from(sid));
-                    log::info!("Headless history enabled: {}", path.display());
-                }
-                Err(e) => {
-                    log::warn!("Failed to open history database {}: {}", path.display(), e);
-                }
+    let history_path =
+        config::history_dir_for_mode(&config.history.mode).map(|dir| dir.join("r.db"));
+    let history_runtime = HistoryRuntime::initialize(
+        &config.history.mode,
+        history_path,
+        session_id,
+        Some(chrono::Utc::now()),
+    );
+    if let Some(history) = history_runtime.store() {
+        ipc::set_headless_history(history);
+        log::info!("Headless history runtime: {}", history_runtime.state_name());
+        if let Some(warning) = history_runtime.startup_warning() {
+            log::warn!("Headless history: {warning}");
+            if json {
+                warnings.push(warning);
+            } else {
+                eprintln!("Warning: Headless history: {warning}");
             }
         }
+    } else {
+        let warning = history_runtime
+            .startup_warning()
+            .unwrap_or_else(|| "history unavailable".to_string());
+        log::warn!("Headless history unavailable: {warning}");
+        if json {
+            warnings.push(warning);
+        } else {
+            eprintln!("Warning: Headless history unavailable: {warning}");
+        }
     }
+    let session_id_raw = history_runtime
+        .store()
+        .and_then(|store| store.session())
+        .map(i64::from);
 
     // Start IPC server (with optional custom bind path)
     let log_file_str = log_file.map(|p| {
@@ -282,7 +319,7 @@ pub(crate) fn run_headless(
 
     if json {
         // Output session info as JSON to stdout
-        let output = HeadlessInfo::from_session(&session, warnings, &resolution);
+        let output = HeadlessInfo::from_session(&session, &history_runtime, warnings, &resolution);
         // Use writeln + flush instead of println to ensure the JSON is
         // delivered immediately when stdout is piped (non-TTY). This is the
         // readiness signal for CI scripts waiting on the output.
@@ -454,6 +491,8 @@ mod tests {
 
     #[test]
     fn headless_json_includes_r_home_from_session() {
+        let history_runtime =
+            HistoryRuntime::initialize(&crate::config::HistoryMode::Volatile, None, None, None);
         let mut session = SessionInfo {
             pid: 12345,
             socket_path: "/tmp/arf.sock".to_string(),
@@ -468,20 +507,110 @@ mod tests {
 
         let output = HeadlessInfo::from_session(
             &session,
+            &history_runtime,
             Vec::new(),
             &report(RSourceOverrideState::NotConfigured),
         );
         let json = serde_json::to_value(output).unwrap();
         assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+        assert_eq!(json["history_runtime"]["state"], "volatile");
+        assert_eq!(json["history_runtime"]["reason"], "configured");
 
         session.r_home = None;
         let output = HeadlessInfo::from_session(
             &session,
+            &history_runtime,
             Vec::new(),
             &report(RSourceOverrideState::NotConfigured),
         );
         let json = serde_json::to_value(output).unwrap();
         assert!(json["r_home"].is_null());
+    }
+
+    #[test]
+    fn headless_history_runtime_uses_stable_reason_and_separate_path() {
+        use crate::history::{
+            HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, HistoryStore,
+            VolatileHistoryReason,
+        };
+
+        let store = HistoryStore::in_memory(None, None).unwrap();
+        let handle = || HistoryHandle {
+            store: store.clone(),
+            receipt: HistorySaveReceipt::new(),
+        };
+        let configured = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Configured,
+        };
+        let fallback = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Fallback {
+                persistent_failure: HistoryFailureDetail::test_persistent_open(
+                    "/tmp/history.db".into(),
+                ),
+            },
+        };
+        let fallback_without_path = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Fallback {
+                persistent_failure: HistoryFailureDetail::test_path_resolution(),
+            },
+        };
+        let unavailable = HistoryRuntime::Unavailable {
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: Some(HistoryFailureDetail::test_persistent_open(
+                "/tmp/history.db".into(),
+            )),
+        };
+        let persistent_dir = tempfile::tempdir().unwrap();
+        let persistent_path = persistent_dir.path().join("history.db");
+        let persistent = HistoryRuntime::Persistent(HistoryHandle {
+            store: HistoryStore::open(persistent_path.clone(), None, None).unwrap(),
+            receipt: HistorySaveReceipt::new(),
+        });
+
+        assert!(configured.startup_warning().is_none());
+        assert!(fallback.startup_warning().is_some());
+        assert!(unavailable.startup_warning().is_some());
+        let persistent_json =
+            serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&persistent)).unwrap();
+        assert_eq!(persistent_json["state"], "persistent");
+        assert!(persistent_json["reason"].is_null());
+        assert_eq!(
+            persistent_json["path"],
+            persistent_path.display().to_string()
+        );
+
+        let configured_json =
+            serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&configured)).unwrap();
+        assert_eq!(configured_json["state"], "volatile");
+        assert_eq!(configured_json["reason"], "configured");
+        assert!(configured_json["path"].is_null());
+        assert!(configured_json["detail"].is_null());
+
+        let fallback_json =
+            serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback)).unwrap();
+        assert_eq!(fallback_json["reason"], "fallback");
+        assert_eq!(fallback_json["path"], "/tmp/history.db");
+        assert!(!fallback_json["detail"].as_str().unwrap().is_empty());
+        let no_path_json =
+            serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback_without_path))
+                .unwrap();
+        assert_eq!(no_path_json["reason"], "fallback");
+        assert!(no_path_json["path"].is_null());
+
+        let unavailable_json =
+            serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&unavailable)).unwrap();
+        assert_eq!(unavailable_json["state"], "unavailable");
+        assert_eq!(unavailable_json["reason"], "initialization_failed");
+        assert_eq!(unavailable_json["path"], "/tmp/history.db");
+        assert!(
+            unavailable_json["detail"]
+                .as_str()
+                .unwrap()
+                .contains("memory initialization failure")
+        );
     }
 
     #[test]

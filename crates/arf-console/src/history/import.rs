@@ -342,12 +342,13 @@ enum DuplicateAction {
 impl DedupSet {
     /// Build a dedup set while the writable target store is already open.
     pub fn from_history(history: &HistoryStore) -> Result<Self> {
-        Self::from_connection(rusqlite::Connection::open(history.path()).with_context(|| {
-            format!(
-                "Failed to read history database: {}",
-                history.path().display()
-            )
-        })?)
+        let path = history
+            .path()
+            .ok_or_else(|| anyhow::anyhow!("history store has no persistent path"))?;
+        Self::from_connection(
+            rusqlite::Connection::open(path)
+                .with_context(|| format!("Failed to read history database: {}", path.display()))?,
+        )
     }
 
     /// Build a dedup set by opening a history database in read-only mode.

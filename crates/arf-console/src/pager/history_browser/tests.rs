@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::Connection;
 
 #[test]
 fn test_history_filter_parse_empty() {
@@ -140,11 +141,11 @@ fn test_db_mode_display_name() {
 }
 
 /// Create a temporary history database with test entries.
-/// Returns the temp dir (must be kept alive) and the db path.
+/// Returns the temp dir (must be kept alive) and the arf-owned store.
 ///
 /// NOTE: The schema here must match reedline's `SqliteBackedHistory` table
 /// definition. If reedline changes its schema, this helper must be updated.
-fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, PathBuf) {
+fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, HistoryStore) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test_history.db");
     let db = Connection::open(&db_path).unwrap();
@@ -169,18 +170,19 @@ fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, PathB
         )
         .unwrap();
     }
-    (dir, db_path)
+    let store = HistoryStore::open(db_path, None, None).unwrap();
+    (dir, store)
 }
 
 #[test]
 fn test_load_history_returns_entries_in_desc_order() {
-    let (_dir, db_path) = create_test_db(&[
+    let (_dir, store) = create_test_db(&[
         ("first_cmd", Some("host1")),
         ("second_cmd", Some("host2")),
         ("third_cmd", None),
     ]);
 
-    let items = load_history(&db_path).unwrap();
+    let items = load_history(&store).unwrap();
     assert_eq!(items.len(), 3);
     // Descending order by id
     assert_eq!(items[0].command_line, "third_cmd");
@@ -193,17 +195,17 @@ fn test_load_history_returns_entries_in_desc_order() {
 
 #[test]
 fn test_load_history_empty_db() {
-    let (_dir, db_path) = create_test_db(&[]);
-    let items = load_history(&db_path).unwrap();
+    let (_dir, store) = create_test_db(&[]);
+    let items = load_history(&store).unwrap();
     assert!(items.is_empty());
 }
 
 #[test]
 fn test_delete_selected_removes_from_db_and_entries() {
-    let (_dir, db_path) = create_test_db(&[("cmd_a", None), ("cmd_b", None), ("cmd_c", None)]);
+    let (_dir, store) = create_test_db(&[("cmd_a", None), ("cmd_b", None), ("cmd_c", None)]);
 
-    let entries = load_history(&db_path).unwrap();
-    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+    let entries = load_history(&store).unwrap();
+    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, store.clone());
 
     // Select the first item (cmd_c, id=3) and the third item (cmd_a, id=1)
     browser.cursor = 0;
@@ -220,29 +222,29 @@ fn test_delete_selected_removes_from_db_and_entries() {
     assert_eq!(browser.selected_count(), 0);
 
     // Verify database state
-    let remaining = load_history(&db_path).unwrap();
+    let remaining = load_history(&store).unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].command_line, "cmd_b");
 }
 
 #[test]
 fn test_delete_selected_no_selection_is_noop() {
-    let (_dir, db_path) = create_test_db(&[("cmd_a", None)]);
-    let entries = load_history(&db_path).unwrap();
-    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+    let (_dir, store) = create_test_db(&[("cmd_a", None)]);
+    let entries = load_history(&store).unwrap();
+    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, store.clone());
 
     browser.delete_selected().unwrap();
 
     assert_eq!(browser.entries.len(), 1);
-    let remaining = load_history(&db_path).unwrap();
+    let remaining = load_history(&store).unwrap();
     assert_eq!(remaining.len(), 1);
 }
 
 #[test]
 fn test_delete_selected_all_entries() {
-    let (_dir, db_path) = create_test_db(&[("cmd_a", None), ("cmd_b", None)]);
-    let entries = load_history(&db_path).unwrap();
-    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, db_path.clone());
+    let (_dir, store) = create_test_db(&[("cmd_a", None), ("cmd_b", None)]);
+    let entries = load_history(&store).unwrap();
+    let mut browser = HistoryBrowser::new(entries, HistoryDbMode::R, store.clone());
 
     browser.select_all_visible();
     assert_eq!(browser.selected_count(), 2);
@@ -251,7 +253,7 @@ fn test_delete_selected_all_entries() {
 
     assert!(browser.entries.is_empty());
     assert!(browser.filtered.is_empty());
-    let remaining = load_history(&db_path).unwrap();
+    let remaining = load_history(&store).unwrap();
     assert!(remaining.is_empty());
 }
 

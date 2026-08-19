@@ -287,9 +287,11 @@ fn run() -> Result<()> {
 
     // History configuration: CLI flag overrides default XDG location
     if cli.history.no_history {
-        config.history.disabled = true;
+        config.history.mode = config::HistoryMode::Volatile;
     } else if let Some(history_dir) = &cli.history.history_dir {
-        config.history.dir = Some(history_dir.clone());
+        config.history.mode = config::HistoryMode::Persistent {
+            dir: Some(history_dir.clone()),
+        };
     }
 
     // Warn if auto-format is enabled (via config) but Air CLI is not available
@@ -435,33 +437,31 @@ fn run() -> Result<()> {
     }
 
     let session_id = create_session_id(&config);
-    let session_id_raw = session_id.map(i64::from);
 
-    // Register history DB path for IPC history queries.
-    // Note: the DB file may not exist yet at this point (first run); that's OK
-    // because SqliteBackedHistory::with_file creates it on open. In the REPL
-    // path, reedline opens the DB later in Repl::run_*, which also creates it.
-    if !config.history.disabled {
-        let history_dir = config.history.dir.clone().or_else(config::history_dir);
-        if let Some(dir) = history_dir {
-            ipc::set_history_db_info(dir.join("r.db"), session_id);
-        }
-    }
+    // Prepare both owned history runtimes before IPC advertises the session.
+    // The server then exposes a store that is already the same owner used by
+    // typed input and the interactive editor.
+    let mut repl = Repl::new(
+        config,
+        config_path,
+        config_status,
+        r_source_status,
+        r_home,
+        session_id,
+    )?;
+    repl.prepare_history();
 
     // Start IPC server if requested.
     //
-    // NOTE: The IPC server is started before history databases are opened (which
-    // happens inside `Repl::run_*`).  This means there is a brief window where
-    // the on-disk session file advertises a non-null `history_session_id` even
-    // though history has not been confirmed yet.  If history initialization later
-    // fails, `clear_history_session_id()` is called to set it back to `null`.
-    // In practice the window is negligibly short (milliseconds).
+    // History runtimes and the R-owned IPC store were prepared above, so the
+    // server advertises a session ID only after the R runtime is confirmed
+    // available. The REPL later attaches those same owners to its editors.
     if cli.with_ipc {
         match ipc::start_server(
             cli.ipc_bind.as_deref(),
-            r_home.as_ref().map(|path| path.display().to_string()),
+            repl.r_home_for_ipc(),
             None,
-            session_id_raw,
+            repl.history_session_id_raw(),
             ipc::session::SessionType::Interactive,
         ) {
             Ok(session) => {
@@ -481,15 +481,7 @@ fn run() -> Result<()> {
         }
     }
 
-    // Create and run the REPL
-    let mut repl = Repl::new(
-        config,
-        config_path,
-        config_status,
-        r_source_status,
-        r_home,
-        session_id,
-    )?;
+    // Run the REPL with runtimes prepared above.
     let repl_result = repl.run();
 
     // Cleanup IPC server on exit (idempotent — also covers :ipc start).

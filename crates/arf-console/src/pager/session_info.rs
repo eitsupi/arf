@@ -4,6 +4,7 @@ use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
 use crate::config::{ConfigStatus, RSourceStatus, mask_home_path};
 use crate::editor::prompt::get_r_version;
 use crate::external::{formatter, rig};
+use crate::history::HistoryRuntime;
 use crate::repl::state::PromptRuntimeConfig;
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -16,16 +17,16 @@ pub fn display_session_info(
     prompt_config: &PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
     config_status: ConfigStatus,
-    r_history_path: &Option<PathBuf>,
-    shell_history_path: &Option<PathBuf>,
+    r_history: &HistoryRuntime,
+    shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
 ) {
     let lines = generate_info_lines(
         prompt_config,
         config_path,
         config_status,
-        r_history_path,
-        shell_history_path,
+        r_history,
+        shell_history,
         r_source_status,
     );
 
@@ -47,8 +48,8 @@ fn generate_info_lines(
     prompt_config: &PromptRuntimeConfig,
     config_path: &Option<PathBuf>,
     config_status: ConfigStatus,
-    r_history_path: &Option<PathBuf>,
-    shell_history_path: &Option<PathBuf>,
+    r_history: &HistoryRuntime,
+    shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
 ) -> Vec<String> {
     let mut lines = Vec::new();
@@ -180,13 +181,17 @@ fn generate_info_lines(
 
     lines.push(String::new());
 
-    // History paths
-    if let Some(path) = r_history_path {
-        lines.push(format!("R history:      {}", mask_home_path(path)));
-    }
-    if let Some(path) = shell_history_path {
-        lines.push(format!("Shell history:  {}", mask_home_path(path)));
-    }
+    // History lifecycle state.  Volatile runtimes intentionally have no
+    // persistent path to display, while fallbacks retain the requested path
+    // as a diagnostic without implying that it was opened.
+    lines.push(format!(
+        "R history:      {}",
+        history_runtime_label(r_history)
+    ));
+    lines.push(format!(
+        "Shell history:  {}",
+        history_runtime_label(shell_history)
+    ));
 
     lines.push(String::new());
 
@@ -215,6 +220,37 @@ fn generate_info_lines(
     }
 
     lines
+}
+
+fn history_runtime_label(runtime: &HistoryRuntime) -> String {
+    let label = match runtime {
+        HistoryRuntime::Persistent(_) => runtime
+            .requested_path()
+            .map(|path| format!("persistent ({})", mask_home_path(path)))
+            .unwrap_or_else(|| "persistent".to_string()),
+        HistoryRuntime::Volatile { reason, .. } => match reason {
+            crate::history::VolatileHistoryReason::Configured => {
+                "volatile (session only)".to_string()
+            }
+            crate::history::VolatileHistoryReason::Fallback { .. } => {
+                match runtime.requested_path() {
+                    Some(path) => format!(
+                        "volatile (fallback; requested path: {})",
+                        mask_home_path(path)
+                    ),
+                    None => "volatile (fallback; no persistent path)".to_string(),
+                }
+            }
+        },
+        HistoryRuntime::Unavailable { .. } => match runtime.requested_path() {
+            Some(path) => format!("unavailable (requested path: {})", mask_home_path(path)),
+            None => "unavailable".to_string(),
+        },
+    };
+    match runtime.diagnostic_detail() {
+        Some(detail) if !label.contains(&detail) => format!("{label}; {detail}"),
+        _ => label,
+    }
 }
 
 /// Mask home directory in environment variable value.
@@ -319,6 +355,7 @@ fn style_info_line(line: &str) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::HistoryFailureDetail;
 
     #[test]
     fn test_mask_env_value_with_home() {
@@ -458,6 +495,13 @@ mod tests {
         PromptRuntimeConfig::builder(PromptFormatter::default(), "r> ", "+  ", "[bash] $ ").build()
     }
 
+    fn unavailable_history() -> HistoryRuntime {
+        HistoryRuntime::Unavailable {
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: None,
+        }
+    }
+
     #[test]
     fn test_generate_info_lines_config_path_none() {
         // Read SHELL through PromptFormatter::new and R_HOME through generate_info_lines.
@@ -467,8 +511,8 @@ mod tests {
             &config,
             &None,
             ConfigStatus::Ok,
-            &None,
-            &None,
+            &unavailable_history(),
+            &unavailable_history(),
             &RSourceStatus::Path,
         );
         let config_line = lines
@@ -494,8 +538,8 @@ mod tests {
             &config,
             &Some(path),
             ConfigStatus::Ok,
-            &None,
-            &None,
+            &unavailable_history(),
+            &unavailable_history(),
             &RSourceStatus::Path,
         );
         let config_line = lines
@@ -530,8 +574,8 @@ mod tests {
             &config,
             &Some(path),
             ConfigStatus::Ok,
-            &None,
-            &None,
+            &unavailable_history(),
+            &unavailable_history(),
             &RSourceStatus::Path,
         );
         let config_line = lines
@@ -556,8 +600,8 @@ mod tests {
             &config,
             &Some(path),
             ConfigStatus::ParseError,
-            &None,
-            &None,
+            &unavailable_history(),
+            &unavailable_history(),
             &RSourceStatus::Path,
         );
         let config_line = lines
@@ -582,8 +626,8 @@ mod tests {
             &config,
             &Some(path),
             ConfigStatus::ReadError,
-            &None,
-            &None,
+            &unavailable_history(),
+            &unavailable_history(),
             &RSourceStatus::Path,
         );
         let config_line = lines
@@ -595,5 +639,55 @@ mod tests {
             "Read error should be shown: {}",
             config_line
         );
+    }
+
+    #[test]
+    fn history_runtime_labels_cover_all_lifecycle_states() {
+        use crate::history::{
+            HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, HistoryStore,
+            VolatileHistoryReason,
+        };
+
+        let store = HistoryStore::in_memory(None, None).unwrap();
+        let handle = || HistoryHandle {
+            store: store.clone(),
+            receipt: HistorySaveReceipt::new(),
+        };
+        let configured = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Configured,
+        };
+        let fallback_with_path = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Fallback {
+                persistent_failure: HistoryFailureDetail::test_persistent_open(
+                    "/tmp/history.db".into(),
+                ),
+            },
+        };
+        let fallback_without_path = HistoryRuntime::Volatile {
+            handle: handle(),
+            reason: VolatileHistoryReason::Fallback {
+                persistent_failure: HistoryFailureDetail::test_path_resolution(),
+            },
+        };
+        let unavailable = HistoryRuntime::Unavailable {
+            failure: HistoryFailureDetail::test_memory(),
+            previous_failure: None,
+        };
+        let persistent_dir = tempfile::tempdir().unwrap();
+        let persistent_path = persistent_dir.path().join("history.db");
+        let persistent = HistoryRuntime::Persistent(HistoryHandle {
+            store: HistoryStore::open(persistent_path.clone(), None, None).unwrap(),
+            receipt: HistorySaveReceipt::new(),
+        });
+
+        assert!(history_runtime_label(&persistent).contains("persistent ("));
+        assert!(history_runtime_label(&configured).contains("volatile (session only)"));
+        assert!(history_runtime_label(&fallback_with_path).contains("fallback; requested path"));
+        assert!(
+            history_runtime_label(&fallback_without_path).contains("fallback; no persistent path")
+        );
+        assert!(history_runtime_label(&unavailable).starts_with("unavailable"));
     }
 }

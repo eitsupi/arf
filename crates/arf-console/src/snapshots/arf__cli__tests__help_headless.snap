@@ -85,14 +85,14 @@ Options:
           
           R history is stored at `{dir}/r.db`. The interactive console also stores shell history at `{dir}/shell.db`.
           
-          Config: history.dir
+          Config: history.mode = { dir = "..." }
           
           [env: ARF_HISTORY_DIR=]
 
       --no-history
-          Disable history (no history saved or loaded)
+          Keep history only in memory for this session (no history loaded or saved)
           
-          Config: history.disabled
+          Overrides config: history.mode = "volatile"
 
   -h, --help
           Print help (see a summary with '-h')

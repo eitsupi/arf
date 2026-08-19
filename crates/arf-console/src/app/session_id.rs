@@ -1,23 +1,13 @@
 //! Reedline history session ID creation.
 
-use crate::config;
 use crate::config::Config;
 use reedline::Reedline;
 
-/// Generate a history session ID when history is enabled and a history directory
-/// is available, or `None` otherwise.
+/// Generate a session ID for both persistent and volatile history.
 ///
-/// This ensures IPC/session JSON does not misleadingly advertise history isolation
-/// when no history backend is configured.
-pub(crate) fn create_session_id(config: &Config) -> Option<reedline::HistorySessionId> {
-    if config.history.disabled {
-        return None;
-    }
-    // Check that a history directory is actually resolvable, matching the logic
-    // in Repl::r_history_path() / shell_history_path().
-    if config.history.dir.is_none() && config::history_dir().is_none() {
-        return None;
-    }
+/// Volatile history still needs session isolation while the process is alive;
+/// it simply does not use the ID to read or write a file.
+pub(crate) fn create_session_id(_config: &Config) -> Option<reedline::HistorySessionId> {
     Reedline::create_history_session_id()
 }
 
@@ -29,8 +19,9 @@ mod session_id_tests {
     fn test_create_session_id_when_history_enabled() {
         let mut config = Config::default();
         // Ensure a history dir is available by setting it explicitly
-        config.history.dir = Some(std::env::temp_dir());
-        assert!(!config.history.disabled);
+        config.history.mode = crate::config::HistoryMode::Persistent {
+            dir: Some(std::env::temp_dir()),
+        };
         let id = create_session_id(&config);
         assert!(
             id.is_some(),
@@ -39,25 +30,24 @@ mod session_id_tests {
     }
 
     #[test]
-    fn test_create_session_id_when_history_disabled() {
+    fn test_create_session_id_when_history_volatile() {
         let mut config = Config::default();
-        config.history.disabled = true;
+        config.history.mode = crate::config::HistoryMode::Volatile;
         let id = create_session_id(&config);
-        assert!(id.is_none(), "should be None when history is disabled");
+        assert!(id.is_some(), "volatile history still has a session ID");
     }
 
     #[test]
-    fn test_create_session_id_respects_default_history_dir() {
-        // create_session_id reads HOME/XDG variables indirectly through history_dir.
+    fn test_create_session_id_is_independent_of_history_directory() {
         let _guard = crate::test_utils::lock_env();
-        // With default config (history.dir = None), session ID depends on
-        // whether the platform provides a data directory via history_dir().
+        // Session IDs are independent of the persistent directory.
         let config = Config::default();
-        assert!(!config.history.disabled);
-        assert!(config.history.dir.is_none());
+        assert!(matches!(
+            config.history.mode,
+            crate::config::HistoryMode::Persistent { dir: None }
+        ));
         let id = create_session_id(&config);
-        // On most platforms history_dir() returns Some, so session ID is generated.
-        // On exotic platforms where it returns None, session ID should be None.
-        assert_eq!(id.is_some(), config::history_dir().is_some());
+        // Session IDs are generated independently of the configured directory.
+        assert!(id.is_some());
     }
 }

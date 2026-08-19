@@ -28,7 +28,6 @@ use protocol::{
     IpcRequest, IpcResponse, R_BUSY, R_EVAL_NOT_ALLOWED, R_NOT_AT_PROMPT, RSessionInfo,
     SessionResult, USER_IS_TYPING, UserInputResult,
 };
-use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
@@ -196,9 +195,8 @@ static HEADLESS_SHUTDOWN: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 /// persisted to the same SQLite history database used by the REPL.
 static HEADLESS_HISTORY: OnceLock<HistoryStore> = OnceLock::new();
 
-/// History database path and session ID, shared between REPL and headless modes.
-/// Used by the `history` IPC method to open a read-only connection for queries.
-static HISTORY_DB_INFO: OnceLock<(PathBuf, Option<reedline::HistorySessionId>)> = OnceLock::new();
+/// The single history owner shared by REPL/headless history queries and saves.
+static HISTORY_STORE: OnceLock<HistoryStore> = OnceLock::new();
 
 /// Channel receiver for IPC requests (server → main thread).
 /// Wrapped in Option so it can be replaced on restart.
@@ -799,22 +797,19 @@ pub fn clear_history_session_id() {
 /// Once set, `headless_handle_request` will persist evaluated commands
 /// (both `evaluate` and `user_input`) to the SQLite history database.
 pub fn set_headless_history(history: HistoryStore) {
+    let ipc_history = history.clone();
     if HEADLESS_HISTORY.set(history).is_err() {
         log::warn!(
             "Headless history backend already initialized; ignoring duplicate set_headless_history call"
         );
     }
+    set_history_store(ipc_history);
 }
 
-/// Store the history database path and session ID for IPC queries.
-///
-/// Called during startup (both REPL and headless) so that the `history`
-/// IPC method can open a read-only connection to query history entries.
-pub fn set_history_db_info(path: PathBuf, session_id: Option<reedline::HistorySessionId>) {
-    if HISTORY_DB_INFO.set((path, session_id)).is_err() {
-        log::warn!(
-            "History DB info already initialized; ignoring duplicate set_history_db_info call"
-        );
+/// Register the already-open history owner for IPC queries.
+pub fn set_history_store(history: HistoryStore) {
+    if HISTORY_STORE.set(history).is_err() {
+        log::warn!("History store already initialized; ignoring duplicate set_history_store call");
     }
 }
 
@@ -827,11 +822,10 @@ pub(crate) enum HistoryQueryError {
     Internal(String),
 }
 
-/// Query the history database and return matching entries.
+/// Query the history store and return matching entries.
 ///
-/// Opens a read-only `rusqlite::Connection` for each query to avoid WAL
-/// and DDL side effects that `SqliteBackedHistory::with_file` would cause.
-/// This prevents conflicts with the main REPL/headless history connection.
+/// Queries use the already-open owner, avoiding competing WAL/DDL connections
+/// and making volatile history available to IPC for the current session.
 pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, HistoryQueryError> {
     if params.limit < 1 {
         return Err(HistoryQueryError::InvalidParams(format!(
@@ -840,11 +834,12 @@ pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, His
         )));
     }
 
-    let (db_path, session_id) = HISTORY_DB_INFO.get().ok_or_else(|| {
+    let store = HISTORY_STORE.get().ok_or_else(|| {
         HistoryQueryError::Internal(
-            "History is not available (no history database configured)".to_string(),
+            "History is not available (no history store configured)".to_string(),
         )
     })?;
+    let session_id = store.session();
 
     // When not requesting all sessions, require a valid session_id.
     if !params.all_sessions && session_id.is_none() {
@@ -875,70 +870,50 @@ pub(crate) fn query_history(params: &HistoryParams) -> Result<HistoryResult, His
         None
     };
 
-    // Open read-only to avoid WAL/DDL conflicts with the main history
-    // connection (same pattern as pager/history_browser.rs).
-    let db =
-        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| {
-                HistoryQueryError::Internal(format!("Failed to open history database: {e}"))
-            })?;
-
-    // Build SQL query with optional WHERE clauses.
-    let mut sql = String::from(
-        "SELECT command_line, start_timestamp, session_id, cwd, exit_status \
-         FROM history WHERE 1=1",
-    );
-    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-    if !params.all_sessions
-        && let Some(sid) = session_id
-    {
-        sql.push_str(" AND session_id = ?");
-        params_vec.push(Box::new(i64::from(*sid)));
-    }
-    if let Some(ref cwd) = params.cwd {
-        sql.push_str(" AND cwd = ?");
-        params_vec.push(Box::new(cwd.clone()));
-    }
-    if let Some(ref grep) = params.grep {
-        // Use instr() instead of LIKE to avoid wildcard escaping issues
-        // (same approach as reedline's Substring search).
-        sql.push_str(" AND instr(command_line, ?) >= 1");
-        params_vec.push(Box::new(grep.clone()));
-    }
-    if let Some(ms) = since_ms {
-        sql.push_str(" AND start_timestamp >= ?");
-        params_vec.push(Box::new(ms));
-    }
-    sql.push_str(" ORDER BY id DESC LIMIT ?");
-    params_vec.push(Box::new(params.limit));
-
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| &**p).collect();
-
-    let mut stmt = db
-        .prepare(&sql)
-        .map_err(|e| HistoryQueryError::Internal(format!("Failed to prepare query: {e}")))?;
-    let entries = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            let ts_ms: Option<i64> = row.get(1)?;
-            let timestamp: Option<String> = ts_ms.and_then(|ms| {
-                chrono::Utc
-                    .timestamp_millis_opt(ms)
-                    .single()
-                    .map(|t| t.to_rfc3339())
-            });
-            let sid: Option<i64> = row.get(2)?;
-            Ok(HistoryEntry {
-                command: row.get(0)?,
-                timestamp,
-                cwd: row.get(3)?,
-                exit_status: row.get(4)?,
-                session_id: sid,
-            })
+    // Do not pass the session to reedline's filter: its persistent semantics
+    // intentionally include rows from before the current session. The owned
+    // store applies strict session matching over bounded pages and applies the
+    // limit only after matching rows are collected.
+    let cwd = params.cwd.clone();
+    let grep = params.grep.clone();
+    let start_time = since_ms.and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single());
+    let rows = store
+        .search_strict_session(
+            |start_id| {
+                let mut filter = reedline::SearchFilter::anything(None);
+                filter.cwd_exact = cwd.clone();
+                filter.command_line = grep.clone().map(reedline::CommandLineSearch::Substring);
+                reedline::SearchQuery {
+                    direction: reedline::SearchDirection::Backward,
+                    // reedline 0.50's start_time SQL uses a misspelled column.
+                    // The owned store applies this bound after each page.
+                    start_time: None,
+                    end_time: None,
+                    start_id,
+                    end_id: None,
+                    limit: None,
+                    filter,
+                }
+            },
+            session_id,
+            params.all_sessions,
+            params.limit,
+            start_time,
+        )
+        .map_err(|e| {
+            log::error!("Strict history query failed: {e}");
+            HistoryQueryError::Internal(format!("History query failed: {e}"))
+        })?;
+    let entries = rows
+        .into_iter()
+        .map(|row| HistoryEntry {
+            command: row.command_line,
+            timestamp: row.start_timestamp.map(|time| time.to_rfc3339()),
+            cwd: row.cwd,
+            exit_status: row.exit_status,
+            session_id: row.session_id.map(i64::from),
         })
-        .map_err(|e| HistoryQueryError::Internal(format!("History query failed: {e}")))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| HistoryQueryError::Internal(format!("Failed to read history row: {e}")))?;
+        .collect();
 
     Ok(HistoryResult {
         entries,
@@ -961,7 +936,7 @@ fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
     item.exit_status = exit_status;
-    item.session_id = HISTORY_DB_INFO.get().and_then(|(_, sid)| *sid);
+    item.session_id = HEADLESS_HISTORY.get().and_then(HistoryStore::session);
     if let Err(e) = h.save_known(item, HistoryExtraInfo::default()) {
         log::warn!("Failed to save headless history: {}", e);
     }

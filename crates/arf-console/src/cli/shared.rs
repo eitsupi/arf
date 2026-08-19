@@ -111,7 +111,7 @@ pub struct HistoryOptions {
     /// R history is stored at `{dir}/r.db`. The interactive console also
     /// stores shell history at `{dir}/shell.db`.
     ///
-    /// Config: history.dir
+    /// Config: history.mode = { dir = "..." }
     #[arg(
         long = "history-dir",
         value_hint = ValueHint::DirPath,
@@ -121,9 +121,9 @@ pub struct HistoryOptions {
     )]
     pub history_dir: Option<PathBuf>,
 
-    /// Disable history (no history saved or loaded)
+    /// Keep history only in memory for this session (no history loaded or saved)
     ///
-    /// Config: history.disabled
+    /// Overrides config: history.mode = "volatile"
     #[arg(long = "no-history", hide_short_help = true)]
     pub no_history: bool,
 }

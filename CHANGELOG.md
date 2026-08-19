@@ -4,6 +4,9 @@
 
 ### Changed
 
+- History storage now has explicit persistent and volatile modes. `--no-history` selects volatile in-memory history (including IPC and session recall) without loading or writing a database; persistent open failures degrade to a volatile fallback. Fallback and unavailable runtimes retain and report their concrete initialization cause, including it as `history_runtime.detail` in headless JSON.
+- Legacy `history.disabled` and top-level `history.dir` are accepted with a migration warning when `history.mode` is omitted: `disabled = false` with `dir` preserves the custom persistent directory, while `disabled = true` selects volatile even when `dir` is present. With an explicit `mode`, legacy `disabled` is ignored in favor of that mode, but top-level `dir` is a parse error. Migrate to a string mode or `history.mode = { dir = "..." }`.
+
 - Command history now records whether each entry was a meta command (`:cd`, `:help`, ...) as determined by the REPL itself, laying groundwork for excluding them from history search (#312).
 
 ### Fixed
@@ -241,7 +244,7 @@
 - Matching bracket highlighting: when cursor is on or after a bracket (`()`, `[]`, `{}`), both brackets are highlighted with a background color. Syntax-aware via tree-sitter (skips brackets in strings/comments). Configurable via `[editor] highlight_matching_bracket` (default: `false`) and `[colors.r] matching_bracket` (default: `"LightYellow"`) (#106)
 - R's `options(width)` is now synced with the terminal width at startup and dynamically on resize, configurable via `[r] auto_width` (default: `true`) (#104)
 - `:changelog` meta command to view the arf changelog in the built-in Markdown pager
-- `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `[history] dir` > XDG default)
+- `ARF_HISTORY_DIR` environment variable to override the history directory (priority: CLI `--history-dir` > `ARF_HISTORY_DIR` > TOML `history.mode = { dir = "..." }` > XDG default)
 - Experimental fuzzy matching for `pkg::func` namespace patterns and `library()`/`require()` package name completions (`experimental.r_completion.fuzzy`)
 - Configurable `package_functions` for custom function names that trigger package completion (e.g., `box::use`)
 - `:restart!` and `:switch!` commands to skip confirmation prompt

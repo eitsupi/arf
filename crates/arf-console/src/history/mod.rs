@@ -11,4 +11,8 @@ mod store;
 
 pub use metadata::HistoryExtraInfo;
 pub use reedline_adapter::ReedlineHistoryAdapter;
-pub use store::{HistoryHandle, HistorySaveOutcome, HistorySaveReceipt, HistoryStore};
+#[allow(unused_imports)]
+pub use store::{
+    HistoryFailureDetail, HistoryHandle, HistoryRuntime, HistorySaveOutcome, HistorySaveReceipt,
+    HistoryStore, VolatileHistoryReason,
+};
