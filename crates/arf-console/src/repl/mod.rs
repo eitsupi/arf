@@ -622,6 +622,7 @@ impl Repl {
                     self.formatter_backend,
                 ),
                 should_exit: false,
+                r_prompt_options_ambiguous: false,
                 config_path: self.config_path.clone(),
                 config_status: self.config_status,
                 r_source_status: self.r_source_status.clone(),

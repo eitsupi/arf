@@ -13,9 +13,9 @@ use std::io::{self, Write};
 use super::history::{finalize_history, save_ipc_history};
 use super::state::{PendingHistoryContext, SpongeQueue};
 use super::{
-    MetaAction, REPL_STATE, RPrompt, SessionInfoContext, arf_println, clear_input_lines,
-    execute_shell_command, handle_meta_command_result, meta_command, process_meta_command,
-    strip_reprex_output,
+    MetaAction, REPL_STATE, RPrompt, SessionInfoContext, arf_eprintln, arf_println,
+    clear_input_lines, execute_shell_command, handle_meta_command_result, meta_command,
+    process_meta_command, strip_reprex_output,
 };
 
 struct ApprovedInteractiveIpcOperation {
@@ -83,7 +83,10 @@ fn approve_interactive_ipc_operation(
 /// With the Validator in place, reedline handles multiline input internally.
 /// The callback receives complete expressions (possibly with embedded newlines)
 /// from reedline and passes them to R.
-pub(super) fn read_console_callback(r_prompt: &str, is_continuation: bool) -> Option<String> {
+pub(super) fn read_console_callback(
+    r_prompt: &str,
+    prompt_info: arf_libr::ReadConsolePromptInfo,
+) -> Option<String> {
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
         // This is a defensive measure in case R unexpectedly calls ReadConsole
@@ -106,10 +109,20 @@ pub(super) fn read_console_callback(r_prompt: &str, is_continuation: bool) -> Op
             return None;
         }
 
-        // The low-level ReadConsole callback reads options(continue) once and
-        // supplies the result here. Classify the prompt once so every lifecycle,
-        // IPC, display, menu, formatter, and history decision shares one value.
-        let prompt_kind = classify_prompt(r_prompt, is_continuation);
+        if should_warn_prompt_ambiguity(
+            &mut state.r_prompt_options_ambiguous,
+            prompt_info.options_are_ambiguous,
+        ) {
+            arf_eprintln!(
+                "Warning: options(\"prompt\") and options(\"continue\") are identical; arf cannot distinguish top-level and continuation prompts."
+            );
+        }
+
+        // The low-level ReadConsole callback reads both prompt options once and
+        // supplies their metadata here. Classify the prompt once so every
+        // lifecycle, IPC, display, menu, formatter, and history decision shares
+        // one value.
+        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation);
 
         // Update exit_status for the previous command when a new prompt is shown.
         // This is called when R has finished evaluating and wants new input.
@@ -611,9 +624,19 @@ fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
     prompt_kind.is_command()
 }
 
+/// Warn once for each transition into an ambiguous prompt-option state.
+fn should_warn_prompt_ambiguity(was_ambiguous: &mut bool, is_ambiguous: bool) -> bool {
+    let should_warn = is_ambiguous && !*was_ambiguous;
+    *was_ambiguous = is_ambiguous;
+    should_warn
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PromptKind, classify_prompt, formatter_failure_updates_lifecycle};
+    use super::{
+        PromptKind, classify_prompt, formatter_failure_updates_lifecycle,
+        should_warn_prompt_ambiguity,
+    };
 
     #[test]
     fn continuation_formatter_failure_keeps_outer_lifecycle_context() {
@@ -631,5 +654,15 @@ mod tests {
     fn prompt_classification_falls_back_for_uninitialized_r() {
         assert_eq!(classify_prompt("> ", false), PromptKind::Command,);
         assert_eq!(classify_prompt("Selection: ", false), PromptKind::Other,);
+    }
+
+    #[test]
+    fn prompt_ambiguity_warning_is_rearmed_after_distinct_options() {
+        let mut was_ambiguous = false;
+
+        assert!(should_warn_prompt_ambiguity(&mut was_ambiguous, true));
+        assert!(!should_warn_prompt_ambiguity(&mut was_ambiguous, true));
+        assert!(!should_warn_prompt_ambiguity(&mut was_ambiguous, false));
+        assert!(should_warn_prompt_ambiguity(&mut was_ambiguous, true));
     }
 }

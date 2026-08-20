@@ -60,6 +60,8 @@ pub struct ReplState {
     pub prompt_config: PromptRuntimeConfig,
     pub reprex: ReprexRuntime,
     pub should_exit: bool,
+    /// Whether the previous ReadConsole invocation had identical R prompt options.
+    pub r_prompt_options_ambiguous: bool,
     /// Path to the config file (for :info command).
     pub config_path: Option<PathBuf>,
     /// Status of config file loading (for :info display).
