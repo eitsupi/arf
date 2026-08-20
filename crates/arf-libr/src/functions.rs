@@ -85,6 +85,8 @@ pub struct RLibrary {
     pub rf_findvar: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     pub rf_definevar: unsafe extern "C" fn(SEXP, SEXP, SEXP),
     pub rf_scalarlogical: unsafe extern "C" fn(c_int) -> SEXP,
+    /// Get an R option directly without evaluating R code.
+    pub rf_get_option1: unsafe extern "C" fn(SEXP) -> SEXP,
 
     // Stack limit (for embedded R)
     pub r_cstacklimit: *mut usize,
@@ -348,6 +350,7 @@ impl RLibrary {
             load_symbol!(rf_findvar, b"Rf_findVar\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
             load_symbol!(rf_scalarlogical, b"Rf_ScalarLogical\0");
+            load_symbol!(rf_get_option1, b"Rf_GetOption1\0");
 
             // Load stack limit pointer
             load_ptr!(r_cstacklimit, b"R_CStackLimit\0", usize);
@@ -612,6 +615,7 @@ impl RLibrary {
                 rf_findvar,
                 rf_definevar,
                 rf_scalarlogical,
+                rf_get_option1,
                 r_cstacklimit,
                 #[cfg(unix)]
                 ptr_r_readconsole,
