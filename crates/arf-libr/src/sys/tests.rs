@@ -1,6 +1,45 @@
 use super::*;
 use std::path::Path;
 
+#[test]
+fn prompt_info_detects_ambiguity_without_changing_exact_classification() {
+    let info = prompt_info_from_options("same> ", Some("same> "), Some("same> "));
+
+    assert!(info.is_continuation);
+    assert!(info.options_are_ambiguous);
+}
+
+#[test]
+fn prompt_info_matches_only_the_current_continuation_option() {
+    let info = prompt_info_from_options("... ", Some("> "), Some("... "));
+
+    assert!(info.is_continuation);
+    assert!(!info.options_are_ambiguous);
+
+    let main_prompt = prompt_info_from_options("> ", Some("> "), Some("... "));
+    assert!(!main_prompt.is_continuation);
+    assert!(!main_prompt.options_are_ambiguous);
+}
+
+#[test]
+fn prompt_info_uses_default_continuation_only_when_option_is_unavailable() {
+    let fallback = prompt_info_from_options("+ ", Some("> "), None);
+    let custom = prompt_info_from_options("+ ", Some("> "), Some("... "));
+
+    assert!(fallback.is_continuation);
+    assert!(!fallback.options_are_ambiguous);
+    assert!(!custom.is_continuation);
+}
+
+#[test]
+fn prompt_info_does_not_mark_malformed_options_as_ambiguous() {
+    let missing_main = prompt_info_from_options("+ ", None, Some("+ "));
+    let missing_continue = prompt_info_from_options("+ ", Some("+ "), None);
+
+    assert!(!missing_main.options_are_ambiguous);
+    assert!(!missing_continue.options_are_ambiguous);
+}
+
 /// Combined spinner test to avoid race conditions from parallel tests sharing global state.
 /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
 #[test]

@@ -54,26 +54,28 @@ use askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_ter
 use interrupt::AwaitConsoleInputGuard;
 use output::REPREX_SETTINGS;
 
-/// ReadConsole callback receives the raw R prompt and whether it exactly
-/// matches R's current `options(continue)` value.
-type ReadConsoleCallback = fn(&str, bool) -> Option<String>;
+/// Option-derived metadata for one ReadConsole invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadConsolePromptInfo {
+    /// Whether the raw prompt exactly matches R's current `options(continue)` value.
+    pub is_continuation: bool,
+    /// Whether R's current `options(prompt)` and `options(continue)` values are identical.
+    pub options_are_ambiguous: bool,
+}
+
+/// ReadConsole callback receives the raw R prompt and option-derived metadata.
+type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<String>;
 
 static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
 
 const DEFAULT_CONTINUATION_PROMPT: &str = "+ ";
 
-/// Read R's current continuation prompt without evaluating any R code.
-///
-/// This is intentionally performed for every ReadConsole invocation. R code may
-/// change `options(continue)` between prompts, so caching the value would make
-/// prompt classification stale. Any failure to inspect the option falls back to
-/// R's default continuation prompt.
-fn continuation_prompt() -> Option<String> {
+/// Read a scalar string option without evaluating any R code.
+fn string_option(option_name: &'static [u8]) -> Option<String> {
     let lib = crate::r_library().ok()?;
-    let option_name = b"continue\0";
 
-    // SAFETY: R is initialized while ReadConsole is invoked, and option_name is
-    // a valid NUL-terminated string. The returned SEXP is borrowed from R.
+    // SAFETY: R is initialized while ReadConsole is invoked. Callers provide a
+    // static NUL-terminated option name. The returned SEXP is borrowed from R.
     let option = unsafe {
         let symbol = (lib.rf_install)(option_name.as_ptr() as *const c_char);
         (lib.rf_get_option1)(symbol)
@@ -83,8 +85,8 @@ fn continuation_prompt() -> Option<String> {
         return None;
     }
 
-    // `options(continue = ...)` must be a character vector with exactly one
-    // element. Treat all other values as malformed and use the default.
+    // Prompt options must be character vectors with exactly one element. Treat
+    // all other values as malformed.
     let is_string = unsafe { (lib.rf_typeof)(option) == SexpType::StrSxp as c_int };
     if !is_string || unsafe { (lib.rf_length)(option) } != 1 {
         return None;
@@ -101,14 +103,39 @@ fn continuation_prompt() -> Option<String> {
     }
 
     // R strings are not necessarily valid UTF-8. The console callback accepts
-    // UTF-8, so malformed values use the default rather than panicking.
+    // UTF-8, so reject malformed values rather than panicking.
     unsafe { CStr::from_ptr(chars).to_str().ok().map(str::to_owned) }
 }
 
-/// Determine whether an R prompt is the configured continuation prompt.
-fn is_continuation_prompt(prompt: &str) -> bool {
-    let configured = continuation_prompt().unwrap_or_else(|| DEFAULT_CONTINUATION_PROMPT.into());
-    prompt == configured
+fn prompt_info_from_options(
+    raw_prompt: &str,
+    main_prompt: Option<&str>,
+    continuation_prompt: Option<&str>,
+) -> ReadConsolePromptInfo {
+    let options_are_ambiguous = matches!(
+        (main_prompt, continuation_prompt),
+        (Some(main), Some(continuation)) if main == continuation
+    );
+    let continuation_prompt = continuation_prompt.unwrap_or(DEFAULT_CONTINUATION_PROMPT);
+
+    ReadConsolePromptInfo {
+        is_continuation: raw_prompt == continuation_prompt,
+        options_are_ambiguous,
+    }
+}
+
+/// Inspect the prompt options for one ReadConsole invocation.
+///
+/// This is intentionally performed for every invocation because R code may
+/// change either option during a session. Values are not cached.
+fn read_console_prompt_info(raw_prompt: &str) -> ReadConsolePromptInfo {
+    let main_prompt = string_option(b"prompt\0");
+    let continuation_prompt = string_option(b"continue\0");
+    prompt_info_from_options(
+        raw_prompt,
+        main_prompt.as_deref(),
+        continuation_prompt.as_deref(),
+    )
 }
 
 /// Buffer for input that exceeds R's buffer size.
@@ -146,9 +173,8 @@ pub(super) unsafe extern "C" fn r_read_console(
     #[cfg(unix)]
     recover_pending_termios();
 
-    // Read the option once per invocation and share this result with both the
-    // reprex bookkeeping below and the high-level console callback. This keeps
-    // all prompt classification consistent without evaluating R code.
+    // Read the prompt options once per invocation and share the resulting
+    // metadata with both the reprex bookkeeping and high-level callback.
     let prompt_str: &str = if prompt.is_null() {
         ""
     } else {
@@ -157,7 +183,7 @@ pub(super) unsafe extern "C" fn r_read_console(
             .to_str()
             .unwrap_or_default()
     };
-    let is_continuation = is_continuation_prompt(prompt_str);
+    let prompt_info = read_console_prompt_info(prompt_str);
 
     // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
     // This runs before the input-wait guard on purpose: no Rust loop pumps R
@@ -188,7 +214,7 @@ pub(super) unsafe extern "C" fn r_read_console(
     {
         // Check if this is a main prompt (not continuation). Use the same
         // option-derived classification passed to the high-level callback.
-        let is_main_prompt = !is_continuation && !prompt_str.trim().is_empty();
+        let is_main_prompt = !prompt_info.is_continuation && !prompt_str.trim().is_empty();
 
         if is_main_prompt {
             println!();
@@ -212,7 +238,7 @@ pub(super) unsafe extern "C" fn r_read_console(
             // SAFETY: READ_CONSOLE_CALLBACK is only accessed from this single-threaded context
             if let Some(callback) = unsafe { READ_CONSOLE_CALLBACK } {
                 log::debug!("r_read_console: calling callback");
-                match callback(prompt_str, is_continuation) {
+                match callback(prompt_str, prompt_info) {
                     Some(s) => {
                         log::debug!("r_read_console: got input len={}", s.len());
                         s
@@ -276,10 +302,10 @@ pub(super) unsafe extern "C" fn r_read_console(
 
 /// Set the console read callback.
 ///
-/// The callback receives the raw R prompt and a boolean indicating whether it
-/// exactly matches the current `options(continue)` value. The option is read
-/// once for each ReadConsole invocation before the callback is called. The
-/// callback should return the user's input, or None to signal EOF (exit R).
+/// The callback receives the raw R prompt and option-derived metadata. The
+/// current `options(prompt)` and `options(continue)` values are read once for
+/// each ReadConsole invocation before the callback is called. The callback
+/// should return the user's input, or None to signal EOF (exit R).
 pub fn set_read_console_callback(callback: ReadConsoleCallback) {
     unsafe {
         READ_CONSOLE_CALLBACK = Some(callback);

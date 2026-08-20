@@ -175,17 +175,10 @@ on_exit_only = false
     terminal
         .expect("R> ")
         .expect("successful command should reach the next prompt");
-    let screen = terminal
-        .screen()
-        .expect("read screen after successful command");
-    let current_line = screen
-        .lines
-        .get(screen.cursor_row as usize)
-        .expect("cursor row should exist");
-    assert!(
-        current_line.contains("ms"),
-        "successful command should leave a visible duration: {current_line:?}"
-    );
+    terminal
+        .current_line()
+        .assert_contains("ms")
+        .expect("successful command should leave a visible duration");
 
     terminal
         .clear_buffer()
@@ -200,6 +193,10 @@ on_exit_only = false
         .expect("R> ")
         .expect("formatter failure should reach the failed prompt");
 
+    terminal
+        .current_line()
+        .assert_contains("ERR ")
+        .expect("formatter failure should mark the next prompt failed");
     let screen = terminal
         .screen()
         .expect("read screen after formatter failure");
@@ -207,10 +204,6 @@ on_exit_only = false
         .lines
         .get(screen.cursor_row as usize)
         .expect("cursor row should exist");
-    assert!(
-        current_line.contains("ERR "),
-        "formatter failure should mark the next prompt failed: {current_line:?}"
-    );
     assert!(
         !current_line.contains("ms"),
         "formatter failure should clear the previous duration: {current_line:?}"
@@ -858,6 +851,70 @@ continuation = "CONT> "
     terminal
         .expect("[1] 2")
         .expect("Subsequent top-level command should execute");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// An identical R main and continuation prompt is ambiguous to arf. Warn once
+/// when the session enters that state, suppress repeated warnings, and re-arm
+/// the warning after the options become distinct again.
+#[test]
+#[cfg(unix)]
+fn test_pty_identical_r_prompt_options_warn_once_per_transition() {
+    const WARNING: &str = "# [arf] Warning: options(\"prompt\") and options(\"continue\") are identical; arf cannot distinguish top-level and continuation prompts.";
+
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-auto-match"]).expect("Failed to spawn arf");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal.clear_buffer().expect("clear initial output");
+    terminal
+        .send_line("options(prompt = '> ', continue = '> ')")
+        .expect("set identical prompt options");
+    terminal.expect(WARNING).expect("warn on first ambiguity");
+    terminal
+        .expect("+  ")
+        .expect("show the continuation prompt while options are ambiguous");
+    let output = terminal.get_output().expect("read terminal output");
+    assert_eq!(output.matches(WARNING).count(), 1);
+
+    terminal.clear_buffer().expect("clear first warning output");
+    terminal.send_line("1 + 1").expect("send command");
+    terminal.expect("[1] 2").expect("evaluate command normally");
+    terminal
+        .expect("+  ")
+        .expect("retain continuation classification while ambiguity persists");
+    let output = terminal
+        .get_output()
+        .expect("read output while ambiguity persists");
+    assert_eq!(output.matches(WARNING).count(), 0);
+
+    terminal
+        .clear_buffer()
+        .expect("clear persistent ambiguity output");
+    terminal
+        .send_line("options(prompt = '> ', continue = '+ ')")
+        .expect("restore distinct prompt options");
+    terminal
+        .wait_for_prompt()
+        .expect("return to the normal prompt after restoring options");
+    let output = terminal.get_output().expect("read distinct options output");
+    assert_eq!(output.matches(WARNING).count(), 0);
+
+    terminal
+        .clear_buffer()
+        .expect("clear distinct options output");
+    terminal
+        .send_line("options(prompt = '> ', continue = '> ')")
+        .expect("re-enter identical prompt options");
+    terminal
+        .expect(WARNING)
+        .expect("warn again after the ambiguity is reintroduced");
+    terminal
+        .expect("+  ")
+        .expect("show the continuation prompt after second warning");
+    let output = terminal.get_output().expect("read second warning output");
+    assert_eq!(output.matches(WARNING).count(), 1);
 
     terminal.quit().expect("Should quit cleanly");
 }
