@@ -83,7 +83,7 @@ fn approve_interactive_ipc_operation(
 /// With the Validator in place, reedline handles multiline input internally.
 /// The callback receives complete expressions (possibly with embedded newlines)
 /// from reedline and passes them to R.
-pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
+pub(super) fn read_console_callback(r_prompt: &str, is_continuation: bool) -> Option<String> {
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
         // This is a defensive measure in case R unexpectedly calls ReadConsole
@@ -106,16 +106,22 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
             return None;
         }
 
+        // The low-level ReadConsole callback reads options(continue) once and
+        // supplies the result here. Classify the prompt once so every lifecycle,
+        // IPC, display, menu, formatter, and history decision shares one value.
+        let prompt_kind = classify_prompt(r_prompt, is_continuation);
+
         // Update exit_status for the previous command when a new prompt is shown.
         // This is called when R has finished evaluating and wants new input.
-        // Continuation prompts (starting with '+') mean we're still in the same expression.
+        // Continuation prompts identified by the low-level option lookup mean
+        // we're still in the same expression.
         // Non-command prompts (menus, etc.) should also not trigger exit status updates.
         // Track prompt state for IPC: true when R is idle at the command
         // prompt, false for continuation/menu/selection prompts so IPC
         // requests are correctly rejected during non-command prompts.
-        crate::ipc::set_r_at_prompt(is_r_command_prompt(r_prompt));
+        crate::ipc::set_r_at_prompt(prompt_kind.is_command());
 
-        if is_r_command_prompt(r_prompt) && !state.prompt_config.is_shell_enabled() {
+        if prompt_kind.is_command() && !state.prompt_config.is_shell_enabled() {
             let pending_history_context = std::mem::take(&mut state.pending_history_context);
             let had_error = match pending_history_context {
                 PendingHistoryContext::Command { store, history_id } => {
@@ -145,7 +151,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
         // Check for pending IPC operations before entering the reedline input loop.
         // At this point reedline hasn't started, so there's no editor buffer to
         // conflict with — we can always accept.
-        if is_r_command_prompt(r_prompt)
+        if prompt_kind.is_command()
             && !state.prompt_config.is_shell_enabled()
             && let Some(op) = crate::ipc::take_pending_ipc_operation()
         {
@@ -222,12 +228,12 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
         loop {
             // Build prompt dynamically from config.
             // We detect the type of prompt R is asking for:
-            // - Continuation prompts start with '+' (multiline input)
-            // - Command prompts typically end with "> " (R's default prompt)
+            // - Continuation prompts are identified by PromptKind (multiline input)
+            // - Command prompts are identified by PromptKind at R's top level
             // - Non-standard prompts (menus, etc.) are passed through directly
-            let prompt = if r_prompt.starts_with('+') {
+            let prompt = if prompt_kind.is_continuation() {
                 state.prompt_config.build_cont_prompt(state.reprex.mode)
-            } else if is_r_command_prompt(r_prompt) {
+            } else if prompt_kind.is_command() {
                 state.prompt_config.build_main_prompt(state.reprex.mode)
             } else {
                 // Non-standard prompt from R (menu selection, etc.)
@@ -254,7 +260,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
             arf_libr::process_r_events();
 
             // Track whether we're in a non-standard prompt mode (menu selection, etc.)
-            let is_menu_prompt = !is_r_command_prompt(r_prompt) && !r_prompt.starts_with('+');
+            let is_menu_prompt = prompt_kind.is_other();
 
             match editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => {
@@ -354,7 +360,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                             // command. It must not finalize that command's
                             // history or sponge state merely because formatting
                             // this piece failed.
-                            if formatter_failure_updates_lifecycle(r_prompt) {
+                            if formatter_failure_updates_lifecycle(prompt_kind) {
                                 let history_id = match save_outcome {
                                     Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
                                     _ => None,
@@ -395,7 +401,7 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
                     // Only a top-level command starts a new Reedline history
                     // context. Continuation prompts remain part of the outer
                     // command, so preserve its context until evaluation ends.
-                    if is_r_command_prompt(r_prompt) && !code.trim().is_empty() {
+                    if prompt_kind.is_command() && !code.trim().is_empty() {
                         let history_id = match save_outcome {
                             Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
                             _ => None,
@@ -553,58 +559,77 @@ pub(super) fn read_console_callback(r_prompt: &str) -> Option<String> {
     })
 }
 
-/// Check if the prompt is R's standard command prompt (top-level).
-///
-/// Uses R's call stack depth (sys.nframe()) to determine if we're at the top-level
-/// or if user code is requesting input (e.g., via readline() or menu()).
-///
-/// This approach is more robust than heuristics like checking prompt endings,
-/// because it detects the actual R evaluation context.
-///
-/// Returns true if:
-/// - We're at the top-level (n_frame == 0) AND not a continuation prompt
-///
-/// Returns false if:
-/// - This is a continuation prompt (starts with '+')
-/// - User code is requesting input (n_frame > 0), e.g., readline(), menu()
-///
-/// Reference: This approach is used by ark (Positron's R kernel).
-fn is_r_command_prompt(prompt: &str) -> bool {
-    // Continuation prompts (starting with '+') are NOT command prompts
-    //
-    // TODO: R lets users change this prefix with options(continue = "..."),
-    // and a custom value is then misread as a command prompt. Compare against
-    // R's configured continuation string instead. Every caller of this
-    // function is affected, including IPC request admission.
-    if prompt.starts_with('+') {
-        return false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptKind {
+    Command,
+    Continuation,
+    Other,
+}
+
+impl PromptKind {
+    fn is_command(self) -> bool {
+        matches!(self, Self::Command)
     }
 
-    // Use R's call stack depth to detect if we're at top-level
-    // n_frame == 0 means top-level prompt
-    // n_frame > 0 means user code is requesting input (readline, menu, etc.)
+    fn is_continuation(self) -> bool {
+        matches!(self, Self::Continuation)
+    }
+
+    fn is_other(self) -> bool {
+        matches!(self, Self::Other)
+    }
+}
+
+/// Classify a ReadConsole prompt once per callback.
+///
+/// Continuation status comes directly from R's low-level option lookup. For
+/// every other prompt, call sys.nframe() once to distinguish a top-level command
+/// prompt from input requested by user code (readline(), menu(), browser(), …).
+fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
+    if is_continuation {
+        return PromptKind::Continuation;
+    }
+
     match arf_harp::r_n_frame() {
-        Ok(n_frame) => n_frame == 0,
+        Ok(0) => PromptKind::Command,
+        Ok(_) => PromptKind::Other,
         Err(_) => {
-            // If we can't get n_frame, fall back to heuristic
-            // R's default prompt ends with "> ", menu prompts end with ": "
-            prompt.ends_with("> ")
+            // If R's stack inspection fails, preserve the historical fallback
+            // for the standard prompt and treat other prompts conservatively.
+            if prompt.ends_with("> ") {
+                PromptKind::Command
+            } else {
+                PromptKind::Other
+            }
         }
     }
 }
 
 /// Formatter failures only finalize lifecycle state for top-level commands.
 /// Continuation prompts belong to the outer command and retain its context.
-fn formatter_failure_updates_lifecycle(prompt: &str) -> bool {
-    is_r_command_prompt(prompt)
+fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
+    prompt_kind.is_command()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::formatter_failure_updates_lifecycle;
+    use super::{PromptKind, classify_prompt, formatter_failure_updates_lifecycle};
 
     #[test]
     fn continuation_formatter_failure_keeps_outer_lifecycle_context() {
-        assert!(!formatter_failure_updates_lifecycle("+ "));
+        assert!(!formatter_failure_updates_lifecycle(
+            PromptKind::Continuation
+        ));
+    }
+
+    #[test]
+    fn prompt_classification_prioritizes_low_level_continuation_status() {
+        assert_eq!(classify_prompt("... ", true), PromptKind::Continuation,);
+    }
+
+    #[test]
+    fn prompt_classification_falls_back_for_uninitialized_r() {
+        assert_eq!(classify_prompt("> ", false), PromptKind::Command,);
+        assert_eq!(classify_prompt("Selection: ", false), PromptKind::Other,);
     }
 }

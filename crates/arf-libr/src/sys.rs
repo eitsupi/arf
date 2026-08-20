@@ -44,14 +44,72 @@ use spinner::SPINNER_THREAD;
 #[cfg(test)]
 mod test_utils;
 
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
+
+use crate::SexpType;
 
 #[cfg(unix)]
 use askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_termios};
 use interrupt::AwaitConsoleInputGuard;
 use output::REPREX_SETTINGS;
 
-static mut READ_CONSOLE_CALLBACK: Option<fn(&str) -> Option<String>> = None;
+/// ReadConsole callback receives the raw R prompt and whether it exactly
+/// matches R's current `options(continue)` value.
+type ReadConsoleCallback = fn(&str, bool) -> Option<String>;
+
+static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
+
+const DEFAULT_CONTINUATION_PROMPT: &str = "+ ";
+
+/// Read R's current continuation prompt without evaluating any R code.
+///
+/// This is intentionally performed for every ReadConsole invocation. R code may
+/// change `options(continue)` between prompts, so caching the value would make
+/// prompt classification stale. Any failure to inspect the option falls back to
+/// R's default continuation prompt.
+fn continuation_prompt() -> Option<String> {
+    let lib = crate::r_library().ok()?;
+    let option_name = b"continue\0";
+
+    // SAFETY: R is initialized while ReadConsole is invoked, and option_name is
+    // a valid NUL-terminated string. The returned SEXP is borrowed from R.
+    let option = unsafe {
+        let symbol = (lib.rf_install)(option_name.as_ptr() as *const c_char);
+        (lib.rf_get_option1)(symbol)
+    };
+
+    if option.is_null() {
+        return None;
+    }
+
+    // `options(continue = ...)` must be a character vector with exactly one
+    // element. Treat all other values as malformed and use the default.
+    let is_string = unsafe { (lib.rf_typeof)(option) == SexpType::StrSxp as c_int };
+    if !is_string || unsafe { (lib.rf_length)(option) } != 1 {
+        return None;
+    }
+
+    // SAFETY: The type and length were checked above. R's STRING_ELT and R_CHAR
+    // accessors return borrowed objects valid for this ReadConsole invocation.
+    let chars = unsafe {
+        let element = (lib.string_elt)(option, 0);
+        (lib.r_charsxp)(element)
+    };
+    if chars.is_null() {
+        return None;
+    }
+
+    // R strings are not necessarily valid UTF-8. The console callback accepts
+    // UTF-8, so malformed values use the default rather than panicking.
+    unsafe { CStr::from_ptr(chars).to_str().ok().map(str::to_owned) }
+}
+
+/// Determine whether an R prompt is the configured continuation prompt.
+fn is_continuation_prompt(prompt: &str) -> bool {
+    let configured = continuation_prompt().unwrap_or_else(|| DEFAULT_CONTINUATION_PROMPT.into());
+    prompt == configured
+}
 
 /// Buffer for input that exceeds R's buffer size.
 /// When input is longer than buflen, the remainder is stored here
@@ -88,6 +146,19 @@ pub(super) unsafe extern "C" fn r_read_console(
     #[cfg(unix)]
     recover_pending_termios();
 
+    // Read the option once per invocation and share this result with both the
+    // reprex bookkeeping below and the high-level console callback. This keeps
+    // all prompt classification consistent without evaluating R code.
+    let prompt_str: &str = if prompt.is_null() {
+        ""
+    } else {
+        // SAFETY: prompt is a valid C string from R.
+        unsafe { CStr::from_ptr(prompt) }
+            .to_str()
+            .unwrap_or_default()
+    };
+    let is_continuation = is_continuation_prompt(prompt_str);
+
     // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
     // This runs before the input-wait guard on purpose: no Rust loop pumps R
     // events during the blocking tty read, so the longjmp hazard the guard
@@ -115,15 +186,9 @@ pub(super) unsafe extern "C" fn r_read_console(
         && settings.enabled
         && settings.had_output
     {
-        // Check if this is a main prompt (not continuation)
-        let is_main_prompt = if prompt.is_null() {
-            true
-        } else {
-            // SAFETY: prompt is a valid C string from R
-            let prompt_str = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_string_lossy();
-            // Continuation prompts typically start with "+" or spaces
-            !prompt_str.starts_with('+') && !prompt_str.trim().is_empty()
-        };
+        // Check if this is a main prompt (not continuation). Use the same
+        // option-derived classification passed to the high-level callback.
+        let is_main_prompt = !is_continuation && !prompt_str.trim().is_empty();
 
         if is_main_prompt {
             println!();
@@ -141,23 +206,13 @@ pub(super) unsafe extern "C" fn r_read_console(
         } else {
             drop(pending); // Release lock before callback
 
-            // Get the prompt string
-            let prompt_str: &str = if prompt.is_null() {
-                ""
-            } else {
-                // SAFETY: prompt is a valid C string from R
-                unsafe { std::ffi::CStr::from_ptr(prompt) }
-                    .to_str()
-                    .unwrap_or_default()
-            };
-
             log::debug!("r_read_console: prompt={:?}", prompt_str);
 
             // Call the callback to get new input
             // SAFETY: READ_CONSOLE_CALLBACK is only accessed from this single-threaded context
             if let Some(callback) = unsafe { READ_CONSOLE_CALLBACK } {
                 log::debug!("r_read_console: calling callback");
-                match callback(prompt_str) {
+                match callback(prompt_str, is_continuation) {
                     Some(s) => {
                         log::debug!("r_read_console: got input len={}", s.len());
                         s
@@ -221,9 +276,11 @@ pub(super) unsafe extern "C" fn r_read_console(
 
 /// Set the console read callback.
 ///
-/// The callback receives the prompt and should return the user's input,
-/// or None to signal EOF (exit R).
-pub fn set_read_console_callback(callback: fn(&str) -> Option<String>) {
+/// The callback receives the raw R prompt and a boolean indicating whether it
+/// exactly matches the current `options(continue)` value. The option is read
+/// once for each ReadConsole invocation before the callback is called. The
+/// callback should return the user's input, or None to signal EOF (exit R).
+pub fn set_read_console_callback(callback: ReadConsoleCallback) {
     unsafe {
         READ_CONSOLE_CALLBACK = Some(callback);
     }

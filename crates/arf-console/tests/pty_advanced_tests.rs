@@ -751,6 +751,117 @@ fn test_pty_menu_prompt() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// A custom R continuation option must still be classified as a continuation
+/// by the console. The fake formatter makes the low-level R ReadConsole path
+/// observable despite reedline handling ordinary incomplete input itself.
+#[test]
+#[cfg(unix)]
+fn test_pty_custom_continuation_prompt_round_trip() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = tempfile::tempdir().expect("create temporary test directory");
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).expect("create fake formatter directory");
+    let arity = bin_dir.join("arity");
+    std::fs::write(
+        &arity,
+        r##"#!/bin/sh
+case "$1" in
+  --version) echo 'arity 0.19.1'; exit 0 ;;
+  format)
+    input=$(cat)
+    if [ "$input" = 42 ]; then
+      printf '%s' '1 +'
+    else
+      printf '%s' "$input"
+    fi
+    exit 0
+    ;;
+  *) exit 18 ;;
+esac
+"##,
+    )
+    .expect("write fake formatter");
+    let mut permissions = std::fs::metadata(&arity)
+        .expect("stat fake formatter")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&arity, permissions).expect("make fake formatter executable");
+
+    let config_path = temp_dir.path().join("arf.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[startup]
+reprex = "format"
+
+[reprex]
+formatter = "arity"
+
+[prompt]
+format = "MAIN> "
+continuation = "CONT> "
+"#,
+    )
+    .expect("write test config");
+
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").expect("PATH should be set")
+    );
+    let config_path = config_path.to_string_lossy().into_owned();
+    let mut terminal = Terminal::spawn_with_args_and_env(
+        &["--no-auto-match", "--config", &config_path],
+        &[("PATH", &path)],
+    )
+    .expect("spawn arf with fake formatter");
+
+    terminal.expect("MAIN> ").expect("Should show main prompt");
+
+    terminal
+        .clear_buffer()
+        .expect("Should clear initial prompt output");
+    terminal
+        .send_line("options(continue = '... ')")
+        .expect("Should configure continuation prompt");
+    terminal
+        .expect("MAIN> ")
+        .expect("Should return to the normal prompt after options()");
+
+    terminal
+        .clear_buffer()
+        .expect("Should clear options output before incomplete expression");
+    terminal
+        .send_line("42")
+        .expect("Should send formatter sentinel");
+    terminal
+        .expect("CONT> ")
+        .expect("Should display the configured arf continuation prompt");
+
+    terminal
+        .clear_buffer()
+        .expect("Should clear continuation prompt output");
+    terminal
+        .send_line("2")
+        .expect("Should complete the expression");
+    terminal
+        .expect("[1] 3")
+        .expect("Should evaluate the expression");
+    terminal
+        .expect("MAIN> ")
+        .expect("Should return to the normal prompt after completion");
+
+    terminal
+        .send_line("1 + 1")
+        .expect("Should send a subsequent top-level command");
+    terminal
+        .expect("[1] 2")
+        .expect("Subsequent top-level command should execute");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Test vi mode indicator is displayed correctly at the end of the prompt.
 ///
 /// The vi mode indicator is shown via `render_prompt_indicator()` which ensures
