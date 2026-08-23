@@ -463,17 +463,18 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test that history search replaces the whole auto-matched pair created in search mode.
+/// Test that history search treats its query as literal input.
 ///
 /// Scenario:
 /// 1. Execute `length(c())` to add it to history
 /// 2. Press Ctrl+R to open history search
-/// 3. Type `c(` in the search input, which auto-match expands to `c()` with the cursor before `)`
+/// 3. Type `c(` in the search input; reverse-history search is not an edit buffer
+///    and therefore does not auto-pair the query
 /// 4. Select the `length(c())` history entry
 /// 5. Execute - should run `length(c())`, not the search buffer `c()` or a stale-suffix `length(c()))`
 #[test]
 #[cfg(unix)]
-fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
+fn test_pty_history_menu_search_mode_literal_paren_query() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
 
@@ -496,8 +497,8 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     terminal
         .current_line()
-        .assert_contains("c()")
-        .expect("Auto-match should insert the closing paren before history selection");
+        .assert_contains("c(")
+        .expect("History search should preserve the literal query");
 
     terminal.send("\n").expect("Should select history item");
     std::thread::sleep(std::time::Duration::from_millis(300));

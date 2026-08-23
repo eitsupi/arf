@@ -164,29 +164,3 @@ fn test_buffer_known_empty_condition() {
         "non-empty buffer should not match"
     );
 }
-
-#[test]
-fn test_cursor_at_end_condition() {
-    let condition = CursorAtEnd;
-
-    // Empty buffer: cursor at end
-    let mut state = EditorState::new();
-    assert!(state.cursor_at_end());
-    assert!(condition.check(&state));
-
-    // Buffer with content, cursor at end
-    state.buffer_len = 5;
-    state.cursor_pos = 5;
-    assert!(state.cursor_at_end());
-    assert!(condition.check(&state));
-
-    // Buffer with content, cursor in middle
-    state.cursor_pos = 2;
-    assert!(!state.cursor_at_end());
-    assert!(!condition.check(&state));
-
-    // Buffer with content, cursor at beginning
-    state.cursor_pos = 0;
-    assert!(!state.cursor_at_end());
-    assert!(!condition.check(&state));
-}

@@ -1,8 +1,8 @@
 //! Custom menu wrappers with shadow state synchronization.
 //!
 //! This module provides wrappers for reedline menus that synchronize the shadow
-//! editor state after buffer modifications. This is critical for features like
-//! auto-match and bracket deletion that depend on accurate buffer tracking.
+//! editor state after buffer modifications. This keeps stateful editor features
+//! accurate after completion and history operations.
 //!
 //! ## FunctionAwareMenu
 //! Wraps IdeMenu with:
@@ -44,8 +44,7 @@ impl FunctionAwareMenu {
     ///
     /// This is critical after any operation that modifies the buffer in ways
     /// the shadow tracking system cannot predict (e.g., completion, partial
-    /// completion). Without this sync, auto_match and bracket_delete rules
-    /// will malfunction.
+    /// completion).
     fn sync_editor_state(&self, editor: &Editor) {
         if let Some(state_ref) = &self.editor_state
             && let Ok(mut state) = state_ref.lock()
@@ -197,8 +196,8 @@ impl Menu for FunctionAwareMenu {
 /// History menu wrapper that synchronizes shadow state after selection.
 ///
 /// This wraps reedline's ListMenu to sync the shadow editor state after
-/// a history entry is selected. Without this sync, auto_match and bracket_delete
-/// rules will malfunction after using history completion.
+/// a history entry is selected so other stateful editor features see the
+/// selected buffer immediately.
 pub struct StateSyncHistoryMenu {
     inner: ListMenu,
     /// Shared editor state for shadow tracking synchronization.

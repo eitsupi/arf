@@ -30,8 +30,8 @@ use crossterm::{
 };
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    DefaultHinter, Emacs, HistorySessionId, IdeMenu, ListMenu, MenuBuilder, Reedline, ReedlineMenu,
-    Signal, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
+    AutoPairs, DefaultHinter, Emacs, HistorySessionId, IdeMenu, ListMenu, MenuBuilder, Reedline,
+    ReedlineMenu, Signal, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
     default_vi_normal_keybindings,
 };
 use std::cell::RefCell;
@@ -40,8 +40,8 @@ use std::io;
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::editor::keybindings::{
-    add_auto_match_keybindings, add_common_keybindings, add_key_map_keybindings,
-    add_shell_semicolon_keybinding, wrap_edit_mode_with_conditional_rules,
+    add_common_keybindings, add_key_map_keybindings, add_shell_semicolon_keybinding,
+    wrap_edit_mode_with_conditional_rules,
 };
 use crate::editor::validator::RValidator;
 use banner::{format_banner, format_override_line};
@@ -428,12 +428,27 @@ impl Repl {
         Ok(())
     }
 
+    fn configure_auto_pairs(&self, line_editor: Reedline) -> Reedline {
+        if self.config.editor.auto_match {
+            line_editor.with_auto_pairs(AutoPairs::new([
+                ('(', ')'),
+                ('[', ']'),
+                ('{', '}'),
+                ('\'', '\''),
+                ('"', '"'),
+                ('`', '`'),
+            ]))
+        } else {
+            line_editor
+        }
+    }
+
     /// Run with R's main loop (run_Rmainloop).
     fn run_with_r_mainloop(&self) -> Result<()> {
         // Create line editor with bracketed paste enabled
         // This allows detecting paste operations and prevents auto-match from
         // interfering with pasted text (e.g., pasting "()" won't become "())")
-        let line_editor = Reedline::create().use_bracketed_paste(true);
+        let line_editor = self.configure_auto_pairs(Reedline::create().use_bracketed_paste(true));
 
         // Set up SQLite-backed history for R mode
         let r_history_handle = self.prepared_r_history();
@@ -445,9 +460,6 @@ impl Repl {
             EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
-                if self.config.editor.auto_match {
-                    add_auto_match_keybindings(&mut insert_keybindings);
-                }
                 if self.config.experimental.shell_semicolon_shortcut {
                     add_shell_semicolon_keybinding(&mut insert_keybindings);
                 }
@@ -456,7 +468,6 @@ impl Repl {
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     vi,
                     editor_state.clone(),
-                    self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
                     self.config.experimental.shell_semicolon_shortcut,
                 ))
@@ -464,9 +475,6 @@ impl Repl {
             EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
-                if self.config.editor.auto_match {
-                    add_auto_match_keybindings(&mut keybindings);
-                }
                 if self.config.experimental.shell_semicolon_shortcut {
                     add_shell_semicolon_keybinding(&mut keybindings);
                 }
@@ -475,7 +483,6 @@ impl Repl {
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     emacs,
                     editor_state.clone(),
-                    self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
                     self.config.experimental.shell_semicolon_shortcut,
                 ))
@@ -539,7 +546,6 @@ impl Repl {
         ));
 
         // Set up syntax highlighter (R code + meta commands)
-        // Pass editor_state so highlighter can sync shadow state on every redraw
         let highlighter = CombinedHighlighter::new(
             self.config.colors.clone(),
             self.config.editor.highlight_matching_bracket,
@@ -720,7 +726,7 @@ impl Repl {
     /// Run without R (standalone mode).
     fn run_standalone(&self) -> Result<()> {
         // Create line editor with bracketed paste enabled
-        let line_editor = Reedline::create().use_bracketed_paste(true);
+        let line_editor = self.configure_auto_pairs(Reedline::create().use_bracketed_paste(true));
 
         // Set up SQLite-backed history for R mode
         let history_handle = self.prepared_r_history();
@@ -743,9 +749,6 @@ impl Repl {
             EditorMode::Vi => {
                 let mut insert_keybindings = default_vi_insert_keybindings();
                 add_common_keybindings(&mut insert_keybindings);
-                if self.config.editor.auto_match {
-                    add_auto_match_keybindings(&mut insert_keybindings);
-                }
                 if self.config.experimental.shell_semicolon_shortcut {
                     add_shell_semicolon_keybinding(&mut insert_keybindings);
                 }
@@ -754,7 +757,6 @@ impl Repl {
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     vi,
                     editor_state.clone(),
-                    self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
                     self.config.experimental.shell_semicolon_shortcut,
                 ))
@@ -762,9 +764,6 @@ impl Repl {
             EditorMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
                 add_common_keybindings(&mut keybindings);
-                if self.config.editor.auto_match {
-                    add_auto_match_keybindings(&mut keybindings);
-                }
                 if self.config.experimental.shell_semicolon_shortcut {
                     add_shell_semicolon_keybinding(&mut keybindings);
                 }
@@ -773,7 +772,6 @@ impl Repl {
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     emacs,
                     editor_state.clone(),
-                    self.config.editor.auto_match,
                     self.config.experimental.completion_min_chars,
                     self.config.experimental.shell_semicolon_shortcut,
                 ))

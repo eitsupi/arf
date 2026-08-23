@@ -108,6 +108,7 @@ vt100 = "0.16"
 # https://github.com/crossterm-rs/crossterm/pull/1030
 [patch.crates-io]
 crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "5c56270f3347f1906e15a383d5342e875f1b3b1d" }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "b13b73cb8b8d4cd6cb0b6985d7c881a5eaeac8b7" }
 
 # The profile that 'dist' will build with
 [profile.dist]
