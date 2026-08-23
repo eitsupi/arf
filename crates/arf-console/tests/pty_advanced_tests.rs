@@ -516,6 +516,181 @@ fn test_pty_history_menu_search_mode_literal_paren_query() {
     terminal.quit().expect("Should quit cleanly");
 }
 
+/// Regression test for deleting an empty quote pair after history navigation.
+///
+/// History recall changes the line buffer outside the edit-mode event stream.
+/// After navigating Up and Down, Backspace inside a recalled empty pair must
+/// remove both delimiters rather than only one of them or leave stale state.
+#[test]
+#[cfg(unix)]
+fn test_pty_history_recall_empty_quote_pair_backspace() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send_line("\"\"")
+        .expect("Should enter an empty quote pair");
+    terminal
+        .expect(r#"[1] """#)
+        .expect("The quote pair should be evaluated and added to history");
+    terminal
+        .send_line("1")
+        .expect("Should add a second history entry");
+    terminal
+        .expect("[1] 1")
+        .expect("Should evaluate the history marker");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the latest history entry");
+    terminal
+        .current_line()
+        .assert_contains("1")
+        .expect("Up should recall the latest history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the empty quote pair");
+    terminal
+        .current_line()
+        .assert_contains("\"\"")
+        .expect("The recalled pair must be visible before deletion");
+
+    terminal
+        .send("\x1b[B")
+        .expect("Should navigate down in history");
+    terminal
+        .current_line()
+        .assert_contains("1")
+        .expect("Down should recall the newer history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should navigate back to the quote pair");
+    terminal
+        .current_line()
+        .assert_contains("\"\"")
+        .expect("The quote pair must survive the Up/Down round trip");
+
+    terminal
+        .send("\x1b[D")
+        .expect("Should move inside the quote pair");
+    terminal
+        .send("\x7f")
+        .expect("Should backspace inside the quote pair");
+
+    // If only one delimiter was deleted, this expression would retain a
+    // quote and fail. Successful evaluation proves both delimiters are gone.
+    terminal
+        .send_line("1+1")
+        .expect("Should evaluate after pair deletion");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove the recalled empty quote pair");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Regression test for deleting an empty bracket pair after history navigation.
+#[test]
+#[cfg(unix)]
+fn test_pty_history_recall_empty_bracket_pair_backspace() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    terminal
+        .send_line("{}")
+        .expect("Should enter an empty bracket pair");
+    terminal
+        .expect("NULL")
+        .expect("Should evaluate the empty bracket pair");
+    terminal
+        .wait_for_prompt()
+        .expect("Should finish the bracket expression");
+    terminal
+        .send_line("1")
+        .expect("Should add a second history entry");
+    terminal
+        .expect("[1] 1")
+        .expect("Should evaluate the history marker");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the latest history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the empty bracket pair");
+    terminal
+        .current_line()
+        .assert_contains("{}")
+        .expect("The recalled empty bracket pair must be visible");
+    terminal
+        .send("\x1b[B")
+        .expect("Should navigate down in history");
+    terminal
+        .send("\x1b[A")
+        .expect("Should navigate back to the bracket pair");
+    terminal
+        .current_line()
+        .assert_contains("{}")
+        .expect("The bracket pair must survive the Up/Down round trip");
+
+    terminal
+        .send("\x1b[D")
+        .expect("Should move inside the bracket pair");
+    terminal
+        .send("\x7f")
+        .expect("Should backspace inside the bracket pair");
+    terminal
+        .send_line("1+1")
+        .expect("Should evaluate after pair deletion");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove the recalled empty bracket pair");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Regression test for Backspace immediately after an inserted newline inside
+/// an auto-matched pair. It must remove only the newline and retain the closer.
+#[test]
+#[cfg(unix)]
+fn test_pty_backspace_after_newline_keeps_closer() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    terminal
+        .send("(")
+        .expect("Should create an empty parenthesis pair");
+    terminal
+        .current_line()
+        .assert_contains("()")
+        .expect("The opening parenthesis should create a visible pair");
+
+    // Shift+Enter is bound to Reedline's InsertNewline event.
+    terminal
+        .send("\x1b[13;2u")
+        .expect("Should insert a newline inside the pair");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    terminal
+        .send("\x7f")
+        .expect("Should backspace the inserted newline");
+
+    // A retained closer makes this a complete parenthesized expression.
+    terminal
+        .send_line("1+1")
+        .expect("Should type inside the pair");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove only the newline and retain the closer");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
 /// Regression test: backtick input should not crash.
 /// Sending a backtick (which becomes `` with auto-match) should produce an
 /// R error about zero-length variable name, not crash with RefCell double borrow.
