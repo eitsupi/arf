@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Vi pending character motions now correctly accept `v` as the motion character instead of entering visual mode.
+- Vi pending character motions now correctly accept `v` as the motion character instead of entering visual mode (#329).
 
 ## [0.5.0] - 2026-08-19
 
