@@ -609,36 +609,38 @@ fn test_pty_multiline_raw_string_input() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test raw string input with auto-match enabled - KNOWN ISSUE.
+/// Test raw string input with auto-match enabled.
 ///
-/// Auto-match interferes with R raw string syntax (`r"(...)"`).
-/// When typing `"` after `r`, auto-match inserts `""` which breaks raw string input.
-///
-/// Workaround: Use `--no-auto-match` flag or paste raw strings via bracketed paste.
+/// The highlighter suppresses the initial quote pair after an R raw-string
+/// prefix, allowing the following brackets and closing quote to be typed
+/// normally.
 #[test]
 #[cfg(unix)]
-#[ignore] // Known issue: auto-match doesn't support raw strings
 fn test_pty_raw_string_with_auto_match() {
     // Enable auto-match (default behavior)
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    // Type r"()" - with auto-match, this will fail because " inserts ""
+    // Type a dashed raw string containing an internal quote; the raw-string
+    // prefix prevents the opening quote from inserting a second quote, and
+    // the raw scanner keeps the body quote from being paired as well.
     terminal
-        .send_line(r#"x <- r"()""#)
-        .expect("Should send raw string");
+        .send_line(r#"x <- r"---(hello "world")---""#)
+        .expect("Should send raw string with an internal quote");
 
     // Wait for prompt (assignment doesn't produce output)
     terminal
         .clear_and_expect("> ")
         .expect("Should show prompt after assignment");
 
-    // The variable should exist and contain an empty string
-    terminal.send_line("x").expect("Should check x");
+    // The variable should preserve the raw body and its internal quote.
     terminal
-        .clear_and_expect(r#"[1] """#)
-        .expect("x should be empty string (content between parens is empty)");
+        .send_line("nchar(x)")
+        .expect("Should check raw string length");
+    terminal
+        .clear_and_expect("[1] 13")
+        .expect("x should preserve the raw body and its internal quote");
 
     terminal.quit().expect("Should quit cleanly");
 }
