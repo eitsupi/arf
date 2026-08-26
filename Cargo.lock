@@ -155,7 +155,7 @@ dependencies = [
  "r-vignette-to-md",
  "rd-ast",
  "rd-helpdb",
- "rd-rds",
+ "rd-rds 0.4.0",
  "rd-source",
  "rd2qmd-core",
  "tempfile",
@@ -1634,7 +1634,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1271da631b9dbdeac3d23e1666c066164ec8eb620cb8504310a0bcd9948b4c0b"
 dependencies = [
- "rd-rds",
+ "rd-rds 0.3.1",
  "serde",
 ]
 
@@ -1645,7 +1645,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6116acd31bf38ad02d774c6f530336b1e3baba51b3f1b7e0d99339e22543479d"
 dependencies = [
  "flate2",
- "rd-rds",
+ "rd-rds 0.3.1",
  "thiserror 2.0.20",
 ]
 
@@ -1654,6 +1654,18 @@ name = "rd-rds"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17ee44999c4d2eee2b81696a21b12f1c47d7e13d3d709222f5e90ad51ca61200"
+dependencies = [
+ "bzip2",
+ "flate2",
+ "ruzstd",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "rd-rds"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf9515c75d24b41617a4863bd78bca58ac1b2db5df63adf500d553e6b653e79c"
 dependencies = [
  "bzip2",
  "flate2",
