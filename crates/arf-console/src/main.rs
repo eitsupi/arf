@@ -629,8 +629,10 @@ fn decode_os_string(encoded: &str) -> Result<OsString, String> {
             return Err("decoded value has an odd number of bytes".to_string());
         }
         let wide = bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u16::from_ne_bytes(*chunk))
             .collect::<Vec<_>>();
         Ok(OsString::from_wide(&wide))
     }
