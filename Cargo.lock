@@ -153,7 +153,7 @@ dependencies = [
  "log",
  "once_cell",
  "r-vignette-to-md",
- "rd-ast",
+ "rd-ast 0.4.0",
  "rd-helpdb",
  "rd-rds",
  "rd-source",
@@ -1634,15 +1634,24 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1271da631b9dbdeac3d23e1666c066164ec8eb620cb8504310a0bcd9948b4c0b"
 dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "rd-ast"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32fe90dac6ea0a31cbb9800064377727ad5a9a2314fdf2574fc3faae31b0ca8f"
+dependencies = [
  "rd-rds",
  "serde",
 ]
 
 [[package]]
 name = "rd-helpdb"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6116acd31bf38ad02d774c6f530336b1e3baba51b3f1b7e0d99339e22543479d"
+checksum = "0da286c76193458b2127640b5059e99dd8827a5b4a825aec4665820e656c3242"
 dependencies = [
  "flate2",
  "rd-rds",
@@ -1651,9 +1660,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17ee44999c4d2eee2b81696a21b12f1c47d7e13d3d709222f5e90ad51ca61200"
+checksum = "bf9515c75d24b41617a4863bd78bca58ac1b2db5df63adf500d553e6b653e79c"
 dependencies = [
  "bzip2",
  "flate2",
@@ -1663,11 +1672,11 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7820ec265c6daf795863a24a14f648b40f2f70327e641f404b3927047693dc13"
+checksum = "ec2dddcad3095505c388f73e0d5020c3af72d08b0ece47a409250b5b99917e88"
 dependencies = [
- "rd-ast",
+ "rd-ast 0.4.0",
 ]
 
 [[package]]
@@ -1676,7 +1685,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b790fa2a3ec7463dc76158ed4dd6cf94b92e878046c3b30203b049d5ceda4e6"
 dependencies = [
- "rd-ast",
+ "rd-ast 0.3.1",
  "rd2qmd-mdast",
  "serde",
  "serde_json",
