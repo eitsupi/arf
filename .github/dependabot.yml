@@ -33,3 +33,7 @@ updates:
         patterns:
           - "reedline"
           - "rusqlite"
+      r-documentation-rs:
+        patterns:
+          - "rd-*"
+          - rd2qmd
