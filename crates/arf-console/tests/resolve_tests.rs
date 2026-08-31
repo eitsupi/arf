@@ -368,6 +368,53 @@ r_version = "4.4.2"
 
 #[test]
 #[cfg(unix)]
+fn resolve_project_file_version_request_reports_json_source() {
+    let temp = write_uninstalled_project_override_fixture();
+    std::fs::write(
+        temp.path().join("arf.toml"),
+        r#"[experimental]
+r_source_overrides = [
+  { type = "json-key", file = "renv.lock", key = "R.Version" },
+]
+
+[startup]
+r_source = { path = "fallback-r-home" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("renv.lock"),
+        r#"{"R":{"Version":"4.4.2"}}"#,
+    )
+    .unwrap();
+    let environment = FakeRigEnvironment::new();
+
+    let output = environment
+        .command()
+        .args(["r", "resolve", "--config", "arf.toml"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["kind"], "version_request");
+    assert_selected_by_nullable_fields_are_present(&value);
+    assert!(value["selected_by"]["requested_r_home"].is_null());
+    assert_eq!(value["selected_by"]["requested_version"], "4.4.2");
+    assert_eq!(value["selected_by"]["source"]["kind"], "project_file");
+    assert!(value["selected_by"]["source"]["name"].is_null());
+    assert_descriptor_path(&value, &value["selected_by"]["source"]["path"], "renv.lock");
+    assert_eq!(value["selected_by"]["source"]["format"], "json");
+    assert_eq!(value["selected_by"]["source"]["key"], "R.Version");
+    insta::assert_snapshot!(
+        "resolve_project_file_version_request_reports_json_source",
+        normalize_descriptor(&value)
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn resolve_project_file_version_request_reports_text_source() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(

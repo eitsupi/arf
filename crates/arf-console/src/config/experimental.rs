@@ -16,6 +16,8 @@ pub enum RSourceOverride {
     VersionFile { file: PathBuf },
     /// Read the R version from a TOML key.
     TomlKey { file: PathBuf, key: String },
+    /// Read the R version from a JSON key.
+    JsonKey { file: PathBuf, key: String },
 }
 
 /// Experimental features configuration.
@@ -519,6 +521,7 @@ shell_semicolon_shortcut = true
 [experimental]
 r_source_overrides = [
   { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { type = "json-key", file = "renv.lock", key = "R.Version" },
   { type = "version-file", file = ".r-version" },
   { type = "pixi" },
 ]
@@ -532,10 +535,15 @@ r_source_overrides = [
         ));
         assert!(matches!(
             &config.experimental.r_source_overrides[1],
+            RSourceOverride::JsonKey { file, key }
+                if file == &PathBuf::from("renv.lock") && key == "R.Version"
+        ));
+        assert!(matches!(
+            &config.experimental.r_source_overrides[2],
             RSourceOverride::VersionFile { file } if file == &PathBuf::from(".r-version")
         ));
         assert!(matches!(
-            config.experimental.r_source_overrides[2],
+            config.experimental.r_source_overrides[3],
             RSourceOverride::Pixi
         ));
     }

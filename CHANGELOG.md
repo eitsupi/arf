@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** Opt-in `json-key` R source override provider for reading a version from JSON files such as `renv.lock` (`{ type = "json-key", file = "renv.lock", key = "R.Version" }`) (#321).
+
 ### Fixed
 
 - Vi pending character motions now correctly accept `v` as the motion character instead of entering visual mode (#329).

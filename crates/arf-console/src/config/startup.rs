@@ -92,7 +92,7 @@ pub struct RSourceOverrideInfo {
     pub provider: String,
     /// The file read by the provider, if any.
     pub file: Option<PathBuf>,
-    /// The TOML key read by the provider, if any.
+    /// The key read by the provider, if any.
     pub key: Option<String>,
     /// The version specification read from the provider.
     pub requested_version: String,

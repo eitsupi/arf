@@ -194,6 +194,79 @@ where
                     }
                 }
             }
+            RSourceOverride::JsonKey { file, key } => {
+                if !is_bare_filename(file) {
+                    evaluated_provider = true;
+                    diagnostics.push(invalid_override_file_warning(provider, file));
+                    continue;
+                }
+                let path = match resolve_override_path(file, &mut base_dir) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        evaluated_provider = true;
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to determine the current directory for R source override file {}: {error}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
+                        continue;
+                    }
+                };
+                match rversion::read_json_key(&path, key) {
+                    Ok(version) => {
+                        evaluated_provider = true;
+                        version
+                    }
+                    Err(error) if error.is_not_found() => {
+                        log::debug!("R source override file {} is not present", file.display());
+                        continue;
+                    }
+                    Err(
+                        rversion::JsonKeyError::MissingKey(_)
+                        | rversion::JsonKeyError::NotString(_),
+                    ) => {
+                        evaluated_provider = true;
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: {}:{} does not contain the configured R version key; trying the next R source override.",
+                                file.display(),
+                                key
+                            ),
+                            Some(file.clone()),
+                        ));
+                        continue;
+                    }
+                    Err(rversion::JsonKeyError::Parse(_)) => {
+                        evaluated_provider = true;
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to parse R source override file {}; trying the next R source override.",
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
+                        continue;
+                    }
+                    Err(error) => {
+                        evaluated_provider = true;
+                        diagnostics.push(warning(
+                            "r_source_override.value_invalid",
+                            format!(
+                                "Warning: Failed to read R version from JSON key '{}' in {}: {error}; trying the next R source override.",
+                                key,
+                                file.display()
+                            ),
+                            Some(file.clone()),
+                        ));
+                        continue;
+                    }
+                }
+            }
         };
 
         let trimmed_version = version.trim().to_owned();
@@ -381,21 +454,24 @@ fn override_provider_name(source: &RSourceOverride) -> &'static str {
         RSourceOverride::Pixi => "pixi",
         RSourceOverride::VersionFile { .. } => "version-file",
         RSourceOverride::TomlKey { .. } => "toml-key",
+        RSourceOverride::JsonKey { .. } => "json-key",
     }
 }
 
 fn override_file(source: &RSourceOverride) -> Option<std::path::PathBuf> {
     match source {
         RSourceOverride::Pixi => None,
-        RSourceOverride::VersionFile { file } | RSourceOverride::TomlKey { file, .. } => {
-            Some(file.clone())
-        }
+        RSourceOverride::VersionFile { file }
+        | RSourceOverride::TomlKey { file, .. }
+        | RSourceOverride::JsonKey { file, .. } => Some(file.clone()),
     }
 }
 
 fn override_key(source: &RSourceOverride) -> Option<String> {
     match source {
-        RSourceOverride::TomlKey { key, .. } => Some(key.clone()),
+        RSourceOverride::TomlKey { key, .. } | RSourceOverride::JsonKey { key, .. } => {
+            Some(key.clone())
+        }
         RSourceOverride::Pixi | RSourceOverride::VersionFile { .. } => None,
     }
 }
@@ -405,6 +481,7 @@ fn override_location(source: &RSourceOverride) -> String {
         RSourceOverride::Pixi => "pixi".to_owned(),
         RSourceOverride::VersionFile { file } => file.display().to_string(),
         RSourceOverride::TomlKey { file, key } => format!("{}:{}", file.display(), key),
+        RSourceOverride::JsonKey { file, key } => format!("{}:{}", file.display(), key),
     }
 }
 
@@ -999,6 +1076,149 @@ mod r_source_override_tests {
     }
 
     #[test]
+    fn json_key_resolution_uses_nested_string_and_reports_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("renv.lock"), r#"{"R":{"Version":"4.4"}}"#).unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::JsonKey {
+                file: "renv.lock".into(),
+                key: "R.Version".to_string(),
+            }],
+            Some(temp.path()),
+            || Ok(()),
+            || Ok(vec![rig_version("4.4.2")]),
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                Ok(ResolvedRSource {
+                    status: RSourceStatus::Rig {
+                        version: versions[0].version.clone(),
+                        override_info: None,
+                    },
+                    r_home: Some(PathBuf::from("/tmp/r-home")),
+                })
+            },
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Applied { info, .. } => {
+                assert_eq!(info.provider, "json-key");
+                assert_eq!(info.file, Some(PathBuf::from("renv.lock")));
+                assert_eq!(info.key.as_deref(), Some("R.Version"));
+                assert_eq!(info.requested_version, "4.4");
+            }
+            OverrideResolution::Fallback { .. } => {
+                panic!("the JSON key provider should be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn json_key_missing_value_falls_through_to_next_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("renv.lock"), r#"{"R":{}}"#).unwrap();
+        let second_file = Path::new("fallback.r-version").to_path_buf();
+        std::fs::write(temp.path().join(&second_file), "4.4.2\n").unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[
+                RSourceOverride::JsonKey {
+                    file: "renv.lock".into(),
+                    key: "R.Version".to_string(),
+                },
+                RSourceOverride::VersionFile {
+                    file: second_file.clone(),
+                },
+            ],
+            Some(temp.path()),
+            || Ok(()),
+            || Ok(vec![rig_version("4.4.2")]),
+            |selected, versions| {
+                assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                Ok(ResolvedRSource {
+                    status: RSourceStatus::Rig {
+                        version: versions[0].version.clone(),
+                        override_info: None,
+                    },
+                    r_home: Some(PathBuf::from("/tmp/r-home")),
+                })
+            },
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Applied {
+                info, diagnostics, ..
+            } => {
+                assert_eq!(info.provider, "version-file");
+                assert_eq!(info.file, Some(second_file));
+                assert_eq!(diagnostics.len(), 1);
+                assert!(diagnostics[0].message.contains("renv.lock:R.Version"));
+            }
+            OverrideResolution::Fallback { .. } => {
+                panic!("the fallback provider should be applied")
+            }
+        }
+    }
+
+    #[test]
+    fn json_key_value_errors_fall_through_to_next_provider() {
+        for (name, contents) in [
+            ("missing", r#"{"R":{}}"#),
+            ("non-string", r#"{"R":{"Version":4.4}}"#),
+            ("parse", r#"{"R":{"Version":"4.4"}"#),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            std::fs::write(temp.path().join("renv.lock"), contents).unwrap();
+            std::fs::write(temp.path().join("fallback.r-version"), "4.4.2\n").unwrap();
+
+            let result = setup_r_via_overrides_with(
+                &[
+                    RSourceOverride::JsonKey {
+                        file: "renv.lock".into(),
+                        key: "R.Version".to_string(),
+                    },
+                    RSourceOverride::VersionFile {
+                        file: "fallback.r-version".into(),
+                    },
+                ],
+                Some(temp.path()),
+                || Ok(()),
+                || Ok(vec![rig_version("4.4.2")]),
+                |selected, versions| {
+                    assert_eq!(selected, &semver::Version::new(4, 4, 2));
+                    Ok(ResolvedRSource {
+                        status: RSourceStatus::Rig {
+                            version: versions[0].version.clone(),
+                            override_info: None,
+                        },
+                        r_home: Some(PathBuf::from("/tmp/r-home")),
+                    })
+                },
+            )
+            .unwrap();
+
+            match result {
+                OverrideResolution::Applied {
+                    info, diagnostics, ..
+                } => {
+                    assert_eq!(info.provider, "version-file", "case: {name}");
+                    assert_eq!(diagnostics.len(), 1, "case: {name}");
+                    if name == "parse" {
+                        assert!(diagnostics[0].message.contains("Failed to parse"));
+                    } else {
+                        assert!(diagnostics[0].message.contains("renv.lock:R.Version"));
+                    }
+                }
+                OverrideResolution::Fallback { .. } => {
+                    panic!("the fallback provider should be applied for {name}")
+                }
+            }
+        }
+    }
+
+    #[test]
     fn overlong_version_file_value_is_not_disclosed_in_diagnostic() {
         let temp = tempfile::tempdir().unwrap();
         let marker = "4".repeat(300);
@@ -1063,14 +1283,14 @@ mod r_source_override_tests {
     fn invalid_version_markers_are_not_disclosed_for_file_providers() {
         let marker = "SUPER-SECRET-TOKEN-abc123";
 
-        for provider in ["version-file", "toml-key"] {
+        for provider in ["version-file", "toml-key", "json-key"] {
             let temp = tempfile::tempdir().unwrap();
             let overrides = if provider == "version-file" {
                 std::fs::write(temp.path().join("project.r-version"), marker).unwrap();
                 vec![RSourceOverride::VersionFile {
                     file: "project.r-version".into(),
                 }]
-            } else {
+            } else if provider == "toml-key" {
                 std::fs::write(
                     temp.path().join("rproject.toml"),
                     format!("[project]\nr_version = \"{marker}\"\n"),
@@ -1079,6 +1299,16 @@ mod r_source_override_tests {
                 vec![RSourceOverride::TomlKey {
                     file: "rproject.toml".into(),
                     key: "project.r_version".to_string(),
+                }]
+            } else {
+                std::fs::write(
+                    temp.path().join("renv.lock"),
+                    format!(r#"{{"R":{{"Version":"{marker}"}}}}"#),
+                )
+                .unwrap();
+                vec![RSourceOverride::JsonKey {
+                    file: "renv.lock".into(),
+                    key: "R.Version".to_string(),
                 }]
             };
 
@@ -1141,22 +1371,62 @@ mod r_source_override_tests {
     }
 
     #[test]
+    fn malformed_json_does_not_disclose_file_contents_in_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = "SUPER-SECRET-JSON-CONTENTS";
+        std::fs::write(
+            temp.path().join("renv.lock"),
+            format!(r#"{{"R":{{"Version":"{marker}"}}"#),
+        )
+        .unwrap();
+
+        let result = setup_r_via_overrides_with(
+            &[RSourceOverride::JsonKey {
+                file: "renv.lock".into(),
+                key: "R.Version".to_string(),
+            }],
+            Some(temp.path()),
+            || panic!("rig should not be queried for malformed JSON"),
+            || panic!("installed versions should not be queried for malformed JSON"),
+            |_, _| panic!("version resolution should not be attempted"),
+        )
+        .unwrap();
+
+        match result {
+            OverrideResolution::Fallback { diagnostics } => {
+                let diagnostics = diagnostic_text(&diagnostics);
+                assert!(diagnostics.contains(
+                    "Warning: Failed to parse R source override file renv.lock; trying the next R source override."
+                ));
+                assert!(!diagnostics.contains(marker));
+            }
+            OverrideResolution::Applied { .. } => {
+                panic!("malformed JSON must not be applied")
+            }
+        }
+    }
+
+    #[test]
     fn invalid_override_filenames_are_skipped_with_diagnostics() {
         let invalid_files = ["../x", "sub/x", r"a\b", "/absolute", "C:foo", ".", "..", ""];
 
-        for provider in ["version-file", "toml-key"] {
+        for provider in ["version-file", "toml-key", "json-key"] {
             for invalid_file in invalid_files {
                 let temp = tempfile::tempdir().unwrap();
                 let valid_file = if provider == "version-file" {
                     PathBuf::from("valid.r-version")
-                } else {
+                } else if provider == "toml-key" {
                     PathBuf::from("valid.toml")
+                } else {
+                    PathBuf::from("valid.json")
                 };
                 let valid_path = temp.path().join(&valid_file);
                 if provider == "version-file" {
                     std::fs::write(valid_path, "4.4.2\n").unwrap();
-                } else {
+                } else if provider == "toml-key" {
                     std::fs::write(valid_path, "[project]\nr_version = \"4.4.2\"\n").unwrap();
+                } else {
+                    std::fs::write(valid_path, r#"{"R":{"Version":"4.4.2"}}"#).unwrap();
                 }
 
                 let invalid = PathBuf::from(invalid_file);
@@ -1167,7 +1437,7 @@ mod r_source_override_tests {
                             file: valid_file.clone(),
                         },
                     ]
-                } else {
+                } else if provider == "toml-key" {
                     vec![
                         RSourceOverride::TomlKey {
                             file: invalid,
@@ -1176,6 +1446,17 @@ mod r_source_override_tests {
                         RSourceOverride::TomlKey {
                             file: valid_file.clone(),
                             key: "project.r_version".to_string(),
+                        },
+                    ]
+                } else {
+                    vec![
+                        RSourceOverride::JsonKey {
+                            file: invalid,
+                            key: "R.Version".to_string(),
+                        },
+                        RSourceOverride::JsonKey {
+                            file: valid_file.clone(),
+                            key: "R.Version".to_string(),
                         },
                     ]
                 };
