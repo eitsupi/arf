@@ -843,7 +843,7 @@ Abbreviations are matched against the word immediately to the left of the cursor
 Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
 
 > [!IMPORTANT]
-> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file` and `toml-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
+> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file`, `toml-key`, and `json-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
 
 Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
 
@@ -858,6 +858,7 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
 | `type = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
 | `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
+| `type = "json-key"` | — | Reads a string version specification from the dot-separated JSON key in the `file` and `key` fields. |
 | `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
 
 For example, [rv](https://a2-ai.github.io/rv-docs/) stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
@@ -896,7 +897,27 @@ r_version = "4.4"
 
 With `key = "project.r_version"`, arf looks up the `project` table and reads its `r_version` field. The value must be a TOML string; any other type is treated as an error.
 
-**Version strings read by `version-file` and `toml-key` use the version specifications above.** These providers accept exact or partial numbers and ranges, and select the newest installed version that matches. `devel` and `release` are recognised names, but named selectors are not supported by the R source override path.
+`json-key` parses `file` as JSON and follows `key` as a dot-separated path through its objects. For example, an `renv.lock` file contains the recorded R version near its top level:
+
+```json
+{
+  "R": {
+    "Version": "4.4.1",
+    "Repositories": []
+  }
+}
+```
+
+With `key = "R.Version"`, arf reads the string under `R.Version`. The value must be a JSON string; arrays, array indexes, and escaped literal dots are not supported. This provider is fully opt-in; arf does not detect `renv.lock` automatically. A recorded `R.Version` is the version captured at the time of the snapshot, so updating the lockfile can change which R arf selects. Use this configuration only when that behavior is desired (and, when appropriate, use `renv::settings$r.version("4.4.1")` to intentionally control the recorded value):
+
+```toml
+[experimental]
+r_source_overrides = [
+  { type = "json-key", file = "renv.lock", key = "R.Version" },
+]
+```
+
+**Version strings read by `version-file`, `toml-key`, and `json-key` use the version specifications above.** These providers accept exact or partial numbers and ranges, and select the newest installed version that matches. `devel` and `release` are recognised names, but named selectors are not supported by the R source override path.
 
 **Who performs the matching:** arf runs rig only to check that it is there (`rig --version`) and to list what is installed (`rig list --json`). It then matches the specification against that list itself and asks the selected installation's R binary for its `R_HOME`. rig never sees the specification, so it is arf that decides what `4.4` means.
 

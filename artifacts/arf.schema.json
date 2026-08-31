@@ -1959,6 +1959,27 @@
             "file",
             "key"
           ]
+        },
+        {
+          "description": "Read the R version from a JSON key.",
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "json-key"
+            }
+          },
+          "required": [
+            "type",
+            "file",
+            "key"
+          ]
         }
       ]
     },
