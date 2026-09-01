@@ -545,6 +545,7 @@ fn run() -> Result<()> {
 }
 
 /// Resolve a CLI bind path while the process still has its original cwd.
+#[cfg(unix)]
 fn absolute_ipc_bind_path(path: &OsStr) -> OsString {
     let path = PathBuf::from(path);
     if is_effective_ipc_bind_path(&path) {
@@ -554,11 +555,8 @@ fn absolute_ipc_bind_path(path: &OsStr) -> OsString {
     }
 }
 
+#[cfg(unix)]
 fn is_effective_ipc_bind_path(path: &std::path::Path) -> bool {
-    #[cfg(windows)]
-    if path.as_os_str().to_string_lossy().starts_with(r"\\.\pipe\") {
-        return true;
-    }
     path.is_absolute()
 }
 

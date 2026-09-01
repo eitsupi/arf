@@ -105,7 +105,11 @@ fn test_pty_restart_preserves_pid_file_ownership() {
         path_from_changed_dir, pid_path,
         "The relative PID argument must resolve differently after setwd"
     );
-    let socket_dir = tempfile::tempdir().expect("Should create a temp socket directory");
+    // Keep the socket under the test's initial directory. macOS limits the
+    // length of Unix socket addresses, and the system temp directory can have
+    // a much longer runner-specific prefix than this workspace path.
+    let socket_dir =
+        tempfile::tempdir_in(&initial_dir).expect("Should create a temp socket directory");
     let socket_path = socket_dir.path().join("custom.sock");
     let _ = std::fs::remove_file(&socket_path);
     let relative_socket_path = relative_path_from(&initial_dir, &socket_path);

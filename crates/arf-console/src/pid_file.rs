@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 /// The only restart capability carried through the environment is the
 /// inherited PID-file descriptor number. The authoritative path comes from
 /// the normalized argv, never from an environment value.
+#[cfg(unix)]
 pub(crate) const RESTART_PID_FD_ENV: &str = "_ARF_INTERNAL_RESTART_PID_FD";
 
 #[cfg(unix)]
@@ -21,21 +22,20 @@ static INITIAL_PID_FILE_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock
 /// Consume the restart fd carrier before R or any child process can observe
 /// it. Parsing does not acquire or close the descriptor.
 pub(crate) fn capture_restart_context() {
-    #[cfg(not(unix))]
-    return;
-
     #[cfg(unix)]
-    // SAFETY: called during single-threaded process startup, before R and its
-    // threads are initialized.
-    let fd = unsafe {
-        let value = std::env::var_os(RESTART_PID_FD_ENV);
-        std::env::remove_var(RESTART_PID_FD_ENV);
-        value
-            .and_then(|value| value.to_str()?.parse::<std::os::unix::io::RawFd>().ok())
-            .filter(|fd| *fd >= 3)
-    };
+    {
+        // SAFETY: called during single-threaded process startup, before R and
+        // its threads are initialized.
+        let fd = unsafe {
+            let value = std::env::var_os(RESTART_PID_FD_ENV);
+            std::env::remove_var(RESTART_PID_FD_ENV);
+            value
+                .and_then(|value| value.to_str()?.parse::<std::os::unix::io::RawFd>().ok())
+                .filter(|fd| *fd >= 3)
+        };
 
-    let _ = INHERITED_PID_FD.set(fd);
+        let _ = INHERITED_PID_FD.set(fd);
+    }
 }
 
 /// Resolve the configured path before R profiles can change the working
@@ -85,11 +85,6 @@ pub(crate) fn finish_loader_reexec() {
     {
         let _ = set_fd_cloexec(fd, true);
     }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn restart_fd_carrier() -> Option<std::ffi::OsString> {
-    None
 }
 
 /// Write the current process ID to a file.
