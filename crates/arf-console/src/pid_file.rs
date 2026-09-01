@@ -184,15 +184,18 @@ fn pid_file_contains_current_pid(path: &Path, expected: &[u8]) -> bool {
 fn validate_inherited_pid_fd(fd: std::os::unix::io::RawFd, path: &Path, expected: &[u8]) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::unix::io::FromRawFd;
 
     // Never close the carrier fd during validation. A clone is used for all
     // reads, while the original remains available for adoption or is left
     // untouched when validation fails.
-    let borrowed = unsafe { std::os::unix::io::BorrowedFd::borrow_raw(fd) };
-    let file = match borrowed.try_clone_to_owned() {
-        Ok(file) => std::fs::File::from(file),
-        Err(_) => return false,
-    };
+    let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+    if duplicate < 0 {
+        return false;
+    }
+    // SAFETY: F_DUPFD_CLOEXEC returned a new owned descriptor. The original
+    // carrier descriptor remains open with its flags unchanged.
+    let file = unsafe { std::fs::File::from_raw_fd(duplicate) };
     let fd_meta = match file.metadata() {
         Ok(meta) if meta.file_type().is_file() => meta,
         _ => return false,
