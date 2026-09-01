@@ -6,12 +6,11 @@
 
 ### Added
 
-- arf now warns when R's `prompt` and `continue` options are set to the same string, which makes the two prompt types indistinguishable (#328).
 - **Experimental:** Opt-in `json-key` R source override provider for reading a version from JSON files such as `renv.lock` (`{ type = "json-key", file = "renv.lock", key = "R.Version" }`) (#321).
 
 ### Fixed
 
-- A continuation prompt set with `options(continue = ...)` is now classified correctly, so history recording, formatting, and display no longer treat continuation lines as new top-level input (#327).
+- A continuation prompt set with `options(continue = ...)` is now classified correctly, so history recording, formatting, and display no longer treat continuation lines as new top-level input. When `prompt` and `continue` are set to the same string, arf warns that the two cannot be told apart (#327, #328).
 - Vi pending character motions now correctly accept `v` as the motion character instead of entering visual mode (#329).
 - **Experimental:** IPC PID file ownership and handoff now preserve tracking across interactive `:restart` and `:switch`; relative paths and loader re-exec are preserved across the replacement (#342).
 
