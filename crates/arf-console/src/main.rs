@@ -100,6 +100,11 @@ fn run() -> Result<()> {
     let matches = command.clone().get_matches();
     validate_top_level_scope(&command, &matches);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    if let Some(path) = cli.ipc_pid_file.as_deref() {
+        // Resolve this before R initialization: profiles may change cwd, but
+        // a relative PID path must continue to identify its initial file.
+        pid_file::set_initial_pid_file_path(path);
+    }
     let no_r_auto_discovery = match &cli.command {
         Some(Commands::Headless(args)) => args.r_source.no_r_auto_discovery,
         Some(Commands::R(args)) => {
@@ -346,6 +351,15 @@ fn run() -> Result<()> {
         // threads are spawned and before R is initialized, so mutating the
         // process environment here cannot race with a concurrent read.
         unsafe { std::env::set_var(STARTUP_ENV_CARRIER, startup_env_carrier()) };
+        if let Some((path, pid)) = pid_file::restart_context_carrier() {
+            // Forward the restart ownership context through this possible
+            // loader re-exec. capture_startup_env removes it in the image
+            // that finally starts R.
+            unsafe {
+                std::env::set_var(pid_file::RESTART_PID_PATH_ENV, path);
+                std::env::set_var(pid_file::RESTART_PID_ENV, pid);
+            }
+        }
         if let Err(e) = arf_libr::ensure_ld_library_path_with_pre_exec(
             console_mode::restore_original_input_mode,
         ) {
@@ -361,6 +375,10 @@ fn run() -> Result<()> {
         //
         // SAFETY: same single-threaded, pre-R-init context as above.
         unsafe { std::env::remove_var(STARTUP_ENV_CARRIER) };
+        unsafe {
+            std::env::remove_var(pid_file::RESTART_PID_PATH_ENV);
+            std::env::remove_var(pid_file::RESTART_PID_ENV);
+        }
     }
     #[cfg(not(unix))]
     if let Err(e) = arf_libr::ensure_ld_library_path() {
@@ -504,6 +522,7 @@ fn run() -> Result<()> {
 /// R-specific variables, using the carrier forwarded through a prior re-exec
 /// when present and otherwise capturing the current environment.
 fn capture_startup_env() {
+    pid_file::capture_restart_context();
     // SAFETY: run() calls this at the start of process initialization, before
     // arf starts any threads or initializes R, so changing the process
     // environment is safe here.

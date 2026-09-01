@@ -1337,6 +1337,26 @@ mod ipc_tests {
         );
     }
 
+    /// A normal startup must retain create_new semantics: an existing file is
+    /// never adopted unless the process carries a validated restart context.
+    #[test]
+    fn test_with_ipc_pid_file_existing_file_is_rejected() {
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let pid_path = tmp.path().join("arf.pid");
+        std::fs::write(&pid_path, "unrelated").expect("write sentinel PID file");
+        let pid_str = pid_path.display().to_string();
+
+        let mut terminal = Terminal::spawn_with_args(&["--with-ipc", "--ipc-pid-file", &pid_str])
+            .expect("Failed to spawn arf with --with-ipc --ipc-pid-file");
+        terminal
+            .wait_for_exit(Duration::from_secs(10))
+            .expect("Startup should fail when the PID file already exists");
+        assert_eq!(
+            std::fs::read_to_string(&pid_path).expect("sentinel PID file should remain"),
+            "unrelated"
+        );
+    }
+
     /// Test that --with-ipc --ipc-pid-file works with Ctrl+D exit.
     #[test]
     fn test_with_ipc_pid_file_ctrld_cleanup() {

@@ -117,6 +117,17 @@ impl Terminal {
         rows: u16,
         cols: u16,
     ) -> Result<Self, String> {
+        Self::spawn_with_size_and_env_in(args, envs, rows, cols, None)
+    }
+
+    /// Spawn arf with an explicitly selected working directory.
+    pub fn spawn_with_size_and_env_in(
+        args: &[&str],
+        envs: &[(&str, &str)],
+        rows: u16,
+        cols: u16,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<Self, String> {
         assert!(rows > 0 && cols > 0, "PTY size must be non-zero");
         let bin_path = env!("CARGO_BIN_EXE_arf");
 
@@ -143,6 +154,9 @@ impl Terminal {
         }
         for (key, value) in envs {
             cmd.env(key, value);
+        }
+        if let Some(cwd) = cwd {
+            cmd.cwd(cwd);
         }
 
         // Spawn the process

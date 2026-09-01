@@ -143,6 +143,11 @@ pub(crate) fn run_headless(
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    if let Some(path) = pid_file {
+        // Resolve before R startup can change the working directory.
+        crate::pid_file::set_initial_pid_file_path(path);
+    }
+
     // --json implies --quiet: suppress status messages on stderr since
     // all relevant info is in the JSON output on stdout.
     let quiet = quiet || json;
