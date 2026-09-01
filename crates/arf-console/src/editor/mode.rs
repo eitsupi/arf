@@ -10,13 +10,14 @@
 //! not the current buffer content. This prevents conditional keybinding
 //! behavior like:
 //! - ':' should only trigger completion when at line position 0
-//! - Auto-match should check what character follows the cursor
+//! - Other stateful shortcuts can inspect the tracked buffer and cursor
 //!
 //! # Solution
 //!
 //! We use a "shadow tracking" approach where the EditMode wrapper maintains
-//! its own estimate of cursor position by observing the events it returns.
-//! This state is then used to make decisions about how to handle certain keys.
+//! an estimate of cursor position and buffer state by observing returned
+//! events. This state supports shortcuts and completion behavior that need
+//! context unavailable to `EditMode::parse_event` itself.
 
 use reedline::{EditCommand, EditMode, PromptEditMode, ReedlineEvent};
 use std::sync::{Arc, Mutex};
@@ -67,87 +68,6 @@ impl EditorState {
         self.cursor_pos == self.buffer_len
     }
 
-    /// Get the character immediately before the cursor, if any.
-    ///
-    /// Returns `None` if cursor is at the beginning or if state is uncertain.
-    #[allow(dead_code)] // Used in tests and kept for potential future use
-    pub fn char_before_cursor(&self) -> Option<char> {
-        if self.uncertain || self.cursor_pos == 0 {
-            return None;
-        }
-        self.buffer.chars().nth(self.cursor_pos - 1)
-    }
-
-    /// Get the character immediately after the cursor, if any.
-    ///
-    /// Returns `None` if cursor is at the end or if state is uncertain.
-    pub fn char_after_cursor(&self) -> Option<char> {
-        if self.uncertain || self.cursor_pos >= self.buffer_len {
-            return None;
-        }
-        self.buffer.chars().nth(self.cursor_pos)
-    }
-
-    /// Check if the cursor is positioned inside an empty bracket pair.
-    ///
-    /// Returns `true` if the character before cursor is an opening bracket
-    /// and the character after cursor is the matching closing bracket.
-    /// Returns `false` if state is uncertain or if the buffer contains newlines
-    /// (multiline mode where state tracking may be unreliable).
-    pub fn is_inside_empty_pair(&self) -> bool {
-        if self.uncertain {
-            return false;
-        }
-        // In multiline mode, our state tracking may be out of sync with
-        // reedline's actual buffer (due to Enter handling in default mode).
-        // Disable bracket delete in this case to prevent data loss.
-        if self.buffer.contains('\n') {
-            return false;
-        }
-        let Some(before) = self.char_before_cursor() else {
-            return false;
-        };
-        let Some(after) = self.char_after_cursor() else {
-            return false;
-        };
-        matches!(
-            (before, after),
-            ('(', ')') | ('[', ']') | ('{', '}') | ('"', '"') | ('\'', '\'') | ('`', '`')
-        )
-    }
-
-    /// Check if the cursor is inside an unclosed quote of the given type.
-    ///
-    /// Returns `true` if there's an odd number of unescaped quote characters
-    /// before the cursor position, indicating we're inside an open string.
-    /// Returns `false` if state is uncertain.
-    ///
-    /// This is used to prevent auto-match from inserting a pair of quotes
-    /// when we're already inside a string and just want to close it.
-    pub fn cursor_in_quote(&self, quote_char: char) -> bool {
-        if self.uncertain {
-            return false;
-        }
-
-        // Get text before cursor
-        let text_before: String = self.buffer.chars().take(self.cursor_pos).collect();
-
-        // Count unescaped quotes
-        let mut count = 0;
-        let mut chars = text_before.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                // Skip next character (escaped)
-                chars.next();
-            } else if c == quote_char {
-                count += 1;
-            }
-        }
-
-        // Odd count means we're inside an unclosed quote
-        count % 2 == 1
-    }
-
     /// Convert a character position to a byte position in the buffer.
     ///
     /// This is necessary because Rust strings are UTF-8 encoded, so
@@ -192,9 +112,9 @@ impl EditorState {
                 // If cursor is not at end, HistoryHintComplete will fail and
                 // fall through to subsequent events (like Right), which we can track.
                 //
-                // This is important for auto-match: if the user presses Right arrow
-                // while a hint is shown, the hint gets completed and the buffer
-                // changes from "pr" to "print(\"hello\")". Without marking uncertain,
+                // If the user presses Right arrow while a hint is shown, the hint
+                // gets completed and the buffer changes from "pr" to
+                // "print(\"hello\")". Without marking uncertain,
                 // the shadow state would incorrectly think cursor just moved right.
                 for e in events {
                     if matches!(
@@ -406,152 +326,9 @@ impl KeyCondition for BufferKnownEmpty {
     }
 }
 
-/// Condition: cursor is at the end of the buffer.
-///
-/// This is useful for auto-match behavior where we only want to insert
-/// the closing bracket when typing at the end, not when inserting in
-/// the middle of existing text.
-///
-/// Note: For auto-matching, prefer `CursorAtEndOrBeforeClosing` which also
-/// allows auto-matching before closing characters.
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-pub struct CursorAtEnd;
-
-impl KeyCondition for CursorAtEnd {
-    fn check(&self, state: &EditorState) -> bool {
-        state.cursor_at_end()
-    }
-}
-
-/// Condition: cursor is inside an empty bracket pair.
-///
-/// Returns true when the cursor is positioned between matching brackets
-/// with no content inside (e.g., `(|)`, `[|]`, `{|}`).
-/// Returns false if the state is uncertain to avoid incorrect deletions.
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-pub struct InsideEmptyPair;
-
-impl KeyCondition for InsideEmptyPair {
-    fn check(&self, state: &EditorState) -> bool {
-        state.is_inside_empty_pair()
-    }
-}
-
-/// Condition: cursor is NOT inside an empty bracket pair.
-///
-/// This is the negation of `InsideEmptyPair`, used for bracket auto-deletion
-/// rules where we want to apply the replacement when inside an empty pair.
-#[derive(Debug, Clone, Copy)]
-pub struct NotInsideEmptyPair;
-
-impl KeyCondition for NotInsideEmptyPair {
-    fn check(&self, state: &EditorState) -> bool {
-        !state.is_inside_empty_pair()
-    }
-}
-
-/// Condition: cursor is at end of buffer OR before a closing character.
-///
-/// Closing characters are: `)`, `]`, `}`, `"`, `'`, `` ` ``
-///
-/// This allows auto-matching to work inside existing brackets/quotes:
-/// - `(│)` + `"` → `("│")`
-/// - `"│"` + `(` → `"(│)"`
-/// - `foo│` + `(` → `foo(│)` (cursor at end)
-#[derive(Debug, Clone, Copy)]
-pub struct CursorAtEndOrBeforeClosing;
-
-impl CursorAtEndOrBeforeClosing {
-    /// Characters that are considered "closing" - auto-match can occur before these.
-    const CLOSING_CHARS: [char; 6] = [')', ']', '}', '"', '\'', '`'];
-}
-
-impl KeyCondition for CursorAtEndOrBeforeClosing {
-    fn check(&self, state: &EditorState) -> bool {
-        // Cursor at end always allows auto-match
-        if state.cursor_at_end() {
-            return true;
-        }
-
-        // Check if the character after cursor is a closing character
-        if let Some(char_after) = state.char_after_cursor() {
-            return Self::CLOSING_CHARS.contains(&char_after);
-        }
-
-        // When uncertain (char_after_cursor returns None), fall back to false
-        // to avoid incorrect auto-matching
-        false
-    }
-}
-
-/// Condition: cursor is at end OR before closing char, AND not inside an unclosed quote.
-///
-/// This is used for quote auto-matching (`"`, `'`, `` ` ``). When already inside
-/// an unclosed string, typing the closing quote should just insert one quote
-/// (not a pair), allowing the user to close the string.
-///
-/// Example:
-/// - `"foo|` + `"` → `"foo"|` (just close the string, don't insert `""`)
-/// - `foo|` + `"` → `foo"|"` (not in string, auto-match works)
-pub struct CursorAtEndOrBeforeClosingAndNotInQuote {
-    quote_char: char,
-}
-
-impl CursorAtEndOrBeforeClosingAndNotInQuote {
-    pub fn new(quote_char: char) -> Self {
-        Self { quote_char }
-    }
-}
-
-impl KeyCondition for CursorAtEndOrBeforeClosingAndNotInQuote {
-    fn check(&self, state: &EditorState) -> bool {
-        // First check position (at end or before closing char)
-        if !CursorAtEndOrBeforeClosing.check(state) {
-            return false;
-        }
-
-        // Then check we're not inside an unclosed quote of this type
-        !state.cursor_in_quote(self.quote_char)
-    }
-}
-
-/// Condition: cursor is NOT before the specified character.
-///
-/// This is used for skip-over rules. When the cursor IS before the specified
-/// character, the condition returns false, triggering the fallback (which is
-/// MoveRight to skip over the character).
-///
-/// When the cursor is NOT before the character, the condition returns true,
-/// allowing the original event to pass through to subsequent rules.
-pub struct CursorNotBeforeChar {
-    target_char: char,
-}
-
-impl CursorNotBeforeChar {
-    pub fn new(target_char: char) -> Self {
-        Self { target_char }
-    }
-}
-
-impl KeyCondition for CursorNotBeforeChar {
-    fn check(&self, state: &EditorState) -> bool {
-        // Return true if NOT before the target char (allow pass-through)
-        // Return false if cursor IS before target char (use fallback = MoveRight)
-        if let Some(char_after) = state.char_after_cursor() {
-            char_after != self.target_char
-        } else {
-            // At end of buffer or uncertain state - not before target char
-            true
-        }
-    }
-}
-
 /// Matcher function type for conditional rules.
 ///
-/// Uses a boxed closure to allow capturing variables (e.g., the specific
-/// character to match in auto-match rules).
+/// Uses a boxed closure to allow capturing values used by a rule.
 pub type EventMatcher = Box<dyn Fn(&ReedlineEvent) -> bool + Send + Sync>;
 
 /// A conditional keybinding rule.
@@ -615,12 +392,6 @@ impl<E: EditMode> ConditionalEditMode<E> {
     /// Add a conditional rule.
     pub fn with_rule(mut self, rule: ConditionalRule) -> Self {
         self.rules.push(rule);
-        self
-    }
-
-    /// Add multiple conditional rules.
-    pub fn with_rules(mut self, rules: impl IntoIterator<Item = ConditionalRule>) -> Self {
-        self.rules.extend(rules);
         self
     }
 
@@ -783,193 +554,6 @@ fn is_character_insert(event: &ReedlineEvent) -> bool {
         ReedlineEvent::Multiple(events) => events.iter().any(is_character_insert),
         _ => false,
     }
-}
-
-/// Create conditional rules for smart auto-match behavior.
-///
-/// Auto-match activates when the cursor is at the end of the buffer OR when
-/// the character after the cursor is a closing character (`)`, `]`, `}`, `"`, `'`, `` ` ``).
-/// When typing in the middle of existing text (not before a closing char), only
-/// the opening character is inserted (no automatic closing bracket).
-///
-/// This follows the behavior of radian which uses `following_text(r"[,)}\]]|$")`
-/// to check that the cursor is followed by a comma, closing bracket, or end of line.
-///
-/// Examples:
-/// - `foo│` + `(` → `foo(│)` (cursor at end)
-/// - `(│)` + `"` → `("│")` (cursor before `)`)
-/// - `"│"` + `(` → `"(│)"` (cursor before `"`)
-/// - `foo│bar` + `(` → `foo(│bar` (cursor before `b`, no auto-match)
-/// - `"foo│` + `"` → `"foo"|` (inside unclosed string, just close it)
-pub fn create_auto_match_rules() -> Vec<ConditionalRule> {
-    // Define pairs: (opening char, pair string, is_quote)
-    let pairs: [(char, &str, bool); 6] = [
-        ('(', "()", false),
-        ('[', "[]", false),
-        ('{', "{}", false),
-        ('"', r#""""#, true),
-        ('\'', "''", true),
-        ('`', "``", true),
-    ];
-
-    pairs
-        .into_iter()
-        .map(|(open_char, pair, is_quote)| {
-            let pair_string = pair.to_string();
-
-            // For quotes, use special condition that also checks if inside unclosed string
-            let condition: Box<dyn KeyCondition> = if is_quote {
-                Box::new(CursorAtEndOrBeforeClosingAndNotInQuote::new(open_char))
-            } else {
-                Box::new(CursorAtEndOrBeforeClosing)
-            };
-
-            ConditionalRule {
-                // Match the auto-match event: InsertString(pair) + MoveLeft
-                match_event: Box::new(move |event| {
-                    matches!(
-                        event,
-                        ReedlineEvent::Edit(cmds)
-                        if cmds.len() == 2
-                            && matches!(&cmds[0], EditCommand::InsertString(s) if s == &pair_string)
-                            && matches!(&cmds[1], EditCommand::MoveLeft { select: false })
-                    )
-                }),
-                // Auto-match when cursor is at end OR before a closing character
-                // (and for quotes: not inside an unclosed string)
-                condition,
-                // When in middle of text (not before closing char), just insert opening char
-                fallback_event: ReedlineEvent::Edit(vec![EditCommand::InsertChar(open_char)]),
-            }
-        })
-        .collect()
-}
-
-/// Create conditional rules for skipping over closing characters.
-///
-/// When typing a closing character (`'`, `"`, `` ` ``, `)`, `]`, `}`) and the
-/// cursor is already positioned before the same character, the cursor should
-/// just move right instead of inserting another character.
-///
-/// This complements the auto-match behavior: when auto-match inserts a pair
-/// (e.g., `()`) and the cursor is between them, typing the closing character
-/// should skip over the existing one rather than inserting a duplicate.
-///
-/// # Rule Order
-///
-/// These rules should be applied BEFORE auto-match rules so they have
-/// priority when the cursor is before a closing character.
-///
-/// # Example
-///
-/// - `stop('Test error|')` + `'` → `stop('Test error'|)` (skip over `'`)
-/// - `foo(|)` + `)` → `foo()|` (skip over `)`)
-///
-/// # Design Note
-///
-/// This matches radian's behavior where:
-/// ```python
-/// @handle("'", filter=... & following_text("^'"))
-/// def _(event):
-///     event.current_buffer.cursor_right()
-/// ```
-///
-/// # Bracket vs Quote Handling
-///
-/// For brackets (`)`/`]`/`}`), the keybinding generates `InsertChar(close_char)`,
-/// which is distinct from the opening bracket's `InsertString(pair) + MoveLeft`.
-/// This allows skip-over rules to only trigger when the closing bracket key is
-/// pressed, not when the opening bracket key is pressed.
-///
-/// For quotes (`"`/`'`/`` ` ``), the same character is used for both opening and
-/// closing, so the keybinding always generates `InsertString(pair) + MoveLeft`.
-/// The skip-over rule matches this event and checks if cursor is before the
-/// same quote character.
-pub fn create_skip_over_rules() -> Vec<ConditionalRule> {
-    let mut rules = Vec::new();
-
-    // Bracket closing characters: match InsertChar(close_char)
-    // These are bound separately from opening brackets in add_auto_match_keybindings
-    let bracket_closing_chars = [')', ']', '}'];
-    for close_char in bracket_closing_chars {
-        rules.push(ConditionalRule {
-            // Match InsertChar for the closing bracket
-            match_event: Box::new(move |event| {
-                matches!(
-                    event,
-                    ReedlineEvent::Edit(cmds)
-                    if cmds.len() == 1
-                        && matches!(&cmds[0], EditCommand::InsertChar(c) if *c == close_char)
-                )
-            }),
-            // Condition: cursor is NOT before the closing char
-            // If cursor IS before it (condition=false), use fallback (MoveRight)
-            condition: Box::new(CursorNotBeforeChar::new(close_char)),
-            // Skip over the existing closing character
-            fallback_event: ReedlineEvent::Edit(vec![EditCommand::MoveRight { select: false }]),
-        });
-    }
-
-    // Quote characters: match InsertString(pair) + MoveLeft
-    // These use the same character for open and close
-    let quote_chars: [(char, &str); 3] = [('"', r#""""#), ('\'', "''"), ('`', "``")];
-    for (quote_char, pair) in quote_chars {
-        let pair_string = pair.to_string();
-        rules.push(ConditionalRule {
-            // Match the auto-match event for quotes
-            match_event: Box::new(move |event| {
-                matches!(
-                    event,
-                    ReedlineEvent::Edit(cmds)
-                    if cmds.len() == 2
-                        && matches!(&cmds[0], EditCommand::InsertString(s) if s == &pair_string)
-                        && matches!(&cmds[1], EditCommand::MoveLeft { select: false })
-                )
-            }),
-            // Condition: cursor is NOT before the quote char
-            condition: Box::new(CursorNotBeforeChar::new(quote_char)),
-            // Skip over the existing quote character
-            fallback_event: ReedlineEvent::Edit(vec![EditCommand::MoveRight { select: false }]),
-        });
-    }
-
-    rules
-}
-
-/// Create conditional rules for bracket pair auto-deletion.
-///
-/// When backspace is pressed inside an empty bracket pair (e.g., `(|)`),
-/// both the opening and closing brackets are deleted together.
-/// This complements the auto-match behavior that inserts pairs together.
-///
-/// The rule transforms a single Backspace into Backspace + Delete when
-/// the cursor is inside an empty pair, effectively removing both brackets.
-///
-/// # Rule Logic
-///
-/// The ConditionalRule system uses:
-/// - condition = true → keep original event
-/// - condition = false → use fallback_event
-///
-/// So we use `NotInsideEmptyPair` as the condition:
-/// - NotInsideEmptyPair = true (not in pair) → keep original Backspace
-/// - NotInsideEmptyPair = false (in pair) → use Backspace + Delete
-pub fn create_bracket_delete_rules() -> Vec<ConditionalRule> {
-    vec![ConditionalRule {
-        // Match a single Backspace command
-        match_event: Box::new(|event| {
-            matches!(
-                event,
-                ReedlineEvent::Edit(cmds)
-                if cmds.len() == 1 && matches!(&cmds[0], EditCommand::Backspace)
-            )
-        }),
-        // When NOT inside empty pair, keep the original Backspace
-        // When inside empty pair (condition=false), use the fallback
-        condition: Box::new(NotInsideEmptyPair),
-        // Delete both brackets: Backspace removes opening, Delete removes closing
-        fallback_event: ReedlineEvent::Edit(vec![EditCommand::Backspace, EditCommand::Delete]),
-    }]
 }
 
 #[cfg(test)]

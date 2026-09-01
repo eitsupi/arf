@@ -26,7 +26,7 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm"]
 # NOTE: reedline and rusqlite share the `links = "sqlite3"` native library (via
 # libsqlite3-sys) and must be upgraded together in lockstep, or Cargo's
 # dependency resolution fails.
-reedline = { version = "0.51", features = ["sqlite", "idle_callback"] }
+reedline = { version = "0.51", features = ["sqlite"] }
 
 # Configuration
 dirs = "6.0"
@@ -104,6 +104,7 @@ vt100 = "0.16"
 # https://github.com/crossterm-rs/crossterm/pull/1030
 [patch.crates-io]
 crossterm = { git = "https://github.com/crossterm-rs/crossterm", rev = "5c56270f3347f1906e15a383d5342e875f1b3b1d" }
+reedline = { git = "https://github.com/nushell/reedline.git", rev = "303b1983337d13a3c8aecc97037acd07e2efaaf4" }
 
 # The profile that 'dist' will build with
 [profile.dist]

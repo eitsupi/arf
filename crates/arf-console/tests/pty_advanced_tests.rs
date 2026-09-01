@@ -463,17 +463,18 @@ fn test_pty_history_menu_with_auto_match_paren_pair() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test that history search replaces the whole auto-matched pair created in search mode.
+/// Test that history search treats its query as literal input.
 ///
 /// Scenario:
 /// 1. Execute `length(c())` to add it to history
 /// 2. Press Ctrl+R to open history search
-/// 3. Type `c(` in the search input, which auto-match expands to `c()` with the cursor before `)`
+/// 3. Type `c(` in the search input; reverse-history search is not an edit buffer
+///    and therefore does not auto-pair the query
 /// 4. Select the `length(c())` history entry
 /// 5. Execute - should run `length(c())`, not the search buffer `c()` or a stale-suffix `length(c()))`
 #[test]
 #[cfg(unix)]
-fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
+fn test_pty_history_menu_search_mode_literal_paren_query() {
     let mut terminal =
         Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
 
@@ -496,8 +497,8 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     terminal
         .current_line()
-        .assert_contains("c()")
-        .expect("Auto-match should insert the closing paren before history selection");
+        .assert_contains("c(")
+        .expect("History search should preserve the literal query");
 
     terminal.send("\n").expect("Should select history item");
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -511,6 +512,181 @@ fn test_pty_history_menu_search_mode_auto_match_paren_pair() {
     terminal
         .expect("[1] 0")
         .expect("length(c()) should execute without a trailing auto-matched paren");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Regression test for deleting an empty quote pair after history navigation.
+///
+/// History recall changes the line buffer outside the edit-mode event stream.
+/// After navigating Up and Down, Backspace inside a recalled empty pair must
+/// remove both delimiters rather than only one of them or leave stale state.
+#[test]
+#[cfg(unix)]
+fn test_pty_history_recall_empty_quote_pair_backspace() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send_line("\"\"")
+        .expect("Should enter an empty quote pair");
+    terminal
+        .expect(r#"[1] """#)
+        .expect("The quote pair should be evaluated and added to history");
+    terminal
+        .send_line("1")
+        .expect("Should add a second history entry");
+    terminal
+        .expect("[1] 1")
+        .expect("Should evaluate the history marker");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the latest history entry");
+    terminal
+        .current_line()
+        .assert_contains("1")
+        .expect("Up should recall the latest history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the empty quote pair");
+    terminal
+        .current_line()
+        .assert_contains("\"\"")
+        .expect("The recalled pair must be visible before deletion");
+
+    terminal
+        .send("\x1b[B")
+        .expect("Should navigate down in history");
+    terminal
+        .current_line()
+        .assert_contains("1")
+        .expect("Down should recall the newer history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should navigate back to the quote pair");
+    terminal
+        .current_line()
+        .assert_contains("\"\"")
+        .expect("The quote pair must survive the Up/Down round trip");
+
+    terminal
+        .send("\x1b[D")
+        .expect("Should move inside the quote pair");
+    terminal
+        .send("\x7f")
+        .expect("Should backspace inside the quote pair");
+
+    // If only one delimiter was deleted, this expression would retain a
+    // quote and fail. Successful evaluation proves both delimiters are gone.
+    terminal
+        .send_line("1+1")
+        .expect("Should evaluate after pair deletion");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove the recalled empty quote pair");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Regression test for deleting an empty bracket pair after history navigation.
+#[test]
+#[cfg(unix)]
+fn test_pty_history_recall_empty_bracket_pair_backspace() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    terminal
+        .send_line("{}")
+        .expect("Should enter an empty bracket pair");
+    terminal
+        .expect("NULL")
+        .expect("Should evaluate the empty bracket pair");
+    terminal
+        .wait_for_prompt()
+        .expect("Should finish the bracket expression");
+    terminal
+        .send_line("1")
+        .expect("Should add a second history entry");
+    terminal
+        .expect("[1] 1")
+        .expect("Should evaluate the history marker");
+    terminal.wait_for_prompt().expect("Should show prompt");
+
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the latest history entry");
+    terminal
+        .send("\x1b[A")
+        .expect("Should recall the empty bracket pair");
+    terminal
+        .current_line()
+        .assert_contains("{}")
+        .expect("The recalled empty bracket pair must be visible");
+    terminal
+        .send("\x1b[B")
+        .expect("Should navigate down in history");
+    terminal
+        .send("\x1b[A")
+        .expect("Should navigate back to the bracket pair");
+    terminal
+        .current_line()
+        .assert_contains("{}")
+        .expect("The bracket pair must survive the Up/Down round trip");
+
+    terminal
+        .send("\x1b[D")
+        .expect("Should move inside the bracket pair");
+    terminal
+        .send("\x7f")
+        .expect("Should backspace inside the bracket pair");
+    terminal
+        .send_line("1+1")
+        .expect("Should evaluate after pair deletion");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove the recalled empty bracket pair");
+
+    terminal.quit().expect("Should quit cleanly");
+}
+
+/// Regression test for Backspace immediately after an inserted newline inside
+/// an auto-matched pair. It must remove only the newline and retain the closer.
+#[test]
+#[cfg(unix)]
+fn test_pty_backspace_after_newline_keeps_closer() {
+    let mut terminal =
+        Terminal::spawn_with_args(&["--no-completion"]).expect("Failed to spawn arf");
+
+    terminal.wait_for_prompt().expect("Should show prompt");
+    terminal
+        .send("(")
+        .expect("Should create an empty parenthesis pair");
+    terminal
+        .current_line()
+        .assert_contains("()")
+        .expect("The opening parenthesis should create a visible pair");
+
+    // Shift+Enter is bound to Reedline's InsertNewline event.
+    terminal
+        .send("\x1b[13;2u")
+        .expect("Should insert a newline inside the pair");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    terminal
+        .send("\x7f")
+        .expect("Should backspace the inserted newline");
+
+    // A retained closer makes this a complete parenthesized expression.
+    terminal
+        .send_line("1+1")
+        .expect("Should type inside the pair");
+    terminal
+        .expect("[1] 2")
+        .expect("Backspace should remove only the newline and retain the closer");
 
     terminal.quit().expect("Should quit cleanly");
 }
@@ -608,36 +784,38 @@ fn test_pty_multiline_raw_string_input() {
     terminal.quit().expect("Should quit cleanly");
 }
 
-/// Test raw string input with auto-match enabled - KNOWN ISSUE.
+/// Test raw string input with auto-match enabled.
 ///
-/// Auto-match interferes with R raw string syntax (`r"(...)"`).
-/// When typing `"` after `r`, auto-match inserts `""` which breaks raw string input.
-///
-/// Workaround: Use `--no-auto-match` flag or paste raw strings via bracketed paste.
+/// The highlighter suppresses the initial quote pair after an R raw-string
+/// prefix, allowing the following brackets and closing quote to be typed
+/// normally.
 #[test]
 #[cfg(unix)]
-#[ignore] // Known issue: auto-match doesn't support raw strings
 fn test_pty_raw_string_with_auto_match() {
     // Enable auto-match (default behavior)
     let mut terminal = Terminal::spawn().expect("Failed to spawn arf");
 
     terminal.wait_for_prompt().expect("Should show prompt");
 
-    // Type r"()" - with auto-match, this will fail because " inserts ""
+    // Type a dashed raw string containing an internal quote; the raw-string
+    // prefix prevents the opening quote from inserting a second quote, and
+    // the raw scanner keeps the body quote from being paired as well.
     terminal
-        .send_line(r#"x <- r"()""#)
-        .expect("Should send raw string");
+        .send_line(r#"x <- r"---(hello "world")---""#)
+        .expect("Should send raw string with an internal quote");
 
     // Wait for prompt (assignment doesn't produce output)
     terminal
         .clear_and_expect("> ")
         .expect("Should show prompt after assignment");
 
-    // The variable should exist and contain an empty string
-    terminal.send_line("x").expect("Should check x");
+    // The variable should preserve the raw body and its internal quote.
     terminal
-        .clear_and_expect(r#"[1] """#)
-        .expect("x should be empty string (content between parens is empty)");
+        .send_line("nchar(x)")
+        .expect("Should check raw string length");
+    terminal
+        .clear_and_expect("[1] 13")
+        .expect("x should preserve the raw body and its internal quote");
 
     terminal.quit().expect("Should quit cleanly");
 }
