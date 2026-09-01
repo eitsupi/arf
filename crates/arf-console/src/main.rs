@@ -73,8 +73,8 @@ const STARTUP_ENV_VARS: &[&str] = &[
 /// be set directly.
 const STARTUP_ENV_CARRIER: &str = "_ARF_INTERNAL_STARTUP_ENV";
 const STARTUP_ENV_CARRIER_VERSION: u32 = 1;
-
 static STARTUP_ENV: OnceLock<HashMap<String, OsString>> = OnceLock::new();
+static NORMALIZED_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 fn main() -> ExitCode {
     match run() {
@@ -100,6 +100,32 @@ fn run() -> Result<()> {
     let matches = command.clone().get_matches();
     validate_top_level_scope(&command, &matches);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    if let Some(path) = cli.ipc_pid_file.as_deref() {
+        // Resolve this before R initialization: profiles may change cwd, but
+        // a relative PID path must continue to identify its initial file.
+        pid_file::set_initial_pid_file_path(path);
+        #[cfg(unix)]
+        pid_file::authorize_inherited_pid_fd(&pid_file::absolute_pid_file_path(path));
+    }
+    let bind_path = cli.ipc_bind.as_deref().map(|path| {
+        #[cfg(unix)]
+        {
+            absolute_ipc_bind_path(OsStr::new(path))
+        }
+        #[cfg(not(unix))]
+        {
+            OsString::from(path)
+        }
+    });
+    let pid_path = cli
+        .ipc_pid_file
+        .as_deref()
+        .map(|path| pid_file::absolute_pid_file_path(path).into_os_string());
+    let _ = NORMALIZED_ARGS.set(normalize_interactive_args(
+        std::env::args_os().skip(1).collect(),
+        bind_path.as_deref(),
+        pid_path.as_deref(),
+    ));
     let no_r_auto_discovery = match &cli.command {
         Some(Commands::Headless(args)) => args.r_source.no_r_auto_discovery,
         Some(Commands::R(args)) => {
@@ -346,7 +372,13 @@ fn run() -> Result<()> {
         // threads are spawned and before R is initialized, so mutating the
         // process environment here cannot race with a concurrent read.
         unsafe { std::env::set_var(STARTUP_ENV_CARRIER, startup_env_carrier()) };
-        if let Err(e) = arf_libr::ensure_ld_library_path_with_pre_exec(
+        if let Some(fd) = pid_file::restart_fd_carrier() {
+            // The descriptor itself is the only PID handoff capability. Keep
+            // its number in the environment solely across this loader exec.
+            unsafe { std::env::set_var(pid_file::RESTART_PID_FD_ENV, fd) };
+        }
+        if let Err(e) = arf_libr::ensure_ld_library_path_with_pre_exec_and_args(
+            &normalized_args(),
             console_mode::restore_original_input_mode,
         ) {
             log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
@@ -361,6 +393,8 @@ fn run() -> Result<()> {
         //
         // SAFETY: same single-threaded, pre-R-init context as above.
         unsafe { std::env::remove_var(STARTUP_ENV_CARRIER) };
+        unsafe { std::env::remove_var(pid_file::RESTART_PID_FD_ENV) };
+        pid_file::finish_loader_reexec();
     }
     #[cfg(not(unix))]
     if let Err(e) = arf_libr::ensure_ld_library_path() {
@@ -461,8 +495,18 @@ fn run() -> Result<()> {
     // server advertises a session ID only after the R runtime is confirmed
     // available. The REPL later attaches those same owners to its editors.
     if cli.with_ipc {
+        let ipc_bind = bind_path
+            .as_deref()
+            .map(|path| {
+                path.to_str().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "IPC bind path is not valid UTF-8 and cannot be advertised by the IPC protocol"
+                    )
+                })
+            })
+            .transpose()?;
         match ipc::start_server(
-            cli.ipc_bind.as_deref(),
+            ipc_bind,
             repl.r_home_for_ipc(),
             None,
             repl.history_session_id_raw(),
@@ -500,10 +544,116 @@ fn run() -> Result<()> {
     repl_result
 }
 
+/// Resolve a CLI bind path while the process still has its original cwd.
+#[cfg(unix)]
+fn absolute_ipc_bind_path(path: &OsStr) -> OsString {
+    let path = PathBuf::from(path);
+    if is_effective_ipc_bind_path(&path) {
+        path.into_os_string()
+    } else {
+        std::path::absolute(&path).unwrap_or(path).into_os_string()
+    }
+}
+
+#[cfg(unix)]
+fn is_effective_ipc_bind_path(path: &std::path::Path) -> bool {
+    path.is_absolute()
+}
+
+/// Return argv with interactive IPC paths fixed against the initial cwd.
+pub(crate) fn normalized_args() -> Vec<OsString> {
+    NORMALIZED_ARGS
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::env::args_os().skip(1).collect())
+}
+
+fn normalize_interactive_args(
+    args: Vec<OsString>,
+    bind_path: Option<&OsStr>,
+    pid_path: Option<&OsStr>,
+) -> Vec<OsString> {
+    let mut normalized = Vec::with_capacity(args.len());
+    let bind_path = bind_path.map(OsStr::to_os_string);
+    let pid_path = pid_path.map(OsStr::to_os_string);
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            normalized.extend(args[index..].iter().cloned());
+            break;
+        }
+        if arg == "--ipc-bind" {
+            if let Some(bind) = bind_path.as_ref()
+                && index + 1 < args.len()
+            {
+                normalized.push(arg.clone());
+                normalized.push(bind.clone());
+                index += 2;
+                continue;
+            }
+        } else if arg == "--ipc-pid-file"
+            && let Some(pid) = pid_path.as_ref()
+            && index + 1 < args.len()
+        {
+            normalized.push(arg.clone());
+            normalized.push(pid.clone());
+            index += 2;
+            continue;
+        }
+        if let Some(bind) = bind_path.as_ref()
+            && os_str_has_ascii_prefix(arg, b"--ipc-bind=")
+        {
+            let mut rewritten = OsString::from("--ipc-bind=");
+            rewritten.push(bind);
+            normalized.push(rewritten);
+            index += 1;
+            continue;
+        }
+        if let Some(pid) = pid_path.as_ref()
+            && os_str_has_ascii_prefix(arg, b"--ipc-pid-file=")
+        {
+            let mut rewritten = OsString::from("--ipc-pid-file=");
+            rewritten.push(pid);
+            normalized.push(rewritten);
+            index += 1;
+            continue;
+        }
+        normalized.push(arg.clone());
+        index += 1;
+    }
+    normalized
+}
+
+/// Check an ASCII option prefix without requiring the complete argument to be
+/// UTF-8. This preserves and rewrites non-UTF-8 path values losslessly.
+fn os_str_has_ascii_prefix(value: &OsStr, prefix: &[u8]) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        value.as_bytes().starts_with(prefix)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        value
+            .encode_wide()
+            .take(prefix.len())
+            .eq(prefix.iter().copied().map(u16::from))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        value
+            .to_str()
+            .is_some_and(|value| value.as_bytes().starts_with(prefix))
+    }
+}
+
 /// Read the startup environment snapshot before R initialization can add any
 /// R-specific variables, using the carrier forwarded through a prior re-exec
 /// when present and otherwise capturing the current environment.
 fn capture_startup_env() {
+    pid_file::capture_restart_context();
     // SAFETY: run() calls this at the start of process initialization, before
     // arf starts any threads or initializes R, so changing the process
     // environment is safe here.
@@ -838,7 +988,7 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
 mod tests {
     use super::{
         STARTUP_ENV_CARRIER_VERSION, absolutize_runtime_r_home, deserialize_startup_env,
-        serialize_startup_env,
+        normalize_interactive_args, serialize_startup_env,
     };
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -873,6 +1023,87 @@ mod tests {
             absolutize_runtime_r_home(PathBuf::from("lib/R"), None),
             None
         );
+    }
+
+    #[test]
+    fn normalize_args_rewrites_separated_options() {
+        let args = vec![
+            OsString::from("--ipc-bind"),
+            OsString::from("relative.sock"),
+            OsString::from("--ipc-pid-file"),
+            OsString::from("relative.pid"),
+        ];
+        let normalized = normalize_interactive_args(
+            args,
+            Some(OsString::from("/tmp/effective.sock").as_os_str()),
+            Some(OsString::from("/tmp/effective.pid").as_os_str()),
+        );
+        assert_eq!(normalized[1], "/tmp/effective.sock");
+        assert_eq!(normalized[3], "/tmp/effective.pid");
+    }
+
+    #[test]
+    fn normalize_args_rewrites_equal_options_and_preserves_non_utf8_arg() {
+        #[cfg(unix)]
+        use std::os::unix::ffi::OsStringExt;
+        let unrelated = {
+            #[cfg(unix)]
+            {
+                OsString::from_vec(vec![b'X', 0xff])
+            }
+            #[cfg(not(unix))]
+            {
+                OsString::from("unrelated")
+            }
+        };
+        #[cfg(unix)]
+        let non_utf_bind = OsString::from_vec(b"--ipc-bind=relative\xff.sock".to_vec());
+        #[cfg(unix)]
+        let non_utf_pid = OsString::from_vec(b"--ipc-pid-file=relative\xfe.pid".to_vec());
+        let args = vec![
+            #[cfg(unix)]
+            non_utf_bind,
+            #[cfg(not(unix))]
+            OsString::from("--ipc-bind=relative.sock"),
+            #[cfg(unix)]
+            non_utf_pid,
+            #[cfg(not(unix))]
+            OsString::from("--ipc-pid-file=relative.pid"),
+            unrelated.clone(),
+        ];
+        let normalized = normalize_interactive_args(
+            args,
+            Some(OsString::from("/tmp/effective.sock").as_os_str()),
+            Some(OsString::from("/tmp/effective.pid").as_os_str()),
+        );
+        assert_eq!(normalized[0], "--ipc-bind=/tmp/effective.sock");
+        assert_eq!(normalized[1], "--ipc-pid-file=/tmp/effective.pid");
+        assert_eq!(normalized[2], unrelated);
+    }
+
+    #[test]
+    fn normalize_args_without_ipc_options_preserves_arguments() {
+        let args = vec![OsString::from("--with-ipc"), OsString::from("--verbose")];
+        assert_eq!(normalize_interactive_args(args.clone(), None, None), args);
+    }
+
+    #[test]
+    fn normalize_args_preserves_options_after_terminator() {
+        let args = vec![
+            OsString::from("--ipc-bind=before.sock"),
+            OsString::from("--"),
+            OsString::from("--ipc-bind=after.sock"),
+            OsString::from("--ipc-pid-file=after.pid"),
+        ];
+        let normalized = normalize_interactive_args(
+            args,
+            Some(OsString::from("/tmp/effective.sock").as_os_str()),
+            Some(OsString::from("/tmp/effective.pid").as_os_str()),
+        );
+        assert_eq!(normalized[0], "--ipc-bind=/tmp/effective.sock");
+        assert_eq!(normalized[1], "--");
+        assert_eq!(normalized[2], "--ipc-bind=after.sock");
+        assert_eq!(normalized[3], "--ipc-pid-file=after.pid");
     }
 
     #[test]

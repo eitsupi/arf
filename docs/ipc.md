@@ -47,6 +47,26 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--no-r-source-overrides` | Disable directory-level R source overrides |
 | `--vanilla` | Start R without init files |
 
+### PID file lifecycle (interactive and headless)
+
+The PID file is the current-process pointer for an integration slot; it is not
+a readiness marker. Readiness is established by the IPC session metadata (or
+the `--json` output). Interactive `:restart` and `:switch` are a
+short transition: clients should use bounded retries, re-read the PID and
+session metadata, and detect the new generation by a changed `started_at`
+value. On Unix the replacement keeps ownership of a matching PID file. On
+Windows the parent relinquishes the file before spawning the replacement, so
+the file is briefly absent and then publishes a new PID. On Windows only, the
+default endpoint also changes because it contains the child PID; each retry
+must resolve it again. On Unix the default endpoint path remains the same
+across an exec restart, although it is temporarily unavailable during the
+restart window. In both cases, `started_at` changes for the new generation.
+An explicitly configured `--ipc-bind` path is reused by the replacement on
+both platforms. For an interactive session, a relative custom path is resolved
+once against arf's initial working directory, before R startup profiles can
+change it. Headless sessions follow the same pointer/readiness contract until
+shutdown.
+
 ### JSON Output (`--json`)
 
 When `--json` is specified, arf prints session connection info to stdout as a single JSON object once the server is ready:

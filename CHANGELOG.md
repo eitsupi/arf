@@ -9,6 +9,7 @@
 ### Fixed
 
 - Vi pending character motions now correctly accept `v` as the motion character instead of entering visual mode (#329).
+- **Experimental:** IPC PID file ownership and handoff now preserve tracking across interactive `:restart` and `:switch`; relative paths and loader re-exec are preserved across the replacement (#342).
 
 ## [0.5.0] - 2026-08-19
 
