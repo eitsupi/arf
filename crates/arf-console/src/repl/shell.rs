@@ -288,11 +288,11 @@ pub fn restart_process(version: Option<&str>) {
         // Stop serving first, then relinquish the file; on failure the old
         // file is left alone and no child is started.
         crate::ipc::stop_server();
-        if let Some(pid_path) = crate::pid_file::initial_pid_file_path() {
-            if let Err(e) = crate::pid_file::relinquish_pid_file_for_restart(&pid_path) {
-                arf_eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
+        if let Some(pid_path) = crate::pid_file::initial_pid_file_path()
+            && let Err(e) = crate::pid_file::relinquish_pid_file_for_restart(&pid_path)
+        {
+            arf_eprintln!("Error: {}", e);
+            std::process::exit(1);
         }
         // On non-Unix platforms, spawn a new process and wait for it to exit.
         // Unlike Unix exec(), this doesn't replace the current process, so we
