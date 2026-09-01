@@ -73,8 +73,15 @@ const STARTUP_ENV_VARS: &[&str] = &[
 /// be set directly.
 const STARTUP_ENV_CARRIER: &str = "_ARF_INTERNAL_STARTUP_ENV";
 const STARTUP_ENV_CARRIER_VERSION: u32 = 1;
+/// Carries the effective IPC bind path through a restart or loader re-exec.
+///
+/// The value is consumed during startup before R is initialized, so it cannot
+/// leak into R or a child process. It is an OsString because Unix paths are not
+/// required to be valid UTF-8.
+pub(crate) const IPC_BIND_CARRIER: &str = "_ARF_INTERNAL_IPC_BIND";
 
 static STARTUP_ENV: OnceLock<HashMap<String, OsString>> = OnceLock::new();
+static IPC_BIND_PATH: OnceLock<Option<OsString>> = OnceLock::new();
 
 fn main() -> ExitCode {
     match run() {
@@ -92,6 +99,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     capture_startup_env();
+    let carried_ipc_bind = capture_ipc_bind_carrier();
 
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
@@ -100,6 +108,11 @@ fn run() -> Result<()> {
     let matches = command.clone().get_matches();
     validate_top_level_scope(&command, &matches);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    // Resolve this before R initialization: profiles may change cwd, but a
+    // relative IPC bind path must continue to identify its initial endpoint.
+    let effective_ipc_bind =
+        effective_ipc_bind_path(cli.ipc_bind.as_deref().map(OsStr::new), carried_ipc_bind);
+    let _ = IPC_BIND_PATH.set(effective_ipc_bind);
     if let Some(path) = cli.ipc_pid_file.as_deref() {
         // Resolve this before R initialization: profiles may change cwd, but
         // a relative PID path must continue to identify its initial file.
@@ -351,6 +364,11 @@ fn run() -> Result<()> {
         // threads are spawned and before R is initialized, so mutating the
         // process environment here cannot race with a concurrent read.
         unsafe { std::env::set_var(STARTUP_ENV_CARRIER, startup_env_carrier()) };
+        if let Some(path) = ipc_bind_path() {
+            // Forward the fixed bind path through this possible loader
+            // re-exec. The replacement consumes it before R initialization.
+            unsafe { std::env::set_var(IPC_BIND_CARRIER, path) };
+        }
         if let Some((path, pid)) = pid_file::restart_context_carrier() {
             // Forward the restart ownership context through this possible
             // loader re-exec. capture_startup_env removes it in the image
@@ -378,6 +396,7 @@ fn run() -> Result<()> {
         unsafe {
             std::env::remove_var(pid_file::RESTART_PID_PATH_ENV);
             std::env::remove_var(pid_file::RESTART_PID_ENV);
+            std::env::remove_var(IPC_BIND_CARRIER);
         }
     }
     #[cfg(not(unix))]
@@ -479,8 +498,17 @@ fn run() -> Result<()> {
     // server advertises a session ID only after the R runtime is confirmed
     // available. The REPL later attaches those same owners to its editors.
     if cli.with_ipc {
+        let ipc_bind = ipc_bind_path()
+            .map(|path| {
+                path.into_string().map_err(|_| {
+                    anyhow::anyhow!(
+                        "IPC bind path is not valid UTF-8 and cannot be advertised by the IPC protocol"
+                    )
+                })
+            })
+            .transpose()?;
         match ipc::start_server(
-            cli.ipc_bind.as_deref(),
+            ipc_bind.as_deref(),
             repl.r_home_for_ipc(),
             None,
             repl.history_session_id_raw(),
@@ -516,6 +544,61 @@ fn run() -> Result<()> {
     }
 
     repl_result
+}
+
+/// Consume the bind-path carrier before R or any child process can observe it.
+/// Invalid carriers are ignored; the command-line path is then used normally.
+fn capture_ipc_bind_carrier() -> Option<OsString> {
+    // SAFETY: run() calls this during single-threaded process initialization,
+    // before R or any child process is started.
+    let value = unsafe {
+        let value = std::env::var_os(IPC_BIND_CARRIER);
+        std::env::remove_var(IPC_BIND_CARRIER);
+        value
+    }?;
+    let path = PathBuf::from(value);
+    if is_effective_ipc_bind_path(&path) {
+        Some(path.into_os_string())
+    } else {
+        None
+    }
+}
+
+/// Resolve a CLI bind path while the process still has its original cwd.
+fn absolute_ipc_bind_path(path: &OsStr) -> OsString {
+    let path = PathBuf::from(path);
+    if is_effective_ipc_bind_path(&path) {
+        path.into_os_string()
+    } else {
+        std::path::absolute(&path).unwrap_or(path).into_os_string()
+    }
+}
+
+/// Select the startup bind path only when the command line requested IPC
+/// binding. This prevents an untrusted or stale carrier from enabling a
+/// custom endpoint during an otherwise ordinary startup.
+fn effective_ipc_bind_path(
+    cli_path: Option<&OsStr>,
+    carried_path: Option<OsString>,
+) -> Option<OsString> {
+    cli_path.map(|path| {
+        carried_path
+            .filter(|path| is_effective_ipc_bind_path(std::path::Path::new(path)))
+            .unwrap_or_else(|| absolute_ipc_bind_path(path))
+    })
+}
+
+fn is_effective_ipc_bind_path(path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    if path.as_os_str().to_string_lossy().starts_with(r"\\.\pipe\") {
+        return true;
+    }
+    path.is_absolute()
+}
+
+/// Return the bind path fixed at process startup, if one was configured.
+pub(crate) fn ipc_bind_path() -> Option<OsString> {
+    IPC_BIND_PATH.get().cloned().flatten()
 }
 
 /// Read the startup environment snapshot before R initialization can add any
@@ -857,7 +940,7 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
 mod tests {
     use super::{
         STARTUP_ENV_CARRIER_VERSION, absolutize_runtime_r_home, deserialize_startup_env,
-        serialize_startup_env,
+        effective_ipc_bind_path, serialize_startup_env,
     };
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -892,6 +975,23 @@ mod tests {
             absolutize_runtime_r_home(PathBuf::from("lib/R"), None),
             None
         );
+    }
+
+    #[test]
+    fn ipc_bind_carrier_cannot_enable_binding_without_cli_option() {
+        let carried = Some(PathBuf::from("/tmp/carried.sock").into_os_string());
+        assert_eq!(effective_ipc_bind_path(None, carried), None);
+    }
+
+    #[test]
+    fn invalid_ipc_bind_carrier_falls_back_to_cli_path() {
+        let carried = Some(PathBuf::from("relative/carried.sock").into_os_string());
+        let effective = effective_ipc_bind_path(
+            Some(OsString::from("relative/cli.sock").as_os_str()),
+            carried,
+        )
+        .expect("CLI bind path should be selected");
+        assert!(PathBuf::from(effective).is_absolute());
     }
 
     #[test]

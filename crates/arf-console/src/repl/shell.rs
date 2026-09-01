@@ -161,6 +161,9 @@ fn build_restart_command(
         cmd.env(crate::pid_file::RESTART_PID_PATH_ENV, path);
         cmd.env(crate::pid_file::RESTART_PID_ENV, pid);
     }
+    if let Some(path) = crate::ipc_bind_path() {
+        cmd.env(crate::IPC_BIND_CARRIER, path);
+    }
     for (var, value) in &changes.restored {
         cmd.env(var, value);
     }

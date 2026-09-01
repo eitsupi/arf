@@ -108,9 +108,15 @@ fn test_pty_restart_preserves_pid_file_ownership() {
     let socket_dir = tempfile::tempdir().expect("Should create a temp socket directory");
     let socket_path = socket_dir.path().join("custom.sock");
     let _ = std::fs::remove_file(&socket_path);
-    let socket_arg = socket_path
+    let relative_socket_path = relative_path_from(&initial_dir, &socket_path);
+    let socket_path_from_changed_dir = changed_dir.path().join(&relative_socket_path);
+    assert_ne!(
+        socket_path_from_changed_dir, socket_path,
+        "The relative IPC bind argument must resolve differently after setwd"
+    );
+    let socket_arg = relative_socket_path
         .to_str()
-        .expect("Socket path should be valid UTF-8");
+        .expect("Relative socket path should be valid UTF-8");
     let config_arg = config_path
         .to_str()
         .expect("Config path should be valid UTF-8");
