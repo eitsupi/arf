@@ -602,10 +602,7 @@ fn normalize_interactive_args(
             continue;
         }
         if let Some(bind) = bind_path.as_ref()
-            && arg
-                .to_str()
-                .and_then(|s| s.strip_prefix("--ipc-bind="))
-                .is_some()
+            && os_str_has_ascii_prefix(arg, b"--ipc-bind=")
         {
             let mut rewritten = OsString::from("--ipc-bind=");
             rewritten.push(bind);
@@ -614,10 +611,7 @@ fn normalize_interactive_args(
             continue;
         }
         if let Some(pid) = pid_path.as_ref()
-            && arg
-                .to_str()
-                .and_then(|s| s.strip_prefix("--ipc-pid-file="))
-                .is_some()
+            && os_str_has_ascii_prefix(arg, b"--ipc-pid-file=")
         {
             let mut rewritten = OsString::from("--ipc-pid-file=");
             rewritten.push(pid);
@@ -629,6 +623,30 @@ fn normalize_interactive_args(
         index += 1;
     }
     normalized
+}
+
+/// Check an ASCII option prefix without requiring the complete argument to be
+/// UTF-8. This preserves and rewrites non-UTF-8 path values losslessly.
+fn os_str_has_ascii_prefix(value: &OsStr, prefix: &[u8]) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        value.as_bytes().starts_with(prefix)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        value
+            .encode_wide()
+            .take(prefix.len())
+            .eq(prefix.iter().copied().map(u16::from))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        value
+            .to_str()
+            .is_some_and(|value| value.as_bytes().starts_with(prefix))
+    }
 }
 
 /// Read the startup environment snapshot before R initialization can add any
@@ -1038,8 +1056,18 @@ mod tests {
                 OsString::from("unrelated")
             }
         };
+        #[cfg(unix)]
+        let non_utf_bind = OsString::from_vec(b"--ipc-bind=relative\xff.sock".to_vec());
+        #[cfg(unix)]
+        let non_utf_pid = OsString::from_vec(b"--ipc-pid-file=relative\xfe.pid".to_vec());
         let args = vec![
+            #[cfg(unix)]
+            non_utf_bind,
+            #[cfg(not(unix))]
             OsString::from("--ipc-bind=relative.sock"),
+            #[cfg(unix)]
+            non_utf_pid,
+            #[cfg(not(unix))]
             OsString::from("--ipc-pid-file=relative.pid"),
             unrelated.clone(),
         ];
