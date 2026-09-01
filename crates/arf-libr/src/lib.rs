@@ -26,8 +26,6 @@ pub use types::{Rstart, SaType, UImode};
 // sys
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
-#[cfg(unix)]
-pub use sys::ensure_ld_library_path_with_pre_exec;
 pub use sys::{
     ReadConsolePromptInfo, clear_r_interrupt_pending, clear_write_console_callback,
     command_had_error, ensure_ld_library_path, find_r_library, finish_ipc_capture,
@@ -39,4 +37,8 @@ pub use sys::{
     run_r_mainloop, set_r_auto_discovery_disabled, set_r_interrupt_pending,
     set_read_console_callback, set_reprex_mode, set_spinner_color, set_spinner_frames,
     set_write_console_callback, start_ipc_capture, start_spinner, stop_spinner, suppress_stderr,
+};
+#[cfg(unix)]
+pub use sys::{
+    ensure_ld_library_path_with_pre_exec, ensure_ld_library_path_with_pre_exec_and_args,
 };

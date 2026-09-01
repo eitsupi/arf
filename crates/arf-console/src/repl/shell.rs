@@ -157,12 +157,9 @@ fn build_restart_command(
     let mut cmd = Command::new(exe);
     cmd.args(args);
     cmd.env(crate::STARTUP_ENV_CARRIER, startup_env_carrier);
-    if let Some((path, pid)) = crate::pid_file::restart_command_context() {
-        cmd.env(crate::pid_file::RESTART_PID_PATH_ENV, path);
-        cmd.env(crate::pid_file::RESTART_PID_ENV, pid);
-    }
-    if let Some(path) = crate::ipc_bind_path() {
-        cmd.env(crate::IPC_BIND_CARRIER, path);
+    #[cfg(unix)]
+    if let Some(fd) = crate::pid_file::restart_fd_carrier() {
+        cmd.env(crate::pid_file::RESTART_PID_FD_ENV, fd);
     }
     for (var, value) in &changes.restored {
         cmd.env(var, value);
@@ -251,7 +248,7 @@ pub fn restart_process(version: Option<&str>) {
 
     // Get command-line arguments (skip the program name, we'll use current_exe instead)
     // Also filter out any existing --with-r-version argument if we're switching versions
-    let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let mut args: Vec<OsString> = crate::normalized_args();
 
     if let Some(v) = &version {
         // Remove existing --with-r-version arguments
@@ -270,6 +267,14 @@ pub fn restart_process(version: Option<&str>) {
     {
         use std::os::unix::process::CommandExt;
 
+        let _pid_fd_guard = match crate::pid_file::prepare_pid_fd_for_exec() {
+            Some(Ok(guard)) => Some(guard),
+            Some(Err(error)) => {
+                arf_eprintln!("Error: Failed to prepare PID file for restart: {error}");
+                return;
+            }
+            None => None,
+        };
         let mut cmd = build_restart_command(&exe, &args, &changes, &startup_env_carrier);
 
         // exec() replaces the current process - this should not return
