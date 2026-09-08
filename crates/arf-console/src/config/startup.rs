@@ -110,7 +110,7 @@ impl RSourceOverrideInfo {
             (None, None) => "pixi".to_string(),
         };
         format!(
-            "{} {} = \"{}\"",
+            r#"{} {} = "{}""#,
             self.provider, source, self.requested_version
         )
     }

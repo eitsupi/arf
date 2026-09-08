@@ -43,7 +43,7 @@ fn test_lib_paths_re_evaluates_after_r_lib_paths_changes() {
 
         assert!(!baseline.iter().any(|path| path == &new_path));
         eval_string_in_base(&format!(
-            "invisible(.libPaths(c(\"{}\", .libPaths())))",
+            r#"invisible(.libPaths(c("{}", .libPaths())))"#,
             escape_r_string(&new_path)
         ))
         .expect(".libPaths() should accept the extra directory");
@@ -71,7 +71,7 @@ impl Drop for LibPathsRestore {
         let paths = self
             .paths
             .iter()
-            .map(|path| format!("\"{}\"", escape_r_string(path)))
+            .map(|path| format!(r#""{}""#, escape_r_string(path)))
             .collect::<Vec<_>>()
             .join(", ");
         if let Err(error) = eval_string_in_base(&format!("invisible(.libPaths(c({paths})))")) {
@@ -83,7 +83,7 @@ impl Drop for LibPathsRestore {
 fn escape_r_string(value: &str) -> String {
     value
         .replace('\\', "\\\\")
-        .replace('"', "\\\"")
+        .replace('"', r#"\""#)
         .replace('\n', "\\n")
         .replace('\r', "\\r")
 }

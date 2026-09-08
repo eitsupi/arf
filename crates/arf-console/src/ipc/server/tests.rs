@@ -3,13 +3,13 @@ use super::*;
 #[test]
 fn test_extract_body_http() {
     let http = b"POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"jsonrpc\":\"2.0\"}";
-    assert_eq!(extract_body(http), b"{\"jsonrpc\":\"2.0\"}");
+    assert_eq!(extract_body(http), br#"{"jsonrpc":"2.0"}"#);
 }
 
 #[test]
 fn test_extract_body_raw_json() {
-    let raw = b"{\"jsonrpc\":\"2.0\"}";
-    assert_eq!(extract_body(raw), b"{\"jsonrpc\":\"2.0\"}");
+    let raw = br#"{"jsonrpc":"2.0"}"#;
+    assert_eq!(extract_body(raw), br#"{"jsonrpc":"2.0"}"#);
 }
 
 /// Tests that dispatch_request rejects both evaluate and user_input

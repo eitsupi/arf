@@ -114,7 +114,7 @@ pub(super) fn read_console_callback(
             prompt_info.options_are_ambiguous,
         ) {
             arf_eprintln!(
-                "Warning: options(\"prompt\") and options(\"continue\") are identical; arf cannot distinguish top-level and continuation prompts."
+                r#"Warning: options("prompt") and options("continue") are identical; arf cannot distinguish top-level and continuation prompts."#
             );
         }
 

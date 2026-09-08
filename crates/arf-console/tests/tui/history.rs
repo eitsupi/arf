@@ -189,17 +189,17 @@ fn history_menu_selection_replaces_auto_matched_quote_pair() -> Result<()> {
         "history-menu-quote-pair",
         &["--no-completion"],
         |terminal| {
-            terminal.submit("nchar(\"``\")", "[1] 2", PROMPT)?;
+            terminal.submit(r#"nchar("``")"#, "[1] 2", PROMPT)?;
             let checkpoint = terminal.checkpoint()?;
             terminal.write("`")?;
             terminal.wait_for("auto-matched quote pair", |_, line| line.contains("``"))?;
             terminal.write("\x12")?;
             terminal.wait_for("quote history item is visible", |state, _| {
-                state.text.contains("Page 1:") && state.text.contains("nchar(\"``\")")
+                state.text.contains("Page 1:") && state.text.contains(r#"nchar("``")"#)
             })?;
             terminal.key("Enter")?;
             terminal.wait_for("quote history item replaces buffer", |_, line| {
-                line.trim_end() == "ARF> nchar(\"``\")"
+                line.trim_end() == r#"ARF> nchar("``")"#
             })?;
             terminal.key("Enter")?;
             terminal.wait_for_prompt(None, PROMPT)?;

@@ -158,10 +158,10 @@ fn backtick_error_does_not_crash_and_repl_recovers() -> Result<()> {
 #[test]
 fn multiline_raw_string_round_trip() -> Result<()> {
     run_case("multiline-raw-string", &["--no-auto-match"], |terminal| {
-        terminal.write("x <- r\"(hello")?;
+        terminal.write(r#"x <- r"(hello"#)?;
         terminal.key("Enter")?;
         terminal.wait_for("raw string continuation", |_, line| line.trim_end() == "+")?;
-        terminal.write("world)\"")?;
+        terminal.write(r#"world)""#)?;
         terminal.key("Enter")?;
         terminal.wait_for_prompt(None, PROMPT)?;
         terminal.submit("nchar(x)", "[1] 11", PROMPT)
@@ -179,7 +179,7 @@ fn multiline_quoted_string_preserves_newline() -> Result<()> {
             terminal.wait_for("quoted string continuation", |_, line| {
                 line.trim_end() == "+"
             })?;
-            terminal.write("end\"")?;
+            terminal.write(r#"end""#)?;
             terminal.key("Enter")?;
             terminal.wait_for_prompt(None, PROMPT)?;
             terminal.submit("nchar(x)", "[1] 8", PROMPT)?;

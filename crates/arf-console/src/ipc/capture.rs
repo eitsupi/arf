@@ -234,7 +234,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_val.dat");
 
         // value present, error absent
-        let value = b"[1] \"hello\"";
+        let value = br#"[1] "hello""#;
         let header = format!("{} -1\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
@@ -244,7 +244,7 @@ mod tests {
         let result = parse_capture_file(&path);
         let _ = std::fs::remove_file(&path);
 
-        assert_eq!(result.value.as_deref(), Some("[1] \"hello\""));
+        assert_eq!(result.value.as_deref(), Some(r#"[1] "hello""#));
         assert!(result.error.is_none());
         // Verify JSON serialization
         let json = serde_json::to_string(&result).unwrap();

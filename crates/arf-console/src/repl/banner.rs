@@ -149,7 +149,7 @@ mod tests {
         let banner = format_banner(&config, true, Some(&info), Some(FormatterBackend::Air));
         assert!(
             banner.contains(
-                "# R source override: toml-key rproject.toml:project.r_version = \"4.4\""
+                r#"# R source override: toml-key rproject.toml:project.r_version = "4.4""#,
             )
         );
     }
@@ -166,7 +166,7 @@ mod tests {
         let line = format_override_line(&info);
         assert_eq!(
             line,
-            "# R source override: version-file .r-version = \"4.4\""
+            r#"# R source override: version-file .r-version = "4.4""#
         );
         assert!(!line.contains('\n'));
     }

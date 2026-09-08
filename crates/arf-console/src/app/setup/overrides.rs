@@ -331,7 +331,7 @@ where
             diagnostics.push(warning(
                 "r_source_override.provider_unsupported",
                 format!(
-                    "Warning: R version \"{name}\" from {} is unsupported in the R source override path; trying the next R source override.",
+                    r#"Warning: R version "{name}" from {} is unsupported in the R source override path; trying the next R source override."#,
                     provider.location()
                 ),
                 provider.file_path(),
@@ -425,7 +425,7 @@ where
                 diagnostics.push(warning(
                     "r_source_override.resolution_failed",
                     format!(
-                        "Warning: Failed to use R version \"{}\" from {}: {error}; trying the next R source override.",
+                        r#"Warning: Failed to use R version "{}" from {}: {error}; trying the next R source override."#,
                         trimmed_version,
                         provider.location()
                     ),
@@ -866,7 +866,7 @@ mod r_source_override_tests {
         assert!(status.rig_enabled());
         assert_eq!(
             status.display(),
-            "rig (R 4.4.2; override: toml-key rproject.toml:project.r_version = \"4.4\")"
+            r#"rig (R 4.4.2; override: toml-key rproject.toml:project.r_version = "4.4")"#
         );
     }
 
@@ -958,7 +958,7 @@ mod r_source_override_tests {
 
         assert_eq!(
             script_override_notice(&report).as_deref(),
-            Some("# R source override: version-file .r-version = \"4.4\"")
+            Some(r#"# R source override: version-file .r-version = "4.4""#)
         );
     }
 
