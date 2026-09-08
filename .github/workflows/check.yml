@@ -92,22 +92,20 @@ jobs:
           dependencies: '"hard"'
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Run interactive terminal smoke test
+      - name: Run tests
         timeout-minutes: 20
         env:
           ARF_TUI_TEST_ARTIFACTS: ${{ runner.temp }}/arf-tui-tests
-        run: cargo test -p arf-console --test tui_tests --locked -- --nocapture
-      - name: Upload terminal diagnostics
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: tui-${{ matrix.os }}-${{ matrix.r-version }}
-          path: ${{ runner.temp }}/arf-tui-tests
-          if-no-files-found: ignore
-      - name: Run tests
         run: >
           cargo test
           --all-targets
           --all-features
           --workspace
           --locked
+      - name: Upload terminal diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tui-${{ matrix.os }}-${{ matrix.r-version }}
+          path: ${{ runner.temp }}/arf-tui-tests
+          if-no-files-found: ignore
