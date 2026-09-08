@@ -23,6 +23,8 @@ use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 const SPAM_INTERVAL: Duration = Duration::from_millis(90);
 const SPAM_COUNT: usize = 15;
@@ -308,7 +310,17 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
         "failed to send SIGTERM to {pid}: {}",
         std::io::Error::last_os_error()
     );
-    let status = child.child.as_mut().expect("guard has child").wait()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
+            break status;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "timed out waiting for arf to terminate after SIGTERM"
+        );
+        thread::sleep(Duration::from_millis(25));
+    };
     child.child.take();
     let expected_signal_name =
         unsafe { std::ffi::CStr::from_ptr(libc::strsignal(libc::SIGTERM)).to_string_lossy() };
