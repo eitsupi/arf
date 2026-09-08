@@ -20,6 +20,8 @@ mod reprex;
 mod session;
 #[path = "tui/shell.rs"]
 mod shell;
+#[path = "tui/signal.rs"]
+mod signal;
 #[path = "tui/support.rs"]
 mod support;
 #[path = "tui/ui.rs"]
