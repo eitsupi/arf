@@ -304,10 +304,17 @@ impl Terminal {
     }
 
     fn current_line(&self, state: &State) -> Result<String> {
+        self.screen_line(state.cursor.y, state.cols)
+    }
+
+    /// Read one emulated screen row without depending on the cursor position.
+    /// Pager headers live above the hidden cursor, so current-line polling is
+    /// insufficient when an alternate-screen UI is active.
+    pub fn screen_line(&self, y: u16, cols: u16) -> Result<String> {
         match self.execute(Operation::Cells {
             x: 0,
-            y: state.cursor.y,
-            w: state.cols,
+            y,
+            w: cols,
             h: 1,
         })? {
             OperationResult::Cells(cells) => Ok(cells.into_iter().map(|cell| cell.char).collect()),
@@ -326,6 +333,38 @@ impl Terminal {
             let state = self.state()?;
             let line = self.current_line(&state)?;
             // Keep the last observation if a later PTY operation blocks.
+            fs::write(
+                self.artifacts.join("state.json"),
+                serde_json::to_vec_pretty(&state)?,
+            )?;
+            ensure!(
+                state.exited.is_none(),
+                "arf exited waiting for {description}: {state:?}"
+            );
+            if predicate(&state, &line) {
+                return Ok(());
+            }
+            ensure!(
+                started.elapsed() < WAIT,
+                "timed out waiting for {description}: {state:?}"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    /// Poll a fixed emulated screen row, which is useful for pager headers
+    /// rendered above the hidden cursor.
+    pub fn wait_for_screen_line(
+        &self,
+        description: &str,
+        y: u16,
+        predicate: impl Fn(&State, &str) -> bool,
+    ) -> Result<()> {
+        self.stage(description)?;
+        let started = Instant::now();
+        loop {
+            let state = self.state()?;
+            let line = self.screen_line(y, state.cols)?;
             fs::write(
                 self.artifacts.join("state.json"),
                 serde_json::to_vec_pretty(&state)?,

@@ -22,3 +22,5 @@ mod session;
 mod shell;
 #[path = "tui/support.rs"]
 mod support;
+#[path = "tui/ui.rs"]
+mod ui;
