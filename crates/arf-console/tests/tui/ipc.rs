@@ -87,6 +87,7 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
             let sentinel = terminal.start_ipc(&["send", r"cat('SILENT_IPC_SENTINEL\n')"])?;
             terminal.wait_for("IPC sentinel approval", |state, _| {
                 state.text.contains("IPC send request:")
+                    && state.text.contains("Press y to approve")
                     && state.text.contains("SILENT_IPC_SENTINEL")
             })?;
             terminal.key("y")?;
@@ -119,7 +120,9 @@ fn visible_ipc_evaluation_waits_for_approval_and_repl_completion() -> Result<()>
             "10000",
         ])?;
         terminal.wait_for("visible IPC approval", |state, _| {
-            state.text.contains("IPC send request:") && state.text.contains("VISIBLE_IPC_OUTPUT")
+            state.text.contains("IPC send request:")
+                && state.text.contains("Press y to approve")
+                && state.text.contains("VISIBLE_IPC_OUTPUT")
         })?;
         terminal.key("y")?;
 
@@ -266,6 +269,128 @@ fn assert_history_metadata(terminal: &Terminal, marker: &str, expected_status: i
         "history entry has wrong exit status: {entry}"
     );
     Ok(())
+}
+
+fn json_object_from_cli_text(text: &str) -> Result<Value> {
+    let start = text
+        .find('{')
+        .context("CLI PTY output lacks a structured JSON object")?;
+    let end = text
+        .rfind('}')
+        .context("CLI PTY output lacks the end of its JSON object")?;
+    ensure!(end >= start, "CLI PTY JSON bounds are invalid: {text:?}");
+    Ok(serde_json::from_str(&text[start..=end])?)
+}
+
+#[test]
+fn ipc_eval_without_code_reports_structured_tty_error() -> Result<()> {
+    run_case("ipc-eval-no-code-tty", &["--with-ipc"], |terminal| {
+        let cli = terminal.start_cli_tty(&["ipc", "eval"])?;
+        ensure!(
+            cli.wait_for_exit()? == 2,
+            "IPC eval without code should exit with client status 2"
+        );
+        let response = json_object_from_cli_text(&cli.state()?.text)?;
+        ensure!(
+            response["error"]["code"] == "NO_CODE_PROVIDED",
+            "wrong no-code error: {response}"
+        );
+        ensure!(
+            response["error"]["message"] == "No code provided and stdin is a terminal",
+            "wrong no-code message: {response}"
+        );
+        terminal.submit("42", "[1] 42", PROMPT)
+    })
+}
+
+fn row_text(cells: &[tui_test::Cell]) -> String {
+    cells.iter().map(|cell| cell.char.as_str()).collect()
+}
+
+fn has_indexed_foreground(cell: &tui_test::Cell, index: u8) -> bool {
+    cell.fg == tui_test::CellColor::Indexed(index)
+}
+
+#[test]
+fn ipc_approval_prompt_preserves_full_code_and_expected_styles() -> Result<()> {
+    run_case_with(
+        Terminal::builder("ipc-approval-styles")
+            .args(["--with-ipc"])
+            .env("NO_COLOR", ""),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let code = format!(
+                "style_approval_prefix <- 1; {}style_approval_tail <- 1",
+                "style_approval_padding <- 1; ".repeat(10)
+            );
+            let checkpoint = terminal.checkpoint()?;
+            let request = terminal.start_ipc(&["send", &code])?;
+            terminal.wait_for("long IPC approval prompt", |state, _| {
+                state.text.contains("IPC send request:")
+                    && state.text.contains("Press y to approve")
+                    && state.text.contains("style_approval_prefix")
+                    && state.text.contains("style_approval_tail")
+            })?;
+            let state = terminal.state()?;
+            let mut heading_styled = false;
+            let mut code_styled = false;
+            let mut confirmation_styled = false;
+            for y in 0..state.rows {
+                let cells = terminal.screen_cells(y, state.cols)?;
+                let text = row_text(&cells);
+                if text.contains("IPC send request:") {
+                    heading_styled = cells.iter().any(|cell| has_indexed_foreground(cell, 6));
+                }
+                if text.contains("style_approval_prefix") {
+                    code_styled = cells.iter().any(|cell| has_indexed_foreground(cell, 11));
+                }
+                if text.contains("Press y to approve") {
+                    confirmation_styled = cells
+                        .iter()
+                        .any(|cell| has_indexed_foreground(cell, 11) && cell.bold);
+                }
+            }
+            ensure!(
+                heading_styled,
+                "approval heading was not dark cyan: {state:?}"
+            );
+            ensure!(code_styled, "approval code was not yellow: {state:?}");
+            ensure!(
+                confirmation_styled,
+                "approval confirmation was not bold yellow: {state:?}"
+            );
+            ensure!(
+                terminal.output_since(checkpoint)?.contains(&code),
+                "long approval code was truncated in terminal output"
+            );
+            terminal.key("y")?;
+            ensure!(
+                request.finish()?["accepted"] == true,
+                "long approval request was not accepted"
+            );
+            terminal.wait_for("long approval returns to prompt", |state, line| {
+                state.text.contains("style_approval_tail") && line.trim_end() == PROMPT
+            })?;
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn dropping_pending_ipc_client_can_be_cancelled_and_repl_recovers() -> Result<()> {
+    run_case("ipc-drop-pending", &["--with-ipc"], |terminal| {
+        terminal.wait_for_first_prompt()?;
+        let request = terminal.start_ipc(&["send", "1 + 1"])?;
+        terminal.wait_for("dropped IPC client approval", |state, _| {
+            state.text.contains("IPC send request:") && state.text.contains("Press y to approve")
+        })?;
+        drop(request);
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for("prompt after dropped IPC client", |_, line| {
+            line.trim_end() == PROMPT
+        })?;
+        terminal.submit("42", "[1] 42", PROMPT)
+    })
 }
 
 #[cfg(unix)]
@@ -526,7 +651,9 @@ fn approved_ipc_send_is_persisted_with_success_metadata() -> Result<()> {
             terminal.wait_for_first_prompt()?;
             let request = terminal.start_ipc(&["send", marker])?;
             terminal.wait_for("IPC history success approval", |state, _| {
-                state.text.contains("IPC send request:") && state.text.contains(marker)
+                state.text.contains("IPC send request:")
+                    && state.text.contains("Press y to approve")
+                    && state.text.contains(marker)
             })?;
             terminal.key("y")?;
             let response = request.finish()?;
@@ -552,7 +679,9 @@ fn approved_ipc_error_is_recorded_and_repl_recovers() -> Result<()> {
             terminal.wait_for_first_prompt()?;
             let request = terminal.start_ipc(&["send", marker])?;
             terminal.wait_for("IPC history error approval", |state, _| {
-                state.text.contains("IPC send request:") && state.text.contains(marker)
+                state.text.contains("IPC send request:")
+                    && state.text.contains("Press y to approve")
+                    && state.text.contains(marker)
             })?;
             terminal.key("y")?;
             let response = request.finish()?;
@@ -611,7 +740,9 @@ fn visible_ipc_evaluation_decline_does_not_execute_code() -> Result<()> {
             "10000",
         ])?;
         terminal.wait_for("visible IPC decline prompt", |state, _| {
-            state.text.contains("IPC send request:") && state.text.contains(marker)
+            state.text.contains("IPC send request:")
+                && state.text.contains("Press y to approve")
+                && state.text.contains(marker)
         })?;
         terminal.key("n")?;
         assert_ipc_not_approved(request.finish_with_status()?)?;
@@ -625,7 +756,9 @@ fn ipc_input_ctrl_c_decline_does_not_execute_code() -> Result<()> {
         let marker = "DECLINED_SEND_IPC_MARKER";
         let request = terminal.start_ipc(&["send", &format!("{marker} <- TRUE")])?;
         terminal.wait_for("send IPC decline prompt", |state, _| {
-            state.text.contains("IPC send request:") && state.text.contains(marker)
+            state.text.contains("IPC send request:")
+                && state.text.contains("Press y to approve")
+                && state.text.contains(marker)
         })?;
         terminal.key("Ctrl+C")?;
         assert_ipc_not_approved(request.finish_with_status()?)?;
@@ -765,7 +898,9 @@ fn approved_ipc_input_is_evaluated_before_the_next_prompt() -> Result<()> {
         let checkpoint = terminal.checkpoint()?;
         let request = terminal.start_ipc(&["send", marker])?;
         terminal.wait_for("silent IPC assignment approval", |state, _| {
-            state.text.contains("IPC send request:") && state.text.contains(marker)
+            state.text.contains("IPC send request:")
+                && state.text.contains("Press y to approve")
+                && state.text.contains(marker)
         })?;
         terminal.key("y")?;
         let response = request.finish()?;

@@ -322,6 +322,18 @@ impl Terminal {
         }
     }
 
+    pub fn screen_cells(&self, y: u16, cols: u16) -> Result<Vec<tui_test::Cell>> {
+        match self.execute(Operation::Cells {
+            x: 0,
+            y,
+            w: cols,
+            h: 1,
+        })? {
+            OperationResult::Cells(cells) => Ok(cells),
+            _ => bail!("unexpected cells response"),
+        }
+    }
+
     pub fn wait_for(
         &self,
         description: &str,
@@ -473,6 +485,10 @@ impl Terminal {
         })
     }
 
+    pub fn start_cli_tty(&self, args: &[&str]) -> Result<CliSession> {
+        CliSession::new("arf-cli-tty", args, &self.cwd, self.ipc_sessions_dir())
+    }
+
     pub fn quit(&self) -> Result<()> {
         self.stage("normal exit")?;
         self.enter("q('no')")?;
@@ -497,6 +513,63 @@ impl Terminal {
         state
             .exited
             .context("process did not report an exit status")
+    }
+}
+
+/// A short-lived CLI process attached to its own tui-test PTY.
+pub struct CliSession {
+    session: Session,
+}
+
+impl CliSession {
+    fn new(
+        name: &str,
+        args: &[&str],
+        cwd: &std::path::Path,
+        sessions_dir: &std::path::Path,
+    ) -> Result<Self> {
+        let session = Session::new(name);
+        let defaults = OpenOptions::default();
+        session.run(RunOptions {
+            backend: defaults.backend,
+            program: env!("CARGO_BIN_EXE_arf").into(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            profile: defaults.profile,
+            cols: defaults.cols,
+            rows: defaults.rows,
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            env: vec![(
+                "ARF_IPC_SESSIONS_DIR".to_owned(),
+                sessions_dir.to_string_lossy().into_owned(),
+            )],
+            wait_ready: Some(false),
+            restart: false,
+            timeouts: defaults.timeouts,
+            recording: AutomaticRecording::default(),
+        })?;
+        Ok(Self { session })
+    }
+
+    pub fn state(&self) -> Result<State> {
+        match self.session.execute(Operation::State)? {
+            OperationResult::State(state) => Ok(state),
+            _ => bail!("unexpected CLI state response"),
+        }
+    }
+
+    pub fn wait_for_exit(&self) -> Result<i32> {
+        self.session.execute(Operation::WaitExit {
+            timeout_ms: Some(30_000),
+        })?;
+        self.state()?
+            .exited
+            .context("CLI process did not report an exit status")
+    }
+}
+
+impl Drop for CliSession {
+    fn drop(&mut self) {
+        let _ = self.session.close();
     }
 }
 
