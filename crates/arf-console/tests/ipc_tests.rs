@@ -3,10 +3,13 @@
 //! These tests verify IPC functionality without relying on terminal output
 //! verification, making them runnable on both Unix and Windows.
 //!
-//! Key differences from `pty_ipc_tests.rs`:
-//! - No terminal output assertions (no vt100 screen parsing)
-//! - Platform-aware transport (Unix sockets / Windows named pipes)
-//! - Only JSON-RPC responses are verified
+//! These tests complement `tui_tests.rs`: the TUI cases verify interactive
+//! screen and prompt behavior, while this file keeps low-level JSON-RPC and
+//! transport coverage independent of those assertions.
+//!
+//! In particular, these tests make no terminal output assertions and verify
+//! JSON-RPC responses over platform-aware transport (Unix sockets / Windows
+//! named pipes).
 //!
 //! Each test spawns a fresh arf process. Run with `--test-threads=1` to avoid
 //! resource contention from multiple R processes starting simultaneously.
@@ -24,6 +27,93 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Timeout for IPC request/response.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CursorQueryState {
+    Ground,
+    Escape,
+    Csi,
+    CsiSix,
+}
+
+/// Detect the cursor-position queries emitted by crossterm without parsing
+/// the PTY as a terminal screen. The detector is deliberately small because
+/// this test only needs to answer CSI `n` and CSI `6n` requests.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+struct CursorQueryDetector {
+    state: CursorQueryState,
+}
+
+#[cfg(unix)]
+impl CursorQueryDetector {
+    fn new() -> Self {
+        Self {
+            state: CursorQueryState::Ground,
+        }
+    }
+
+    /// Consume a chunk and return the number of cursor queries it contains.
+    /// State is retained between calls so an escape sequence may span reads.
+    fn consume(&mut self, bytes: &[u8]) -> usize {
+        let mut queries = 0;
+        for &byte in bytes {
+            self.state = match (self.state, byte) {
+                (CursorQueryState::Ground, 0x1b) => CursorQueryState::Escape,
+                (CursorQueryState::Ground, _) => CursorQueryState::Ground,
+                (CursorQueryState::Escape, b'[') => CursorQueryState::Csi,
+                (CursorQueryState::Escape, 0x1b) => CursorQueryState::Escape,
+                (CursorQueryState::Escape, _) => CursorQueryState::Ground,
+                (CursorQueryState::Csi, b'n') => {
+                    queries += 1;
+                    CursorQueryState::Ground
+                }
+                (CursorQueryState::Csi, b'6') => CursorQueryState::CsiSix,
+                (CursorQueryState::Csi, 0x1b) => CursorQueryState::Escape,
+                (CursorQueryState::Csi, _) => CursorQueryState::Ground,
+                (CursorQueryState::CsiSix, b'n') => {
+                    queries += 1;
+                    CursorQueryState::Ground
+                }
+                (CursorQueryState::CsiSix, 0x1b) => CursorQueryState::Escape,
+                (CursorQueryState::CsiSix, _) => CursorQueryState::Ground,
+            };
+        }
+        queries
+    }
+}
+
+#[cfg(all(test, unix))]
+mod cursor_query_detector_tests {
+    use super::{CursorQueryDetector, CursorQueryState};
+
+    #[test]
+    fn detects_empty_and_six_parameter_queries() {
+        let mut detector = CursorQueryDetector::new();
+
+        assert_eq!(detector.consume(b"\x1b[n"), 1);
+        assert_eq!(detector.consume(b"\x1b[6n"), 1);
+        assert_eq!(detector.state, CursorQueryState::Ground);
+    }
+
+    #[test]
+    fn detects_queries_split_across_reads_and_multiple_queries() {
+        let mut detector = CursorQueryDetector::new();
+
+        assert_eq!(detector.consume(b"noise\x1b"), 0);
+        assert_eq!(detector.consume(b"[6"), 0);
+        assert_eq!(detector.consume(b"n\x1b[n"), 2);
+    }
+
+    #[test]
+    fn ignores_other_parameters_and_recovers_after_noise() {
+        let mut detector = CursorQueryDetector::new();
+
+        assert_eq!(detector.consume(b"\x1b[12n\x1b[?6n\x1b[6m"), 0);
+        assert_eq!(detector.consume(b"text\x1b[6n"), 1);
+    }
+}
 
 /// Minimal process wrapper for cross-platform IPC testing.
 ///
@@ -91,32 +181,7 @@ impl IpcTestProcess {
         let reader_handle = thread::spawn(move || {
             #[cfg(unix)]
             {
-                // Use vt100 parser to reliably detect CSI 6n across read boundaries.
-                let (query_tx, query_rx) = std::sync::mpsc::channel::<()>();
-
-                struct QueryDetector {
-                    tx: std::sync::mpsc::Sender<()>,
-                }
-                impl vt100::Callbacks for QueryDetector {
-                    fn unhandled_csi(
-                        &mut self,
-                        _screen: &mut vt100::Screen,
-                        _prefix: Option<u8>,
-                        _intermediate: Option<u8>,
-                        params: &[&[u16]],
-                        c: char,
-                    ) {
-                        if c == 'n'
-                            && (params.is_empty()
-                                || (params.len() == 1 && params[0].len() == 1 && params[0][0] == 6))
-                        {
-                            let _ = self.tx.send(());
-                        }
-                    }
-                }
-
-                let callbacks = QueryDetector { tx: query_tx };
-                let mut parser = vt100::Parser::new_with_callbacks(24, 80, 0, callbacks);
+                let mut query_detector = CursorQueryDetector::new();
                 let mut buf = [0u8; 4096];
 
                 loop {
@@ -130,9 +195,8 @@ impl IpcTestProcess {
                                 output.push_str(&String::from_utf8_lossy(&buf[..n]));
                                 pty_output_clone.1.notify_all();
                             }
-                            parser.process(&buf[..n]);
                             // Respond to any cursor queries detected
-                            while query_rx.try_recv().is_ok() {
+                            for _ in 0..query_detector.consume(&buf[..n]) {
                                 let response = b"\x1b[1;1R";
                                 if let Ok(mut writer) = pty_writer_clone.lock() {
                                     let _ = writer.write_all(response);
@@ -537,8 +601,8 @@ fn test_ipc_evaluate_mixed() {
 
 /// Test that `visible=true` evaluate returns captured output.
 ///
-/// Unlike pty_ipc_tests, we cannot verify the output appeared in the terminal.
-/// We only verify the JSON-RPC response contains the expected captured data.
+/// This transport-only test verifies the JSON-RPC response; the corresponding
+/// tui-test case additionally verifies terminal output and prompt completion.
 #[test]
 #[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_visible() {
