@@ -12,6 +12,8 @@ mod input;
 mod ipc;
 #[path = "tui/output.rs"]
 mod output;
+#[path = "tui/prompt.rs"]
+mod prompt;
 #[path = "tui/session.rs"]
 mod session;
 #[path = "tui/support.rs"]

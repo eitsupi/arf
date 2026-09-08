@@ -138,6 +138,54 @@ fn screen_state_tracks_results_and_checkpointed_output() -> Result<()> {
 }
 
 #[test]
+fn backtick_error_does_not_crash_and_repl_recovers() -> Result<()> {
+    run_case("backtick-error", &["--no-completion"], |terminal| {
+        terminal.write("`")?;
+        terminal.wait_for("auto-matched quote", |state, line| {
+            state.exited.is_none() && line.contains("``")
+        })?;
+        terminal.key("Enter")?;
+        terminal.wait_for("backtick parser error", |state, _| {
+            state.text.contains("zero-length variable name")
+        })?;
+        terminal.wait_for("prompt after backtick error", |_, line| {
+            line.trim_end() == ERROR_PROMPT
+        })?;
+        terminal.submit("1 + 1", "[1] 2", PROMPT)
+    })
+}
+
+#[test]
+fn multiline_raw_string_round_trip() -> Result<()> {
+    run_case("multiline-raw-string", &["--no-auto-match"], |terminal| {
+        terminal.write("x <- r\"(hello")?;
+        terminal.key("Enter")?;
+        terminal.wait_for("raw string continuation", |_, line| line.trim_end() == "+")?;
+        terminal.write("world)\"")?;
+        terminal.key("Enter")?;
+        terminal.wait_for_prompt(None, PROMPT)?;
+        terminal.submit("nchar(x)", "[1] 11", PROMPT)
+    })
+}
+
+#[test]
+#[ignore = "requires PR #330 reedline auto-pairs"]
+fn raw_string_with_auto_match_is_preserved() -> Result<()> {
+    run_case("raw-string-auto-match", &[], |terminal| {
+        let source = r#"x <- r"---(hello "world")---"#;
+        terminal.write(source)?;
+        terminal.wait_for("raw string source is constructed", |_, line| {
+            line.contains(source)
+        })?;
+        terminal.key("Enter")?;
+        terminal.wait_for("raw string assignment completed", |state, line| {
+            state.text.contains(source) && line.trim_end() == PROMPT
+        })?;
+        terminal.submit("nchar(x)", "[1] 13", PROMPT)
+    })
+}
+
+#[test]
 fn bracketed_paste_handles_basic_long_multiline_and_multibyte_text() -> Result<()> {
     run_case("bracketed-paste-shapes", &["--no-auto-match"], |terminal| {
         bracketed_paste(terminal, "basic <- 'abcdefghij'")?;
