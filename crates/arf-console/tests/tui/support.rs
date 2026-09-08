@@ -67,6 +67,7 @@ pub struct TerminalBuilder {
     history_dir: Option<PathBuf>,
     artifacts: Option<PathBuf>,
     resources: Option<SharedResources>,
+    vanilla: bool,
 }
 
 enum ConfigSource {
@@ -87,6 +88,7 @@ impl TerminalBuilder {
             history_dir: None,
             artifacts: None,
             resources: None,
+            vanilla: true,
         }
     }
 
@@ -146,6 +148,13 @@ impl TerminalBuilder {
         self
     }
 
+    /// Keep the default isolated startup flags unless a startup profile must
+    /// be exercised by a test.
+    pub fn vanilla(mut self, enabled: bool) -> Self {
+        self.vanilla = enabled;
+        self
+    }
+
     fn ensure_artifacts(&mut self) -> Result<PathBuf> {
         if let Some(path) = &self.artifacts {
             fs::create_dir_all(path)?;
@@ -198,14 +207,16 @@ impl TerminalBuilder {
             .history_dir
             .unwrap_or_else(|| work.path().join("history"));
         let defaults = OpenOptions::default();
-        let mut args = vec![
-            "--vanilla".to_owned(),
-            "--no-r-source-overrides".to_owned(),
+        let mut args = vec!["--no-r-source-overrides".to_owned()];
+        if self.vanilla {
+            args.insert(0, "--vanilla".to_owned());
+        }
+        args.extend([
             "--config".to_owned(),
             config.to_string_lossy().into_owned(),
             "--history-dir".to_owned(),
             history_dir.to_string_lossy().into_owned(),
-        ];
+        ]);
         args.extend(self.args);
         let cwd = self.cwd.unwrap_or_else(|| work.path().to_path_buf());
         let mut env = self.env;

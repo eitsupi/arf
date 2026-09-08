@@ -1,5 +1,13 @@
-use super::support::{PROMPT, run_case};
-use anyhow::Result;
+use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
+use anyhow::{Result, ensure};
+
+fn bracketed_paste(terminal: &Terminal, content: &str) -> Result<()> {
+    let marker = format!("PASTE_DONE_{}", content.len());
+    terminal.write(&format!(
+        "\x1b[200~{content}\ncat('{marker}\\n')\x1b[201~\r"
+    ))?;
+    terminal.wait_for_prompt(Some(&marker), PROMPT)
+}
 
 #[test]
 fn arrow_and_backspace_edit_input_before_evaluation() -> Result<()> {
@@ -30,6 +38,131 @@ fn ctrl_c_discards_input_and_allows_a_new_command() -> Result<()> {
             PROMPT,
         )
     })
+}
+
+#[test]
+fn ctrl_c_interrupts_running_command_and_allows_recovery() -> Result<()> {
+    run_case("interrupt-computation", &["--no-auto-match"], |terminal| {
+        terminal.enter("cat('SLEEP_START\\n'); Sys.sleep(30)")?;
+        terminal.wait_for("long command started", |state, _| {
+            state.exited.is_none() && state.text.contains("SLEEP_START")
+        })?;
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+        terminal.submit("42", "[1] 42", PROMPT)
+    })
+}
+
+#[test]
+fn ctrl_d_with_content_does_not_exit_or_drop_input() -> Result<()> {
+    run_case(
+        "ctrl-d-content",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            terminal.write("abc")?;
+            terminal.wait_for("input before Ctrl+D", |_, line| {
+                line.trim_end() == "ARF> abc"
+            })?;
+            terminal.key("Ctrl+D")?;
+            terminal.wait_for("input survives Ctrl+D", |state, line| {
+                state.exited.is_none() && line.trim_end() == "ARF> abc"
+            })?;
+            terminal.key("Ctrl+C")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit("42", "[1] 42", PROMPT)
+        },
+    )
+}
+
+#[test]
+fn bracketed_paste_handles_basic_long_multiline_and_multibyte_text() -> Result<()> {
+    run_case("bracketed-paste-shapes", &["--no-auto-match"], |terminal| {
+        bracketed_paste(terminal, "basic <- 'abcdefghij'")?;
+        terminal.submit("nchar(basic)", "[1] 10", PROMPT)?;
+
+        bracketed_paste(terminal, &format!("long <- '{}'", "a".repeat(5000)))?;
+        terminal.submit("nchar(long)", "[1] 5000", PROMPT)?;
+
+        bracketed_paste(
+            terminal,
+            &format!("multiline <- '{}\\n{}'", "a".repeat(2000), "b".repeat(2000)),
+        )?;
+        terminal.submit("nchar(multiline)", "[1] 4001", PROMPT)?;
+
+        let multibyte = "中".repeat(1000)
+            + "\\n"
+            + &"文".repeat(1000)
+            + "\\n"
+            + &"中".repeat(1000)
+            + "\\n"
+            + &"文".repeat(1000);
+        bracketed_paste(terminal, &format!("x <- '{multibyte}'"))?;
+        terminal.submit("nchar(x)", "[1] 4003", PROMPT)?;
+        bracketed_paste(terminal, &format!("xy <- '{multibyte}'"))?;
+        terminal.submit("nchar(xy)", "[1] 4003", PROMPT)
+    })
+}
+
+#[test]
+fn bracketed_paste_executes_multiple_expressions() -> Result<()> {
+    run_case(
+        "bracketed-paste-multiple",
+        &["--no-auto-match"],
+        |terminal| {
+            terminal.write("\x1b[200~1 + 1\n2 + 2\ncat('PASTE_DONE_MULTIPLE\\n')\x1b[201~\r")?;
+            terminal.wait_for("both pasted expressions", |state, _| {
+                state.text.contains("[1] 2") && state.text.contains("[1] 4")
+            })?;
+            terminal.wait_for_prompt(Some("PASTE_DONE_MULTIPLE"), PROMPT)
+        },
+    )
+}
+
+#[test]
+fn bracketed_paste_does_not_duplicate_auto_matched_brackets() -> Result<()> {
+    run_case("bracketed-paste-auto-match", &[], |terminal| {
+        bracketed_paste(terminal, "x <- (1)")?;
+        terminal.submit("x", "[1] 1", PROMPT)?;
+        bracketed_paste(terminal, "y <- sum(c(1, 2, 3))")?;
+        terminal.submit("y", "[1] 6", PROMPT)
+    })
+}
+
+#[test]
+fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
+    let profile = tempfile::tempdir()?;
+    let profile_path = profile.path().join(".Rprofile");
+    std::fs::write(&profile_path, "Sys.sleep(2)\n")?;
+    run_case_with(
+        Terminal::builder("bracketed-paste-before-prompt")
+            .args(["--no-auto-match"])
+            .vanilla(false)
+            .env(
+                "R_PROFILE_USER",
+                profile_path.to_string_lossy().into_owned(),
+            ),
+        |terminal| {
+            // Wait for startup output to confirm the early terminal guard is
+            // active without a timing sleep. Paste is then sent before the
+            // explicit first-prompt readiness check below.
+            terminal.wait_for("startup before paste", |state, _| {
+                state.text.contains("# arf console")
+            })?;
+            terminal.write("\x1b[200~x <- 42\ncat('PRE_PROMPT_PASTE_DONE\\n')\x1b[201~\r")?;
+            terminal.wait_for_prompt(Some("PRE_PROMPT_PASTE_DONE"), PROMPT)?;
+            let output = terminal.output()?;
+            ensure!(
+                !output.contains("\x1b[200~") && !output.contains("^[[200~"),
+                "bracketed paste start was echoed before first prompt: {output:?}"
+            );
+            ensure!(
+                !output.contains("\x1b[201~") && !output.contains("^[[201~"),
+                "bracketed paste end was echoed before first prompt: {output:?}"
+            );
+            terminal.submit("x", "[1] 42", PROMPT)?;
+            terminal.quit()
+        },
+    )
 }
 
 #[test]
