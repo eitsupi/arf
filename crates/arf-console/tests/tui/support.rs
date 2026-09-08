@@ -179,7 +179,15 @@ impl TerminalBuilder {
                 fs::write(&path, contents)?;
                 path
             }
-            Some(ConfigSource::Path(path)) => path,
+            Some(ConfigSource::Path(path)) => {
+                if path.is_absolute() {
+                    path
+                } else {
+                    // Resolve before launching the child: its cwd may be a
+                    // session-specific temporary directory.
+                    std::env::current_dir()?.join(path)
+                }
+            }
             None => {
                 let path = work.path().join("config.toml");
                 fs::write(&path, DEFAULT_CONFIG)?;
@@ -633,8 +641,19 @@ fn builder_applies_process_settings_and_shares_ipc_resources() -> Result<()> {
     let history = tempfile::tempdir()?;
     let artifacts = tempfile::tempdir()?;
     let second_artifacts = tempfile::tempdir()?;
-    let config_file = tempfile::NamedTempFile::new()?;
-    fs::write(config_file.path(), DEFAULT_CONFIG)?;
+    let current_dir = std::env::current_dir()?;
+    let config_file = tempfile::Builder::new()
+        .prefix("arf-tui-config-")
+        .tempfile_in(&current_dir)?;
+    fs::write(
+        config_file.path(),
+        "[startup]\nshow_banner = false\n[prompt]\nformat = 'PATH> '",
+    )?;
+    let config_relative = config_file
+        .path()
+        .file_name()
+        .context("temporary config has no file name")?
+        .to_owned();
     let resources = SharedResources::new()?;
     let cwd_text = cwd.path().to_string_lossy().replace('\\', "/");
     let shared_sessions = resources.sessions_dir().to_path_buf();
@@ -691,11 +710,11 @@ fn builder_applies_process_settings_and_shares_ipc_resources() -> Result<()> {
 
     run_case_with(
         Terminal::builder("builder-shared-resource")
-            .config_path(config_file.path())
+            .config_path(config_relative)
             .artifacts(second_artifacts.path())
             .resources(resources),
         |terminal| {
-            terminal.wait_for_first_prompt()?;
+            terminal.wait_for_prompt(None, "PATH>")?;
             ensure!(
                 terminal.sessions_dir() == shared_sessions,
                 "second session did not reuse shared IPC directory"
