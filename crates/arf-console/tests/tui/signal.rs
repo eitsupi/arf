@@ -245,6 +245,8 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
         pixel_height: 0,
     })?;
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_arf"));
+    command.env_remove("ARF_R_HOME");
+    command.env_remove("ARF_R_VERSION");
     command.args([
         "--vanilla",
         "--no-r-source-overrides",
