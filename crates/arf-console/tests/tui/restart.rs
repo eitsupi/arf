@@ -114,7 +114,7 @@ fn restart_preserves_environment_and_reconnects_ipc() -> Result<()> {
                 metadata_before.is_file(),
                 "initial session metadata is missing"
             );
-            initial_metadata = Some(metadata_before);
+            initial_metadata = Some(metadata_before.clone());
 
             let initial_session = terminal.start_ipc(&["session"])?.finish()?;
             ensure!(

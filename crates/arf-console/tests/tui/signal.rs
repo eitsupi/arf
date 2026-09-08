@@ -7,7 +7,9 @@
 //! portable-pty child kill path for termination, neither of which is an
 //! external Unix signal delivered to arf.
 
-use super::support::{DEFAULT_CONFIG, ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
+#[cfg(unix)]
+use super::support::DEFAULT_CONFIG;
+use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
 #[cfg(unix)]
 use anyhow::Context;
 #[cfg(unix)]
