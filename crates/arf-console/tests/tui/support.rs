@@ -476,6 +476,16 @@ impl Terminal {
     pub fn quit(&self) -> Result<()> {
         self.stage("normal exit")?;
         self.enter("q('no')")?;
+        let exit_code = self.wait_for_exit()?;
+        ensure!(exit_code == 0, "wrong process exit: {exit_code}");
+        Ok(())
+    }
+
+    /// Wait for an explicitly requested process exit and return its status.
+    ///
+    /// This is separate from `quit` so lifecycle tests can exercise Ctrl+D or
+    /// startup failures without sending an unconditional R command first.
+    pub fn wait_for_exit(&self) -> Result<i32> {
         self.execute(Operation::WaitExit {
             timeout_ms: Some(30_000),
         })?;
@@ -484,9 +494,24 @@ impl Terminal {
             self.artifacts.join("state.json"),
             serde_json::to_vec_pretty(&state)?,
         )?;
-        ensure!(state.exited == Some(0), "wrong process exit: {state:?}");
-        Ok(())
+        state
+            .exited
+            .context("process did not report an exit status")
     }
+}
+
+/// Wait for a lifecycle artifact to disappear without assuming a cleanup delay.
+pub fn wait_for_path_absent(path: &std::path::Path) -> Result<()> {
+    let started = Instant::now();
+    while path.exists() {
+        ensure!(
+            started.elapsed() < WAIT,
+            "path remained after process cleanup: {}",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    Ok(())
 }
 
 impl Drop for Terminal {
