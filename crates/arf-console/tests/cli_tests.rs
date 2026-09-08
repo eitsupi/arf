@@ -619,6 +619,45 @@ fn test_eval_function() {
     );
 }
 
+/// Test that R event processing remains available after using a graphics device.
+///
+/// This verifies that arf can load R's event-processing API, close a graphics
+/// device, and continue evaluating code. Actual graphics-window testing
+/// requires a display and is outside this non-interactive integration test.
+#[test]
+fn test_eval_r_event_processing_api() {
+    let output = sanitized_arf_command()
+        .args([
+            "-e",
+            r#"
+            # Create a simple plot (opens graphics device)
+            # On non-interactive systems, this may use a null device
+            invisible(plot(1:3, main = "Event Processing Test"))
+
+            # Call dev.off() to close any graphics device
+            invisible(dev.off())
+
+            # Verify R is still responsive
+            42
+        "#,
+        ])
+        .output()
+        .expect("Failed to run arf -e with plot");
+
+    assert!(
+        output.status.success(),
+        "arf should succeed with plot command. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[1] 42"),
+        "R should be responsive after plot: {}",
+        stdout
+    );
+}
+
 /// Test that R errors are handled gracefully.
 #[test]
 fn test_eval_error_handling() {

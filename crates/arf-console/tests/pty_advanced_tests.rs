@@ -13,8 +13,6 @@ mod common;
 #[cfg(unix)]
 use common::Terminal;
 
-use std::process::Command;
-
 /// Test reprex mode paste - stripping #> output lines from pasted reprex output.
 ///
 /// When pasting reprex output in reprex mode, lines starting with #> should be
@@ -640,53 +638,6 @@ fn test_pty_raw_string_with_auto_match() {
         .expect("x should be empty string (content between parens is empty)");
 
     terminal.quit().expect("Should quit cleanly");
-}
-
-// ============================================================================
-// R Event Processing Tests
-// ============================================================================
-
-/// Test that R event processing API is available and works correctly.
-///
-/// This test verifies that:
-/// 1. R_ProcessEvents and related functions are loaded
-/// 2. Calling process_r_events() doesn't crash
-/// 3. Basic R evaluation still works after event processing
-///
-/// Note: Actual graphics window testing (plot()) requires a display
-/// and manual testing. This test only verifies the API is functional.
-#[test]
-fn test_r_event_processing_api() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args([
-            "-e",
-            r#"
-            # Create a simple plot (opens graphics device)
-            # On non-interactive systems, this may use a null device
-            invisible(plot(1:3, main = "Event Processing Test"))
-
-            # Call dev.off() to close any graphics device
-            invisible(dev.off())
-
-            # Verify R is still responsive
-            42
-        "#,
-        ])
-        .output()
-        .expect("Failed to run arf -e with plot");
-
-    assert!(
-        output.status.success(),
-        "arf should succeed with plot command. stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("[1] 42"),
-        "R should be responsive after plot: {}",
-        stdout
-    );
 }
 
 /// Test that R's menu() function displays the correct prompt.
