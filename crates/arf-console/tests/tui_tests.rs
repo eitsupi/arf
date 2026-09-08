@@ -18,5 +18,7 @@ mod prompt;
 mod reprex;
 #[path = "tui/session.rs"]
 mod session;
+#[path = "tui/shell.rs"]
+mod shell;
 #[path = "tui/support.rs"]
 mod support;
