@@ -99,6 +99,7 @@ portable-pty = "0.9"
 regex = "1.11"
 tempfile = "3"
 vt100 = "0.16"
+tui-test-rs = { version = "=0.1.0-beta.3", default-features = false }
 
 # Patch crossterm with Windows VT input support (bracketed paste)
 # https://github.com/crossterm-rs/crossterm/pull/1030
