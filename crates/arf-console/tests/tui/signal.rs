@@ -7,7 +7,7 @@
 //! portable-pty child kill path for termination, neither of which is an
 //! external Unix signal delivered to arf.
 
-use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
+use super::support::{DEFAULT_CONFIG, ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
 #[cfg(unix)]
 use anyhow::Context;
 #[cfg(unix)]
@@ -231,6 +231,12 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     // the distinction between a signal and an ordinary failure. Use its
     // portable-pty layer directly here so ExitStatus::signal() remains
     // available for the exact default-disposition assertion.
+    let work = tempfile::tempdir()?;
+    let config = work.path().join("config.toml");
+    std::fs::write(&config, DEFAULT_CONFIG)?;
+    let history = work.path().join("history");
+    std::fs::create_dir(&history)?;
+
     let pty_system = native_pty_system();
     let pair = pty_system.openpty(PtySize {
         rows: 32,
@@ -239,7 +245,17 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
         pixel_height: 0,
     })?;
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_arf"));
-    command.args(["--no-history", "--no-auto-match", "--no-completion"]);
+    command.args([
+        "--vanilla",
+        "--no-r-source-overrides",
+        "--config",
+        config.to_string_lossy().as_ref(),
+        "--history-dir",
+        history.to_string_lossy().as_ref(),
+        "--no-auto-match",
+        "--no-completion",
+    ]);
+    command.cwd(work.path());
     let child = pair.slave.spawn_command(command)?;
     let mut child = PtyChildGuard { child: Some(child) };
     let _writer = pair.master.take_writer()?;
