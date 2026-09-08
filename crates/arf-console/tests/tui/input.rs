@@ -158,9 +158,16 @@ fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
             terminal.wait_for("profile marker before first prompt", |state, _| {
                 state.exited.is_none() && state.text.contains("PROFILE_MARKER")
             })?;
-            terminal.write("\x1b[200~x <- 42\ncat('PRE_PROMPT_PASTE_DONE\\n')\x1b[201~\r")?;
+            terminal.write("\x1b[200~x <- 42\x1b[201~\r")?;
             std::fs::write(&release_path, "release")?;
-            terminal.wait_for_prompt(Some("PRE_PROMPT_PASTE_DONE"), PROMPT)?;
+            terminal.wait_for("queued assignment and first prompt", |state, line| {
+                state
+                    .text
+                    .lines()
+                    .any(|line| line.trim_end() == "ARF> x <- 42")
+                    && line.trim_end() == PROMPT
+                    && usize::from(state.cursor.x) == PROMPT.len() + 1
+            })?;
             let output = terminal.output()?;
             ensure!(
                 !output.contains("\x1b[200~") && !output.contains("^[[200~"),
