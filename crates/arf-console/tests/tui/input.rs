@@ -77,6 +77,67 @@ fn ctrl_d_with_content_does_not_exit_or_drop_input() -> Result<()> {
 }
 
 #[test]
+fn cursor_position_tracks_empty_input_and_interrupt() -> Result<()> {
+    run_case(
+        "cursor-position",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            let initial = terminal.state()?;
+            let initial_row = initial.cursor.y;
+            let initial_col = initial.cursor.x;
+            ensure!(initial_col > 0, "cursor should start after the prompt");
+
+            terminal.key("Enter")?;
+            terminal.wait_for("empty input moves to a new prompt", |state, line| {
+                state.cursor.y > initial_row
+                    && state.cursor.x == initial_col
+                    && line.trim_end() == PROMPT
+            })?;
+
+            terminal.write("a")?;
+            terminal.wait_for("typed input advances the cursor", |state, line| {
+                state.cursor.x == initial_col + 1 && line.trim_end() == "ARF> a"
+            })?;
+
+            terminal.key("Ctrl+C")?;
+            terminal.wait_for("interrupt restores prompt position", |state, line| {
+                state.cursor.x == initial_col && line.trim_end() == PROMPT
+            })
+        },
+    )
+}
+
+#[test]
+fn screen_state_tracks_results_and_checkpointed_output() -> Result<()> {
+    run_case(
+        "screen-state",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            let initial = terminal.state()?;
+            let initial_row = initial.cursor.y;
+            ensure!(initial.cursor.x > 0, "cursor should start after the prompt");
+            ensure!(initial.text.lines().any(|line| line.trim_end() == PROMPT));
+
+            terminal.submit("100", "[1] 100", PROMPT)?;
+            let after_first = terminal.state()?;
+            ensure!(after_first.cursor.y > initial_row);
+            ensure!(after_first.text.contains("[1] 100"));
+            ensure!(after_first.cursor.x == initial.cursor.x);
+
+            // The checkpoint replaces the legacy PTY output-buffer clearing
+            // while retaining the observable result of the second command.
+            let checkpoint = terminal.checkpoint()?;
+            terminal.submit("200", "[1] 200", PROMPT)?;
+            ensure!(
+                terminal.output_since(checkpoint)?.contains("[1] 200"),
+                "second result was not emitted after the checkpoint"
+            );
+            Ok(())
+        },
+    )
+}
+
+#[test]
 fn bracketed_paste_handles_basic_long_multiline_and_multibyte_text() -> Result<()> {
     run_case("bracketed-paste-shapes", &["--no-auto-match"], |terminal| {
         bracketed_paste(terminal, "basic <- 'abcdefghij'")?;

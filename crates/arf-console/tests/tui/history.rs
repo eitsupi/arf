@@ -154,3 +154,120 @@ on_exit_only = false
     }
     Ok(())
 }
+
+#[test]
+fn history_menu_selection_replaces_existing_buffer() -> Result<()> {
+    let command = "history_menu_replace_value <- 999";
+    run_case(
+        "history-menu-replace",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            terminal.enter(command)?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.write("history_menu")?;
+            terminal.wait_for("partial history input", |_, line| {
+                line.trim_end().starts_with("ARF> history_menu")
+            })?;
+            terminal.write("\x12")?;
+            terminal.wait_for("history item is visible", |state, _| {
+                state.text.contains("Page 1:") && state.text.contains(command)
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for("history item replaces buffer", |_, line| {
+                line.trim_end() == format!("ARF> {command}")
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit("history_menu_replace_value", "[1] 999", PROMPT)
+        },
+    )
+}
+
+#[test]
+fn history_menu_selection_replaces_auto_matched_quote_pair() -> Result<()> {
+    run_case(
+        "history-menu-quote-pair",
+        &["--no-completion"],
+        |terminal| {
+            terminal.submit("nchar(\"``\")", "[1] 2", PROMPT)?;
+            let checkpoint = terminal.checkpoint()?;
+            terminal.write("`")?;
+            terminal.wait_for("auto-matched quote pair", |_, line| line.contains("``"))?;
+            terminal.write("\x12")?;
+            terminal.wait_for("quote history item is visible", |state, _| {
+                state.text.contains("Page 1:") && state.text.contains("nchar(\"``\")")
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for("quote history item replaces buffer", |_, line| {
+                line.trim_end() == "ARF> nchar(\"``\")"
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            ensure!(
+                terminal.output_since(checkpoint)?.contains("[1] 2"),
+                "selected quote-pair history item did not execute"
+            );
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn history_menu_selection_replaces_auto_matched_paren_pair() -> Result<()> {
+    run_case(
+        "history-menu-paren-pair",
+        &["--no-completion"],
+        |terminal| {
+            terminal.submit("length(c())", "[1] 0", PROMPT)?;
+            let checkpoint = terminal.checkpoint()?;
+            terminal.write("c(")?;
+            terminal.wait_for("auto-matched paren pair", |_, line| line.contains("c()"))?;
+            terminal.write("\x12")?;
+            terminal.wait_for("paren history item is visible", |state, _| {
+                state.text.contains("Page 1:") && state.text.contains("length(c())")
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for("paren history item replaces buffer", |_, line| {
+                line.trim_end() == "ARF> length(c())"
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            ensure!(
+                terminal.output_since(checkpoint)?.contains("[1] 0"),
+                "selected paren-pair history item did not execute"
+            );
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn history_search_preserves_auto_matched_paren_pair() -> Result<()> {
+    run_case(
+        "history-menu-search-paren-pair",
+        &["--no-completion"],
+        |terminal| {
+            terminal.submit("length(c())", "[1] 0", PROMPT)?;
+            let checkpoint = terminal.checkpoint()?;
+            terminal.write("\x12")?;
+            terminal.wait_for("history menu opens", |state, _| {
+                state.text.contains("Page 1:")
+            })?;
+            terminal.write("c(")?;
+            terminal.wait_for("auto-matched paren in history search", |_, line| {
+                line.contains("c()")
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for("search result replaces buffer", |_, line| {
+                line.trim_end() == "ARF> length(c())"
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            ensure!(
+                terminal.output_since(checkpoint)?.contains("[1] 0"),
+                "selected search history item did not execute"
+            );
+            Ok(())
+        },
+    )
+}
