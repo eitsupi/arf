@@ -10,12 +10,35 @@
 use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
 #[cfg(unix)]
 use anyhow::Context;
+#[cfg(unix)]
+use anyhow::bail;
 use anyhow::{Result, ensure};
+#[cfg(unix)]
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+#[cfg(unix)]
+use std::io::Read;
+#[cfg(unix)]
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 const SPAM_INTERVAL: Duration = Duration::from_millis(90);
 const SPAM_COUNT: usize = 15;
+
+#[cfg(unix)]
+struct PtyChildGuard {
+    child: Option<Box<dyn Child + Send + Sync>>,
+}
+
+#[cfg(unix)]
+impl Drop for PtyChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 
 #[cfg(unix)]
 fn send_signal(terminal: &Terminal, signal: libc::c_int) -> Result<()> {
@@ -204,17 +227,74 @@ fn external_sigint_interrupts_slow_startup_profile_before_its_end() -> Result<()
 #[cfg(unix)]
 #[test]
 fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
-    run_case_with(
-        Terminal::builder("external-sigterm").args(["--no-auto-match"]),
-        |terminal| {
-            terminal.wait_for_first_prompt()?;
-            send_signal(terminal, libc::SIGTERM)?;
-            let exit_code = terminal.wait_for_exit()?;
-            ensure!(
-                exit_code != 0,
-                "SIGTERM unexpectedly returned a successful exit status"
-            );
-            Ok(())
-        },
-    )
+    // tui-test beta.3 exposes only a numeric exit code in State, which loses
+    // the distinction between a signal and an ordinary failure. Use its
+    // portable-pty layer directly here so ExitStatus::signal() remains
+    // available for the exact default-disposition assertion.
+    let pty_system = native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows: 32,
+        cols: 100,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_arf"));
+    command.args(["--no-history", "--no-auto-match", "--no-completion"]);
+    let child = pair.slave.spawn_command(command)?;
+    let mut child = PtyChildGuard { child: Some(child) };
+    let _writer = pair.master.take_writer()?;
+    let mut reader = pair.master.try_clone_reader()?;
+    drop(pair.slave);
+    let (ready_tx, ready_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = String::new();
+        let mut buffer = [0_u8; 1024];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = ready_tx.send(Err(format!(
+                        "PTY closed before R became ready; output={output}"
+                    )));
+                    return;
+                }
+                Ok(count) => {
+                    output.push_str(&String::from_utf8_lossy(&buffer[..count]));
+                    if output.contains("is ready.") {
+                        let _ = ready_tx.send(Ok(()));
+                        return;
+                    }
+                }
+                Err(_) => {
+                    let _ = ready_tx.send(Err(format!("PTY reader failed; output={output}")));
+                    return;
+                }
+            }
+        }
+    });
+    ready_rx
+        .recv_timeout(Duration::from_secs(30))
+        .context("timed out waiting for R startup readiness")?
+        .map_err(anyhow::Error::msg)?;
+    let pid = child
+        .child
+        .as_ref()
+        .and_then(|child| child.process_id())
+        .context("missing arf PID")? as libc::pid_t;
+    if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
+        bail!("arf exited before SIGTERM: {status:?}");
+    }
+    ensure!(
+        unsafe { libc::kill(pid, libc::SIGTERM) } == 0,
+        "failed to send SIGTERM to {pid}: {}",
+        std::io::Error::last_os_error()
+    );
+    let status = child.child.as_mut().expect("guard has child").wait()?;
+    child.child.take();
+    let expected_signal_name =
+        unsafe { std::ffi::CStr::from_ptr(libc::strsignal(libc::SIGTERM)).to_string_lossy() };
+    ensure!(
+        status.signal() == Some(expected_signal_name.as_ref()),
+        "SIGTERM did not use its default disposition: {status:?}"
+    );
+    Ok(())
 }
