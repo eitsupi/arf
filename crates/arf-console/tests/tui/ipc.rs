@@ -11,7 +11,7 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
             let response = terminal
                 .start_ipc(&[
                     "eval",
-                    "ipc_value <- 41; cat('SILENT_IPC_OUTPUT\\n'); ipc_value + 1",
+                    r"ipc_value <- 41; cat('SILENT_IPC_OUTPUT\n'); ipc_value + 1",
                     "--timeout",
                     "10000",
                 ])?
@@ -49,7 +49,7 @@ fn approved_ipc_input_is_evaluated_before_the_next_prompt() -> Result<()> {
     run_case("ipc-approval", &["--with-ipc"], |terminal| {
         let request = terminal.start_ipc(&[
             "send",
-            "ipc_input <- 42; Sys.sleep(0.4); cat(paste0('APPROVED_', 'OUTPUT'), '\\n')",
+            r"ipc_input <- 42; Sys.sleep(0.4); cat(paste0('APPROVED_', 'OUTPUT'), '\n')",
         ])?;
         terminal.wait_for("IPC approval prompt", |state, _| {
             state.text.contains("IPC send request:") && state.text.contains("Press y to approve")

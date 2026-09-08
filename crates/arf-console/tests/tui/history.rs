@@ -8,7 +8,7 @@ fn history_browser_reopens_after_writing_more_history() -> Result<()> {
         &["--no-auto-match", "--no-completion"],
         |terminal| {
             terminal.submit("1 + 1", "[1] 2", PROMPT)?;
-            terminal.submit("print('hello')", "[1] \"hello\"", PROMPT)?;
+            terminal.submit("print('hello')", r#"[1] "hello""#, PROMPT)?;
             terminal.enter(":history browse")?;
             terminal.wait_for("first history browser", |state, _| {
                 state.text.contains("q exit") && state.text.contains("print('hello')")

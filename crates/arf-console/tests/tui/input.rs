@@ -25,7 +25,7 @@ fn ctrl_c_discards_input_and_allows_a_new_command() -> Result<()> {
         terminal.key("Ctrl+C")?;
         terminal.wait_for_prompt(None, PROMPT)?;
         terminal.submit(
-            "Sys.sleep(0.4); cat(paste0('CANCEL_', 'OK'), '\\n')",
+            r"Sys.sleep(0.4); cat(paste0('CANCEL_', 'OK'), '\n')",
             "CANCEL_OK",
             PROMPT,
         )
@@ -52,10 +52,10 @@ fn multiline_function_uses_continuation_then_returns_to_prompt() -> Result<()> {
 fn unicode_output_preserves_wide_and_combining_characters() -> Result<()> {
     run_case("unicode", &[], |terminal| {
         terminal.submit(
-            "cat(intToUtf8(c(26085, 26412, 35486)), '\\n')",
+            r"cat(intToUtf8(c(26085, 26412, 35486)), '\n')",
             "日本語",
             PROMPT,
         )?;
-        terminal.submit("cat(intToUtf8(c(101, 769)), '\\n')", "e\u{301}", PROMPT)
+        terminal.submit(r"cat(intToUtf8(c(101, 769)), '\n')", "e\u{301}", PROMPT)
     })
 }

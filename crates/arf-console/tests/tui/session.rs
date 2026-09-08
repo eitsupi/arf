@@ -28,7 +28,7 @@ fn evaluation_error_changes_status_then_next_command_recovers() -> Result<()> {
     run_case("error-recovery", &[], |terminal| {
         terminal.submit("stop('tui failure')", "Error: tui failure", ERROR_PROMPT)?;
         terminal.submit(
-            "cat(paste0('RECOVERY_', 'OK'), '\\n')",
+            r"cat(paste0('RECOVERY_', 'OK'), '\n')",
             "RECOVERY_OK",
             PROMPT,
         )
@@ -58,7 +58,7 @@ fn resize_updates_terminal_and_r_width() -> Result<()> {
                 "wrong R width: {response}"
             );
             terminal.submit(
-                "cat(paste0('RESIZED_', 'READY'), '\\n')",
+                r"cat(paste0('RESIZED_', 'READY'), '\n')",
                 "RESIZED_READY",
                 PROMPT,
             )?;

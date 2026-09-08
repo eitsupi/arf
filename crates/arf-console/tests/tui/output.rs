@@ -8,12 +8,12 @@ fn recording_retains_output_erased_from_the_screen() -> Result<()> {
         // Observe the text before clearing it. ConPTY may coalesce unobserved
         // intermediate screen updates into a single output update.
         terminal.submit(
-            "cat(paste0('ERASED_', 'OUTPUT'), '\\n')",
+            r"cat(paste0('ERASED_', 'OUTPUT'), '\n')",
             "ERASED_OUTPUT",
             PROMPT,
         )?;
         terminal.submit(
-            "cat('\\033[2J\\033[H', paste0('VISIBLE_', 'OUTPUT'), '\\n', sep='')",
+            r"cat('\033[2J\033[H', paste0('VISIBLE_', 'OUTPUT'), '\n', sep='')",
             "VISIBLE_OUTPUT",
             PROMPT,
         )?;
@@ -28,7 +28,7 @@ fn recording_retains_output_erased_from_the_screen() -> Result<()> {
         );
         let checkpoint = terminal.checkpoint()?;
         terminal.submit(
-            "cat(paste0('SECOND_', 'OUTPUT'), '\\n')",
+            r"cat(paste0('SECOND_', 'OUTPUT'), '\n')",
             "SECOND_OUTPUT",
             PROMPT,
         )?;
@@ -63,9 +63,9 @@ fn askpass_does_not_echo_the_password_in_terminal_output() -> Result<()> {
             line.trim_end() == "Enter password:"
         })?;
         terminal.enter("secret_answer")?;
-        terminal.wait_for_prompt(Some("[1] \"secret_answer\""), PROMPT)?;
+        terminal.wait_for_prompt(Some(r#"[1] "secret_answer""#), PROMPT)?;
         let output = terminal.output_since(checkpoint)?;
-        let quoted = output.matches("\"secret_answer\"").count();
+        let quoted = output.matches(r#""secret_answer""#).count();
         ensure!(
             quoted > 0 && output.matches("secret_answer").count() == quoted,
             "password was echoed: {output:?}"

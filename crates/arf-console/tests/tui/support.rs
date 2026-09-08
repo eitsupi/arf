@@ -146,7 +146,11 @@ impl Terminal {
         let config = self.work.path().join("config.toml");
         fs::write(
             &config,
-            "[prompt]\nformat = '{status}ARF> '\n[prompt.status.symbol]\nerror = 'ERR '\n",
+            r#"[prompt]
+format = '{status}ARF> '
+[prompt.status.symbol]
+error = 'ERR '
+"#,
         )?;
         let defaults = OpenOptions::default();
         let mut arguments = vec![
@@ -349,7 +353,12 @@ pub fn run_case(
 
 #[test]
 fn recording_concatenates_output_without_input_or_resize_events() -> Result<()> {
-    let recording = "{\"version\":3}\n[0,\"o\",\"日\"]\n[0,\"i\",\"secret\"]\n[0,\"r\",\"80x24\"]\n[0,\"o\",\"本語\\r\\u001b[2K\"]\n";
+    let recording = r#"{"version":3}
+[0,"o","日"]
+[0,"i","secret"]
+[0,"r","80x24"]
+[0,"o","本語\r\u001b[2K"]
+"#;
     ensure!(output_events(recording)? == "日本語\r\x1b[2K");
     Ok(())
 }
@@ -358,9 +367,14 @@ fn recording_concatenates_output_without_input_or_resize_events() -> Result<()> 
 fn malformed_recordings_fail_instead_of_dropping_output() {
     for recording in [
         "",
-        "{}\n[0,\"o\",123]\n",
-        "{}\n[0,\"o\"]\n",
-        "{}\ntruncated",
+        r#"{}
+[0,"o",123]
+"#,
+        r#"{}
+[0,"o"]
+"#,
+        r#"{}
+truncated"#,
     ] {
         assert!(output_events(recording).is_err(), "accepted {recording:?}");
     }
