@@ -21,7 +21,7 @@ const WAIT: Duration = Duration::from_secs(30);
 pub const PROMPT: &str = "ARF>";
 pub const ERROR_PROMPT: &str = "ERR ARF>";
 
-const DEFAULT_CONFIG: &str = r#"[prompt]
+pub const DEFAULT_CONFIG: &str = r#"[prompt]
 format = '{status}ARF> '
 [prompt.status.symbol]
 error = 'ERR '
@@ -423,7 +423,7 @@ impl Terminal {
         })
     }
 
-    fn quit(&self) -> Result<()> {
+    pub fn quit(&self) -> Result<()> {
         self.stage("normal exit")?;
         self.enter("q('no')")?;
         self.execute(Operation::WaitExit {
