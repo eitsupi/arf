@@ -48,7 +48,9 @@ fn ctrl_c_interrupts_running_command_and_allows_recovery() -> Result<()> {
             state.exited.is_none() && state.text.contains("SLEEP_START")
         })?;
         terminal.key("Ctrl+C")?;
-        terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+        terminal.wait_for("prompt after interrupt", |state, line| {
+            state.exited.is_none() && matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+        })?;
         terminal.submit("42", "[1] 42", PROMPT)
     })
 }
@@ -132,7 +134,12 @@ fn bracketed_paste_does_not_duplicate_auto_matched_brackets() -> Result<()> {
 fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
     let profile = tempfile::tempdir()?;
     let profile_path = profile.path().join(".Rprofile");
-    std::fs::write(&profile_path, "Sys.sleep(2)\n")?;
+    let release_dir = tempfile::tempdir()?;
+    let release_path = release_dir.path().join("release");
+    std::fs::write(
+        &profile_path,
+        "cat('PROFILE_MARKER\\n')\nwhile (!file.exists(Sys.getenv('ARF_TUI_RELEASE_FILE'))) Sys.sleep(0.01)\n",
+    )?;
     run_case_with(
         Terminal::builder("bracketed-paste-before-prompt")
             .args(["--no-auto-match"])
@@ -140,15 +147,19 @@ fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
             .env(
                 "R_PROFILE_USER",
                 profile_path.to_string_lossy().into_owned(),
+            )
+            .env(
+                "ARF_TUI_RELEASE_FILE",
+                release_path.to_string_lossy().into_owned(),
             ),
         |terminal| {
-            // Wait for startup output to confirm the early terminal guard is
-            // active without a timing sleep. Paste is then sent before the
-            // explicit first-prompt readiness check below.
-            terminal.wait_for("startup before paste", |state, _| {
-                state.text.contains("# arf console")
+            // The profile marker is emitted before the blocking release-file
+            // loop, which guarantees that the first prompt has not appeared.
+            terminal.wait_for("profile marker before first prompt", |state, _| {
+                state.exited.is_none() && state.text.contains("PROFILE_MARKER")
             })?;
             terminal.write("\x1b[200~x <- 42\ncat('PRE_PROMPT_PASTE_DONE\\n')\x1b[201~\r")?;
+            std::fs::write(&release_path, "release")?;
             terminal.wait_for_prompt(Some("PRE_PROMPT_PASTE_DONE"), PROMPT)?;
             let output = terminal.output()?;
             ensure!(
