@@ -2,7 +2,8 @@
 //!
 //! The ordinary workspace test command runs these cases on Windows, Linux, and
 //! macOS. Each case owns a fresh R process, configuration, history and IPC directory.
-//! The legacy Unix PTY suite remains a regression baseline during migration.
+//! These cases verify interactive screen and prompt behavior; the separate
+//! `ipc_tests.rs` integration test keeps low-level JSON-RPC transport coverage.
 
 #[path = "tui/history.rs"]
 mod history;
