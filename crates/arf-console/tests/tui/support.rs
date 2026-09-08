@@ -465,13 +465,23 @@ impl Terminal {
 
     /// Use the real CLI's platform-aware IPC transport, targeting only this R process.
     pub fn start_ipc(&self, args: &[&str]) -> Result<IpcCommand> {
+        self.start_ipc_with_pid(args, self.pid.context("missing arf PID")?)
+    }
+
+    /// Use the real CLI IPC transport with a caller-selected process ID.
+    ///
+    /// Restarting arf keeps the tui-test session alive while the process ID
+    /// changes on platforms that spawn a replacement child. Callers can read
+    /// the active PID from the process's lifecycle artifact and target that
+    /// replacement explicitly.
+    pub fn start_ipc_with_pid(&self, args: &[&str], pid: u32) -> Result<IpcCommand> {
         let stdout = NamedTempFile::new_in(self.work.path())?;
         let stderr = NamedTempFile::new_in(self.work.path())?;
         let child = Command::new(env!("CARGO_BIN_EXE_arf"))
             .arg("ipc")
             .args(args)
             .arg("--pid")
-            .arg(self.pid.context("missing arf PID")?.to_string())
+            .arg(pid.to_string())
             .env("ARF_IPC_SESSIONS_DIR", self.ipc_sessions_dir())
             .current_dir(&self.cwd)
             .stdin(Stdio::null())

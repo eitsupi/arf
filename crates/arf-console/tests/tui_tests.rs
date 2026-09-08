@@ -16,6 +16,8 @@ mod output;
 mod prompt;
 #[path = "tui/reprex.rs"]
 mod reprex;
+#[path = "tui/restart.rs"]
+mod restart;
 #[path = "tui/session.rs"]
 mod session;
 #[path = "tui/shell.rs"]
