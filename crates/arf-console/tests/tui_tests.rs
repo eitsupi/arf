@@ -14,6 +14,8 @@ mod ipc;
 mod output;
 #[path = "tui/prompt.rs"]
 mod prompt;
+#[path = "tui/reprex.rs"]
+mod reprex;
 #[path = "tui/session.rs"]
 mod session;
 #[path = "tui/support.rs"]
