@@ -2,7 +2,6 @@
 
 use crate::editor::mode::{
     BufferKnownEmpty, ConditionalEditMode, ConditionalRule, CursorAtBegin, EditorStateRef,
-    create_auto_match_rules, create_bracket_delete_rules, create_skip_over_rules,
 };
 use crokey::KeyCombination;
 use reedline::{EditCommand, EditMode, KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
@@ -35,9 +34,7 @@ pub fn add_common_keybindings(keybindings: &mut Keybindings) {
 
     // Ctrl+R for history search menu (shows multiple candidates)
     // First move cursor to end of buffer to ensure history selection replaces
-    // the entire buffer. Without this, if cursor is in the middle (e.g., after
-    // auto-match inserts a pair like ``), the selection would only replace text
-    // up to the cursor, leaving trailing characters.
+    // the entire buffer.
     keybindings.add_binding(
         KeyModifiers::CONTROL,
         KeyCode::Char('r'),
@@ -63,14 +60,12 @@ pub fn add_common_keybindings(keybindings: &mut Keybindings) {
 ///
 /// This applies several conditional rules:
 /// - ':' only triggers completion menu when at line start (not in `1:10`)
-/// - Auto-match only inserts closing brackets when cursor is at end of buffer
 /// - Auto-trigger completion when buffer reaches `completion_min_chars` characters
 /// - Tree-sitter based word navigation for Ctrl+Arrow (R token boundaries)
 /// - When `shell_semicolon_shortcut` is true, ';' at empty buffer triggers shell mode
 pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
     edit_mode: E,
     state: EditorStateRef,
-    auto_match: bool,
     completion_min_chars: Option<usize>,
     shell_semicolon_shortcut: bool,
 ) -> Box<dyn EditMode> {
@@ -95,17 +90,6 @@ pub fn wrap_edit_mode_with_conditional_rules<E: EditMode + 'static>(
         .with_rule(colon_rule)
         .with_completion_min_chars(completion_min_chars)
         .with_tree_sitter_word_nav(true);
-
-    // Add smart auto-match rules if enabled
-    if auto_match {
-        // Bracket delete rules must come first - they handle backspace in empty pairs
-        conditional = conditional.with_rules(create_bracket_delete_rules());
-        // Skip-over rules must come before auto-match - when cursor is before a closing
-        // character, just move right instead of inserting another character
-        conditional = conditional.with_rules(create_skip_over_rules());
-        // Auto-match rules handle inserting closing brackets
-        conditional = conditional.with_rules(create_auto_match_rules());
-    }
 
     // When the semicolon shortcut is enabled, ';' at an empty buffer inserts
     // ":shell" and submits immediately. When the buffer has content, fall back
@@ -148,64 +132,9 @@ pub fn add_shell_semicolon_keybinding(keybindings: &mut Keybindings) {
         ReedlineEvent::Submit,
     ]);
     // Bind both NONE and SHIFT: on some platforms/layouts crossterm includes
-    // SHIFT in the key event even when it is part of typing the character
-    // (same rationale as add_auto_match_keybindings).
+    // SHIFT in the key event even when it is part of typing the character.
     keybindings.add_binding(KeyModifiers::NONE, KeyCode::Char(';'), event.clone());
     keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(';'), event);
-}
-
-/// Add auto-match keybindings for brackets and quotes.
-///
-/// When typing an opening bracket or quote, automatically inserts the closing
-/// counterpart and positions the cursor between them.
-///
-/// Also binds closing brackets/quotes to `InsertChar` so that skip-over rules
-/// can distinguish between opening and closing character key presses.
-pub fn add_auto_match_keybindings(keybindings: &mut Keybindings) {
-    // Define pairs: (opening char, closing char, pair string)
-    let pairs = [
-        ('(', ')', "()"),
-        ('[', ']', "[]"),
-        ('{', '}', "{}"),
-        ('"', '"', r#""""#),
-        ('\'', '\'', "''"),
-        ('`', '`', "``"),
-    ];
-
-    for (open_char, close_char, pair) in pairs {
-        // Opening char: insert pair and move cursor between them
-        let open_event = ReedlineEvent::Edit(vec![
-            EditCommand::InsertString(pair.to_string()),
-            EditCommand::MoveLeft { select: false },
-        ]);
-
-        // Bind both NONE and SHIFT modifiers for all characters.
-        // On Windows, crossterm may include SHIFT in the key event even when
-        // Shift is "part of" typing the character (e.g., Shift+9 for '(').
-        // Different keyboard layouts have different shift requirements:
-        // - US: '(' = Shift+9, '{' = Shift+[
-        // - French AZERTY: '(' = 5 (no shift), '{' = AltGr+4
-        // By binding both variants, we handle all common layouts.
-        keybindings.add_binding(
-            KeyModifiers::NONE,
-            KeyCode::Char(open_char),
-            open_event.clone(),
-        );
-        keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(open_char), open_event);
-
-        // Closing char: just insert the character (skip-over rules will handle
-        // moving right when cursor is before the same closing char).
-        // Only bind for non-quote pairs (quotes use same char for open/close).
-        if open_char != close_char {
-            let close_event = ReedlineEvent::Edit(vec![EditCommand::InsertChar(close_char)]);
-            keybindings.add_binding(
-                KeyModifiers::NONE,
-                KeyCode::Char(close_char),
-                close_event.clone(),
-            );
-            keybindings.add_binding(KeyModifiers::SHIFT, KeyCode::Char(close_char), close_event);
-        }
-    }
 }
 
 /// Add keybindings for inserting text (like assignment and pipe operators).
