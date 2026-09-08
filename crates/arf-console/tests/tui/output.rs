@@ -46,6 +46,9 @@ fn recording_retains_output_erased_from_the_screen() -> Result<()> {
 }
 
 #[test]
+// arf installs its terminal askpass handler only on Unix. Windows uses a GUI
+// dialog, whose interaction is outside a terminal-based test suite.
+#[cfg(unix)]
 fn askpass_does_not_echo_the_password_in_terminal_output() -> Result<()> {
     run_case("askpass", &["--no-auto-match"], |terminal| {
         // askpass is part of the declared test dependencies; absence is a failure.

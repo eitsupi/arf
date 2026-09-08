@@ -30,13 +30,16 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
                     .is_some_and(|value| value.contains("42")),
                 "wrong value: {response}"
             );
+            // Cross a visible PTY output boundary before asserting absence:
+            // the IPC reply can arrive before the terminal reader catches up.
+            terminal.submit("ipc_value", "[1] 41", PROMPT)?;
             ensure!(
                 !terminal
                     .output_since(checkpoint)?
                     .contains("SILENT_IPC_OUTPUT"),
                 "silent output leaked to terminal"
             );
-            terminal.submit("ipc_value", "[1] 41", PROMPT)
+            Ok(())
         },
     )
 }
