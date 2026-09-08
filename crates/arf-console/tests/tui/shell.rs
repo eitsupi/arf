@@ -62,7 +62,7 @@ fn readline_accepts_input_and_returns_to_r_prompt() -> Result<()> {
             state
                 .text
                 .lines()
-                .any(|line| line.contains("\"readline_answer\""))
+                .any(|line| line.contains(r#""readline_answer""#))
                 && line.trim_end() == PROMPT
         })
     })

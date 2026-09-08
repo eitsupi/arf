@@ -228,7 +228,7 @@ mod tests {
             crate::config::HistoryMode::Volatile
         ));
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("history.mode = \"volatile\""));
+        assert!(warnings[0].contains(r#"history.mode = "volatile""#));
     }
 
     #[test]

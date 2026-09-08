@@ -348,7 +348,7 @@ fn test_detect_library_context_comma_skipped() {
 
 #[test]
 fn test_detect_library_context_quoted_skipped() {
-    let result = detect_library_context("library(\"dpl", 12, &lib_funcs());
+    let result = detect_library_context(r#"library("dpl"#, 12, &lib_funcs());
     assert_eq!(result, None);
 }
 

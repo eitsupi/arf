@@ -180,7 +180,7 @@ impl ShellCompleter {
                 if s.value.ends_with('\\') {
                     s.value.push('\\');
                 }
-                s.value = format!("\"{}\"", s.value);
+                s.value = format!(r#""{}""#, s.value);
                 if let Some(match_indices) = &mut s.match_indices {
                     for index in match_indices.iter_mut() {
                         *index += 1;

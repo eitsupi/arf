@@ -41,12 +41,12 @@ continuation = "CONT> "
                     .output_since(options_checkpoint)?
                     .contains("options(continue ")
             );
-            terminal.write("x <- r\"(hello")?;
+            terminal.write(r#"x <- r"(hello"#)?;
             terminal.key("Enter")?;
             terminal.wait_for("custom continuation prompt", |_, line| {
                 line.trim_end() == "CONT>"
             })?;
-            terminal.write("world)\"")?;
+            terminal.write(r#"world)""#)?;
             terminal.key("Enter")?;
             terminal.wait_for("custom main prompt after completion", |_, line| {
                 line.trim_end() == "MAIN>"
@@ -147,7 +147,7 @@ continuation = "CONT> "
 
 #[test]
 fn identical_r_prompts_warn_once_per_transition() -> Result<()> {
-    const WARNING: &str = "# [arf] Warning: options(\"prompt\") and options(\"continue\") are identical; arf cannot distinguish top-level and continuation prompts.";
+    const WARNING: &str = r#"# [arf] Warning: options("prompt") and options("continue") are identical; arf cannot distinguish top-level and continuation prompts."#;
 
     run_case("identical-r-prompts", &["--no-auto-match"], |terminal| {
         terminal.enter("options(prompt = '> ', continue = '> ')")?;

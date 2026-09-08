@@ -177,7 +177,7 @@ impl JsonSchema for SpinnerConfigSchema {
             "properties": {
                 "frames": {
                     "type": "string",
-                    "description": "Spinner animation frames as a string where each character is one frame. Empty string disables the spinner. Example: \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\" (braille dots), \"|/-\\\\\" (ASCII spinner).",
+                    "description": r#"Spinner animation frames as a string where each character is one frame. Empty string disables the spinner. Example: "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" (braille dots), "|/-\\" (ASCII spinner)."#,
                     "default": ""
                 },
                 "color": color_prop!("Color for the spinner.", default = "Cyan")
