@@ -156,6 +156,12 @@ fn visible_ipc_evaluation_waits_for_approval_and_repl_completion() -> Result<()>
                 && state.text.contains("[1] 99")
                 && line.trim_end() == PROMPT
         })?;
+        let state = terminal.state()?;
+        let output_line = terminal.screen_line(state.cursor.y.saturating_sub(1), state.cols)?;
+        ensure!(
+            output_line.trim_end() == "[1] 99",
+            "R output should immediately precede the prompt without a blank line: {state:?}",
+        );
 
         // The same code is rejected on the unattended path in a restricted
         // session; visible evaluation above is intentionally approval-based.
@@ -752,18 +758,47 @@ fn visible_ipc_evaluation_decline_does_not_execute_code() -> Result<()> {
 
 #[test]
 fn ipc_input_ctrl_c_decline_does_not_execute_code() -> Result<()> {
-    run_case("ipc-send-decline", &["--with-ipc"], |terminal| {
-        let marker = "DECLINED_SEND_IPC_MARKER";
-        let request = terminal.start_ipc(&["send", &format!("{marker} <- TRUE")])?;
-        terminal.wait_for("send IPC decline prompt", |state, _| {
-            state.text.contains("IPC send request:")
-                && state.text.contains("Press y to approve")
-                && state.text.contains(marker)
-        })?;
-        terminal.key("Ctrl+C")?;
-        assert_ipc_not_approved(request.finish_with_status()?)?;
-        terminal.submit(&format!("exists('{marker}')"), "[1] FALSE", PROMPT)
-    })
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("ipc-send-decline")
+            .args(["--with-ipc"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let marker = "DECLINED_SEND_IPC_MARKER";
+            let declined_command = format!("{marker} <- TRUE");
+            let request = terminal.start_ipc(&["send", &declined_command])?;
+            terminal.wait_for("send IPC decline prompt", |state, _| {
+                state.text.contains("IPC send request:")
+                    && state.text.contains("Press y to approve")
+                    && state.text.contains(marker)
+            })?;
+            terminal.key("Ctrl+C")?;
+            assert_ipc_not_approved(request.finish_with_status()?)?;
+
+            let history_response = terminal
+                .start_ipc(&[
+                    "history",
+                    "--all-sessions",
+                    "--grep",
+                    marker,
+                    "--limit",
+                    "10",
+                ])?
+                .finish()?;
+            let entries = history_response["entries"]
+                .as_array()
+                .context("IPC history response lacks entries")?;
+            ensure!(
+                entries
+                    .iter()
+                    .all(|entry| entry["command"].as_str() != Some(declined_command.as_str())),
+                "declined IPC command was persisted in history: {history_response}"
+            );
+
+            terminal.submit(&format!("exists('{marker}')"), "[1] FALSE", PROMPT)
+        },
+    )
 }
 
 fn visible_policy(terminal: &Terminal) -> Result<String> {
@@ -821,6 +856,31 @@ fn live_send_policy_controls_ipc_approval_and_session_info() -> Result<()> {
                     .output_since(send_checkpoint)?
                     .contains("IPC send request:"),
                 "allow policy unexpectedly displayed an approval prompt"
+            );
+
+            let assignment = "send_policy_allow_echo <- 1";
+            let assignment_checkpoint = terminal.checkpoint()?;
+            let request = terminal.start_ipc(&["send", assignment])?;
+            let response = request.finish()?;
+            ensure!(
+                response["accepted"] == true,
+                "policy-allow silent assignment was rejected: {response}"
+            );
+            terminal.wait_for(
+                "policy-allow assignment reaches a fresh prompt",
+                |state, line| line.trim_end() == PROMPT && state.text.contains(assignment),
+            )?;
+            ensure!(
+                terminal
+                    .output_since(assignment_checkpoint)?
+                    .contains(assignment),
+                "policy-allow silent assignment echo was not retained"
+            );
+            ensure!(
+                !terminal
+                    .output_since(assignment_checkpoint)?
+                    .contains("IPC send request:"),
+                "policy-allow silent assignment unexpectedly displayed an approval prompt"
             );
 
             let eval_checkpoint = terminal.checkpoint()?;

@@ -169,6 +169,26 @@ fn multiline_raw_string_round_trip() -> Result<()> {
 }
 
 #[test]
+fn multiline_quoted_string_preserves_newline() -> Result<()> {
+    run_case(
+        "multiline-quoted-string",
+        &["--no-auto-match"],
+        |terminal| {
+            terminal.write(r#"x <- "test"#)?;
+            terminal.key("Enter")?;
+            terminal.wait_for("quoted string continuation", |_, line| {
+                line.trim_end() == "+"
+            })?;
+            terminal.write("end\"")?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit("nchar(x)", "[1] 8", PROMPT)?;
+            terminal.submit(r#"identical(x, "test\nend")"#, "[1] TRUE", PROMPT)
+        },
+    )
+}
+
+#[test]
 #[ignore = "requires PR #330 reedline auto-pairs"]
 fn raw_string_with_auto_match_is_preserved() -> Result<()> {
     run_case("raw-string-auto-match", &[], |terminal| {
