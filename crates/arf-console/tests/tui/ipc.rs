@@ -1,4 +1,4 @@
-use super::support::{PROMPT, run_case};
+use super::support::{IpcOutcome, PROMPT, Terminal, run_case};
 use anyhow::{Result, ensure};
 
 #[test]
@@ -158,14 +158,181 @@ fn visible_ipc_evaluation_waits_for_approval_and_repl_completion() -> Result<()>
                 "--timeout",
                 "10000",
             ])?
-            .finish();
-        let error = restricted.expect_err("restricted silent evaluation should be rejected");
+            .finish_with_status()?;
         ensure!(
-            error.to_string().contains("R_EVAL_NOT_ALLOWED"),
-            "wrong restricted-evaluation error: {error:#}"
+            restricted.status.code() == Some(4),
+            "restricted evaluation had unexpected exit status: {}",
+            restricted.status
+        );
+        ensure!(
+            restricted.json["error"]["code"] == "R_EVAL_NOT_ALLOWED",
+            "wrong restricted-evaluation error code: {}",
+            restricted.json
+        );
+        ensure!(
+            restricted.json["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("rejected by policy")),
+            "wrong restricted-evaluation error message: {}",
+            restricted.json
         );
         Ok(())
     })
+}
+
+fn assert_ipc_not_approved(outcome: IpcOutcome) -> Result<()> {
+    ensure!(
+        outcome.status.code() == Some(4),
+        "declined IPC request had unexpected exit status: {}",
+        outcome.status
+    );
+    ensure!(
+        outcome.json["error"]["code"] == "INPUT_NOT_APPROVED",
+        "wrong declined IPC error code: {}",
+        outcome.json
+    );
+    ensure!(
+        outcome.json["error"]["message"] == "IPC send was not approved",
+        "wrong declined IPC error message: {}",
+        outcome.json
+    );
+    Ok(())
+}
+
+#[test]
+fn visible_ipc_evaluation_decline_does_not_execute_code() -> Result<()> {
+    run_case("ipc-visible-decline", &["--with-ipc"], |terminal| {
+        let marker = "DECLINED_VISIBLE_IPC_MARKER";
+        let request = terminal.start_ipc(&[
+            "eval",
+            &format!("{marker} <- TRUE"),
+            "--visible",
+            "--timeout",
+            "10000",
+        ])?;
+        terminal.wait_for("visible IPC decline prompt", |state, _| {
+            state.text.contains("IPC send request:") && state.text.contains(marker)
+        })?;
+        terminal.key("n")?;
+        assert_ipc_not_approved(request.finish_with_status()?)?;
+        terminal.submit(&format!("exists('{marker}')"), "[1] FALSE", PROMPT)
+    })
+}
+
+#[test]
+fn ipc_input_ctrl_c_decline_does_not_execute_code() -> Result<()> {
+    run_case("ipc-send-decline", &["--with-ipc"], |terminal| {
+        let marker = "DECLINED_SEND_IPC_MARKER";
+        let request = terminal.start_ipc(&["send", &format!("{marker} <- TRUE")])?;
+        terminal.wait_for("send IPC decline prompt", |state, _| {
+            state.text.contains("IPC send request:") && state.text.contains(marker)
+        })?;
+        terminal.key("Ctrl+C")?;
+        assert_ipc_not_approved(request.finish_with_status()?)?;
+        terminal.submit(&format!("exists('{marker}')"), "[1] FALSE", PROMPT)
+    })
+}
+
+fn visible_policy(terminal: &Terminal) -> Result<String> {
+    let response = terminal.start_ipc(&["session"])?.finish()?;
+    response["ipc_policy"]["visible"]["mode"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("session response lacks visible policy: {response}"))
+}
+
+fn wait_for_info_policy(terminal: &Terminal, expected: &str) -> Result<()> {
+    terminal.enter(":info")?;
+    terminal.key("G")?;
+    terminal.wait_for("session info visible policy", |state, _| {
+        state.text.contains(expected)
+    })?;
+    terminal.key("q")?;
+    terminal.wait_for_prompt(None, PROMPT)
+}
+
+fn wait_for_policy_command(terminal: &Terminal, policy: &str) -> Result<()> {
+    terminal.wait_for("send policy confirmation", |state, line| {
+        state.text.contains(policy) && line.trim_end() == PROMPT
+    })
+}
+
+#[test]
+fn live_send_policy_controls_ipc_approval_and_session_info() -> Result<()> {
+    run_case(
+        "ipc-send-policy",
+        &["--with-ipc", "--no-auto-match", "--no-completion"],
+        |terminal| {
+            ensure!(
+                visible_policy(terminal)? == "approval_required",
+                "initial visible policy should require approval"
+            );
+
+            terminal.enter(":ipc send-policy allow")?;
+            wait_for_policy_command(terminal, "IPC send policy: allow")?;
+            ensure!(
+                visible_policy(terminal)? == "approval_not_required",
+                "allow policy was not reflected by the live session"
+            );
+
+            let send_checkpoint = terminal.checkpoint()?;
+            let request = terminal.start_ipc(&["send", r"cat('POLICY_SEND_OUTPUT\n')"])?;
+            let response = request.finish()?;
+            ensure!(
+                response["accepted"] == true,
+                "policy-allow send was rejected: {response}"
+            );
+            terminal.wait_for_prompt(Some("POLICY_SEND_OUTPUT"), PROMPT)?;
+            ensure!(
+                !terminal
+                    .output_since(send_checkpoint)?
+                    .contains("IPC send request:"),
+                "allow policy unexpectedly displayed an approval prompt"
+            );
+
+            let eval_checkpoint = terminal.checkpoint()?;
+            let response = terminal
+                .start_ipc(&[
+                    "eval",
+                    r"cat('POLICY_VISIBLE_OUTPUT\n'); 7",
+                    "--visible",
+                    "--timeout",
+                    "10000",
+                ])?
+                .finish()?;
+            ensure!(
+                response["stdout"]
+                    .as_str()
+                    .is_some_and(|stdout| stdout.contains("POLICY_VISIBLE_OUTPUT")),
+                "policy-allow visible eval missed stdout: {response}"
+            );
+            ensure!(
+                response["value"].is_null(),
+                "visible eval returned a value: {response}"
+            );
+            ensure!(
+                response["error"].is_null(),
+                "visible eval returned an error: {response}"
+            );
+            terminal.wait_for_prompt(Some("POLICY_VISIBLE_OUTPUT"), PROMPT)?;
+            ensure!(
+                !terminal
+                    .output_since(eval_checkpoint)?
+                    .contains("IPC send request:"),
+                "allow policy unexpectedly displayed an eval approval prompt"
+            );
+
+            wait_for_info_policy(terminal, "Visible requests: approval not required")?;
+
+            terminal.enter(":ipc send-policy prompt")?;
+            wait_for_policy_command(terminal, "IPC send policy: prompt")?;
+            ensure!(
+                visible_policy(terminal)? == "approval_required",
+                "prompt policy was not reflected by the live session"
+            );
+            wait_for_info_policy(terminal, "Visible requests: approval required")
+        },
+    )
 }
 
 #[test]

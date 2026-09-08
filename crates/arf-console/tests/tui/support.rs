@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
@@ -504,19 +504,50 @@ pub struct IpcCommand {
     stderr: NamedTempFile,
 }
 
+/// Completed CLI IPC invocation, including expected non-zero responses.
+pub struct IpcOutcome {
+    pub status: ExitStatus,
+    pub stdout: String,
+    pub stderr: String,
+    pub json: Value,
+}
+
 impl IpcCommand {
-    pub fn finish(mut self) -> Result<Value> {
+    pub fn finish(self) -> Result<Value> {
+        let outcome = self.finish_with_status()?;
+        ensure!(
+            outcome.status.success(),
+            "IPC failed: {}; stdout={}; stderr={}",
+            outcome.status,
+            outcome.stdout,
+            outcome.stderr
+        );
+        Ok(outcome.json)
+    }
+
+    /// Wait for the CLI and retain its parsed JSON even when it exits non-zero.
+    ///
+    /// The ordinary `finish` path remains success-only; this variant is for
+    /// policy and approval responses whose structured error is expected.
+    pub fn finish_with_status(mut self) -> Result<IpcOutcome> {
         let start = Instant::now();
         loop {
             if let Some(status) = self.child.try_wait()? {
                 let stdout = fs::read_to_string(self.stdout.path())?;
                 let stderr = fs::read_to_string(self.stderr.path())?;
-                ensure!(
-                    status.success(),
-                    "IPC failed: {status}; stdout={stdout}; stderr={stderr}"
-                );
-                return serde_json::from_str(&stdout)
-                    .with_context(|| format!("invalid IPC JSON: {stdout}; stderr={stderr}"));
+                let json = serde_json::from_str(&stdout).or_else(|stdout_error| {
+                    serde_json::from_str(&stderr).with_context(|| {
+                        format!(
+                            "invalid IPC JSON (stdout: {stdout_error}): stdout={stdout}; stderr={stderr}"
+                        )
+                    })
+                })?;
+                return Ok(IpcOutcome {
+                    status,
+                    stdout,
+                    stderr,
+                    json,
+                });
             }
             ensure!(start.elapsed() < WAIT, "IPC client timed out");
             thread::sleep(Duration::from_millis(25));
