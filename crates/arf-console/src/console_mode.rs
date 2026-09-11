@@ -57,9 +57,13 @@ mod imp {
 
     /// Complete the handoff from startup input suppression to reedline.
     ///
-    /// Windows keeps the startup snapshot until process exit. Reedline owns
-    /// the console mode after its first successful read, so there is no
-    /// startup mode to restore at this boundary.
+    /// The patched crossterm Windows implementation does not restore a
+    /// pre-raw snapshot when `disable_raw_mode()` runs. It reads the current
+    /// mode and re-enables the three non-raw bits (`ENABLE_LINE_INPUT`,
+    /// `ENABLE_ECHO_INPUT`, and `ENABLE_PROCESSED_INPUT`), so startup's
+    /// echo-off mode cannot remain as the cooked baseline after the first
+    /// read. Keep the guard's full snapshot until process exit, though, so
+    /// cleanup still restores all console state, including VT-input bits.
     pub(crate) fn handoff_to_reedline() -> std::io::Result<()> {
         Ok(())
     }
@@ -183,10 +187,18 @@ mod imp {
     /// Restore the mode captured before startup suppression after reedline has
     /// returned from its first raw-mode read.
     ///
+    /// Unix crossterm snapshots the complete termios immediately before
+    /// enabling raw mode, then restores that snapshot in
+    /// `disable_raw_mode()`. Because startup already cleared ECHO, that
+    /// snapshot would otherwise become the cooked baseline again. This
+    /// explicit handoff restores the true startup mode after the first read.
+    ///
     /// This is deliberately called after `read_line()` returns. Restoring just
     /// before that call would leave a window in which early PTY input could be
     /// echoed before reedline enables raw mode. A failed restore leaves both
-    /// the pending flag and the snapshot intact so Drop/atexit can retry it.
+    /// the pending flag and the snapshot intact solely so Drop/atexit cleanup
+    /// can retry it; normal R or standalone processing must stop while the
+    /// terminal state is unknown.
     pub(crate) fn handoff_to_reedline() -> std::io::Result<()> {
         if !STARTUP_RESTORE_PENDING.load(Ordering::Acquire) {
             return Ok(());
