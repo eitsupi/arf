@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-11
+
 ### Fixed
 
 - Restored the original Unix terminal mode after the first interactive reedline input so terminal security indicators are not triggered by a startup-only `ECHO` suppression state (#352).
