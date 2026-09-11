@@ -320,7 +320,7 @@ fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
 fn cooked_terminal_mode_is_restored_during_evaluation() -> Result<()> {
     run_case("cooked-terminal-mode", &[], |terminal| {
         terminal.enter(
-            "system(\"printf 'ARF_TERM_BEGIN_352\\n'; stty -a 2>&1; printf 'ARF_TERM_END_352\\n'\")",
+            r#"system("printf 'ARF_TERM_BEGIN_352\n'; stty -a 2>&1; printf 'ARF_TERM_END_352\n'")"#,
         )?;
         terminal.wait_for("cooked terminal mode", |state, line| {
             let Some(begin) = state.text.rfind("ARF_TERM_BEGIN_352") else {
