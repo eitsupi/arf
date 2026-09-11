@@ -74,18 +74,28 @@ pub(crate) fn format_override_line(info: &RSourceOverrideInfo) -> String {
 mod tests {
     use super::*;
 
+    fn assert_banner_snapshot(name: &str, banner: String) {
+        let version_line = format!("# arf console v{}", env!("CARGO_PKG_VERSION"));
+        assert!(
+            banner.contains(&version_line),
+            "banner should contain the package version"
+        );
+        let banner = banner.replacen(&version_line, "# arf console v<version>", 1);
+        insta::assert_snapshot!(name, banner);
+    }
+
     #[test]
     fn test_banner_default_r_initialized() {
         let config = Config::default();
         let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_default_r_initialized", banner);
+        assert_banner_snapshot("banner_default_r_initialized", banner);
     }
 
     #[test]
     fn test_banner_default_r_not_initialized() {
         let config = Config::default();
         let banner = format_banner(&config, false, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_default_r_not_initialized", banner);
+        assert_banner_snapshot("banner_default_r_not_initialized", banner);
     }
 
     #[test]
@@ -93,7 +103,7 @@ mod tests {
         let mut config = Config::default();
         config.startup.reprex = ReprexMode::On;
         let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_reprex_mode", banner);
+        assert_banner_snapshot("banner_reprex_mode", banner);
     }
 
     #[test]
@@ -102,7 +112,7 @@ mod tests {
         config.startup.reprex = ReprexMode::On;
         config.reprex.comment = "## ".to_string();
         let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_reprex_custom_comment", banner);
+        assert_banner_snapshot("banner_reprex_custom_comment", banner);
     }
 
     #[test]
@@ -110,7 +120,7 @@ mod tests {
         let mut config = Config::default();
         config.startup.reprex = ReprexMode::Format;
         let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_reprex_format_mode", banner);
+        assert_banner_snapshot("banner_reprex_format_mode", banner);
     }
 
     #[test]
@@ -118,7 +128,14 @@ mod tests {
         let mut config = Config::default();
         config.editor.mode = crate::config::EditorMode::Vi;
         let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
-        insta::assert_snapshot!("banner_vi_mode", banner);
+        assert_banner_snapshot("banner_vi_mode", banner);
+    }
+
+    #[test]
+    fn test_banner_includes_package_version() {
+        let config = Config::default();
+        let banner = format_banner(&config, true, None, Some(FormatterBackend::Air));
+        assert!(banner.contains(concat!("# arf console v", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]
