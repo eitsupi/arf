@@ -312,6 +312,36 @@ fn bracketed_paste_before_first_prompt_is_not_echoed() -> Result<()> {
     )
 }
 
+/// The startup guard must not remain the terminal mode baseline once reedline
+/// has completed its first raw-mode read. Inspect the PTY from R evaluation so
+/// this exercises the same terminal inherited by child processes.
+#[cfg(unix)]
+#[test]
+fn cooked_terminal_mode_is_restored_during_evaluation() -> Result<()> {
+    run_case("cooked-terminal-mode", &[], |terminal| {
+        terminal.enter(
+            "system(\"printf 'ARF_TERM_BEGIN_352\\n'; stty -a 2>&1; printf 'ARF_TERM_END_352\\n'\")",
+        )?;
+        terminal.wait_for("cooked terminal mode", |state, line| {
+            let Some(begin) = state.text.rfind("ARF_TERM_BEGIN_352") else {
+                return false;
+            };
+            let Some(end) = state.text[begin..].find("ARF_TERM_END_352") else {
+                return false;
+            };
+            let output = state.text[begin..begin + end].to_ascii_lowercase();
+            let flags: Vec<_> = output.split_whitespace().collect();
+            line.trim_end() == PROMPT
+                && flags.contains(&"icanon")
+                && flags.contains(&"echo")
+                && !flags.contains(&"-icanon")
+                && !flags.contains(&"-echo")
+        })?;
+        bracketed_paste(terminal, "cat('COOKED_PASTE_OK\\n')")?;
+        terminal.submit("cat('COOKED_MODE_OK\\n')", "COOKED_MODE_OK", PROMPT)
+    })
+}
+
 #[test]
 fn multiline_function_uses_continuation_then_returns_to_prompt() -> Result<()> {
     run_case("multiline", &["--no-auto-match"], |terminal| {

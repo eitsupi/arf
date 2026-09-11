@@ -275,7 +275,19 @@ pub(super) fn read_console_callback(
             // Track whether we're in a non-standard prompt mode (menu selection, etc.)
             let is_menu_prompt = prompt_kind.is_other();
 
-            match editor.read_line(&prompt) {
+            let read_result = editor.read_line(&prompt);
+            // Keep startup echo suppression through the raw-mode transition.
+            // The original cooked mode is restored only after reedline returns,
+            // so early PTY input cannot pass through an echo window.
+            if read_result.is_ok()
+                && let Err(error) = crate::console_mode::handoff_to_reedline()
+            {
+                eprintln!("Error: {}", error);
+                state.should_exit = true;
+                return None;
+            }
+
+            match read_result {
                 Ok(Signal::Success(line)) => {
                     let save_outcome = history_handle.receipt_outcome();
 

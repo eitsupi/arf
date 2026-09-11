@@ -845,7 +845,18 @@ impl Repl {
         let mut dir_stack: Vec<std::path::PathBuf> = Vec::new();
 
         loop {
-            match line_editor.read_line(&prompt) {
+            let read_result = line_editor.read_line(&prompt);
+            // Keep startup echo suppression through the raw-mode transition.
+            // Restore the original cooked mode after reedline returns so its
+            // raw-mode handoff has no interval in which input can be echoed.
+            if read_result.is_ok()
+                && let Err(error) = crate::console_mode::handoff_to_reedline()
+            {
+                eprintln!("Error: {}", error);
+                break;
+            }
+
+            match read_result {
                 Ok(Signal::Success(line)) => {
                     let save_outcome = history_handle.receipt_outcome();
 
