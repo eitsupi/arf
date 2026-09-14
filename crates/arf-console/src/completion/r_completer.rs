@@ -11,10 +11,40 @@ use std::time::{Duration, Instant};
 struct CompletionCache {
     /// The token that was used for the R completion query.
     token: String,
+    /// The input before the token, used to identify the completion context.
+    prefix: String,
+    /// The input after the cursor, used to identify the completion context.
+    suffix: String,
     /// The full completion results from R.
     completions: Vec<String>,
     /// When the completion was fetched.
     timestamp: Instant,
+}
+
+/// The cursor-adjacent token and the surrounding input used as a cache key.
+#[derive(Debug, PartialEq, Eq)]
+struct CompletionContext {
+    token: String,
+    prefix: String,
+    suffix: String,
+}
+
+/// Build a cache context only when the token is the exact suffix before the
+/// cursor. Invalid UTF-8 boundaries and non-adjacent tokens are cache misses.
+fn completion_context(line: &str, cursor_pos: usize, token: &str) -> Option<CompletionContext> {
+    let cursor_pos = cursor_pos.min(line.len());
+    if !line.is_char_boundary(cursor_pos) {
+        return None;
+    }
+    let token_start = cursor_pos.checked_sub(token.len())?;
+    if !line.is_char_boundary(token_start) || &line[token_start..cursor_pos] != token {
+        return None;
+    }
+    Some(CompletionContext {
+        token: token.to_owned(),
+        prefix: line[..token_start].to_owned(),
+        suffix: line[cursor_pos..].to_owned(),
+    })
 }
 
 /// Parsed `pkg::partial` or `pkg:::partial` token from user input.
@@ -346,15 +376,18 @@ impl RCompleter {
     }
 
     /// Check if the new token extends the cached token (prefix extension).
-    fn is_prefix_extension(&self, new_token: &str) -> bool {
+    fn is_prefix_extension(&self, context: &CompletionContext) -> bool {
         if let Some(cache) = &self.cache {
+            if cache.prefix != context.prefix || cache.suffix != context.suffix {
+                return false;
+            }
             // Only reuse the cache when the extension consists solely of identifier
             // characters (alphanumeric, `.`, `_`).  Structural operators such as `$`,
             // `@`, `[`, or `:` change the completion context entirely, so a fresh
             // fetch is required.
             // Example: "l$a$" extends "l$" by "a$" — the `$` means we are now
             // completing inside a nested list and the old completions are irrelevant.
-            let Some(extension) = new_token.strip_prefix(cache.token.as_str()) else {
+            let Some(extension) = context.token.strip_prefix(cache.token.as_str()) else {
                 return false;
             };
             !extension.is_empty()
@@ -367,7 +400,7 @@ impl RCompleter {
     }
 
     /// Check if we should use cached results (within debounce window, same token).
-    fn should_use_cache(&self, token: &str) -> bool {
+    fn should_use_cache(&self, context: &CompletionContext) -> bool {
         if let Some(cache) = &self.cache {
             // Don't use empty cache
             if cache.completions.is_empty() {
@@ -375,22 +408,28 @@ impl RCompleter {
             }
 
             // Don't use cache for empty tokens (context likely changed)
-            if token.is_empty() || cache.token.is_empty() {
+            if context.token.is_empty() || cache.token.is_empty() {
+                return false;
+            }
+
+            // A token alone is not a sufficient cache key: qualified calls,
+            // named arguments, and cursor suffixes can all change its meaning.
+            if cache.prefix != context.prefix || cache.suffix != context.suffix {
                 return false;
             }
 
             // Don't use cache for package:: completions (always fetch fresh, worth waiting)
-            if token.contains("::") || cache.token.contains("::") {
+            if context.token.contains("::") || cache.token.contains("::") {
                 return false;
             }
 
             // Use cache if:
             // 1. Same token and within debounce window
             // 2. Token is a prefix extension of cached token
-            if cache.token == token {
+            if cache.token == context.token {
                 cache.timestamp.elapsed() < Duration::from_millis(self.debounce_ms)
             } else {
-                self.is_prefix_extension(token)
+                self.is_prefix_extension(context)
             }
         } else {
             false
@@ -482,9 +521,13 @@ impl RCompleter {
 
         // Get the token being completed (for filtering and span calculation)
         let token = arf_harp::completion::get_token(line, pos).unwrap_or_default();
+        let context = completion_context(line, pos, &token);
 
         // Try to use cache for prefix extensions or debounced requests
-        let completions = if self.should_use_cache(&token) {
+        let completions = if context
+            .as_ref()
+            .is_some_and(|context| self.should_use_cache(context))
+        {
             // Use cached results, filtering for the current token
             self.filter_cached(&token)
         } else {
@@ -504,9 +547,14 @@ impl RCompleter {
             };
 
             // Only cache non-empty results with non-empty tokens
-            if !fresh.is_empty() && !token.is_empty() {
+            if !fresh.is_empty()
+                && !token.is_empty()
+                && let Some(context) = context
+            {
                 self.cache = Some(CompletionCache {
-                    token: token.clone(),
+                    token: context.token,
+                    prefix: context.prefix,
+                    suffix: context.suffix,
                     completions: fresh.clone(),
                     timestamp: Instant::now(),
                 });
