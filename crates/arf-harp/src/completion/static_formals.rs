@@ -229,10 +229,7 @@ fn parse_request(line: &str, cursor_pos: usize) -> Option<StaticFormalsRequest> 
     }
     let used_named = completed_arguments
         .split(',')
-        .filter(|argument| argument.contains('='))
-        .filter_map(|argument| argument.split_once('='))
-        .map(|(name, _)| name.trim().to_owned())
-        .filter(|name| is_valid_identifier(name))
+        .filter_map(named_argument_name)
         .collect();
 
     Some(StaticFormalsRequest {
@@ -253,6 +250,34 @@ fn is_valid_identifier(identifier: &str) -> bool {
         return false;
     };
     !first.is_ascii_digit() && characters.all(is_identifier_character)
+}
+
+/// Return a named argument's name when the segment contains a top-level,
+/// standalone `=` separator. Comparison operators are expressions, not named
+/// arguments, and must not affect the set of already-used formals.
+fn named_argument_name(argument: &str) -> Option<String> {
+    let mut depth = 0usize;
+    for (index, character) in argument.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '=' if depth == 0 => {
+                let previous = argument[..index].chars().next_back();
+                let next = argument[index + character.len_utf8()..].chars().next();
+                if previous.is_some_and(|value| matches!(value, '=' | '!' | '<' | '>'))
+                    || next.is_some_and(|value| matches!(value, '=' | '<' | '>'))
+                {
+                    continue;
+                }
+                let name = argument[..index].trim();
+                if is_valid_identifier(name) {
+                    return Some(name.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn lookup_request(request: &StaticFormalsRequest) -> StaticFormalsResult {
@@ -502,7 +527,7 @@ fn inspection_error_outcome(source_name: &str, error: InstalledCodeError) -> Sta
 mod tests {
     use super::{
         StaticFormal, StaticFormalsOutcome, StaticFormalsResult, candidates,
-        inspection_error_outcome, parse_request,
+        inspection_error_outcome, named_argument_name, parse_request,
     };
     use rd_rds::package::DefaultPresence;
     use rd_rds::package::InstalledCodeError;
@@ -553,6 +578,22 @@ mod tests {
                 .used_named,
             vec!["foo".to_owned()]
         );
+        let comparison = parse_request("stats::lm(x == 1, ", "stats::lm(x == 1, ".len())
+            .expect("comparison expression should retain static completion");
+        assert!(comparison.used_named.is_empty());
+        let comparison_result = StaticFormalsResult {
+            package: "stats".to_owned(),
+            exported_name: "lm".to_owned(),
+            source_name: Some("lm".to_owned()),
+            kind: None,
+            partial: comparison.partial,
+            used_named: comparison.used_named,
+            outcome: StaticFormalsOutcome::Available(vec![StaticFormal {
+                name: "x".to_owned(),
+                default: DefaultPresence::Absent,
+            }]),
+        };
+        assert_eq!(candidates(&comparison_result), Some(vec!["x".to_owned()]));
         assert!(parse_request("stats::lm(foo = 1", "stats::lm(foo = 1".len()).is_none());
         assert!(parse_request("stats::lm(foo +", "stats::lm(foo +".len()).is_none());
         assert!(parse_request("stats::lm", "stats::lm".len()).is_none());
@@ -631,5 +672,14 @@ mod tests {
             inspection_error_outcome("name", error),
             StaticFormalsOutcome::Unavailable(_)
         ));
+    }
+
+    #[test]
+    fn comparisons_are_not_named_argument_separators() {
+        for argument in ["x == 1", "x != 1", "x <= 1", "x >= 1"] {
+            assert_eq!(named_argument_name(argument), None, "{argument}");
+        }
+        assert_eq!(named_argument_name("foo = 1"), Some("foo".to_owned()));
+        assert_eq!(named_argument_name("foo=1"), Some("foo".to_owned()));
     }
 }
