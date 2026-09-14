@@ -161,9 +161,17 @@ pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>
         return None;
     }
     let candidates = candidates(result)?;
+    // Keep static-first conservative: a malformed or reserved formal in the
+    // selected prefix makes the whole result unsafe to insert. A later R
+    // fallback can apply backtick quoting or other language-specific rules.
+    if candidates
+        .iter()
+        .any(|name| name != "..." && !is_valid_identifier(name))
+    {
+        return None;
+    }
     let formatted = candidates
         .into_iter()
-        .filter(|name| name == "..." || is_valid_identifier(name))
         .map(|name| {
             if name == "..." {
                 name
@@ -285,7 +293,38 @@ fn is_valid_identifier(identifier: &str) -> bool {
     {
         return false;
     }
-    characters.all(is_identifier_character)
+    characters.all(is_identifier_character) && !is_reserved_identifier(identifier)
+}
+
+fn is_reserved_identifier(identifier: &str) -> bool {
+    if identifier == "..."
+        || identifier
+            .strip_prefix("..")
+            .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()))
+    {
+        return true;
+    }
+    matches!(
+        identifier,
+        "if" | "else"
+            | "repeat"
+            | "while"
+            | "function"
+            | "for"
+            | "in"
+            | "next"
+            | "break"
+            | "TRUE"
+            | "FALSE"
+            | "NULL"
+            | "Inf"
+            | "NaN"
+            | "NA"
+            | "NA_integer_"
+            | "NA_real_"
+            | "NA_complex_"
+            | "NA_character_"
+    )
 }
 
 /// Return a named argument's name when the segment contains a top-level,
@@ -596,6 +635,10 @@ mod tests {
         assert!(parse_request("stats::lm(foo(", "stats::lm(foo(".len()).is_none());
         assert!(parse_request("stats::.foo(", "stats::.foo(".len()).is_some());
         assert!(parse_request("stats::foo_1(", "stats::foo_1(".len()).is_some());
+        assert!(parse_request("stats::if(", "stats::if(".len()).is_none());
+        assert!(parse_request("stats::NA_real_(", "stats::NA_real_(".len()).is_none());
+        assert!(parse_request("stats::...(", "stats::...(".len()).is_none());
+        assert!(parse_request("stats::..1(", "stats::..1(".len()).is_none());
         assert!(parse_request("stats::-foo(", "stats::-foo(".len()).is_none());
         assert!(parse_request("stats::_foo(", "stats::_foo(".len()).is_none());
         assert!(parse_request("stats::.1foo(", "stats::.1foo(".len()).is_none());
@@ -697,7 +740,19 @@ mod tests {
         for identifier in ["foo", ".foo", "foo_1", "."] {
             assert!(is_valid_identifier(identifier), "{identifier}");
         }
-        for identifier in ["", "-foo", "_foo", ".1foo", "éfoo"] {
+        for identifier in [
+            "",
+            "-foo",
+            "_foo",
+            ".1foo",
+            "éfoo",
+            "if",
+            "TRUE",
+            "NA_character_",
+            "...",
+            "..1",
+            "..20",
+        ] {
             assert!(!is_valid_identifier(identifier), "{identifier}");
         }
     }
@@ -746,6 +801,10 @@ mod tests {
                     default: DefaultPresence::Absent,
                 },
                 StaticFormal {
+                    name: "if".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
                     name: "éfoo".to_owned(),
                     default: DefaultPresence::Absent,
                 },
@@ -755,8 +814,34 @@ mod tests {
                 },
             ]),
         };
+        assert_eq!(production_candidates(&result), None);
+        let valid_result = StaticFormalsResult {
+            outcome: StaticFormalsOutcome::Available(vec![
+                StaticFormal {
+                    name: "formula".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "...".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo_1".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+            ]),
+            ..result.clone()
+        };
         assert_eq!(
-            production_candidates(&result),
+            production_candidates(&valid_result),
             Some(vec![
                 "formula=".to_owned(),
                 "...".to_owned(),
@@ -768,14 +853,14 @@ mod tests {
         assert_eq!(
             production_candidates(&StaticFormalsResult {
                 kind: Some(StoredKind::BuiltIn),
-                ..result.clone()
+                ..valid_result.clone()
             }),
             None
         );
         assert_eq!(
             production_candidates(&StaticFormalsResult {
                 kind: None,
-                ..result.clone()
+                ..valid_result.clone()
             }),
             None
         );
@@ -785,7 +870,7 @@ mod tests {
                     name: "not-a-syntactic-name".to_owned(),
                     default: DefaultPresence::Absent,
                 }]),
-                ..result
+                ..valid_result
             }),
             None
         );
