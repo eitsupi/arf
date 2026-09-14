@@ -1368,9 +1368,9 @@ dependencies = [
 
 [[package]]
 name = "lzma-rust2"
-version = "0.18.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "243cb2271683c2855cad62142cbf38199db439b1b1e1ccdd5a011342894dd7cc"
+checksum = "5e2a88783b84d2d67ef2791778a9e76bfb68b8017aaf6c9d7d5f2626a478b16c"
 dependencies = [
  "sha2 0.11.0",
 ]
@@ -1866,9 +1866,9 @@ dependencies = [
 
 [[package]]
 name = "rd-ast"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32fe90dac6ea0a31cbb9800064377727ad5a9a2314fdf2574fc3faae31b0ca8f"
+checksum = "a31cc72afa6eaaa5eb717af1970dfd40cd2393993a8f37f911c511f818db8454"
 dependencies = [
  "rd-rds",
  "serde",
@@ -1876,20 +1876,19 @@ dependencies = [
 
 [[package]]
 name = "rd-helpdb"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da286c76193458b2127640b5059e99dd8827a5b4a825aec4665820e656c3242"
+checksum = "218f4d8faae391e6652659a39a447fdb969920bc16b07938f16a4ce72f65808f"
 dependencies = [
- "flate2",
  "rd-rds",
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "rd-rds"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf9515c75d24b41617a4863bd78bca58ac1b2db5df63adf500d553e6b653e79c"
+checksum = "4bebce80a9bccefd7fb281dea2b0e911aad541514aa6e07d64d1f8a93648dcd1"
 dependencies = [
  "bzip2",
  "flate2",
@@ -1900,9 +1899,9 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec2dddcad3095505c388f73e0d5020c3af72d08b0ece47a409250b5b99917e88"
+checksum = "aa991633d50c48148763cb05de96e879625dbe16d6ab35e5d78d1530e7e90041"
 dependencies = [
  "rd-ast",
 ]
@@ -1910,8 +1909,7 @@ dependencies = [
 [[package]]
 name = "rd2qmd-core"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55d554cf5695ca44125fb00e4f6d5f113527e212201c6b8a20dd44572b67d27f"
+source = "git+https://github.com/eitsupi/rd2qmd.git?rev=8fa352e9c000d2c035a4c7865e84d45f8b6a9d69#8fa352e9c000d2c035a4c7865e84d45f8b6a9d69"
 dependencies = [
  "rd-ast",
  "rd2qmd-mdast",
@@ -1924,8 +1922,7 @@ dependencies = [
 [[package]]
 name = "rd2qmd-mdast"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39938a4cd831a8fc6e481cf08d4eb52b6ed6b320a951fe3f02b214f7008a3947"
+source = "git+https://github.com/eitsupi/rd2qmd.git?rev=8fa352e9c000d2c035a4c7865e84d45f8b6a9d69#8fa352e9c000d2c035a4c7865e84d45f8b6a9d69"
 dependencies = [
  "serde",
 ]
@@ -2497,9 +2494,9 @@ dependencies = [
 
 [[package]]
 name = "tabled"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5dc662e6da844ad6e428ad16b57967c9d33c82e16bb1c258326c0c078605dff"
+checksum = "2d2596a104db1900b943f97d793a6c99addca918c4525c999f751a0f17d472eb"
 dependencies = [
  "papergrid",
  "testing_table",
