@@ -8,12 +8,14 @@
 
 mod common;
 
-#[cfg(feature = "experimental-static-formals")]
 use arf_harp::completion::static_formals::production_candidates;
 use arf_harp::completion::static_formals::{
     StaticFormalsOutcome, candidates, lookup, r_evaluation_count, shadow,
 };
-use arf_harp::completion::{check_if_functions, get_completions, get_token};
+use arf_harp::completion::{
+    StaticFormalsMode, StaticFormalsPolicy, check_if_functions, get_completions,
+    get_completions_with_policy, get_token,
+};
 use arf_harp::{eval_string_with_visibility, lib_paths};
 use common::{ld_library_path_is_set, with_r};
 use std::time::Instant;
@@ -207,8 +209,7 @@ fn static_formals_integration_spike() {
 }
 
 #[test]
-#[ignore = "requires an installed R package corpus and both completion spike features"]
-#[cfg(feature = "experimental-static-formals")]
+#[ignore = "requires an installed R package corpus"]
 fn experimental_static_first_hit_and_fallback() {
     if !ld_library_path_is_set() {
         eprintln!("Skipping experimental static-first test: LD_LIBRARY_PATH is not set.");
@@ -217,13 +218,56 @@ fn experimental_static_first_hit_and_fallback() {
 
     with_r(|| {
         lib_paths::populate_lib_paths().expect("R library paths should be available");
+        let policy = StaticFormalsPolicy {
+            mode: StaticFormalsMode::PreferStatic,
+            ..StaticFormalsPolicy::default()
+        };
         let line = "stats::lm(";
+        let off_before = r_evaluation_count();
+        let _ =
+            get_completions_with_policy(line, line.len(), 1_000, &StaticFormalsPolicy::default())
+                .expect("R-only completion should succeed");
+        assert_eq!(
+            r_evaluation_count().saturating_sub(off_before),
+            1,
+            "off mode must use the R completion oracle"
+        );
+
+        let package_excluded = StaticFormalsPolicy {
+            mode: StaticFormalsMode::PreferStatic,
+            excluded_packages: vec!["stats".to_owned()],
+            ..StaticFormalsPolicy::default()
+        };
+        let excluded_before = r_evaluation_count();
+        let _ = get_completions_with_policy(line, line.len(), 1_000, &package_excluded)
+            .expect("package exclusion should retain R completion");
+        assert_eq!(
+            r_evaluation_count().saturating_sub(excluded_before),
+            1,
+            "package exclusion must use the R completion oracle"
+        );
+
+        let function_excluded = StaticFormalsPolicy {
+            mode: StaticFormalsMode::PreferStatic,
+            excluded_functions: vec!["stats::lm".to_owned()],
+            ..StaticFormalsPolicy::default()
+        };
+        let excluded_before = r_evaluation_count();
+        let _ = get_completions_with_policy(line, line.len(), 1_000, &function_excluded)
+            .expect("function exclusion should retain R completion");
+        assert_eq!(
+            r_evaluation_count().saturating_sub(excluded_before),
+            1,
+            "function exclusion must use the R completion oracle"
+        );
+
         let result = lookup(line, line.len()).expect("qualified call should parse");
         let expected = production_candidates(&result).expect("stats::lm should be a static hit");
         let before = r_evaluation_count();
         let _ = get_token(line, line.len()).expect("token lookup should succeed");
         let after_token = r_evaluation_count();
-        let actual = get_completions(line, line.len(), 1_000).expect("completion should succeed");
+        let actual = get_completions_with_policy(line, line.len(), 1_000, &policy)
+            .expect("completion should succeed");
         let after_completion = r_evaluation_count();
         let _ = check_if_functions(&["lm"]).expect("function check should succeed");
         let after_functions = r_evaluation_count();
@@ -246,7 +290,7 @@ fn experimental_static_first_hit_and_fallback() {
             let before = r_evaluation_count();
             let _ = get_token(unsupported, unsupported.len()).expect("token lookup should succeed");
             let after_token = r_evaluation_count();
-            let _ = get_completions(unsupported, unsupported.len(), 1_000)
+            let _ = get_completions_with_policy(unsupported, unsupported.len(), 1_000, &policy)
                 .expect("R fallback should remain available");
             let after_completion = r_evaluation_count();
             let _ = check_if_functions(&["foo"]).expect("function check should succeed");

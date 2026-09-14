@@ -149,6 +149,13 @@ on_exit_only = false       # Purge on each prompt (false) or only on exit (true)
 fuzzy = false              # Fuzzy matching for pkg::func and library() completions
 package_functions = ["library", "require"]  # Functions that trigger package name completion
 
+[experimental.r_completion.static_formals]
+mode = "off"              # "off" or "prefer-static" for pkg::foo( argument completion
+
+[experimental.r_completion.static_formals.exclusions]
+packages = []              # Package names that always use R completion
+functions = []             # Public names such as "pkg::function" that use R completion
+
 [experimental.prompt_spinner]
 frames = ""                # Animation frames (empty = disabled)
 color = "Cyan"             # Spinner color
@@ -789,6 +796,29 @@ The `package_functions` option controls which function calls trigger package-nam
 fuzzy = true
 package_functions = ["library", "require", "box::use"]
 ```
+
+#### Static formal completion
+
+When enabled, arf can inspect installed package metadata and stored code to
+complete formal argument names in qualified calls such as `stats::lm(` without
+asking R to evaluate the completion request. The static path is conservative:
+unsupported, ambiguous, or unavailable metadata always falls back to R's
+completion oracle. It is disabled by default while this experimental feature is
+being evaluated.
+
+```toml
+[experimental.r_completion.static_formals]
+mode = "prefer-static"
+
+[experimental.r_completion.static_formals.exclusions]
+packages = ["S7", "methods"]
+functions = ["rlang::abort"]
+```
+
+`mode = "off"` retains the existing R-only behavior. `mode = "prefer-static"`
+uses static formals only for a clear static hit and otherwise falls back to R.
+Exclusions are case-sensitive exact matches; function entries use the public
+`pkg::function` spelling and package entries take precedence.
 
 ### History Forget
 

@@ -61,9 +61,9 @@ pub struct StaticFormalsObservation {
     pub r_evaluations: usize,
 }
 
-/// Side-by-side result for migration experiments. This helper is intentionally
-/// not used by [`crate::completion::get_completions`]: the R result remains the
-/// user-facing result until a later, separately authorized migration.
+/// Side-by-side result for validation experiments. This helper always records
+/// the R oracle result; runtime callers can independently opt into the static
+/// path through [`crate::completion::get_completions_with_policy`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaticFormalsShadow {
     pub static_observation: StaticFormalsObservation,
@@ -75,6 +75,41 @@ pub struct StaticFormalsShadow {
     pub r_oracle_calls: usize,
     /// An exact embedded-R evaluation count is not currently instrumented.
     pub r_evaluation_count: Option<usize>,
+}
+
+/// Runtime mode for installed-package static formal completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StaticFormalsMode {
+    /// Use the existing R completion oracle only.
+    #[default]
+    Off,
+    /// Use static formals when they are unambiguous, otherwise use R.
+    PreferStatic,
+}
+
+/// Runtime policy for static formal completion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaticFormalsPolicy {
+    pub mode: StaticFormalsMode,
+    pub excluded_packages: Vec<String>,
+    pub excluded_functions: Vec<String>,
+}
+
+impl StaticFormalsPolicy {
+    /// Return a policy that disables static inspection.
+    pub fn off() -> Self {
+        Self::default()
+    }
+
+    /// Check exclusions using the requested public package/function names.
+    pub fn excludes(&self, package: &str, function: &str) -> bool {
+        let qualified_name = format!("{package}::{function}");
+        self.excluded_packages.iter().any(|name| name == package)
+            || self
+                .excluded_functions
+                .iter()
+                .any(|name| name == &qualified_name)
+    }
 }
 
 /// Return the instrumentation count for the completion spike.
@@ -96,6 +131,24 @@ struct StaticFormalsRequest {
 /// can retain their existing completion path unchanged.
 pub fn lookup(line: &str, cursor_pos: usize) -> Option<StaticFormalsResult> {
     let request = parse_request(line, cursor_pos)?;
+    Some(lookup_request(&request))
+}
+
+/// Resolve a request unless its public package or function name is excluded.
+/// Exclusions are checked after parsing but before any installed metadata or
+/// code database access.
+pub fn lookup_with_policy(
+    line: &str,
+    cursor_pos: usize,
+    policy: &StaticFormalsPolicy,
+) -> Option<StaticFormalsResult> {
+    if policy.mode == StaticFormalsMode::Off {
+        return None;
+    }
+    let request = parse_request(line, cursor_pos)?;
+    if policy.excludes(&request.package, &request.exported_name) {
+        return None;
+    }
     Some(lookup_request(&request))
 }
 
@@ -155,7 +208,6 @@ pub fn candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
 /// R 4.5.2 uses `name=` for ordinary formal candidates while `...` is already
 /// a complete token and is returned unchanged. This helper intentionally does
 /// not add global or other R-completer candidates.
-#[cfg(feature = "experimental-static-formals")]
 pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
     if result.kind != Some(StoredKind::Closure) {
         return None;
@@ -600,15 +652,14 @@ fn inspection_error_outcome(source_name: &str, error: InstalledCodeError) -> Sta
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "experimental-static-formals")]
     use super::production_candidates;
     use super::{
-        StaticFormal, StaticFormalsOutcome, StaticFormalsResult, candidates,
-        inspection_error_outcome, is_valid_identifier, named_argument_name, parse_request,
+        StaticFormal, StaticFormalsMode, StaticFormalsOutcome, StaticFormalsPolicy,
+        StaticFormalsResult, candidates, inspection_error_outcome, is_valid_identifier,
+        lookup_with_policy, named_argument_name, parse_request,
     };
     use rd_rds::package::DefaultPresence;
     use rd_rds::package::InstalledCodeError;
-    #[cfg(feature = "experimental-static-formals")]
     use rd_rds::package::StoredKind;
 
     #[test]
@@ -757,7 +808,26 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "experimental-static-formals")]
+    #[test]
+    fn static_policy_uses_exact_public_names_and_package_precedence() {
+        let policy = StaticFormalsPolicy {
+            mode: StaticFormalsMode::PreferStatic,
+            excluded_packages: vec!["S7".to_owned()],
+            excluded_functions: vec!["rlang::abort".to_owned()],
+        };
+        assert!(policy.excludes("S7", "anything"));
+        assert!(policy.excludes("rlang", "abort"));
+        assert!(!policy.excludes("rlang", "Abort"));
+        assert!(!policy.excludes("s7", "anything"));
+    }
+
+    #[test]
+    fn static_policy_off_does_not_lookup() {
+        let policy = StaticFormalsPolicy::off();
+        let line = "missing_package::function(";
+        assert!(lookup_with_policy(line, line.len(), &policy).is_none());
+    }
+
     #[test]
     fn production_candidates_match_r_formatting() {
         let result = StaticFormalsResult {

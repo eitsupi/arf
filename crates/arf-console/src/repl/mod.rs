@@ -485,7 +485,33 @@ impl Repl {
         // Set up combined completer (R + meta commands) if completion is enabled
         // When rig is not enabled, :switch is excluded from completion
         if self.config.completion.enabled {
-            let completer = Box::new(CombinedCompleter::with_settings_full(
+            let static_formals = arf_harp::completion::StaticFormalsPolicy {
+                mode: match self.config.experimental.r_completion.static_formals.mode {
+                    crate::config::StaticFormalsMode::Off => {
+                        arf_harp::completion::StaticFormalsMode::Off
+                    }
+                    crate::config::StaticFormalsMode::PreferStatic => {
+                        arf_harp::completion::StaticFormalsMode::PreferStatic
+                    }
+                },
+                excluded_packages: self
+                    .config
+                    .experimental
+                    .r_completion
+                    .static_formals
+                    .exclusions
+                    .packages
+                    .clone(),
+                excluded_functions: self
+                    .config
+                    .experimental
+                    .r_completion
+                    .static_formals
+                    .exclusions
+                    .functions
+                    .clone(),
+            };
+            let completer = Box::new(CombinedCompleter::with_settings_full_and_static_formals(
                 self.config.completion.timeout_ms,
                 self.config.completion.debounce_ms,
                 self.config.completion.auto_paren_limit,
@@ -496,6 +522,7 @@ impl Repl {
                     .r_completion
                     .package_functions
                     .clone(),
+                static_formals,
             ));
             line_editor = line_editor.with_completer(completer);
 

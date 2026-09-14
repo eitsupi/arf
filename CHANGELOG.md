@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** Static formal completion is included in the regular binary and can be enabled with `[experimental.r_completion.static_formals] mode = "prefer-static"`; package and function exclusions are supported, with automatic fallback to R completion.
+
 ## [0.5.2] - 2026-09-11
 
 ### Fixed

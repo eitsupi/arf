@@ -7,9 +7,6 @@ repository.workspace = true
 description = "A cross-platform R console written in Rust"
 readme = "../../README.md"
 
-[features]
-experimental-static-formals = ["arf-harp/experimental-static-formals"]
-
 [[bin]]
 name = "arf"
 path = "src/main.rs"

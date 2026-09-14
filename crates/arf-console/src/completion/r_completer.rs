@@ -299,6 +299,8 @@ pub struct RCompleter {
     fuzzy_namespace: bool,
     /// Function names that trigger package-name completion (e.g., "library", "require").
     package_functions: Vec<String>,
+    /// Runtime policy for installed-package static formal completion.
+    static_formals: arf_harp::completion::StaticFormalsPolicy,
     /// Per-package cache of namespace exports.
     namespace_cache: HashMap<String, NamespaceExportCache>,
     /// Debounce cache for fuzzy namespace completion results.
@@ -315,18 +317,20 @@ impl RCompleter {
             cache: None,
             fuzzy_namespace: false,
             package_functions: vec!["library".to_string(), "require".to_string()],
+            static_formals: arf_harp::completion::StaticFormalsPolicy::off(),
             namespace_cache: HashMap::new(),
             namespace_fuzzy_cache: None,
         }
     }
 
-    /// Create a new RCompleter with all settings including fuzzy namespace.
-    pub fn with_settings_full(
+    /// Create a completer with all settings, including static formal policy.
+    pub fn with_settings_full_and_static_formals(
         timeout_ms: u64,
         debounce_ms: u64,
         auto_paren_limit: usize,
         fuzzy_namespace: bool,
         package_functions: Vec<String>,
+        static_formals: arf_harp::completion::StaticFormalsPolicy,
     ) -> Self {
         RCompleter {
             timeout_ms,
@@ -335,6 +339,7 @@ impl RCompleter {
             cache: None,
             fuzzy_namespace,
             package_functions,
+            static_formals,
             namespace_cache: HashMap::new(),
             namespace_fuzzy_cache: None,
         }
@@ -483,8 +488,13 @@ impl RCompleter {
             // Use cached results, filtering for the current token
             self.filter_cached(&token)
         } else {
-            // Fetch fresh completions from R
-            let fresh = match arf_harp::completion::get_completions(line, pos, self.timeout_ms) {
+            // Fetch fresh completions using the configured static/R policy.
+            let fresh = match arf_harp::completion::get_completions_with_policy(
+                line,
+                pos,
+                self.timeout_ms,
+                &self.static_formals,
+            ) {
                 Ok(c) => c,
                 Err(_) => {
                     // On error, invalidate cache and return empty

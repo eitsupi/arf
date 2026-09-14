@@ -119,6 +119,13 @@ package_functions = [
     "require",
 ]
 
+[experimental.r_completion.static_formals]
+mode = "off"
+
+[experimental.r_completion.static_formals.exclusions]
+packages = []
+functions = []
+
 [experimental.shell_completion]
 command_names = false
 

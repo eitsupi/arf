@@ -9,10 +9,6 @@ description = "High-level R abstractions for safe R object manipulation"
 [features]
 # Enables counters used only by the ignored completion integration spike.
 completion-spike = []
-# Opt-in static-first argument completion for `pkg::foo(`. Static package
-# artifacts are not guaranteed to match loaded namespaces, `.onLoad`, active
-# bindings, or runtime mutation; all non-Available cases retain the R fallback.
-experimental-static-formals = []
 
 [dev-dependencies]
 tempfile.workspace = true

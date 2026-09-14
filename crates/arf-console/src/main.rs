@@ -475,14 +475,16 @@ fn run() -> Result<()> {
     }
 
     // Static formals inspection relies on the library paths after R startup
-    // profiles have run. Populate them once for the opt-in experimental path;
+    // profiles have run. Populate them only when runtime configuration opts in;
     // a failure is non-fatal because completion retains its R fallback.
-    #[cfg(feature = "experimental-static-formals")]
-    if r_initialized {
+    if r_initialized
+        && matches!(
+            config.experimental.r_completion.static_formals.mode,
+            config::StaticFormalsMode::PreferStatic
+        )
+    {
         if let Err(error) = arf_harp::lib_paths::populate_lib_paths() {
-            log::warn!(
-                "Could not populate R library paths for experimental static formals: {error}"
-            );
+            log::warn!("Could not populate R library paths for static formals completion: {error}");
         }
     }
 
