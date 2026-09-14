@@ -150,6 +150,31 @@ pub fn candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
     )
 }
 
+/// Format static candidates for the experimental production path.
+///
+/// R 4.5.2 uses `name=` for ordinary formal candidates while `...` is already
+/// a complete token and is returned unchanged. This helper intentionally does
+/// not add global or other R-completer candidates.
+#[cfg(feature = "experimental-static-formals")]
+pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
+    if result.kind != Some(StoredKind::Closure) {
+        return None;
+    }
+    let candidates = candidates(result)?;
+    let formatted = candidates
+        .into_iter()
+        .filter(|name| name == "..." || is_valid_identifier(name))
+        .map(|name| {
+            if name == "..." {
+                name
+            } else {
+                format!("{name}=")
+            }
+        })
+        .collect::<Vec<_>>();
+    (!formatted.is_empty()).then_some(formatted)
+}
+
 /// Compare static metadata with the existing R completion oracle.
 pub fn shadow(
     line: &str,
@@ -162,7 +187,7 @@ pub fn shadow(
     #[cfg(feature = "completion-spike")]
     let r_count_before = super::r_ffi::r_evaluation_count();
     let started = Instant::now();
-    let r_candidates = super::get_completions(line, cursor_pos, timeout_ms)?;
+    let r_candidates = super::get_r_completions(line, cursor_pos, timeout_ms)?;
     #[cfg(feature = "completion-spike")]
     let r_evaluation_count =
         Some(super::r_ffi::r_evaluation_count().saturating_sub(r_count_before));
@@ -249,7 +274,18 @@ fn is_valid_identifier(identifier: &str) -> bool {
     let Some(first) = characters.next() else {
         return false;
     };
-    !first.is_ascii_digit() && characters.all(is_identifier_character)
+    if !first.is_ascii_alphabetic() && first != '.' {
+        return false;
+    }
+    if first == '.'
+        && characters
+            .clone()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+    {
+        return false;
+    }
+    characters.all(is_identifier_character)
 }
 
 /// Return a named argument's name when the segment contains a top-level,
@@ -525,12 +561,16 @@ fn inspection_error_outcome(source_name: &str, error: InstalledCodeError) -> Sta
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "experimental-static-formals")]
+    use super::production_candidates;
     use super::{
         StaticFormal, StaticFormalsOutcome, StaticFormalsResult, candidates,
-        inspection_error_outcome, named_argument_name, parse_request,
+        inspection_error_outcome, is_valid_identifier, named_argument_name, parse_request,
     };
     use rd_rds::package::DefaultPresence;
     use rd_rds::package::InstalledCodeError;
+    #[cfg(feature = "experimental-static-formals")]
+    use rd_rds::package::StoredKind;
 
     #[test]
     fn parses_only_initial_supported_shape() {
@@ -554,6 +594,13 @@ mod tests {
         );
         assert!(parse_request("stats:::lm(", "stats:::lm(".len()).is_none());
         assert!(parse_request("stats::lm(foo(", "stats::lm(foo(".len()).is_none());
+        assert!(parse_request("stats::.foo(", "stats::.foo(".len()).is_some());
+        assert!(parse_request("stats::foo_1(", "stats::foo_1(".len()).is_some());
+        assert!(parse_request("stats::-foo(", "stats::-foo(".len()).is_none());
+        assert!(parse_request("stats::_foo(", "stats::_foo(".len()).is_none());
+        assert!(parse_request("stats::.1foo(", "stats::.1foo(".len()).is_none());
+        assert!(parse_request("stats::.(", "stats::.(".len()).is_some());
+        assert!(parse_request("stats::é(", "stats::é(".len()).is_none());
         assert_eq!(
             parse_request("stats::lm(foo = 1, ", "stats::lm(foo = 1, ".len()),
             Some(super::StaticFormalsRequest {
@@ -639,6 +686,105 @@ mod tests {
         assert_eq!(
             candidates(&StaticFormalsResult {
                 outcome: StaticFormalsOutcome::Unavailable("unsafe".to_owned()),
+                ..result
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn syntactic_identifier_validation_is_conservative() {
+        for identifier in ["foo", ".foo", "foo_1", "."] {
+            assert!(is_valid_identifier(identifier), "{identifier}");
+        }
+        for identifier in ["", "-foo", "_foo", ".1foo", "éfoo"] {
+            assert!(!is_valid_identifier(identifier), "{identifier}");
+        }
+    }
+
+    #[cfg(feature = "experimental-static-formals")]
+    #[test]
+    fn production_candidates_match_r_formatting() {
+        let result = StaticFormalsResult {
+            package: "pkg".to_owned(),
+            exported_name: "fun".to_owned(),
+            source_name: Some("fun".to_owned()),
+            kind: Some(StoredKind::Closure),
+            partial: String::new(),
+            used_named: Vec::new(),
+            outcome: StaticFormalsOutcome::Available(vec![
+                StaticFormal {
+                    name: "formula".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "...".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo_1".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "-foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "_foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".1foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "éfoo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: String::new(),
+                    default: DefaultPresence::Absent,
+                },
+            ]),
+        };
+        assert_eq!(
+            production_candidates(&result),
+            Some(vec![
+                "formula=".to_owned(),
+                "...".to_owned(),
+                ".foo=".to_owned(),
+                "foo_1=".to_owned(),
+                ".=".to_owned()
+            ])
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                kind: Some(StoredKind::BuiltIn),
+                ..result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                kind: None,
+                ..result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                outcome: StaticFormalsOutcome::Available(vec![StaticFormal {
+                    name: "not-a-syntactic-name".to_owned(),
+                    default: DefaultPresence::Absent,
+                }]),
                 ..result
             }),
             None

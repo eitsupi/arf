@@ -8,6 +8,8 @@
 
 mod common;
 
+#[cfg(feature = "experimental-static-formals")]
+use arf_harp::completion::static_formals::production_candidates;
 use arf_harp::completion::static_formals::{
     StaticFormalsOutcome, candidates, lookup, r_evaluation_count, shadow,
 };
@@ -92,6 +94,11 @@ fn static_formals_integration_spike() {
                     (Vec::new(), 0.0, 0, None)
                 }
             };
+            assert_eq!(
+                r_eval_count,
+                Some(1),
+                "shadow must invoke exactly one R oracle callback"
+            );
             let _ = eval_string_with_visibility(&format!(
                 "try(loadNamespace({package:?}), silent = TRUE)"
             ));
@@ -112,6 +119,11 @@ fn static_formals_integration_spike() {
                     (Vec::new(), 0.0, None)
                 }
             };
+            assert_eq!(
+                r_after_eval_count,
+                Some(1),
+                "post-load shadow must invoke exactly one R oracle callback"
+            );
             let agreement = if static_candidates.is_empty() {
                 "n/a".to_owned()
             } else {
@@ -189,6 +201,65 @@ fn static_formals_integration_spike() {
                 console_after_completion.saturating_sub(console_after_token),
                 console_after_functions.saturating_sub(console_after_completion),
                 console_after_functions.saturating_sub(console_before),
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires an installed R package corpus and both completion spike features"]
+#[cfg(feature = "experimental-static-formals")]
+fn experimental_static_first_hit_and_fallback() {
+    if !ld_library_path_is_set() {
+        eprintln!("Skipping experimental static-first test: LD_LIBRARY_PATH is not set.");
+        return;
+    }
+
+    with_r(|| {
+        lib_paths::populate_lib_paths().expect("R library paths should be available");
+        let line = "stats::lm(";
+        let result = lookup(line, line.len()).expect("qualified call should parse");
+        let expected = production_candidates(&result).expect("stats::lm should be a static hit");
+        let before = r_evaluation_count();
+        let _ = get_token(line, line.len()).expect("token lookup should succeed");
+        let after_token = r_evaluation_count();
+        let actual = get_completions(line, line.len(), 1_000).expect("completion should succeed");
+        let after_completion = r_evaluation_count();
+        let _ = check_if_functions(&["lm"]).expect("function check should succeed");
+        let after_functions = r_evaluation_count();
+        assert_eq!(
+            actual, expected,
+            "static hit must return only formatted formals"
+        );
+        assert_eq!(
+            [
+                after_token.saturating_sub(before),
+                after_completion.saturating_sub(after_token),
+                after_functions.saturating_sub(after_completion),
+                after_functions.saturating_sub(before),
+            ],
+            [1, 0, 1, 2],
+            "static hit wrapper sequence must be token=1, completion=0, function-check=1"
+        );
+
+        for unsupported in ["stats:::lm(", "missing_package::foo("] {
+            let before = r_evaluation_count();
+            let _ = get_token(unsupported, unsupported.len()).expect("token lookup should succeed");
+            let after_token = r_evaluation_count();
+            let _ = get_completions(unsupported, unsupported.len(), 1_000)
+                .expect("R fallback should remain available");
+            let after_completion = r_evaluation_count();
+            let _ = check_if_functions(&["foo"]).expect("function check should succeed");
+            let after_functions = r_evaluation_count();
+            assert_eq!(
+                [
+                    after_token.saturating_sub(before),
+                    after_completion.saturating_sub(after_token),
+                    after_functions.saturating_sub(after_completion),
+                    after_functions.saturating_sub(before),
+                ],
+                [1, 1, 1, 3],
+                "fallback wrapper sequence must be token=1, completion=1, function-check=1"
             );
         }
     });

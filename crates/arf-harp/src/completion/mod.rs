@@ -58,6 +58,22 @@ impl Drop for SuppressStderrGuard {
 /// * `cursor_pos` - Cursor position in the line
 /// * `timeout_ms` - Timeout in milliseconds for R completion (0 = no timeout)
 pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
+    #[cfg(feature = "experimental-static-formals")]
+    if let Some(result) = static_formals::lookup(line, cursor_pos)
+        && let Some(candidates) = static_formals::production_candidates(&result)
+    {
+        // Experimental limitation: a static hit returns formal candidates
+        // only. Additional candidates from R's completer are intentionally not
+        // merged until artifact/runtime agreement has been evaluated further.
+        return Ok(candidates);
+    }
+
+    get_r_completions(line, cursor_pos, timeout_ms)
+}
+
+/// Run the existing R completion oracle without the experimental static-first
+/// path. Shadow comparisons use this entry point so they always exercise R.
+fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
     // Suppress R console output during completion to prevent error messages
     // from interfering with the terminal display (especially on Windows).
     let _guard = SuppressStderrGuard::new();
