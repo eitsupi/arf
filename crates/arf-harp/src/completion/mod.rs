@@ -18,6 +18,8 @@
 mod context;
 mod package_discovery;
 mod r_ffi;
+#[doc(hidden)]
+pub mod static_formals;
 
 use crate::error::HarpResult;
 use arf_libr::{restore_stderr, suppress_stderr};

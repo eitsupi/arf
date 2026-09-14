@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "High-level R abstractions for safe R object manipulation"
 
+[features]
+# Enables counters used only by the ignored completion integration spike.
+completion-spike = []
+
 [dev-dependencies]
 tempfile.workspace = true
 insta.workspace = true
