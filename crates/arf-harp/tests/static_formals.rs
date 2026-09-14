@@ -58,13 +58,13 @@ fn static_formals_integration_spike() {
             // load namespaces or evaluate R.
             let before = namespace_state(package);
             let cold_started = Instant::now();
-            let cold = lookup(&line, cursor).expect("qualified call should parse");
+            let cold = lookup(line, cursor).expect("qualified call should parse");
             let cold_ms = cold_started.elapsed().as_secs_f64() * 1_000.0;
 
             let mut warm_samples = Vec::new();
             for _ in 0..5 {
                 let started = Instant::now();
-                let _ = lookup(&line, cursor);
+                let _ = lookup(line, cursor);
                 warm_samples.push(started.elapsed().as_secs_f64() * 1_000.0);
             }
             warm_samples.sort_by(f64::total_cmp);
@@ -166,7 +166,7 @@ fn static_formals_integration_spike() {
             // These are exact embedded-R callback counts when the feature is
             // enabled; normal builds contain no counter.
             let console_before = r_evaluation_count();
-            let _ = get_token(&line, cursor);
+            let _ = get_token(line, cursor);
             let console_after_token = r_evaluation_count();
             let _ = get_completions(line, cursor, 1_000);
             let console_after_completion = r_evaluation_count();

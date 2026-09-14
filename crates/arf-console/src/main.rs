@@ -482,10 +482,9 @@ fn run() -> Result<()> {
             config.experimental.r_completion.static_formals.mode,
             config::StaticFormalsMode::PreferStatic
         )
+        && let Err(error) = arf_harp::lib_paths::populate_lib_paths()
     {
-        if let Err(error) = arf_harp::lib_paths::populate_lib_paths() {
-            log::warn!("Could not populate R library paths for static formals completion: {error}");
-        }
+        log::warn!("Could not populate R library paths for static formals completion: {error}");
     }
 
     let session_id = create_session_id(&config);
