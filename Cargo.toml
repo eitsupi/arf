@@ -29,7 +29,7 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm"]
 reedline = { version = "0.51", features = ["sqlite", "idle_callback"] }
 
 # Configuration
-dirs = "6.0"
+dirs = "7.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.1"
