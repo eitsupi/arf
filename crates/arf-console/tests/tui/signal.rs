@@ -554,6 +554,9 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
             .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"))
     } else {
         stages.append("test failure left PTY reader unfinished; detaching reader thread");
+        // The PTY read may remain blocked after the child exits. Joining it
+        // would hang failure cleanup, so leak the reader only until this
+        // already-failing test process exits.
         drop(reader_thread);
         Ok(())
     };
