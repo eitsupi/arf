@@ -757,7 +757,7 @@ fn visible_ipc_evaluation_decline_does_not_execute_code() -> Result<()> {
 }
 
 #[test]
-fn ipc_input_ctrl_c_decline_does_not_execute_code() -> Result<()> {
+fn ipc_input_decline_keys_do_not_execute_or_save_code() -> Result<()> {
     let history = tempfile::tempdir()?;
     run_case_with(
         Terminal::builder("ipc-send-decline")
@@ -765,40 +765,49 @@ fn ipc_input_ctrl_c_decline_does_not_execute_code() -> Result<()> {
             .history_dir(history.path()),
         |terminal| {
             terminal.wait_for_first_prompt()?;
-            let marker = "DECLINED_SEND_IPC_MARKER";
-            let declined_command = format!("{marker} <- TRUE");
-            let request = terminal.start_ipc(&["send", &declined_command])?;
-            terminal.wait_for("send IPC decline prompt", |state, _| {
-                state.text.contains("IPC send request:")
-                    && state.text.contains("Press y to approve")
-                    && state.text.contains(marker)
-            })?;
-            terminal.key("Ctrl+C")?;
-            assert_ipc_not_approved(request.finish_with_status()?)?;
+            decline_send_with_key(terminal, "DECLINED_SEND_CTRL_C_MARKER", "Ctrl+C")?;
+            decline_send_with_key(terminal, "DECLINED_SEND_ENTER_MARKER", "Enter")?;
+            decline_send_with_key(terminal, "DECLINED_SEND_CTRL_D_MARKER", "Ctrl+D")?;
 
             let history_response = terminal
                 .start_ipc(&[
                     "history",
                     "--all-sessions",
                     "--grep",
-                    marker,
+                    "DECLINED_SEND_",
                     "--limit",
-                    "10",
+                    "20",
                 ])?
                 .finish()?;
             let entries = history_response["entries"]
                 .as_array()
                 .context("IPC history response lacks entries")?;
             ensure!(
-                entries
-                    .iter()
-                    .all(|entry| entry["command"].as_str() != Some(declined_command.as_str())),
+                entries.iter().all(|entry| {
+                    !entry["command"]
+                        .as_str()
+                        .is_some_and(|command| command.starts_with("DECLINED_SEND_"))
+                }),
                 "declined IPC command was persisted in history: {history_response}"
             );
 
-            terminal.submit(&format!("exists('{marker}')"), "[1] FALSE", PROMPT)
+            Ok(())
         },
     )
+}
+
+fn decline_send_with_key(terminal: &Terminal, marker: &str, key: &str) -> Result<()> {
+    let declined_command = format!(r#"{marker} <- TRUE"#);
+    let request = terminal.start_ipc(&["send", &declined_command])?;
+    terminal.wait_for("send IPC decline prompt", |state, _| {
+        state.text.contains("IPC send request:")
+            && state.text.contains("Press y to approve")
+            && state.text.contains(marker)
+    })?;
+    terminal.key(key)?;
+    assert_ipc_not_approved(request.finish_with_status()?)?;
+    let exists_check = format!(r#"exists("{marker}")"#);
+    terminal.submit(&exists_check, "[1] FALSE", PROMPT)
 }
 
 fn visible_policy(terminal: &Terminal) -> Result<String> {
