@@ -11,6 +11,9 @@ mod object;
 mod protect;
 pub mod startup;
 
+#[cfg(test)]
+mod test_support;
+
 pub use error::*;
 pub use help::*;
 pub use object::*;

@@ -485,6 +485,8 @@ fn completer_with_cache(token: &str, completions: Vec<String>) -> RCompleter {
     let mut c = RCompleter::new();
     c.cache = Some(CompletionCache {
         token: token.to_string(),
+        prefix: String::new(),
+        suffix: String::new(),
         completions,
         timestamp: Instant::now(),
     });
@@ -495,17 +497,20 @@ fn completer_with_cache(token: &str, completions: Vec<String>) -> RCompleter {
 fn test_is_prefix_extension_identifier_only() {
     // "pri" extends "pr" — pure identifier extension, cache is valid
     let c = completer_with_cache("pr", vec!["print".to_string()]);
-    assert!(c.is_prefix_extension("pri"));
+    let context = completion_context("pri", 3, "pri").unwrap();
+    assert!(c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_dot_underscore() {
     // "my_f" extends "my_" and "st.g" extends "st." — dots/underscores are ok
     let c = completer_with_cache("my_", vec!["my_func".to_string()]);
-    assert!(c.is_prefix_extension("my_f"));
+    let context = completion_context("my_f", 4, "my_f").unwrap();
+    assert!(c.is_prefix_extension(&context));
 
     let c = completer_with_cache("st.", vec!["st.geo".to_string()]);
-    assert!(c.is_prefix_extension("st.g"));
+    let context = completion_context("st.g", 5, "st.g").unwrap();
+    assert!(c.is_prefix_extension(&context));
 }
 
 #[test]
@@ -515,38 +520,93 @@ fn test_is_prefix_extension_dollar_sign_not_extension() {
     // This is the nested-list completion bug: must return false so fresh
     // completions are fetched.
     let c = completer_with_cache("l$", vec!["l$a".to_string(), "l$b".to_string()]);
-    assert!(!c.is_prefix_extension("l$a$"));
+    let context = completion_context("l$a$", 4, "l$a$").unwrap();
+    assert!(!c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_at_sign_not_extension() {
     // "obj@field$" extends "obj@" by "field$" — structural operator
     let c = completer_with_cache("obj@", vec!["obj@slot".to_string()]);
-    assert!(!c.is_prefix_extension("obj@slot$"));
+    let context = completion_context("obj@slot$", 9, "obj@slot$").unwrap();
+    assert!(!c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_same_token_not_extension() {
     let c = completer_with_cache("pri", vec!["print".to_string()]);
-    assert!(!c.is_prefix_extension("pri"));
+    let context = completion_context("pri", 3, "pri").unwrap();
+    assert!(!c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_bracket_not_extension() {
     // "l[" extends "l" by "[" — bracket access changes completion context
     let c = completer_with_cache("l", vec!["list".to_string()]);
-    assert!(!c.is_prefix_extension("l["));
+    let context = completion_context("l[", 2, "l[").unwrap();
+    assert!(!c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_colon_not_extension() {
     // "pkg::foo" extends "pkg:" by ":foo" — namespace operator, fresh fetch needed
     let c = completer_with_cache("pkg:", vec!["pkg::foo".to_string()]);
-    assert!(!c.is_prefix_extension("pkg::foo"));
+    let context = completion_context("pkg::foo", 8, "pkg::foo").unwrap();
+    assert!(!c.is_prefix_extension(&context));
 }
 
 #[test]
 fn test_is_prefix_extension_no_cache() {
     let c = RCompleter::new();
-    assert!(!c.is_prefix_extension("pri"));
+    let context = completion_context("pri", 3, "pri").unwrap();
+    assert!(!c.is_prefix_extension(&context));
+}
+
+fn completer_with_line_cache(line: &str, token: &str, completions: Vec<String>) -> RCompleter {
+    let mut c = RCompleter::new();
+    let context = completion_context(line, line.len(), token).unwrap();
+    c.cache = Some(CompletionCache {
+        token: context.token,
+        prefix: context.prefix,
+        suffix: context.suffix,
+        completions,
+        timestamp: Instant::now(),
+    });
+    c
+}
+
+#[test]
+fn test_cache_misses_when_qualified_call_context_changes() {
+    let c = completer_with_line_cache("stats::lm(fo", "fo", vec!["formula=".to_string()]);
+    let current = completion_context("dplyr::mutate(fo", 16, "fo").unwrap();
+    assert!(!c.should_use_cache(&current));
+}
+
+#[test]
+fn test_cache_reuses_prefix_extension_in_same_context() {
+    let c = completer_with_line_cache("stats::lm(f", "f", vec!["formula=".to_string()]);
+    let current = completion_context("stats::lm(fo", 12, "fo").unwrap();
+    assert!(c.should_use_cache(&current));
+}
+
+#[test]
+fn test_cache_misses_when_named_argument_context_changes() {
+    let c = completer_with_line_cache("stats::lm(fo", "fo", vec!["formula=".to_string()]);
+    let line = "stats::lm(data=1, fo";
+    let current = completion_context(line, line.len(), "fo").unwrap();
+    assert!(!c.should_use_cache(&current));
+}
+
+#[test]
+fn test_cache_misses_when_cursor_suffix_changes() {
+    let c = completer_with_line_cache("stats::lm(fo", "fo", vec!["formula=".to_string()]);
+    let current = completion_context("stats::lm(fo)", 12, "fo").unwrap();
+    assert!(!c.should_use_cache(&current));
+}
+
+#[test]
+fn test_completion_context_rejects_non_boundary_cursor_and_non_adjacent_token() {
+    assert!(completion_context("éfo", 1, "fo").is_none());
+    assert!(completion_context("stats::lm(foo", 13, "fo").is_none());
+    assert!(completion_context("éfo", 4, "fo").is_some());
 }

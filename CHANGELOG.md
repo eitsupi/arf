@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** Opt-in static formal-name completion for qualified calls such as `stats::lm(` uses installed package metadata and stored code; enable it with `[experimental.r_completion.static.formals] mode = "prefer-static"`, with exact package/function exclusions and automatic fallback to R completion.
+
 ## [0.5.2] - 2026-09-11
 
 ### Fixed

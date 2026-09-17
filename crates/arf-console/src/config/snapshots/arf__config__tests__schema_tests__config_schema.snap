@@ -88,7 +88,16 @@ expression: schema
           "package_functions": [
             "library",
             "require"
-          ]
+          ],
+          "static": {
+            "formals": {
+              "exclusions": {
+                "functions": [],
+                "packages": []
+              },
+              "mode": "off"
+            }
+          }
         },
         "r_source_overrides": [],
         "shell_abbreviations": {},
@@ -1611,7 +1620,16 @@ expression: schema
             "package_functions": [
               "library",
               "require"
-            ]
+            ],
+            "static": {
+              "formals": {
+                "exclusions": {
+                  "functions": [],
+                  "packages": []
+                },
+                "mode": "off"
+              }
+            }
           }
         },
         "r_source_overrides": {
@@ -1858,6 +1876,19 @@ expression: schema
           ],
           "items": {
             "type": "string"
+          }
+        },
+        "static": {
+          "description": "Static completion settings, configured separately for each feature.",
+          "$ref": "#/$defs/StaticCompletionConfig",
+          "default": {
+            "formals": {
+              "exclusions": {
+                "functions": [],
+                "packages": []
+              },
+              "mode": "off"
+            }
           }
         }
       }
@@ -2137,6 +2168,79 @@ expression: schema
           "default": true
         }
       }
+    },
+    "StaticCompletionConfig": {
+      "description": "Configuration for static R completion features.",
+      "type": "object",
+      "properties": {
+        "formals": {
+          "description": "Static inspection mode for qualified-call formal completion.",
+          "$ref": "#/$defs/StaticFormalsConfig",
+          "default": {
+            "exclusions": {
+              "functions": [],
+              "packages": []
+            },
+            "mode": "off"
+          }
+        }
+      }
+    },
+    "StaticFormalsConfig": {
+      "description": "Configuration for installed-package static formal completion.",
+      "type": "object",
+      "properties": {
+        "exclusions": {
+          "description": "Packages and exported functions that must use the R completion oracle.",
+          "$ref": "#/$defs/StaticFormalsExclusions",
+          "default": {
+            "functions": [],
+            "packages": []
+          }
+        },
+        "mode": {
+          "description": "Whether static formals are disabled or preferred over R completion.",
+          "$ref": "#/$defs/StaticFormalsMode",
+          "default": "off"
+        }
+      }
+    },
+    "StaticFormalsExclusions": {
+      "description": "Exclusions from static formal completion.",
+      "type": "object",
+      "properties": {
+        "functions": {
+          "description": "Public qualified function names such as `pkg::function` to exclude.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "packages": {
+          "description": "Package names to exclude (case-sensitive exact matches).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "StaticFormalsMode": {
+      "description": "Static formal completion modes.",
+      "oneOf": [
+        {
+          "description": "Use the existing R completion oracle only.",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "Prefer installed-package static formals and fall back to R.",
+          "type": "string",
+          "const": "prefer-static"
+        }
+      ]
     },
     "StatusConfig": {
       "description": "Command status indicator configuration.\n\nControls how the prompt indicates success or failure of the previous command.\nUse `symbol` to configure what symbols are displayed via the `{status}` placeholder.",

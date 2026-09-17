@@ -120,6 +120,58 @@ pub struct RCompletionConfig {
     /// Users can add custom functions like `"box::use"`.
     #[serde(default = "default_package_functions")]
     pub package_functions: Vec<String>,
+
+    /// Static completion settings, configured separately for each feature.
+    #[serde(default)]
+    pub r#static: StaticCompletionConfig,
+}
+
+/// Configuration for static R completion features.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct StaticCompletionConfig {
+    /// Static inspection mode for qualified-call formal completion.
+    pub formals: StaticFormalsConfig,
+}
+
+/// Configuration for installed-package static formal completion.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct StaticFormalsConfig {
+    /// Whether static formals are disabled or preferred over R completion.
+    pub mode: StaticFormalsMode,
+    /// Packages and exported functions that must use the R completion oracle.
+    pub exclusions: StaticFormalsExclusions,
+}
+
+/// Static formal completion modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StaticFormalsMode {
+    /// Use the existing R completion oracle only.
+    #[default]
+    Off,
+    /// Prefer installed-package static formals and fall back to R.
+    PreferStatic,
+}
+
+/// Exclusions from static formal completion.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct StaticFormalsExclusions {
+    /// Package names to exclude (case-sensitive exact matches).
+    pub packages: Vec<String>,
+    /// Public qualified function names such as `pkg::function` to exclude.
+    pub functions: Vec<String>,
+}
+
+impl Default for StaticFormalsConfig {
+    fn default() -> Self {
+        Self {
+            mode: StaticFormalsMode::Off,
+            exclusions: StaticFormalsExclusions::default(),
+        }
+    }
 }
 
 fn default_package_functions() -> Vec<String> {
@@ -131,6 +183,7 @@ impl Default for RCompletionConfig {
         Self {
             fuzzy: false,
             package_functions: default_package_functions(),
+            r#static: StaticCompletionConfig::default(),
         }
     }
 }
@@ -413,6 +466,28 @@ mod tests {
             config.r_completion.package_functions,
             vec!["library".to_string(), "require".to_string()]
         );
+        assert_eq!(
+            config.r_completion.r#static.formals.mode,
+            StaticFormalsMode::Off
+        );
+        assert!(
+            config
+                .r_completion
+                .r#static
+                .formals
+                .exclusions
+                .packages
+                .is_empty()
+        );
+        assert!(
+            config
+                .r_completion
+                .r#static
+                .formals
+                .exclusions
+                .functions
+                .is_empty()
+        );
         assert!(!config.shell_completion.command_names); // Disabled by default
         assert!(config.r_source_overrides.is_empty());
     }
@@ -466,6 +541,87 @@ package_functions = ["library", "require", "box::use"]
                 "box::use".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_static_formals_config() {
+        let toml_str = r#"
+[experimental.r_completion]
+fuzzy = true
+
+[experimental.r_completion.static.formals]
+mode = "prefer-static"
+
+[experimental.r_completion.static.formals.exclusions]
+packages = ["S7", "methods"]
+functions = ["rlang::abort"]
+"#;
+        let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+        assert!(config.experimental.r_completion.fuzzy);
+        assert_eq!(
+            config.experimental.r_completion.r#static.formals.mode,
+            StaticFormalsMode::PreferStatic
+        );
+        assert_eq!(
+            config
+                .experimental
+                .r_completion
+                .r#static
+                .formals
+                .exclusions
+                .packages,
+            vec!["S7", "methods"]
+        );
+        assert_eq!(
+            config
+                .experimental
+                .r_completion
+                .r#static
+                .formals
+                .exclusions
+                .functions,
+            vec!["rlang::abort"]
+        );
+
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("[experimental.r_completion.static.formals]"));
+        assert!(!serialized.contains("static_formals"));
+        let round_trip: crate::config::Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(
+            toml::Value::try_from(&config).unwrap(),
+            toml::Value::try_from(&round_trip).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_static_formals_defaults_to_off() {
+        for source in [
+            "",
+            "[experimental.r_completion.static]",
+            "[experimental.r_completion.static.formals]",
+            r#"[experimental.r_completion.static.formals]
+mode = "off""#,
+            r#"[experimental.r_completion.static.formals.exclusions]
+packages = ["stats"]"#,
+        ] {
+            let config: crate::config::Config = toml::from_str(source).unwrap();
+            assert_eq!(
+                config.experimental.r_completion.r#static.formals.mode,
+                StaticFormalsMode::Off,
+                "static formals must remain opt-in: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_static_formals_rejects_invalid_modes() {
+        for mode in [r#""static-only""#, r#""prefer_static""#, "true"] {
+            let source = format!(
+                r#"[experimental.r_completion.static.formals]
+mode = {mode}"#
+            );
+            assert!(toml::from_str::<crate::config::Config>(&source).is_err());
+        }
     }
 
     #[test]

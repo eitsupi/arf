@@ -474,6 +474,19 @@ fn run() -> Result<()> {
         source_r_profiles(&r_args);
     }
 
+    // Static formals inspection relies on the library paths after R startup
+    // profiles have run. Populate them only when runtime configuration opts in;
+    // a failure is non-fatal because completion retains its R fallback.
+    if r_initialized
+        && matches!(
+            config.experimental.r_completion.r#static.formals.mode,
+            config::StaticFormalsMode::PreferStatic
+        )
+        && let Err(error) = arf_harp::lib_paths::populate_lib_paths()
+    {
+        log::warn!("Could not populate R library paths for static formals completion: {error}");
+    }
+
     let session_id = create_session_id(&config);
 
     // Prepare both owned history runtimes before IPC advertises the session.

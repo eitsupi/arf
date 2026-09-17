@@ -16,6 +16,7 @@ pub use completion::CompletionConfig;
 pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
+    StaticFormalsMode,
 };
 pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;

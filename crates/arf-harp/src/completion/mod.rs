@@ -18,6 +18,11 @@
 mod context;
 mod package_discovery;
 mod r_ffi;
+#[doc(hidden)]
+pub mod static_formals;
+
+#[cfg(test)]
+mod r_tests;
 
 use crate::error::HarpResult;
 use arf_libr::{restore_stderr, suppress_stderr};
@@ -25,6 +30,7 @@ use arf_libr::{restore_stderr, suppress_stderr};
 pub use context::{PackageContext, detect_package_context};
 pub use package_discovery::get_installed_packages;
 pub use r_ffi::{check_if_functions, get_namespace_exports, get_token};
+pub use static_formals::{StaticFormalsMode, StaticFormalsPolicy};
 
 /// Guard that suppresses R stderr output and restores it on drop.
 ///
@@ -56,6 +62,31 @@ impl Drop for SuppressStderrGuard {
 /// * `cursor_pos` - Cursor position in the line
 /// * `timeout_ms` - Timeout in milliseconds for R completion (0 = no timeout)
 pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
+    get_r_completions(line, cursor_pos, timeout_ms)
+}
+
+/// Get completions using the supplied static-formals runtime policy.
+pub fn get_completions_with_policy(
+    line: &str,
+    cursor_pos: usize,
+    timeout_ms: u64,
+    policy: &StaticFormalsPolicy,
+) -> HarpResult<Vec<String>> {
+    if let Some(result) = static_formals::lookup_with_policy(line, cursor_pos, policy)
+        && let Some(candidates) = static_formals::production_candidates(&result)
+    {
+        // Experimental limitation: a static hit returns formal candidates
+        // only. Additional candidates from R's completer are intentionally not
+        // merged until artifact/runtime agreement has been evaluated further.
+        return Ok(candidates);
+    }
+
+    get_r_completions(line, cursor_pos, timeout_ms)
+}
+
+/// Run the existing R completion oracle without the experimental static-first
+/// path. Test comparisons use this entry point so they always exercise R.
+fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
     // Suppress R console output during completion to prevent error messages
     // from interfering with the terminal display (especially on Windows).
     let _guard = SuppressStderrGuard::new();

@@ -1,0 +1,945 @@
+//! Static function-formal completion for installed R packages.
+//!
+//! This provider deliberately covers only the unambiguous `pkg::name(` form
+//! and its partial-argument variants.
+//! It reads declared namespace exports and the installed code database without
+//! evaluating R. Dynamic exports, export patterns, and runtime namespace state
+//! remain the responsibility of R's completion oracle.
+
+use crate::lib_paths::{cached_lib_paths, installed_package_dir};
+use rd_rds::package::{
+    DefaultPresence, FormalsInspection, InstalledCodeError, MetadataField, NamespaceImport,
+    NamespaceMetadata, StoredKind,
+};
+use std::collections::HashSet;
+
+/// The outcome of inspecting one statically resolved binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StaticFormalsOutcome {
+    /// A closure's formal names were inspected successfully.
+    Available(Vec<StaticFormal>),
+    /// The binding was found, but formals do not apply to it.
+    NotApplicable(String),
+    /// The binding or its formals could not be inspected safely.
+    Unavailable(String),
+    /// Static metadata did not identify one source binding.
+    Unresolved(String),
+}
+
+/// The result of a static formals lookup.
+///
+/// Resolution metadata is retained for every outcome so test observations
+/// can distinguish export resolution failures from code inspection failures.
+/// In particular, `NotApplicable` still records the stored kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaticFormalsResult {
+    pub package: String,
+    pub exported_name: String,
+    pub source_name: Option<String>,
+    pub kind: Option<StoredKind>,
+    pub partial: String,
+    pub used_named: Vec<String>,
+    pub outcome: StaticFormalsOutcome,
+}
+
+/// A formal name with the serialized default-presence bit kept separate from
+/// the insertion text produced by [`production_candidates`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaticFormal {
+    pub name: String,
+    pub default: DefaultPresence,
+}
+
+/// Runtime mode for installed-package static formal completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StaticFormalsMode {
+    /// Use the existing R completion oracle only.
+    #[default]
+    Off,
+    /// Use static formals when they are unambiguous, otherwise use R.
+    PreferStatic,
+}
+
+/// Runtime policy for static formal completion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaticFormalsPolicy {
+    pub mode: StaticFormalsMode,
+    pub excluded_packages: Vec<String>,
+    pub excluded_functions: Vec<String>,
+}
+
+impl StaticFormalsPolicy {
+    /// Return a policy that disables static inspection.
+    pub fn off() -> Self {
+        Self::default()
+    }
+
+    /// Check exclusions using the requested public package/function names.
+    pub fn excludes(&self, package: &str, function: &str) -> bool {
+        let qualified_name = format!("{package}::{function}");
+        self.excluded_packages.iter().any(|name| name == package)
+            || self
+                .excluded_functions
+                .iter()
+                .any(|name| name == &qualified_name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticFormalsRequest {
+    package: String,
+    exported_name: String,
+    partial: String,
+    used_named: Vec<String>,
+}
+
+/// Return static formals for a completion request, if it has the supported
+/// `pkg::foo(` shape. Unsupported input is represented by `None` so callers
+/// can retain their existing completion path unchanged.
+pub fn lookup(line: &str, cursor_pos: usize) -> Option<StaticFormalsResult> {
+    let request = parse_request(line, cursor_pos)?;
+    Some(lookup_request(&request))
+}
+
+/// Resolve a request unless its public package or function name is excluded.
+/// Exclusions are checked after parsing but before any installed metadata or
+/// code database access.
+pub fn lookup_with_policy(
+    line: &str,
+    cursor_pos: usize,
+    policy: &StaticFormalsPolicy,
+) -> Option<StaticFormalsResult> {
+    if policy.mode == StaticFormalsMode::Off {
+        return None;
+    }
+    let request = parse_request(line, cursor_pos)?;
+    if policy.excludes(&request.package, &request.exported_name) {
+        return None;
+    }
+    Some(lookup_request(&request))
+}
+
+/// Build conservative insertion candidates from an available static result.
+///
+/// Returns formal names only, filters names already supplied by the user, and
+/// preserves the request's partial prefix. [`production_candidates`] formats
+/// these names for insertion in the editor.
+pub fn candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
+    let StaticFormalsResult {
+        outcome: StaticFormalsOutcome::Available(formals),
+        partial,
+        used_named,
+        ..
+    } = result
+    else {
+        return None;
+    };
+
+    let mut seen = HashSet::new();
+    Some(
+        formals
+            .iter()
+            .filter(|formal| {
+                (partial.is_empty() || formal.name.starts_with(partial))
+                    && !used_named.iter().any(|name| name == &formal.name)
+            })
+            .filter(|formal| seen.insert(formal.name.clone()))
+            .map(|formal| formal.name.clone())
+            .collect(),
+    )
+}
+
+/// Format static candidates for the experimental production path.
+///
+/// R 4.5.2 uses `name=` for ordinary formal candidates while `...` is already
+/// a complete token and is returned unchanged. This helper intentionally does
+/// not add global or other R-completer candidates.
+pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
+    if result.kind != Some(StoredKind::Closure) {
+        return None;
+    }
+    let candidates = candidates(result)?;
+    // Keep static-first conservative: a malformed or reserved formal in the
+    // selected prefix makes the whole result unsafe to insert. A later R
+    // fallback can apply backtick quoting or other language-specific rules.
+    if candidates
+        .iter()
+        .any(|name| name != "..." && !is_valid_identifier(name))
+    {
+        return None;
+    }
+    let formatted = candidates
+        .into_iter()
+        .map(|name| {
+            if name == "..." {
+                name
+            } else {
+                format!("{name}=")
+            }
+        })
+        .collect::<Vec<_>>();
+    // An empty static result falls back to R so non-formal candidates remain available.
+    (!formatted.is_empty()).then_some(formatted)
+}
+
+fn parse_request(line: &str, cursor_pos: usize) -> Option<StaticFormalsRequest> {
+    let before_cursor = line.get(..cursor_pos.min(line.len()))?;
+    let operator = before_cursor.rfind("::")?;
+    // `rfind("::")` also finds the final pair in `:::`. Reject both triple
+    // colon forms and a colon immediately before the selected operator.
+    if before_cursor[..operator].ends_with(':') {
+        return None;
+    }
+
+    let package_end = operator;
+    let package_start = before_cursor[..package_end]
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_identifier_character(character)).then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    // The provider intentionally accepts only a top-level qualified call. This
+    // avoids guessing through a path, nested call, or other expression.
+    if !before_cursor[..package_start].trim().is_empty() {
+        return None;
+    }
+    let package = &before_cursor[package_start..package_end];
+    if !is_valid_identifier(package) {
+        return None;
+    }
+
+    let function_start = operator + 2;
+    let function_end = before_cursor[function_start..]
+        .find('(')
+        .map(|offset| function_start + offset)?;
+    let function = &before_cursor[function_start..function_end];
+    if !is_valid_identifier(function) {
+        return None;
+    }
+
+    let arguments = &before_cursor[function_end + 1..];
+    // Splitting on commas is only safe without nested expressions. Keep even
+    // balanced brackets and braces on the R path rather than tracking depth.
+    if arguments.chars().any(|character| {
+        matches!(
+            character,
+            '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '#'
+        )
+    }) {
+        return None;
+    }
+    let (completed_arguments, current_argument) = arguments
+        .rsplit_once(',')
+        .map_or(("", arguments), |(completed, current)| (completed, current));
+    let partial = current_argument.trim();
+    if !partial.is_empty() && !is_valid_identifier(partial) {
+        return None;
+    }
+    let used_named = completed_arguments
+        .split(',')
+        .filter_map(named_argument_name)
+        .collect();
+
+    Some(StaticFormalsRequest {
+        package: package.to_owned(),
+        exported_name: function.to_owned(),
+        partial: partial.to_owned(),
+        used_named,
+    })
+}
+
+fn is_identifier_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '.' | '_')
+}
+
+fn is_valid_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '.' {
+        return false;
+    }
+    if first == '.'
+        && characters
+            .clone()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+    {
+        return false;
+    }
+    characters.all(is_identifier_character) && !is_reserved_identifier(identifier)
+}
+
+fn is_reserved_identifier(identifier: &str) -> bool {
+    if identifier == "..."
+        || identifier
+            .strip_prefix("..")
+            .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()))
+    {
+        return true;
+    }
+    matches!(
+        identifier,
+        "if" | "else"
+            | "repeat"
+            | "while"
+            | "function"
+            | "for"
+            | "in"
+            | "next"
+            | "break"
+            | "TRUE"
+            | "FALSE"
+            | "NULL"
+            | "Inf"
+            | "NaN"
+            | "NA"
+            | "NA_integer_"
+            | "NA_real_"
+            | "NA_complex_"
+            | "NA_character_"
+    )
+}
+
+/// Return a named argument's name when the segment contains a top-level,
+/// standalone `=` separator. Comparison operators are expressions, not named
+/// arguments, and must not affect the set of already-used formals.
+fn named_argument_name(argument: &str) -> Option<String> {
+    let mut depth = 0usize;
+    for (index, character) in argument.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '=' if depth == 0 => {
+                let previous = argument[..index].chars().next_back();
+                let next = argument[index + character.len_utf8()..].chars().next();
+                if previous.is_some_and(|value| matches!(value, '=' | '!' | '<' | '>'))
+                    || next.is_some_and(|value| matches!(value, '=' | '<' | '>'))
+                {
+                    continue;
+                }
+                let name = argument[..index].trim();
+                if is_valid_identifier(name) {
+                    return Some(name.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn lookup_request(request: &StaticFormalsRequest) -> StaticFormalsResult {
+    let paths = cached_lib_paths();
+    if paths.is_empty() {
+        return result(
+            request,
+            None,
+            None,
+            StaticFormalsOutcome::Unresolved(
+                "library paths have not been populated; static lookup is not authoritative"
+                    .to_owned(),
+            ),
+        );
+    }
+
+    let Some(package_dir) = installed_package_dir(&paths, &request.package) else {
+        return result(
+            request,
+            None,
+            None,
+            StaticFormalsOutcome::Unresolved(format!(
+                "package {:?} is not installed in the cached library paths",
+                request.package
+            )),
+        );
+    };
+
+    let metadata_path = package_dir.join("Meta/nsInfo.rds");
+    let metadata_object = match rd_rds::file::read(&metadata_path) {
+        Ok(object) => object,
+        Err(error) => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unavailable(format!(
+                    "failed to read namespace metadata: {error}"
+                )),
+            );
+        }
+    };
+    let metadata = match NamespaceMetadata::from_object(&metadata_object) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unresolved(format!(
+                    "failed to parse namespace metadata: {error}"
+                )),
+            );
+        }
+    };
+
+    let source_name = match metadata.declared_exports() {
+        MetadataField::Present(exports) => {
+            let matches = exports
+                .iter()
+                .filter(|export| export.exported_name() == request.exported_name)
+                .collect::<Vec<_>>();
+            if matches.len() != 1 {
+                return result(
+                    request,
+                    None,
+                    None,
+                    StaticFormalsOutcome::Unresolved(format!(
+                        "declared export {:?} has {} unambiguous source bindings",
+                        request.exported_name,
+                        matches.len()
+                    )),
+                );
+            }
+            matches[0].source_name().to_owned()
+        }
+        MetadataField::Missing => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unresolved(
+                    "namespace metadata has no declared export field".to_owned(),
+                ),
+            );
+        }
+        MetadataField::Invalid(error) => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unresolved(format!("declared exports are invalid: {error}")),
+            );
+        }
+        MetadataField::UnsupportedSchema { description } => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unresolved(format!(
+                    "declared export schema is unsupported: {description}"
+                )),
+            );
+        }
+        _ => {
+            return result(
+                request,
+                None,
+                None,
+                StaticFormalsOutcome::Unresolved(
+                    "declared export metadata has an unknown state".to_owned(),
+                ),
+            );
+        }
+    };
+
+    if let Some(reason) = imported_export_reason(&metadata, &source_name) {
+        return result(
+            request,
+            Some(source_name),
+            None,
+            StaticFormalsOutcome::Unresolved(reason),
+        );
+    }
+
+    let database = match rd_rds::package::InstalledCodeDb::open(&package_dir) {
+        Ok(database) => database,
+        Err(error) => {
+            return result(
+                request,
+                Some(source_name.clone()),
+                None,
+                StaticFormalsOutcome::Unavailable(format!(
+                    "failed to open installed code database: {error}"
+                )),
+            );
+        }
+    };
+    let inspection = match database.inspect_stored_binding(&source_name) {
+        Ok(inspection) => inspection,
+        Err(error) => {
+            return result(
+                request,
+                Some(source_name.clone()),
+                None,
+                inspection_error_outcome(&source_name, error),
+            );
+        }
+    };
+    let kind = inspection.kind();
+
+    match inspection.formals() {
+        FormalsInspection::Available(formals) => result(
+            request,
+            Some(source_name),
+            Some(kind),
+            StaticFormalsOutcome::Available(
+                formals
+                    .iter()
+                    .map(|formal| StaticFormal {
+                        name: formal.name().to_owned(),
+                        default: formal.default(),
+                    })
+                    .collect(),
+            ),
+        ),
+        FormalsInspection::NotApplicable(reason) => result(
+            request,
+            Some(source_name),
+            Some(kind),
+            StaticFormalsOutcome::NotApplicable(format!("formals are not applicable: {reason:?}")),
+        ),
+        FormalsInspection::Unavailable(reason) => result(
+            request,
+            Some(source_name),
+            Some(kind),
+            StaticFormalsOutcome::Unavailable(format!("formals are unavailable: {reason:?}")),
+        ),
+        _ => result(
+            request,
+            Some(source_name),
+            Some(kind),
+            StaticFormalsOutcome::Unavailable("formals inspection has an unknown state".to_owned()),
+        ),
+    }
+}
+
+fn result(
+    request: &StaticFormalsRequest,
+    source_name: Option<String>,
+    kind: Option<StoredKind>,
+    outcome: StaticFormalsOutcome,
+) -> StaticFormalsResult {
+    StaticFormalsResult {
+        package: request.package.clone(),
+        exported_name: request.exported_name.clone(),
+        source_name,
+        kind,
+        partial: request.partial.clone(),
+        used_named: request.used_named.clone(),
+        outcome,
+    }
+}
+
+fn imported_export_reason(metadata: &NamespaceMetadata, source_name: &str) -> Option<String> {
+    let imports = match metadata.imports() {
+        MetadataField::Present(imports) => imports,
+        MetadataField::Missing => return None,
+        MetadataField::Invalid(_) | MetadataField::UnsupportedSchema { .. } => {
+            return Some("import metadata is invalid or unsupported".to_owned());
+        }
+        _ => return Some("import metadata has an unknown state".to_owned()),
+    };
+    for import in imports {
+        match import {
+            // An `import`/`importFrom` all declaration does not by itself
+            // shadow an explicit export declaration. Export-pattern and
+            // re-export cases without an explicit local declaration are
+            // unresolved earlier because they have no matching export.
+            NamespaceImport::All { .. } => {}
+            NamespaceImport::From { names, .. }
+                if names.iter().any(|name| name.local_name() == source_name) =>
+            {
+                return Some("export resolves through an imported/re-exported binding".to_owned());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn inspection_error_outcome(source_name: &str, error: InstalledCodeError) -> StaticFormalsOutcome {
+    let unresolved = matches!(
+        &error,
+        InstalledCodeError::UnknownStoredBinding { .. }
+            | InstalledCodeError::AmbiguousStoredBinding { .. }
+    );
+    let reason = format!("failed to inspect stored binding {source_name:?}: {error}");
+    if unresolved {
+        StaticFormalsOutcome::Unresolved(reason)
+    } else {
+        StaticFormalsOutcome::Unavailable(reason)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::production_candidates;
+    use super::{
+        StaticFormal, StaticFormalsMode, StaticFormalsOutcome, StaticFormalsPolicy,
+        StaticFormalsResult, candidates, inspection_error_outcome, is_valid_identifier,
+        lookup_with_policy, named_argument_name, parse_request,
+    };
+    use rd_rds::package::DefaultPresence;
+    use rd_rds::package::InstalledCodeError;
+    use rd_rds::package::StoredKind;
+
+    #[test]
+    fn parses_only_initial_supported_shape() {
+        assert_eq!(
+            parse_request("stats::lm(", 10),
+            Some(super::StaticFormalsRequest {
+                package: "stats".to_owned(),
+                exported_name: "lm".to_owned(),
+                partial: "".to_owned(),
+                used_named: Vec::new(),
+            })
+        );
+        assert_eq!(
+            parse_request("stats::lm(fo", "stats::lm(fo".len()),
+            Some(super::StaticFormalsRequest {
+                package: "stats".to_owned(),
+                exported_name: "lm".to_owned(),
+                partial: "fo".to_owned(),
+                used_named: Vec::new(),
+            })
+        );
+        assert!(parse_request("stats:::lm(", "stats:::lm(".len()).is_none());
+        assert!(parse_request("stats::lm(foo(", "stats::lm(foo(".len()).is_none());
+        assert!(parse_request("stats::.foo(", "stats::.foo(".len()).is_some());
+        assert!(parse_request("stats::foo_1(", "stats::foo_1(".len()).is_some());
+        assert!(parse_request("stats::if(", "stats::if(".len()).is_none());
+        assert!(parse_request("stats::NA_real_(", "stats::NA_real_(".len()).is_none());
+        assert!(parse_request("stats::...(", "stats::...(".len()).is_none());
+        assert!(parse_request("stats::..1(", "stats::..1(".len()).is_none());
+        assert!(parse_request("stats::-foo(", "stats::-foo(".len()).is_none());
+        assert!(parse_request("stats::_foo(", "stats::_foo(".len()).is_none());
+        assert!(parse_request("stats::.1foo(", "stats::.1foo(".len()).is_none());
+        assert!(parse_request("stats::.(", "stats::.(".len()).is_some());
+        assert!(parse_request("stats::é(", "stats::é(".len()).is_none());
+        assert_eq!(
+            parse_request("stats::lm(foo = 1, ", "stats::lm(foo = 1, ".len()),
+            Some(super::StaticFormalsRequest {
+                package: "stats".to_owned(),
+                exported_name: "lm".to_owned(),
+                partial: "".to_owned(),
+                used_named: vec!["foo".to_owned()],
+            })
+        );
+        assert_eq!(
+            parse_request("stats::lm(foo = 1, fo", "stats::lm(foo = 1, fo".len()),
+            Some(super::StaticFormalsRequest {
+                package: "stats".to_owned(),
+                exported_name: "lm".to_owned(),
+                partial: "fo".to_owned(),
+                used_named: vec!["foo".to_owned()],
+            })
+        );
+        assert_eq!(
+            parse_request("stats::lm(foo = 1, bar", "stats::lm(foo = 1, bar".len())
+                .expect("partial argument should parse")
+                .used_named,
+            vec!["foo".to_owned()]
+        );
+        let comparison = parse_request("stats::lm(x == 1, ", "stats::lm(x == 1, ".len())
+            .expect("comparison expression should retain static completion");
+        assert!(comparison.used_named.is_empty());
+        let comparison_result = StaticFormalsResult {
+            package: "stats".to_owned(),
+            exported_name: "lm".to_owned(),
+            source_name: Some("lm".to_owned()),
+            kind: None,
+            partial: comparison.partial,
+            used_named: comparison.used_named,
+            outcome: StaticFormalsOutcome::Available(vec![StaticFormal {
+                name: "x".to_owned(),
+                default: DefaultPresence::Absent,
+            }]),
+        };
+        assert_eq!(candidates(&comparison_result), Some(vec!["x".to_owned()]));
+        assert!(parse_request("stats::lm(foo = 1", "stats::lm(foo = 1".len()).is_none());
+        assert!(parse_request("stats::lm(foo +", "stats::lm(foo +".len()).is_none());
+        assert!(parse_request("stats::lm", "stats::lm".len()).is_none());
+        assert!(parse_request("../stats::lm(", "../stats::lm(".len()).is_none());
+        assert!(parse_request("stats::lm(foo = f(1), ", "stats::lm(foo = f(1), ".len()).is_none());
+        assert!(
+            parse_request("stats::lm(foo = \"x\", ", "stats::lm(foo = \"x\", ".len()).is_none()
+        );
+        assert!(
+            parse_request(
+                "stats::lm(foo = 1 # comment",
+                "stats::lm(foo = 1 # comment".len()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn rejects_brackets_and_braces_in_arguments() {
+        for line in [
+            "stats::lm(x = value[fo",
+            "stats::lm(x = value[1, fo",
+            "stats::lm(x = value[1, ",
+            "stats::lm(x = value[[1, fo",
+            "stats::lm(x = { value[1, fo",
+            "stats::lm(x = value[1], fo",
+            "stats::lm(x = {1; 2}, fo",
+            "stats::lm(x = value], fo",
+            "stats::lm(x = value}, fo",
+        ] {
+            assert!(parse_request(line, line.len()).is_none(), "{line}");
+        }
+
+        let line = "stats::lm(x = value[1, fo], data = df)";
+        let cursor = line.find("fo]").unwrap() + 2;
+        assert!(parse_request(line, cursor).is_none());
+    }
+
+    #[test]
+    fn candidates_filter_partial_used_names_and_duplicates() {
+        let result = StaticFormalsResult {
+            package: "stats".to_owned(),
+            exported_name: "lm".to_owned(),
+            source_name: Some("lm".to_owned()),
+            kind: None,
+            partial: "fo".to_owned(),
+            used_named: vec!["formula".to_owned()],
+            outcome: StaticFormalsOutcome::Available(vec![
+                StaticFormal {
+                    name: "formula".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+            ]),
+        };
+        assert_eq!(candidates(&result), Some(vec!["foo".to_owned()]));
+        assert_eq!(
+            candidates(&StaticFormalsResult {
+                outcome: StaticFormalsOutcome::Unavailable("unsafe".to_owned()),
+                ..result
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn syntactic_identifier_validation_is_conservative() {
+        for identifier in ["foo", ".foo", "foo_1", "."] {
+            assert!(is_valid_identifier(identifier), "{identifier}");
+        }
+        for identifier in [
+            "",
+            "-foo",
+            "_foo",
+            ".1foo",
+            "éfoo",
+            "if",
+            "TRUE",
+            "NA_character_",
+            "...",
+            "..1",
+            "..20",
+        ] {
+            assert!(!is_valid_identifier(identifier), "{identifier}");
+        }
+    }
+
+    #[test]
+    fn static_policy_uses_exact_public_names_and_package_precedence() {
+        let policy = StaticFormalsPolicy {
+            mode: StaticFormalsMode::PreferStatic,
+            excluded_packages: vec!["S7".to_owned()],
+            excluded_functions: vec!["rlang::abort".to_owned()],
+        };
+        assert!(policy.excludes("S7", "anything"));
+        assert!(policy.excludes("rlang", "abort"));
+        assert!(!policy.excludes("rlang", "Abort"));
+        assert!(!policy.excludes("s7", "anything"));
+    }
+
+    #[test]
+    fn static_policy_off_does_not_lookup() {
+        let policy = StaticFormalsPolicy::off();
+        let line = "missing_package::function(";
+        assert!(lookup_with_policy(line, line.len(), &policy).is_none());
+    }
+
+    #[test]
+    fn production_candidates_match_r_formatting() {
+        let result = StaticFormalsResult {
+            package: "pkg".to_owned(),
+            exported_name: "fun".to_owned(),
+            source_name: Some("fun".to_owned()),
+            kind: Some(StoredKind::Closure),
+            partial: String::new(),
+            used_named: Vec::new(),
+            outcome: StaticFormalsOutcome::Available(vec![
+                StaticFormal {
+                    name: "formula".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "...".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo_1".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "-foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "_foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".1foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "if".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "éfoo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: String::new(),
+                    default: DefaultPresence::Absent,
+                },
+            ]),
+        };
+        assert_eq!(production_candidates(&result), None);
+        let valid_result = StaticFormalsResult {
+            outcome: StaticFormalsOutcome::Available(vec![
+                StaticFormal {
+                    name: "formula".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "...".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".foo".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: "foo_1".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+                StaticFormal {
+                    name: ".".to_owned(),
+                    default: DefaultPresence::Absent,
+                },
+            ]),
+            ..result.clone()
+        };
+        assert_eq!(
+            production_candidates(&valid_result),
+            Some(vec![
+                "formula=".to_owned(),
+                "...".to_owned(),
+                ".foo=".to_owned(),
+                "foo_1=".to_owned(),
+                ".=".to_owned()
+            ])
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                outcome: StaticFormalsOutcome::Available(Vec::new()),
+                ..valid_result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                partial: "does_not_match".to_owned(),
+                ..valid_result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                kind: Some(StoredKind::BuiltIn),
+                ..valid_result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                kind: None,
+                ..valid_result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                outcome: StaticFormalsOutcome::Available(vec![StaticFormal {
+                    name: "not-a-syntactic-name".to_owned(),
+                    default: DefaultPresence::Absent,
+                }]),
+                ..valid_result
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn unsafe_binding_resolution_errors_fall_back_to_unresolved() {
+        for error in [
+            InstalledCodeError::UnknownStoredBinding {
+                name: "missing".to_owned(),
+            },
+            InstalledCodeError::AmbiguousStoredBinding {
+                name: "duplicate".to_owned(),
+                count: 2,
+            },
+        ] {
+            assert!(matches!(
+                inspection_error_outcome("name", error),
+                StaticFormalsOutcome::Unresolved(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn other_binding_errors_are_unavailable() {
+        let error = InstalledCodeError::InvalidPackageDirectory {
+            path: std::path::PathBuf::from("pkg"),
+        };
+        assert!(matches!(
+            inspection_error_outcome("name", error),
+            StaticFormalsOutcome::Unavailable(_)
+        ));
+    }
+
+    #[test]
+    fn comparisons_are_not_named_argument_separators() {
+        for argument in ["x == 1", "x != 1", "x <= 1", "x >= 1"] {
+            assert_eq!(named_argument_name(argument), None, "{argument}");
+        }
+        assert_eq!(named_argument_name("foo = 1"), Some("foo".to_owned()));
+        assert_eq!(named_argument_name("foo=1"), Some("foo".to_owned()));
+    }
+}

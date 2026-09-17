@@ -5,6 +5,17 @@ use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use std::ffi::CString;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(test)]
+static R_EVALUATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(super) fn r_evaluation_count() -> usize {
+    R_EVALUATION_COUNT.load(Ordering::Relaxed)
+}
+
 /// Get the names from a package's namespace.
 ///
 /// For `::` access (`triple_colon = false`), returns exported names via
@@ -281,6 +292,8 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
         Ok(lib) => lib,
         Err(_) => return,
     };
+    #[cfg(test)]
+    R_EVALUATION_COUNT.fetch_add(1, Ordering::Relaxed);
     let result = unsafe { (lib.rf_eval)(data.expr, data.env) };
     data.result = Some(result);
 }
