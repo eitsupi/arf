@@ -22,6 +22,8 @@ use std::io::{Read, Write};
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::sync::mpsc;
 #[cfg(unix)]
 use std::sync::{Arc, Mutex};
@@ -179,6 +181,70 @@ fn append_cleanup_diagnostic(artifacts: &Path, message: impl AsRef<str>) {
         return;
     };
     let _ = writeln!(file, "{}", message.as_ref());
+}
+
+#[cfg(unix)]
+fn set_nonblocking(fd: std::os::unix::io::RawFd) -> Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    ensure!(
+        flags >= 0,
+        "failed to read PTY master flags: {}",
+        std::io::Error::last_os_error()
+    );
+    ensure!(
+        unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } >= 0,
+        "failed to set PTY master nonblocking: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn spawn_pty_reader(
+    mut reader: Box<dyn Read + Send>,
+    shutdown: Arc<AtomicBool>,
+    startup_artifact: PathBuf,
+    ready_tx: mpsc::Sender<std::result::Result<String, String>>,
+    would_block_tx: Option<mpsc::Sender<()>>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut output = String::new();
+        let mut buffer = [0_u8; 1024];
+        let mut would_block_tx = would_block_tx;
+        loop {
+            if shutdown.load(Ordering::Relaxed) {
+                return;
+            }
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = ready_tx.send(Err(format!(
+                        "PTY closed before R became ready; output={output}"
+                    )));
+                    return;
+                }
+                Ok(count) => {
+                    output.push_str(&String::from_utf8_lossy(&buffer[..count]));
+                    let _ = std::fs::write(&startup_artifact, &output);
+                    if output.contains("is ready.") {
+                        let _ = ready_tx.send(Ok(output));
+                        return;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if let Some(tx) = would_block_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    let _ =
+                        ready_tx.send(Err(format!("PTY reader failed: {error}; output={output}")));
+                    return;
+                }
+            }
+        }
+    })
 }
 
 #[cfg(unix)]
@@ -394,6 +460,122 @@ fn external_sigint_interrupts_slow_startup_profile_before_its_end() -> Result<()
 
 #[cfg(unix)]
 #[test]
+fn nonblocking_pty_reader_shutdown_allows_join_without_eof() -> Result<()> {
+    let artifacts = retained_artifacts("nonblocking-pty-reader")?;
+    let stages = StageTracker::new(artifacts.clone());
+    let (watchdog_done, watchdog) = mpsc::channel::<()>();
+    let watchdog_stages = stages.current.clone();
+    let watchdog_artifacts = artifacts.clone();
+    thread::spawn(move || {
+        if matches!(
+            watchdog.recv_timeout(Duration::from_secs(30)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ) {
+            let stage = watchdog_stages
+                .lock()
+                .map(|stage| stage.clone())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            let message = format!(
+                "tui-test nonblocking_pty_reader_shutdown_allows_join_without_eof exceeded 30s at stage {stage}; diagnostics: {}\n",
+                watchdog_artifacts.display()
+            );
+            let _ = std::fs::write(watchdog_artifacts.join("timeout.txt"), &message);
+            let _ = std::io::stderr().lock().write_all(message.as_bytes());
+            std::process::exit(1);
+        }
+    });
+
+    let result = (|| {
+        stages.stage("openpty")?;
+        let pty_system = native_pty_system();
+        let pair = pty_system.openpty(PtySize {
+            rows: 32,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        stages.stage("configure-reader")?;
+        let master_fd = pair
+            .master
+            .as_raw_fd()
+            .context("PTY master has no raw fd")?;
+        set_nonblocking(master_fd)?;
+        let reader = pair.master.try_clone_reader()?;
+        let artifact_dir = tempfile::tempdir()?;
+        let startup_artifact = artifact_dir.path().join("startup-output.txt");
+        std::fs::write(&startup_artifact, "")?;
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (would_block_tx, would_block_rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let reader_thread = spawn_pty_reader(
+            reader,
+            Arc::clone(&shutdown),
+            startup_artifact,
+            ready_tx,
+            Some(would_block_tx),
+        );
+
+        // Keep the slave open so the reader has neither output nor EOF to
+        // finish on; shutdown must be what makes the nonblocking reader exit.
+        let assertion_result = (|| {
+            stages.stage("wait-would-block")?;
+            let would_block_result = would_block_rx
+                .recv_timeout(Duration::from_secs(1))
+                .context("nonblocking PTY reader did not observe WouldBlock");
+            let ready_result = match ready_rx.try_recv() {
+                Err(mpsc::TryRecvError::Empty) => Ok(()),
+                Ok(message) => bail!(
+                    "PTY reader sent a readiness or error message before shutdown: {message:?}"
+                ),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    bail!("PTY reader exited before shutdown")
+                }
+            };
+            would_block_result?;
+            ready_result
+        })();
+        let stop_reader_stage = stages.stage("stop-reader");
+        shutdown.store(true, Ordering::Relaxed);
+        let drop_pty_stage = stages.stage("drop-pty");
+        drop(pair.master);
+        let join_reader_stage = stages.stage("join-reader");
+        let reader_result = reader_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"));
+        drop(pair.slave);
+        drop(artifact_dir);
+
+        let ready_channel_result: Result<()> = match ready_rx.try_recv() {
+            Err(mpsc::TryRecvError::Disconnected) => Ok(()),
+            Ok(message) => {
+                bail!("PTY reader sent a readiness or error message during shutdown: {message:?}")
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                bail!("PTY reader channel remained connected after join")
+            }
+        };
+        let cleanup_result = stop_reader_stage
+            .and(drop_pty_stage)
+            .and(join_reader_stage)
+            .and(reader_result)
+            .and(ready_channel_result);
+        cleanup_result?;
+        assertion_result?;
+        Ok(())
+    })();
+    let passed_stage = if result.is_ok() {
+        stages.stage("passed")
+    } else {
+        Ok(())
+    };
+    drop(watchdog_done);
+    result?;
+    passed_stage?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     // tui-test beta.3 exposes only a numeric exit code in State, which loses
     // the distinction between a signal and an ordinary failure. Use its
@@ -466,38 +648,25 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     stages.append(format!("pid: {pid}"));
     // This test only observes startup output. Taking the writer can trigger
     // a blocking EOF write when it is dropped on Unix, so leave it untouched.
-    let mut reader = pair.master.try_clone_reader()?;
+    stages.stage("configure-reader")?;
+    let master_fd = pair
+        .master
+        .as_raw_fd()
+        .context("PTY master has no raw fd")?;
+    set_nonblocking(master_fd)?;
+    let reader = pair.master.try_clone_reader()?;
     drop(pair.slave);
     let startup_artifact = artifacts.join("startup-output.txt");
     std::fs::write(&startup_artifact, "")?;
     let (ready_tx, ready_rx) = mpsc::channel();
-    let reader_thread = thread::spawn(move || {
-        let mut output = String::new();
-        let mut buffer = [0_u8; 1024];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => {
-                    let _ = ready_tx.send(Err(format!(
-                        "PTY closed before R became ready; output={output}"
-                    )));
-                    return;
-                }
-                Ok(count) => {
-                    output.push_str(&String::from_utf8_lossy(&buffer[..count]));
-                    let _ = std::fs::write(&startup_artifact, &output);
-                    if output.contains("is ready.") {
-                        let _ = ready_tx.send(Ok(output));
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ =
-                        ready_tx.send(Err(format!("PTY reader failed: {error}; output={output}")));
-                    return;
-                }
-            }
-        }
-    });
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let reader_thread = spawn_pty_reader(
+        reader,
+        Arc::clone(&shutdown),
+        startup_artifact,
+        ready_tx,
+        None,
+    );
     let result = (|| {
         stages.stage("wait-ready")?;
         let startup_result = ready_rx
@@ -545,17 +714,20 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
 
     let cleanup_stage = stages.stage("cleanup-child");
     drop(child);
+    let stop_reader_stage = stages.stage("stop-reader");
+    shutdown.store(true, Ordering::Relaxed);
     let drop_pty_stage = stages.stage("drop-pty");
     drop(pair.master);
-    let join_stage = stages.stage("join-reader");
-    let join_result = reader_thread
+    let join_reader_stage = stages.stage("join-reader");
+    let reader_result = reader_thread
         .join()
         .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"));
     drop(work);
     cleanup_stage?;
+    stop_reader_stage?;
     drop_pty_stage?;
-    join_stage?;
-    join_result?;
+    join_reader_stage?;
+    reader_result?;
     result?;
     stages.stage("passed")?;
     drop(watchdog_done);
