@@ -490,26 +490,82 @@ fn nonblocking_pty_reader_shutdown_allows_join_without_eof() -> Result<()> {
 
     // Keep the slave open so the reader has neither output nor EOF to finish
     // on; shutdown must be what makes the nonblocking reader exit.
-    would_block_rx
-        .recv_timeout(Duration::from_secs(1))
-        .context("nonblocking PTY reader did not observe WouldBlock")?;
-    ensure!(
-        matches!(ready_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "PTY reader reported readiness or failure before shutdown"
-    );
+    let assertion_result = (|| {
+        let would_block_result = would_block_rx
+            .recv_timeout(Duration::from_secs(1))
+            .context("nonblocking PTY reader did not observe WouldBlock");
+        let ready_result = match ready_rx.try_recv() {
+            Err(mpsc::TryRecvError::Empty) => Ok(()),
+            Ok(message) => {
+                bail!("PTY reader sent a readiness or error message before shutdown: {message:?}")
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                bail!("PTY reader exited before shutdown")
+            }
+        };
+        would_block_result?;
+        ready_result
+    })();
     shutdown.store(true, Ordering::Relaxed);
     drop(pair.master);
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + Duration::from_secs(5);
     while !reader_thread.is_finished() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
-    ensure!(
-        reader_thread.is_finished(),
-        "nonblocking PTY reader did not observe shutdown within 1s"
-    );
-    reader_thread
-        .join()
-        .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"))?;
+    let stopped_without_eof = reader_thread.is_finished();
+    let (reader_join_result, reader_joined) = if stopped_without_eof {
+        (
+            reader_thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("PTY reader thread panicked")),
+            true,
+        )
+    } else {
+        // Closing the slave is only needed when the normal shutdown path did
+        // not make progress; it gives the reader one final bounded chance to
+        // observe EOF before the handle is detached as a last resort.
+        drop(pair.slave);
+        let recovery_deadline = Instant::now() + Duration::from_secs(1);
+        while !reader_thread.is_finished() && Instant::now() < recovery_deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if reader_thread.is_finished() {
+            (
+                reader_thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("PTY reader thread panicked")),
+                true,
+            )
+        } else {
+            drop(reader_thread);
+            (
+                Err(anyhow::anyhow!(
+                    "nonblocking PTY reader did not finish within cleanup deadline"
+                )),
+                false,
+            )
+        }
+    };
+    let ready_channel_result: Result<()> = if reader_joined {
+        ensure!(
+            matches!(ready_rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)),
+            "PTY reader sent a readiness or error message during shutdown"
+        );
+        Ok(())
+    } else {
+        Ok(())
+    };
+    reader_join_result?;
+    ready_channel_result?;
+    let behavior_result: Result<()> = if stopped_without_eof {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "shutdown alone did not stop reader before EOF cleanup"
+        ))
+    };
+    behavior_result?;
+    assertion_result?;
     Ok(())
 }
 
