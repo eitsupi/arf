@@ -547,15 +547,21 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     drop(child);
     let drop_pty_stage = stages.stage("drop-pty");
     drop(pair.master);
-    let join_stage = stages.stage("join-reader");
-    let join_result = reader_thread
-        .join()
-        .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"));
+    let reader_cleanup_stage = stages.stage("cleanup-reader");
+    let reader_result = if result.is_ok() || reader_thread.is_finished() {
+        reader_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"))
+    } else {
+        stages.append("test failure left PTY reader unfinished; detaching reader thread");
+        drop(reader_thread);
+        Ok(())
+    };
     drop(work);
     cleanup_stage?;
     drop_pty_stage?;
-    join_stage?;
-    join_result?;
+    reader_cleanup_stage?;
+    reader_result?;
     result?;
     stages.stage("passed")?;
     drop(watchdog_done);
