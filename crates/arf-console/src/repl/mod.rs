@@ -486,7 +486,7 @@ impl Repl {
         // When rig is not enabled, :switch is excluded from completion
         if self.config.completion.enabled {
             let static_formals = arf_harp::completion::StaticFormalsPolicy {
-                mode: match self.config.experimental.r_completion.static_formals.mode {
+                mode: match self.config.experimental.r_completion.r#static.formals.mode {
                     crate::config::StaticFormalsMode::Off => {
                         arf_harp::completion::StaticFormalsMode::Off
                     }
@@ -498,7 +498,8 @@ impl Repl {
                     .config
                     .experimental
                     .r_completion
-                    .static_formals
+                    .r#static
+                    .formals
                     .exclusions
                     .packages
                     .clone(),
@@ -506,7 +507,8 @@ impl Repl {
                     .config
                     .experimental
                     .r_completion
-                    .static_formals
+                    .r#static
+                    .formals
                     .exclusions
                     .functions
                     .clone(),

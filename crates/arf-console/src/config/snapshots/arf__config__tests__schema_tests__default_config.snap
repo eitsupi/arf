@@ -119,10 +119,10 @@ package_functions = [
     "require",
 ]
 
-[experimental.r_completion.static_formals]
+[experimental.r_completion.static.formals]
 mode = "off"
 
-[experimental.r_completion.static_formals.exclusions]
+[experimental.r_completion.static.formals.exclusions]
 packages = []
 functions = []
 

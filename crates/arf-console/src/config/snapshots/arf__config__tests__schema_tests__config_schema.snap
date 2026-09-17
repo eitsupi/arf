@@ -89,12 +89,14 @@ expression: schema
             "library",
             "require"
           ],
-          "static_formals": {
-            "exclusions": {
-              "functions": [],
-              "packages": []
-            },
-            "mode": "off"
+          "static": {
+            "formals": {
+              "exclusions": {
+                "functions": [],
+                "packages": []
+              },
+              "mode": "off"
+            }
           }
         },
         "r_source_overrides": [],
@@ -1619,12 +1621,14 @@ expression: schema
               "library",
               "require"
             ],
-            "static_formals": {
-              "exclusions": {
-                "functions": [],
-                "packages": []
-              },
-              "mode": "off"
+            "static": {
+              "formals": {
+                "exclusions": {
+                  "functions": [],
+                  "packages": []
+                },
+                "mode": "off"
+              }
             }
           }
         },
@@ -1874,15 +1878,17 @@ expression: schema
             "type": "string"
           }
         },
-        "static_formals": {
-          "description": "Static inspection mode for qualified-call formal completion.",
-          "$ref": "#/$defs/StaticFormalsConfig",
+        "static": {
+          "description": "Static completion settings, configured separately for each feature.",
+          "$ref": "#/$defs/StaticCompletionConfig",
           "default": {
-            "exclusions": {
-              "functions": [],
-              "packages": []
-            },
-            "mode": "off"
+            "formals": {
+              "exclusions": {
+                "functions": [],
+                "packages": []
+              },
+              "mode": "off"
+            }
           }
         }
       }
@@ -2160,6 +2166,23 @@ expression: schema
           "description": "Show startup banner.",
           "type": "boolean",
           "default": true
+        }
+      }
+    },
+    "StaticCompletionConfig": {
+      "description": "Configuration for static R completion features.",
+      "type": "object",
+      "properties": {
+        "formals": {
+          "description": "Static inspection mode for qualified-call formal completion.",
+          "$ref": "#/$defs/StaticFormalsConfig",
+          "default": {
+            "exclusions": {
+              "functions": [],
+              "packages": []
+            },
+            "mode": "off"
+          }
         }
       }
     },

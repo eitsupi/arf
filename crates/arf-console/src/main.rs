@@ -479,7 +479,7 @@ fn run() -> Result<()> {
     // a failure is non-fatal because completion retains its R fallback.
     if r_initialized
         && matches!(
-            config.experimental.r_completion.static_formals.mode,
+            config.experimental.r_completion.r#static.formals.mode,
             config::StaticFormalsMode::PreferStatic
         )
         && let Err(error) = arf_harp::lib_paths::populate_lib_paths()
