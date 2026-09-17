@@ -12,7 +12,6 @@ use rd_rds::package::{
     NamespaceMetadata, StoredKind,
 };
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
 
 /// The outcome of inspecting one statically resolved binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +28,7 @@ pub enum StaticFormalsOutcome {
 
 /// The result of a static formals lookup.
 ///
-/// Resolution metadata is retained for every outcome so shadow-mode reports
+/// Resolution metadata is retained for every outcome so test observations
 /// can distinguish export resolution failures from code inspection failures.
 /// In particular, `NotApplicable` still records the stored kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,37 +43,11 @@ pub struct StaticFormalsResult {
 }
 
 /// A formal name with the serialized default-presence bit kept separate from
-/// completion insertion text. The R oracle remains responsible for formatting.
+/// the insertion text produced by [`production_candidates`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaticFormal {
     pub name: String,
     pub default: DefaultPresence,
-}
-
-/// An observation used by tests and migration experiments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StaticFormalsObservation {
-    pub result: StaticFormalsResult,
-    pub candidate_count: usize,
-    pub elapsed: Duration,
-    /// Static lookup intentionally performs no R evaluation.
-    pub r_evaluations: usize,
-}
-
-/// Side-by-side result for validation experiments. This helper always records
-/// the R oracle result; runtime callers can independently opt into the static
-/// path through [`crate::completion::get_completions_with_policy`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StaticFormalsShadow {
-    pub static_observation: StaticFormalsObservation,
-    pub r_candidates: Vec<String>,
-    pub r_elapsed: Duration,
-    /// Number of calls to the harp R-completion wrapper. This is not an
-    /// instrumented count of embedded R evaluations in the wider console
-    /// request (which may also call token and function helpers).
-    pub r_oracle_calls: usize,
-    /// An exact embedded-R evaluation count is not currently instrumented.
-    pub r_evaluation_count: Option<usize>,
 }
 
 /// Runtime mode for installed-package static formal completion.
@@ -112,12 +85,6 @@ impl StaticFormalsPolicy {
     }
 }
 
-/// Return the instrumentation count for the completion spike.
-#[cfg(feature = "completion-spike")]
-pub fn r_evaluation_count() -> usize {
-    super::r_ffi::r_evaluation_count()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StaticFormalsRequest {
     package: String,
@@ -152,32 +119,11 @@ pub fn lookup_with_policy(
     Some(lookup_request(&request))
 }
 
-/// Perform a lookup and record bounded migration observations.
-pub fn observe(line: &str, cursor_pos: usize) -> Option<StaticFormalsObservation> {
-    let request = parse_request(line, cursor_pos)?;
-    let started = Instant::now();
-    let result = lookup_request(&request);
-    let candidate_count = match &result {
-        StaticFormalsResult {
-            outcome: StaticFormalsOutcome::Available(formals),
-            ..
-        } => formals.len(),
-        StaticFormalsResult { .. } => 0,
-    };
-    Some(StaticFormalsObservation {
-        result,
-        candidate_count,
-        elapsed: started.elapsed(),
-        r_evaluations: 0,
-    })
-}
-
 /// Build conservative insertion candidates from an available static result.
 ///
-/// This helper is deliberately separate from the production completion path.
-/// It returns formal names only, filters names already supplied by the user,
-/// and preserves the request's partial prefix. Formatting of candidates for
-/// the editor remains an R-oracle concern until a later migration.
+/// Returns formal names only, filters names already supplied by the user, and
+/// preserves the request's partial prefix. [`production_candidates`] formats
+/// these names for insertion in the editor.
 pub fn candidates(result: &StaticFormalsResult) -> Option<Vec<String>> {
     let StaticFormalsResult {
         outcome: StaticFormalsOutcome::Available(formals),
@@ -235,33 +181,6 @@ pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>
     (!formatted.is_empty()).then_some(formatted)
 }
 
-/// Compare static metadata with the existing R completion oracle.
-pub fn shadow(
-    line: &str,
-    cursor_pos: usize,
-    timeout_ms: u64,
-) -> crate::error::HarpResult<Option<StaticFormalsShadow>> {
-    let Some(static_observation) = observe(line, cursor_pos) else {
-        return Ok(None);
-    };
-    #[cfg(feature = "completion-spike")]
-    let r_count_before = super::r_ffi::r_evaluation_count();
-    let started = Instant::now();
-    let r_candidates = super::get_r_completions(line, cursor_pos, timeout_ms)?;
-    #[cfg(feature = "completion-spike")]
-    let r_evaluation_count =
-        Some(super::r_ffi::r_evaluation_count().saturating_sub(r_count_before));
-    #[cfg(not(feature = "completion-spike"))]
-    let r_evaluation_count = None;
-    Ok(Some(StaticFormalsShadow {
-        static_observation,
-        r_candidates,
-        r_elapsed: started.elapsed(),
-        r_oracle_calls: 1,
-        r_evaluation_count,
-    }))
-}
-
 fn parse_request(line: &str, cursor_pos: usize) -> Option<StaticFormalsRequest> {
     let before_cursor = line.get(..cursor_pos.min(line.len()))?;
     let operator = before_cursor.rfind("::")?;
@@ -279,7 +198,7 @@ fn parse_request(line: &str, cursor_pos: usize) -> Option<StaticFormalsRequest> 
             (!is_identifier_character(character)).then_some(index + character.len_utf8())
         })
         .unwrap_or(0);
-    // The spike intentionally accepts only a top-level qualified call. This
+    // The provider intentionally accepts only a top-level qualified call. This
     // avoids guessing through a path, nested call, or other expression.
     if !before_cursor[..package_start].trim().is_empty() {
         return None;

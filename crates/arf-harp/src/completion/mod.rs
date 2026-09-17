@@ -21,6 +21,9 @@ mod r_ffi;
 #[doc(hidden)]
 pub mod static_formals;
 
+#[cfg(test)]
+mod r_tests;
+
 use crate::error::HarpResult;
 use arf_libr::{restore_stderr, suppress_stderr};
 
@@ -82,7 +85,7 @@ pub fn get_completions_with_policy(
 }
 
 /// Run the existing R completion oracle without the experimental static-first
-/// path. Shadow comparisons use this entry point so they always exercise R.
+/// path. Test comparisons use this entry point so they always exercise R.
 fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
     // Suppress R console output during completion to prevent error messages
     // from interfering with the terminal display (especially on Windows).

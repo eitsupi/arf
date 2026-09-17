@@ -5,14 +5,14 @@ use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use std::ffi::CString;
 
-#[cfg(feature = "completion-spike")]
+#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(feature = "completion-spike")]
+#[cfg(test)]
 static R_EVALUATION_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(feature = "completion-spike")]
-pub(crate) fn r_evaluation_count() -> usize {
+#[cfg(test)]
+pub(super) fn r_evaluation_count() -> usize {
     R_EVALUATION_COUNT.load(Ordering::Relaxed)
 }
 
@@ -292,7 +292,7 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
         Ok(lib) => lib,
         Err(_) => return,
     };
-    #[cfg(feature = "completion-spike")]
+    #[cfg(test)]
     R_EVALUATION_COUNT.fetch_add(1, Ordering::Relaxed);
     let result = unsafe { (lib.rf_eval)(data.expr, data.env) };
     data.result = Some(result);
