@@ -64,9 +64,15 @@ fn spam_sigint(terminal: &Terminal) -> Result<()> {
     Ok(())
 }
 
-fn wait_for_interrupted_prompt(terminal: &Terminal, marker: &str) -> Result<()> {
+fn wait_for_interrupted_prompt(
+    terminal: &Terminal,
+    marker: &str,
+    completion_marker: &str,
+) -> Result<()> {
     terminal.wait_for("prompt after interrupt", |state, line| {
-        state.text.contains(marker) && matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+        state.text.lines().any(|line| line == marker)
+            && matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+            && !state.text.lines().any(|line| line == completion_marker)
     })
 }
 
@@ -130,12 +136,15 @@ fn ctrl_c_spam_at_prompt_does_not_interrupt_next_evaluation() -> Result<()> {
 fn ctrl_c_spam_during_evaluation_interrupts_once_and_recovers() -> Result<()> {
     run_case("ctrl-c-evaluation-spam", &["--no-auto-match"], |terminal| {
         let marker = "CTRL_C_SPAM_STARTED";
-        terminal.enter(&format!("cat('{marker}\\n'); Sys.sleep(30)"))?;
+        let completion_marker = "CTRL_C_SPAM_COMPLETED";
+        terminal.enter(&format!(
+            r#"cat('{marker}\n'); Sys.sleep(30); cat('{completion_marker}\n')"#,
+        ))?;
         terminal.wait_for("evaluation starts before Ctrl+C spam", |state, _| {
-            state.text.contains(marker)
+            state.text.lines().any(|line| line == marker)
         })?;
         spam_ctrl_c(terminal)?;
-        wait_for_interrupted_prompt(terminal, marker)?;
+        wait_for_interrupted_prompt(terminal, marker, completion_marker)?;
         terminal.submit("sum(2:10)", "[1] 54", PROMPT)
     })
 }
@@ -148,12 +157,15 @@ fn external_sigint_interrupts_evaluation_and_repl_recovers() -> Result<()> {
         &["--no-auto-match"],
         |terminal| {
             let marker = "EXTERNAL_SIGINT_EVAL_STARTED";
-            terminal.enter(&format!("cat('{marker}\\n'); Sys.sleep(30)"))?;
+            let completion_marker = "EXTERNAL_SIGINT_EVAL_COMPLETED";
+            terminal.enter(&format!(
+                r#"cat('{marker}\n'); Sys.sleep(30); cat('{completion_marker}\n')"#,
+            ))?;
             terminal.wait_for("evaluation starts before external SIGINT", |state, _| {
-                state.text.contains(marker)
+                state.text.lines().any(|line| line == marker)
             })?;
             send_signal(terminal, libc::SIGINT)?;
-            wait_for_interrupted_prompt(terminal, marker)?;
+            wait_for_interrupted_prompt(terminal, marker, completion_marker)?;
             terminal.submit("sum(1:10)", "[1] 55", PROMPT)
         },
     )
@@ -180,13 +192,16 @@ fn external_sigint_spam_during_evaluation_interrupts_once_and_recovers() -> Resu
         &["--no-auto-match"],
         |terminal| {
             let marker = "EXTERNAL_SIGINT_SPAM_STARTED";
-            terminal.enter(&format!("cat('{marker}\\n'); Sys.sleep(30)"))?;
+            let completion_marker = "EXTERNAL_SIGINT_SPAM_COMPLETED";
+            terminal.enter(&format!(
+                r#"cat('{marker}\n'); Sys.sleep(30); cat('{completion_marker}\n')"#,
+            ))?;
             terminal.wait_for(
                 "evaluation starts before external SIGINT spam",
-                |state, _| state.text.contains(marker),
+                |state, _| state.text.lines().any(|line| line == marker),
             )?;
             spam_sigint(terminal)?;
-            wait_for_interrupted_prompt(terminal, marker)?;
+            wait_for_interrupted_prompt(terminal, marker, completion_marker)?;
             terminal.submit("sum(2:10)", "[1] 54", PROMPT)
         },
     )
