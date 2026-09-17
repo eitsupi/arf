@@ -216,8 +216,7 @@ fn history_menu_selection_replaces_auto_matched_paren_pair() -> Result<()> {
         "history-menu-paren-pair",
         &["--no-completion"],
         |terminal| {
-            let command =
-                "history_p <- get0(\"history_p\", ifnotfound = 0) + 1; length(c()) + history_p - 1";
+            let command = r#"history_p <- get0("history_p", ifnotfound = 0) + 1; length(c()) + history_p - 1"#;
             terminal.submit(command, "[1] 0", PROMPT)?;
             terminal.write("c(")?;
             terminal.wait_for("auto-matched paren pair", |_, line| line.contains("c()"))?;
@@ -242,8 +241,7 @@ fn history_search_preserves_auto_matched_paren_pair() -> Result<()> {
         "history-menu-search-paren-pair",
         &["--no-completion"],
         |terminal| {
-            let command =
-                "history_s <- get0(\"history_s\", ifnotfound = 0) + 1; length(c()) + history_s - 1";
+            let command = r#"history_s <- get0("history_s", ifnotfound = 0) + 1; length(c()) + history_s - 1"#;
             terminal.submit(command, "[1] 0", PROMPT)?;
             terminal.write("\x12")?;
             terminal.wait_for("history menu opens", |state, _| {
