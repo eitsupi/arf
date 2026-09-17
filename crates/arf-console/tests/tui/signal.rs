@@ -461,111 +461,116 @@ fn external_sigint_interrupts_slow_startup_profile_before_its_end() -> Result<()
 #[cfg(unix)]
 #[test]
 fn nonblocking_pty_reader_shutdown_allows_join_without_eof() -> Result<()> {
-    let pty_system = native_pty_system();
-    let pair = pty_system.openpty(PtySize {
-        rows: 32,
-        cols: 100,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-    let master_fd = pair
-        .master
-        .as_raw_fd()
-        .context("PTY master has no raw fd")?;
-    set_nonblocking(master_fd)?;
-    let reader = pair.master.try_clone_reader()?;
-    let artifact_dir = tempfile::tempdir()?;
-    let startup_artifact = artifact_dir.path().join("startup-output.txt");
-    std::fs::write(&startup_artifact, "")?;
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let (would_block_tx, would_block_rx) = mpsc::channel();
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let reader_thread = spawn_pty_reader(
-        reader,
-        Arc::clone(&shutdown),
-        startup_artifact,
-        ready_tx,
-        Some(would_block_tx),
-    );
+    let artifacts = retained_artifacts("nonblocking-pty-reader")?;
+    let stages = StageTracker::new(artifacts.clone());
+    let (watchdog_done, watchdog) = mpsc::channel::<()>();
+    let watchdog_stages = stages.current.clone();
+    let watchdog_artifacts = artifacts.clone();
+    thread::spawn(move || {
+        if matches!(
+            watchdog.recv_timeout(Duration::from_secs(30)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ) {
+            let stage = watchdog_stages
+                .lock()
+                .map(|stage| stage.clone())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            let message = format!(
+                "tui-test nonblocking_pty_reader_shutdown_allows_join_without_eof exceeded 30s at stage {stage}; diagnostics: {}\n",
+                watchdog_artifacts.display()
+            );
+            let _ = std::fs::write(watchdog_artifacts.join("timeout.txt"), &message);
+            let _ = std::io::stderr().lock().write_all(message.as_bytes());
+            std::process::exit(1);
+        }
+    });
 
-    // Keep the slave open so the reader has neither output nor EOF to finish
-    // on; shutdown must be what makes the nonblocking reader exit.
-    let assertion_result = (|| {
-        let would_block_result = would_block_rx
-            .recv_timeout(Duration::from_secs(1))
-            .context("nonblocking PTY reader did not observe WouldBlock");
-        let ready_result = match ready_rx.try_recv() {
-            Err(mpsc::TryRecvError::Empty) => Ok(()),
+    let result = (|| {
+        stages.stage("openpty")?;
+        let pty_system = native_pty_system();
+        let pair = pty_system.openpty(PtySize {
+            rows: 32,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        stages.stage("configure-reader")?;
+        let master_fd = pair
+            .master
+            .as_raw_fd()
+            .context("PTY master has no raw fd")?;
+        set_nonblocking(master_fd)?;
+        let reader = pair.master.try_clone_reader()?;
+        let artifact_dir = tempfile::tempdir()?;
+        let startup_artifact = artifact_dir.path().join("startup-output.txt");
+        std::fs::write(&startup_artifact, "")?;
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (would_block_tx, would_block_rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let reader_thread = spawn_pty_reader(
+            reader,
+            Arc::clone(&shutdown),
+            startup_artifact,
+            ready_tx,
+            Some(would_block_tx),
+        );
+
+        // Keep the slave open so the reader has neither output nor EOF to
+        // finish on; shutdown must be what makes the nonblocking reader exit.
+        let assertion_result = (|| {
+            stages.stage("wait-would-block")?;
+            let would_block_result = would_block_rx
+                .recv_timeout(Duration::from_secs(1))
+                .context("nonblocking PTY reader did not observe WouldBlock");
+            let ready_result = match ready_rx.try_recv() {
+                Err(mpsc::TryRecvError::Empty) => Ok(()),
+                Ok(message) => bail!(
+                    "PTY reader sent a readiness or error message before shutdown: {message:?}"
+                ),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    bail!("PTY reader exited before shutdown")
+                }
+            };
+            would_block_result?;
+            ready_result
+        })();
+        let stop_reader_stage = stages.stage("stop-reader");
+        shutdown.store(true, Ordering::Relaxed);
+        let drop_pty_stage = stages.stage("drop-pty");
+        drop(pair.master);
+        let join_reader_stage = stages.stage("join-reader");
+        let reader_result = reader_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"));
+        drop(pair.slave);
+        drop(artifact_dir);
+
+        let ready_channel_result: Result<()> = match ready_rx.try_recv() {
+            Err(mpsc::TryRecvError::Disconnected) => Ok(()),
             Ok(message) => {
-                bail!("PTY reader sent a readiness or error message before shutdown: {message:?}")
+                bail!("PTY reader sent a readiness or error message during shutdown: {message:?}")
             }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                bail!("PTY reader exited before shutdown")
+            Err(mpsc::TryRecvError::Empty) => {
+                bail!("PTY reader channel remained connected after join")
             }
         };
-        would_block_result?;
-        ready_result
+        let cleanup_result = stop_reader_stage
+            .and(drop_pty_stage)
+            .and(join_reader_stage)
+            .and(reader_result)
+            .and(ready_channel_result);
+        cleanup_result?;
+        assertion_result?;
+        Ok(())
     })();
-    shutdown.store(true, Ordering::Relaxed);
-    drop(pair.master);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !reader_thread.is_finished() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    let stopped_without_eof = reader_thread.is_finished();
-    let (reader_join_result, reader_joined) = if stopped_without_eof {
-        (
-            reader_thread
-                .join()
-                .map_err(|_| anyhow::anyhow!("PTY reader thread panicked")),
-            true,
-        )
-    } else {
-        // Closing the slave is only needed when the normal shutdown path did
-        // not make progress; it gives the reader one final bounded chance to
-        // observe EOF before the handle is detached as a last resort.
-        drop(pair.slave);
-        let recovery_deadline = Instant::now() + Duration::from_secs(1);
-        while !reader_thread.is_finished() && Instant::now() < recovery_deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if reader_thread.is_finished() {
-            (
-                reader_thread
-                    .join()
-                    .map_err(|_| anyhow::anyhow!("PTY reader thread panicked")),
-                true,
-            )
-        } else {
-            drop(reader_thread);
-            (
-                Err(anyhow::anyhow!(
-                    "nonblocking PTY reader did not finish within cleanup deadline"
-                )),
-                false,
-            )
-        }
-    };
-    let ready_channel_result: Result<()> = if reader_joined {
-        ensure!(
-            matches!(ready_rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)),
-            "PTY reader sent a readiness or error message during shutdown"
-        );
-        Ok(())
+    let passed_stage = if result.is_ok() {
+        stages.stage("passed")
     } else {
         Ok(())
     };
-    reader_join_result?;
-    ready_channel_result?;
-    let behavior_result: Result<()> = if stopped_without_eof {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "shutdown alone did not stop reader before EOF cleanup"
-        ))
-    };
-    behavior_result?;
-    assertion_result?;
+    drop(watchdog_done);
+    result?;
+    passed_stage?;
     Ok(())
 }
 
