@@ -262,6 +262,7 @@ fn experimental_static_first_hit_and_fallback() {
             for unsupported in [
                 "stats:::lm(",
                 "missing_package::foo(",
+                "stats::lm(zz",
                 "stats::lm(x = value[1, fo",
                 "stats::lm(x = value[1, ",
                 "stats::lm(x = { value[1, fo",

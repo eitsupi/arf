@@ -178,6 +178,7 @@ pub fn production_candidates(result: &StaticFormalsResult) -> Option<Vec<String>
             }
         })
         .collect::<Vec<_>>();
+    // An empty static result falls back to R so non-formal candidates remain available.
     (!formatted.is_empty()).then_some(formatted)
 }
 
@@ -863,6 +864,20 @@ mod tests {
                 "foo_1=".to_owned(),
                 ".=".to_owned()
             ])
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                outcome: StaticFormalsOutcome::Available(Vec::new()),
+                ..valid_result.clone()
+            }),
+            None
+        );
+        assert_eq!(
+            production_candidates(&StaticFormalsResult {
+                partial: "does_not_match".to_owned(),
+                ..valid_result.clone()
+            }),
+            None
         );
         assert_eq!(
             production_candidates(&StaticFormalsResult {
