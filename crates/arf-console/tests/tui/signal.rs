@@ -18,9 +18,13 @@ use anyhow::{Result, ensure};
 #[cfg(unix)]
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 #[cfg(unix)]
-use std::io::Read;
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::sync::mpsc;
+#[cfg(unix)]
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 #[cfg(unix)]
@@ -32,16 +36,161 @@ const SPAM_COUNT: usize = 15;
 #[cfg(unix)]
 struct PtyChildGuard {
     child: Option<Box<dyn Child + Send + Sync>>,
+    artifacts: PathBuf,
 }
 
 #[cfg(unix)]
 impl Drop for PtyChildGuard {
     fn drop(&mut self) {
-        if let Some(child) = &mut self.child {
-            let _ = child.kill();
-            let _ = child.wait();
+        let Some(child) = &mut self.child else {
+            return;
+        };
+
+        append_cleanup_diagnostic(&self.artifacts, "cleanup-child: starting");
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                append_cleanup_diagnostic(
+                    &self.artifacts,
+                    format!("cleanup-child: child was already reaped: {status:?}"),
+                );
+                return;
+            }
+            Ok(None) => {}
+            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                append_cleanup_diagnostic(
+                    &self.artifacts,
+                    "cleanup-child: initial try_wait reported ECHILD; assuming child was reaped",
+                );
+                return;
+            }
+            Err(error) => append_cleanup_diagnostic(
+                &self.artifacts,
+                format!("cleanup-child: initial try_wait failed: {error}"),
+            ),
+        }
+
+        let kill_result = child
+            .process_id()
+            .map(|pid| unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) })
+            .map(|result| {
+                if result == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        match kill_result {
+            Some(Ok(())) => {
+                append_cleanup_diagnostic(&self.artifacts, "cleanup-child: sent SIGKILL")
+            }
+            Some(Err(error)) if error.raw_os_error() == Some(libc::ESRCH) => {
+                append_cleanup_diagnostic(
+                    &self.artifacts,
+                    "cleanup-child: SIGKILL target was already gone",
+                );
+            }
+            Some(Err(error)) => append_cleanup_diagnostic(
+                &self.artifacts,
+                format!("cleanup-child: SIGKILL failed: {error}"),
+            ),
+            None => match child.kill() {
+                Ok(()) => append_cleanup_diagnostic(
+                    &self.artifacts,
+                    "cleanup-child: sent portable-pty kill",
+                ),
+                Err(error) => append_cleanup_diagnostic(
+                    &self.artifacts,
+                    format!("cleanup-child: portable-pty kill failed: {error}"),
+                ),
+            },
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    append_cleanup_diagnostic(
+                        &self.artifacts,
+                        format!("cleanup-child: reaped after kill: {status:?}"),
+                    );
+                    return;
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Ok(None) => {
+                    append_cleanup_diagnostic(
+                        &self.artifacts,
+                        "cleanup-child: timed out waiting to reap after SIGKILL",
+                    );
+                    return;
+                }
+                Err(error) => {
+                    append_cleanup_diagnostic(
+                        &self.artifacts,
+                        format!("cleanup-child: try_wait while reaping failed: {error}"),
+                    );
+                    return;
+                }
+            }
         }
     }
+}
+
+#[cfg(unix)]
+struct StageTracker {
+    artifacts: PathBuf,
+    current: Arc<Mutex<String>>,
+}
+
+#[cfg(unix)]
+impl StageTracker {
+    fn new(artifacts: PathBuf) -> Self {
+        Self {
+            artifacts,
+            current: Arc::new(Mutex::new("prepare".to_owned())),
+        }
+    }
+
+    fn stage(&self, name: &str) -> Result<()> {
+        if let Ok(mut current) = self.current.lock() {
+            *current = name.to_owned();
+        }
+        eprintln!("tui-test: {name} (artifacts: {})", self.artifacts.display());
+        std::fs::write(self.artifacts.join("stage.txt"), name)?;
+        Ok(())
+    }
+
+    fn append(&self, message: impl AsRef<str>) {
+        append_cleanup_diagnostic(&self.artifacts, message.as_ref());
+    }
+}
+
+#[cfg(unix)]
+fn append_cleanup_diagnostic(artifacts: &Path, message: impl AsRef<str>) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(artifacts.join("cleanup.txt"))
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{}", message.as_ref());
+}
+
+#[cfg(unix)]
+fn retained_artifacts(name: &str) -> Result<PathBuf> {
+    let root = std::env::var_os("ARF_TUI_TEST_ARTIFACTS")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&root)?;
+    Ok(tempfile::Builder::new()
+        .prefix(&format!("arf-tui-{name}-"))
+        .tempdir_in(root)?
+        .keep())
 }
 
 #[cfg(unix)]
@@ -250,6 +399,31 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     // the distinction between a signal and an ordinary failure. Use its
     // portable-pty layer directly here so ExitStatus::signal() remains
     // available for the exact default-disposition assertion.
+    let artifacts = retained_artifacts("external-sigterm")?;
+    let stages = StageTracker::new(artifacts.clone());
+    let (watchdog_done, watchdog) = mpsc::channel::<()>();
+    let watchdog_stages = stages.current.clone();
+    let watchdog_artifacts = artifacts.clone();
+    thread::spawn(move || {
+        if matches!(
+            watchdog.recv_timeout(Duration::from_secs(180)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ) {
+            let stage = watchdog_stages
+                .lock()
+                .map(|stage| stage.clone())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            let message = format!(
+                "tui-test external SIGTERM case exceeded 180s at stage {stage}; diagnostics: {}\n",
+                watchdog_artifacts.display()
+            );
+            let _ = std::fs::write(watchdog_artifacts.join("timeout.txt"), &message);
+            let _ = std::io::stderr().lock().write_all(message.as_bytes());
+            std::process::exit(1);
+        }
+    });
+
+    stages.stage("prepare")?;
     let work = tempfile::tempdir()?;
     let config = work.path().join("config.toml");
     std::fs::write(&config, DEFAULT_CONFIG)?;
@@ -257,6 +431,7 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
     std::fs::create_dir(&history)?;
 
     let pty_system = native_pty_system();
+    stages.stage("openpty")?;
     let pair = pty_system.openpty(PtySize {
         rows: 32,
         cols: 100,
@@ -277,13 +452,26 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
         "--no-completion",
     ]);
     command.cwd(work.path());
+    stages.stage("spawn")?;
     let child = pair.slave.spawn_command(command)?;
-    let mut child = PtyChildGuard { child: Some(child) };
-    let _writer = pair.master.take_writer()?;
+    let mut child = PtyChildGuard {
+        child: Some(child),
+        artifacts: artifacts.clone(),
+    };
+    let pid = child
+        .child
+        .as_ref()
+        .and_then(|child| child.process_id())
+        .context("missing arf PID")? as libc::pid_t;
+    stages.append(format!("pid: {pid}"));
+    // This test only observes startup output. Taking the writer can trigger
+    // a blocking EOF write when it is dropped on Unix, so leave it untouched.
     let mut reader = pair.master.try_clone_reader()?;
     drop(pair.slave);
+    let startup_artifact = artifacts.join("startup-output.txt");
+    std::fs::write(&startup_artifact, "")?;
     let (ready_tx, ready_rx) = mpsc::channel();
-    thread::spawn(move || {
+    let reader_thread = thread::spawn(move || {
         let mut output = String::new();
         let mut buffer = [0_u8; 1024];
         loop {
@@ -296,52 +484,80 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
                 }
                 Ok(count) => {
                     output.push_str(&String::from_utf8_lossy(&buffer[..count]));
+                    let _ = std::fs::write(&startup_artifact, &output);
                     if output.contains("is ready.") {
-                        let _ = ready_tx.send(Ok(()));
+                        let _ = ready_tx.send(Ok(output));
                         return;
                     }
                 }
-                Err(_) => {
-                    let _ = ready_tx.send(Err(format!("PTY reader failed; output={output}")));
+                Err(error) => {
+                    let _ =
+                        ready_tx.send(Err(format!("PTY reader failed: {error}; output={output}")));
                     return;
                 }
             }
         }
     });
-    ready_rx
-        .recv_timeout(Duration::from_secs(30))
-        .context("timed out waiting for R startup readiness")?
-        .map_err(anyhow::Error::msg)?;
-    let pid = child
-        .child
-        .as_ref()
-        .and_then(|child| child.process_id())
-        .context("missing arf PID")? as libc::pid_t;
-    if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
-        bail!("arf exited before SIGTERM: {status:?}");
-    }
-    ensure!(
-        unsafe { libc::kill(pid, libc::SIGTERM) } == 0,
-        "failed to send SIGTERM to {pid}: {}",
-        std::io::Error::last_os_error()
-    );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let status = loop {
-        if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
-            break status;
+    let result = (|| {
+        stages.stage("wait-ready")?;
+        let startup_result = ready_rx
+            .recv_timeout(Duration::from_secs(30))
+            .context("timed out waiting for R startup readiness")?;
+        match startup_result {
+            Ok(_) => {}
+            Err(error) => {
+                bail!("{error}");
+            }
         }
+        if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
+            bail!("arf exited before SIGTERM: {status:?}");
+        }
+        stages.stage("send-sigterm")?;
         ensure!(
-            Instant::now() < deadline,
-            "timed out waiting for arf to terminate after SIGTERM"
+            unsafe { libc::kill(pid, libc::SIGTERM) } == 0,
+            "failed to send SIGTERM to {pid}: {}",
+            std::io::Error::last_os_error()
         );
-        thread::sleep(Duration::from_millis(25));
-    };
-    child.child.take();
-    let expected_signal_name =
-        unsafe { std::ffi::CStr::from_ptr(libc::strsignal(libc::SIGTERM)).to_string_lossy() };
-    ensure!(
-        status.signal() == Some(expected_signal_name.as_ref()),
-        "SIGTERM did not use its default disposition: {status:?}"
-    );
+        stages.stage("wait-exit")?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.child.as_mut().expect("guard has child").try_wait()? {
+                break status;
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "timed out waiting for arf to terminate after SIGTERM"
+            );
+            thread::sleep(Duration::from_millis(25));
+        };
+        stages.append(format!("exit-status: {status:?}"));
+        // The child has been reaped, so do not let later assertion failures
+        // leave a stale PID for the guard to signal.
+        child.child.take();
+        let expected_signal_name =
+            unsafe { std::ffi::CStr::from_ptr(libc::strsignal(libc::SIGTERM)).to_string_lossy() };
+        ensure!(
+            status.signal() == Some(expected_signal_name.as_ref()),
+            "SIGTERM did not use its default disposition: {status:?}"
+        );
+        Ok(())
+    })();
+
+    let cleanup_stage = stages.stage("cleanup-child");
+    drop(child);
+    let drop_pty_stage = stages.stage("drop-pty");
+    drop(pair.master);
+    let join_stage = stages.stage("join-reader");
+    let join_result = reader_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("PTY reader thread panicked"));
+    drop(work);
+    cleanup_stage?;
+    drop_pty_stage?;
+    join_stage?;
+    join_result?;
+    result?;
+    stages.stage("passed")?;
+    drop(watchdog_done);
     Ok(())
 }
