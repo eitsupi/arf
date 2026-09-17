@@ -808,10 +808,10 @@ fn recording_concatenates_output_without_input_or_resize_events() -> Result<()> 
 }
 
 #[test]
-fn fragmented_history_recording_separates_visual_result_from_raw_output() -> Result<()> {
-    // Reduced from a Windows ConPTY artifact: cursor-control output can occur
-    // between a replayed result's prefix and value. The screen shows `[1] 3`,
-    // but the raw recording does not contain that contiguous substring.
+fn fragmented_history_recording_does_not_contain_visual_result() -> Result<()> {
+    // Reduced from a Windows ConPTY artifact: the corresponding saved screen
+    // state displayed `[1] 3`, but this reduced raw recording does not contain
+    // that visual result as a contiguous substring.
     let recording = r#"{"version":3}
 [0,"o","[1] 2\r\n"]
 [0,"o","\u001b[2K\rARF> "]
