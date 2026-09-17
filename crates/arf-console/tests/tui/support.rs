@@ -808,6 +808,32 @@ fn recording_concatenates_output_without_input_or_resize_events() -> Result<()> 
 }
 
 #[test]
+fn fragmented_history_recording_does_not_contain_visual_result() -> Result<()> {
+    // Reduced from a Windows ConPTY artifact: the corresponding saved screen
+    // state displayed `[1] 3`, but this reduced raw recording does not contain
+    // that visual result as a contiguous substring.
+    let recording = r#"{"version":3}
+[0,"o","[1] 2\r\n"]
+[0,"o","\u001b[2K\rARF> "]
+[0,"o","\u001b[2K\r[1]\r\u001b[3C 3\r\nARF> "]
+"#;
+    let output = output_events(recording)?;
+    ensure!(
+        output.matches("[1] 2").count() == 1,
+        "initial result missing from fragmented recording: {output:?}"
+    );
+    ensure!(
+        output.contains("\r\x1b[3C"),
+        "cursor-control boundary missing from fragmented recording: {output:?}"
+    );
+    ensure!(
+        !output.contains("[1] 3"),
+        "raw recording unexpectedly contains the visual replay result: {output:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn malformed_recordings_fail_instead_of_dropping_output() {
     for recording in [
         "",
