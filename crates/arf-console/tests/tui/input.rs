@@ -43,13 +43,19 @@ fn ctrl_c_discards_input_and_allows_a_new_command() -> Result<()> {
 #[test]
 fn ctrl_c_interrupts_running_command_and_allows_recovery() -> Result<()> {
     run_case("interrupt-computation", &["--no-auto-match"], |terminal| {
-        terminal.enter("cat('SLEEP_START\\n'); Sys.sleep(30)")?;
+        let start_marker = "SLEEP_START";
+        let completion_marker = "SLEEP_COMPLETED";
+        terminal.enter(&format!(
+            r#"cat('{start_marker}\n'); Sys.sleep(30); cat('{completion_marker}\n')"#,
+        ))?;
         terminal.wait_for("long command started", |state, _| {
-            state.exited.is_none() && state.text.contains("SLEEP_START")
+            state.exited.is_none() && state.text.lines().any(|line| line == start_marker)
         })?;
         terminal.key("Ctrl+C")?;
         terminal.wait_for("prompt after interrupt", |state, line| {
-            state.exited.is_none() && matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+            state.exited.is_none()
+                && matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+                && !state.text.lines().any(|line| line == completion_marker)
         })?;
         terminal.submit("42", "[1] 42", PROMPT)
     })
