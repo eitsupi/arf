@@ -259,13 +259,24 @@ fn experimental_static_first_hit_and_fallback() {
                 "static hit wrapper sequence must be token=1, completion=0, function-check=1"
             );
 
-            for unsupported in ["stats:::lm(", "missing_package::foo("] {
+            for unsupported in [
+                "stats:::lm(",
+                "missing_package::foo(",
+                "stats::lm(x = value[1, fo",
+                "stats::lm(x = value[1, ",
+                "stats::lm(x = { value[1, fo",
+                "stats::lm(x = value[1], fo",
+                "stats::lm(x = {1; 2}, fo",
+            ] {
+                let expected = get_completions(unsupported, unsupported.len(), 1_000)
+                    .expect("R oracle should remain available");
                 let before = r_evaluation_count();
                 let _ =
                     get_token(unsupported, unsupported.len()).expect("token lookup should succeed");
                 let after_token = r_evaluation_count();
-                let _ = get_completions_with_policy(unsupported, unsupported.len(), 1_000, &policy)
-                    .expect("R fallback should remain available");
+                let actual =
+                    get_completions_with_policy(unsupported, unsupported.len(), 1_000, &policy)
+                        .expect("R fallback should remain available");
                 let after_completion = r_evaluation_count();
                 let _ = check_if_functions(&["foo"]).expect("function check should succeed");
                 let after_functions = r_evaluation_count();
@@ -277,8 +288,9 @@ fn experimental_static_first_hit_and_fallback() {
                         after_functions.saturating_sub(before),
                     ],
                     [1, 1, 1, 3],
-                    "fallback wrapper sequence must be token=1, completion=1, function-check=1"
+                    "fallback wrapper sequence must be token=1, completion=1, function-check=1: {unsupported}"
                 );
+                assert_eq!(actual, expected, "R fallback candidates: {unsupported}");
             }
         },
     );

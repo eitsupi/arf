@@ -218,10 +218,14 @@ fn parse_request(line: &str, cursor_pos: usize) -> Option<StaticFormalsRequest> 
     }
 
     let arguments = &before_cursor[function_end + 1..];
-    if arguments
-        .chars()
-        .any(|character| matches!(character, '(' | ')' | '"' | '\'' | '#'))
-    {
+    // Splitting on commas is only safe without nested expressions. Keep even
+    // balanced brackets and braces on the R path rather than tracking depth.
+    if arguments.chars().any(|character| {
+        matches!(
+            character,
+            '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '#'
+        )
+    }) {
         return None;
     }
     let (completed_arguments, current_argument) = arguments
@@ -669,6 +673,27 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn rejects_brackets_and_braces_in_arguments() {
+        for line in [
+            "stats::lm(x = value[fo",
+            "stats::lm(x = value[1, fo",
+            "stats::lm(x = value[1, ",
+            "stats::lm(x = value[[1, fo",
+            "stats::lm(x = { value[1, fo",
+            "stats::lm(x = value[1], fo",
+            "stats::lm(x = {1; 2}, fo",
+            "stats::lm(x = value], fo",
+            "stats::lm(x = value}, fo",
+        ] {
+            assert!(parse_request(line, line.len()).is_none(), "{line}");
+        }
+
+        let line = "stats::lm(x = value[1, fo], data = df)";
+        let cursor = line.find("fo]").unwrap() + 2;
+        assert!(parse_request(line, cursor).is_none());
     }
 
     #[test]
