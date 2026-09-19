@@ -10,6 +10,7 @@ description = "High-level R abstractions for safe R object manipulation"
 command-outcome-spike = []
 mainloop-unwind-spike = []
 repl-semantics-spike = []
+nested-recovery-spike = []
 
 [[example]]
 name = "command-outcome-spike"
@@ -26,6 +27,12 @@ bench = false
 [[example]]
 name = "repl-semantics-spike"
 required-features = ["repl-semantics-spike"]
+test = false
+bench = false
+
+[[example]]
+name = "nested-recovery-spike"
+required-features = ["nested-recovery-spike"]
 test = false
 bench = false
 
