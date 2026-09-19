@@ -6,9 +6,59 @@ use crate::config::{
     load_config_from_path, load_config_from_path_with_provenance, mask_home_path,
 };
 
-fn report_history_migration_warning(warning: &str) {
-    eprintln!("Warning: {warning}");
-    log::warn!("{warning}");
+/// A user-facing startup diagnostic and its optional log entry.
+#[derive(Debug)]
+pub(crate) struct StartupDiagnostic {
+    message: String,
+    log_message: Option<String>,
+}
+
+impl StartupDiagnostic {
+    pub(crate) fn user_warning(message: String) -> Self {
+        Self {
+            message,
+            log_message: None,
+        }
+    }
+
+    fn emit(self) {
+        eprintln!("{}", self.message);
+        if let Some(message) = self.log_message {
+            log::warn!("{message}");
+        }
+    }
+}
+
+/// Result of loading startup configuration, with diagnostics held until the
+/// caller has crossed any process re-exec boundary.
+#[derive(Debug)]
+pub(crate) struct ConfigLoadReport {
+    pub(crate) config: Config,
+    pub(crate) config_path: Option<std::path::PathBuf>,
+    pub(crate) status: ConfigStatus,
+    pub(crate) diagnostics: Vec<StartupDiagnostic>,
+}
+
+pub(crate) fn report_startup_diagnostics(diagnostics: Vec<StartupDiagnostic>) {
+    for diagnostic in diagnostics {
+        diagnostic.emit();
+    }
+}
+
+/// Keep diagnostics pending on successful R setup, but report them before
+/// returning a setup error that cannot reach the loader re-exec barrier.
+pub(crate) fn report_diagnostics_on_setup_error<T, E>(
+    result: Result<T, E>,
+    diagnostics: Vec<StartupDiagnostic>,
+    report: impl FnOnce(Vec<StartupDiagnostic>),
+) -> Result<(T, Vec<StartupDiagnostic>), E> {
+    match result {
+        Ok(value) => Ok((value, diagnostics)),
+        Err(error) => {
+            report(diagnostics);
+            Err(error)
+        }
+    }
 }
 
 /// A config load warning with stable machine-readable classification.
@@ -21,11 +71,8 @@ pub(crate) struct ConfigLoadWarning {
 
 /// Load configuration with fallback to defaults on error.
 ///
-/// Prints a warning to stderr if the config file has errors.
-/// Returns `(config, config_path, config_status)`.
-pub(crate) fn load_config_with_fallback(
-    cli: &Cli,
-) -> (Config, Option<std::path::PathBuf>, ConfigStatus) {
+/// Holds user-visible warnings for the caller to report after loader re-exec.
+pub(crate) fn load_config_with_fallback(cli: &Cli) -> ConfigLoadReport {
     let (result, config_path) = if let Some(path) = &cli.r_source.config {
         (load_config_from_path(path), Some(path.clone()))
     } else {
@@ -35,10 +82,21 @@ pub(crate) fn load_config_with_fallback(
 
     match result {
         Ok(mut config) => {
-            if let Some(warning) = config.history_migration_warning.take() {
-                report_history_migration_warning(&warning);
+            let diagnostics = config
+                .history_migration_warning
+                .take()
+                .map(|warning| StartupDiagnostic {
+                    message: format!("Warning: {warning}"),
+                    log_message: None,
+                })
+                .into_iter()
+                .collect();
+            ConfigLoadReport {
+                config,
+                config_path,
+                status: ConfigStatus::Ok,
+                diagnostics,
             }
-            (config, config_path, ConfigStatus::Ok)
         }
         Err(e) => {
             let (raw_path, masked_path, source_msg, status) = match &e {
@@ -61,25 +119,30 @@ pub(crate) fn load_config_with_fallback(
                     ConfigStatus::ParseError,
                 ),
             };
-            eprintln!(
-                "Warning: Failed to load config from {}: {}",
-                masked_path, source_msg
-            );
-            eprintln!(
-                "         Using default configuration. Run `arf config check` to see details."
-            );
-            // Log with unmasked path for debugging
-            log::warn!("Config load error for {}: {}", raw_path, source_msg);
-            (Config::default(), config_path, status)
+            ConfigLoadReport {
+                config: Config::default(),
+                config_path,
+                status,
+                diagnostics: vec![StartupDiagnostic {
+                    message: format!(
+                        "Warning: Failed to load config from {}: {}\n         Using default configuration. Run `arf config check` to see details.",
+                        masked_path, source_msg
+                    ),
+                    // Keep the unmasked path in the diagnostic log for debugging.
+                    log_message: Some(format!(
+                        "Config load error for {}: {}",
+                        raw_path, source_msg
+                    )),
+                }],
+            }
         }
     }
 }
 
-/// Load config with a warning on error, falling back to defaults.
-///
-/// Used by subcommands (history, script) where config loading is not the
-/// primary operation but errors should still be visible.
-pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
+/// Load config for a startup path that may re-exec before reporting warnings.
+pub(crate) fn load_config_for_startup(
+    config_path: Option<&std::path::PathBuf>,
+) -> (Config, Vec<StartupDiagnostic>) {
     let result = if let Some(path) = config_path {
         load_config_from_path(path)
     } else {
@@ -87,10 +150,16 @@ pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> C
     };
     match result {
         Ok(mut config) => {
-            if let Some(warning) = config.history_migration_warning.take() {
-                report_history_migration_warning(&warning);
-            }
-            config
+            let diagnostics = config
+                .history_migration_warning
+                .take()
+                .map(|warning| StartupDiagnostic {
+                    message: format!("Warning: {warning}"),
+                    log_message: None,
+                })
+                .into_iter()
+                .collect();
+            (config, diagnostics)
         }
         Err(e) => {
             let (path_display, source_msg) = match &e {
@@ -104,14 +173,28 @@ pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> C
                     (mask_home_path(path), message.clone())
                 }
             };
-            eprintln!(
-                "Warning: Failed to load config from {}: {}",
-                path_display, source_msg
-            );
-            eprintln!("         Using default configuration.");
-            Config::default()
+            (
+                Config::default(),
+                vec![StartupDiagnostic {
+                    message: format!(
+                        "Warning: Failed to load config from {}: {}\n         Using default configuration.",
+                        path_display, source_msg
+                    ),
+                    log_message: None,
+                }],
+            )
         }
     }
+}
+
+/// Load config with a warning on error, falling back to defaults.
+///
+/// Used by subcommands (such as history) where config loading is not the
+/// primary operation but errors should still be visible.
+pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
+    let (config, diagnostics) = load_config_for_startup(config_path);
+    report_startup_diagnostics(diagnostics);
+    config
 }
 
 /// Load config, collecting warnings into a buffer instead of printing to stderr.
@@ -130,7 +213,6 @@ pub(crate) fn load_config_collecting_warnings(
     match result {
         Ok(mut config) => {
             if let Some(warning) = config.history_migration_warning.take() {
-                log::warn!("{warning}");
                 warnings.push(warning);
             }
             config
@@ -214,6 +296,77 @@ pub(crate) fn load_config_collecting_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn setup_error_reports_pending_diagnostics_once() {
+        let mut reported = None;
+        let result = report_diagnostics_on_setup_error(
+            Err::<(), _>("R setup failed"),
+            vec![StartupDiagnostic::user_warning("Warning: pending".into())],
+            |diagnostics| reported = Some(diagnostics),
+        );
+
+        assert!(matches!(result, Err("R setup failed")));
+        let diagnostics = reported.expect("diagnostics should be reported on setup error");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "Warning: pending");
+    }
+
+    #[test]
+    fn successful_r_setup_keeps_diagnostics_pending() {
+        let mut reported = false;
+        let (value, diagnostics) = report_diagnostics_on_setup_error(
+            Ok::<_, &str>(42),
+            vec![StartupDiagnostic::user_warning("Warning: pending".into())],
+            |_| reported = true,
+        )
+        .unwrap();
+
+        assert_eq!(value, 42);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(!reported);
+    }
+
+    #[test]
+    fn startup_config_load_holds_deprecation_warning_for_the_caller() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        std::fs::write(&path, "[history]\ndisabled = true\n").unwrap();
+
+        let (config, diagnostics) = load_config_for_startup(Some(&path));
+
+        assert!(matches!(
+            config.history.mode,
+            crate::config::HistoryMode::Volatile
+        ));
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0]
+                .message
+                .starts_with("Warning: Config key history.disabled")
+        );
+        assert!(diagnostics[0].log_message.is_none());
+    }
+
+    #[test]
+    fn interactive_config_load_holds_deprecation_warning_for_the_caller() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        std::fs::write(&path, "[history]\ndisabled = true\n").unwrap();
+        let cli = Cli::try_parse_from(["arf", "--config", path.to_str().unwrap()]).unwrap();
+
+        let report = load_config_with_fallback(&cli);
+
+        assert_eq!(report.status, ConfigStatus::Ok);
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(
+            report.diagnostics[0]
+                .message
+                .starts_with("Warning: Config key history.disabled")
+        );
+        assert!(report.diagnostics[0].log_message.is_none());
+    }
 
     #[test]
     fn deprecated_history_disabled_is_collected_for_headless_output() {

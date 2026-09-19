@@ -43,8 +43,11 @@ fn handle_config_check(path: Option<&std::path::Path>) -> Result<()> {
     println!("Checking config file: {}", mask_home_path(&config_path));
 
     match load_config_from_path(&config_path) {
-        Ok(_) => {
+        Ok(mut config) => {
             println!("Config file is valid.");
+            if let Some(warning) = config.history_migration_warning.take() {
+                eprintln!("Warning: {warning}");
+            }
             Ok(())
         }
         Err(ConfigLoadError::Parse { source, .. }) => {
