@@ -1,7 +1,7 @@
 //! Script execution mode.
 
 use crate::app::config_load::{
-    load_config_for_startup, report_config_load_diagnostics, report_diagnostics_on_setup_error,
+    load_config_for_startup, report_diagnostics_on_setup_error, report_startup_diagnostics,
 };
 use crate::cli::Cli;
 use crate::config::ReprexMode;
@@ -25,7 +25,7 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
             cli.r_source.no_r_source_overrides,
         ),
         config_diagnostics,
-        report_config_load_diagnostics,
+        report_startup_diagnostics,
     )?;
     let override_notice = super::overrides::script_override_notice(&resolution);
 
@@ -34,7 +34,7 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
 
-    report_config_load_diagnostics(config_diagnostics);
+    report_startup_diagnostics(config_diagnostics);
     resolution.emit_diagnostics();
     if let Some(notice) = override_notice {
         eprintln!("{notice}");

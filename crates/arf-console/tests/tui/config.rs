@@ -43,13 +43,13 @@ error = 'ERR '
 
     terminal.wait_for_prompt(None, PROMPT)?;
     let output = terminal.output()?;
-    assert_eq!(
-        output
-            .matches("Warning: Config key history.disabled")
-            .count(),
-        1,
-        "{output}"
-    );
+    let warning_lines = output
+        .lines()
+        .filter(|line| line.contains("Warning: Config key history.disabled"))
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(warning_lines, @r###"Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead."###);
     terminal.quit()?;
     Ok(())
 }

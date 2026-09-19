@@ -26,8 +26,8 @@ mod test_utils;
 use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::{
-    ConfigLoadDiagnostic, load_config_with_fallback, report_config_load_diagnostics,
-    report_diagnostics_on_setup_error,
+    StartupDiagnostic, load_config_with_fallback, report_diagnostics_on_setup_error,
+    report_startup_diagnostics,
 };
 use app::headless::run_headless;
 #[cfg(windows)]
@@ -336,7 +336,7 @@ fn run() -> Result<()> {
         && cli.reprex.is_none()
         && external::formatter::resolve_formatter(formatter).is_none()
     {
-        startup_diagnostics.push(ConfigLoadDiagnostic::user_warning(
+        startup_diagnostics.push(StartupDiagnostic::user_warning(
             external::formatter::unavailable_message(
                 formatter,
                 external::formatter::FormatterUnavailableContext::ConfiguredMode,
@@ -356,7 +356,7 @@ fn run() -> Result<()> {
             cli.r_source.no_r_source_overrides,
         ),
         startup_diagnostics,
-        report_config_load_diagnostics,
+        report_startup_diagnostics,
     )?;
     let r_source_status = resolution.status.clone();
     log::debug!("R source status: {:?}", r_source_status);
@@ -414,7 +414,7 @@ fn run() -> Result<()> {
     // Report startup diagnostics only after the loader re-exec boundary. If
     // ensure_ld_library_path replaced this process, only the replacement
     // process reaches this point.
-    report_config_load_diagnostics(startup_diagnostics);
+    report_startup_diagnostics(startup_diagnostics);
     resolution.emit_diagnostics();
 
     // Generate R initialization arguments from CLI flags

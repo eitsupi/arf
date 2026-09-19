@@ -1,8 +1,8 @@
 //! Headless mode: R + IPC server without an interactive REPL.
 
 use crate::app::config_load::{
-    load_config_collecting_warnings, load_config_for_startup, report_config_load_diagnostics,
-    report_diagnostics_on_setup_error,
+    load_config_collecting_warnings, load_config_for_startup, report_diagnostics_on_setup_error,
+    report_startup_diagnostics,
 };
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
@@ -185,7 +185,7 @@ pub(crate) fn run_headless(
         report_diagnostics_on_setup_error(
             setup_result,
             config_diagnostics,
-            report_config_load_diagnostics,
+            report_startup_diagnostics,
         )?
     };
     if json {
@@ -203,7 +203,7 @@ pub(crate) fn run_headless(
     }
 
     if !json {
-        report_config_load_diagnostics(config_diagnostics);
+        report_startup_diagnostics(config_diagnostics);
         resolution.emit_diagnostics();
     }
 

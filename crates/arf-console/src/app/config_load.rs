@@ -6,14 +6,14 @@ use crate::config::{
     load_config_from_path, load_config_from_path_with_provenance, mask_home_path,
 };
 
-/// A user-facing startup warning and its optional diagnostic log entry.
+/// A user-facing startup diagnostic and its optional log entry.
 #[derive(Debug)]
-pub(crate) struct ConfigLoadDiagnostic {
+pub(crate) struct StartupDiagnostic {
     message: String,
     log_message: Option<String>,
 }
 
-impl ConfigLoadDiagnostic {
+impl StartupDiagnostic {
     pub(crate) fn user_warning(message: String) -> Self {
         Self {
             message,
@@ -36,10 +36,10 @@ pub(crate) struct ConfigLoadReport {
     pub(crate) config: Config,
     pub(crate) config_path: Option<std::path::PathBuf>,
     pub(crate) status: ConfigStatus,
-    pub(crate) diagnostics: Vec<ConfigLoadDiagnostic>,
+    pub(crate) diagnostics: Vec<StartupDiagnostic>,
 }
 
-pub(crate) fn report_config_load_diagnostics(diagnostics: Vec<ConfigLoadDiagnostic>) {
+pub(crate) fn report_startup_diagnostics(diagnostics: Vec<StartupDiagnostic>) {
     for diagnostic in diagnostics {
         diagnostic.emit();
     }
@@ -49,9 +49,9 @@ pub(crate) fn report_config_load_diagnostics(diagnostics: Vec<ConfigLoadDiagnost
 /// returning a setup error that cannot reach the loader re-exec barrier.
 pub(crate) fn report_diagnostics_on_setup_error<T, E>(
     result: Result<T, E>,
-    diagnostics: Vec<ConfigLoadDiagnostic>,
-    report: impl FnOnce(Vec<ConfigLoadDiagnostic>),
-) -> Result<(T, Vec<ConfigLoadDiagnostic>), E> {
+    diagnostics: Vec<StartupDiagnostic>,
+    report: impl FnOnce(Vec<StartupDiagnostic>),
+) -> Result<(T, Vec<StartupDiagnostic>), E> {
     match result {
         Ok(value) => Ok((value, diagnostics)),
         Err(error) => {
@@ -85,7 +85,7 @@ pub(crate) fn load_config_with_fallback(cli: &Cli) -> ConfigLoadReport {
             let diagnostics = config
                 .history_migration_warning
                 .take()
-                .map(|warning| ConfigLoadDiagnostic {
+                .map(|warning| StartupDiagnostic {
                     message: format!("Warning: {warning}"),
                     log_message: None,
                 })
@@ -123,7 +123,7 @@ pub(crate) fn load_config_with_fallback(cli: &Cli) -> ConfigLoadReport {
                 config: Config::default(),
                 config_path,
                 status,
-                diagnostics: vec![ConfigLoadDiagnostic {
+                diagnostics: vec![StartupDiagnostic {
                     message: format!(
                         "Warning: Failed to load config from {}: {}\n         Using default configuration. Run `arf config check` to see details.",
                         masked_path, source_msg
@@ -142,7 +142,7 @@ pub(crate) fn load_config_with_fallback(cli: &Cli) -> ConfigLoadReport {
 /// Load config for a startup path that may re-exec before reporting warnings.
 pub(crate) fn load_config_for_startup(
     config_path: Option<&std::path::PathBuf>,
-) -> (Config, Vec<ConfigLoadDiagnostic>) {
+) -> (Config, Vec<StartupDiagnostic>) {
     let result = if let Some(path) = config_path {
         load_config_from_path(path)
     } else {
@@ -153,7 +153,7 @@ pub(crate) fn load_config_for_startup(
             let diagnostics = config
                 .history_migration_warning
                 .take()
-                .map(|warning| ConfigLoadDiagnostic {
+                .map(|warning| StartupDiagnostic {
                     message: format!("Warning: {warning}"),
                     log_message: None,
                 })
@@ -175,7 +175,7 @@ pub(crate) fn load_config_for_startup(
             };
             (
                 Config::default(),
-                vec![ConfigLoadDiagnostic {
+                vec![StartupDiagnostic {
                     message: format!(
                         "Warning: Failed to load config from {}: {}\n         Using default configuration.",
                         path_display, source_msg
@@ -193,7 +193,7 @@ pub(crate) fn load_config_for_startup(
 /// primary operation but errors should still be visible.
 pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> Config {
     let (config, diagnostics) = load_config_for_startup(config_path);
-    report_config_load_diagnostics(diagnostics);
+    report_startup_diagnostics(diagnostics);
     config
 }
 
@@ -303,9 +303,7 @@ mod tests {
         let mut reported = None;
         let result = report_diagnostics_on_setup_error(
             Err::<(), _>("R setup failed"),
-            vec![ConfigLoadDiagnostic::user_warning(
-                "Warning: pending".into(),
-            )],
+            vec![StartupDiagnostic::user_warning("Warning: pending".into())],
             |diagnostics| reported = Some(diagnostics),
         );
 
@@ -320,9 +318,7 @@ mod tests {
         let mut reported = false;
         let (value, diagnostics) = report_diagnostics_on_setup_error(
             Ok::<_, &str>(42),
-            vec![ConfigLoadDiagnostic::user_warning(
-                "Warning: pending".into(),
-            )],
+            vec![StartupDiagnostic::user_warning("Warning: pending".into())],
             |_| reported = true,
         )
         .unwrap();

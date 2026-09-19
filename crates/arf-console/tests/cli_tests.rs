@@ -432,14 +432,7 @@ fn test_config_check_reports_deprecated_history_keys_as_warnings() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("Config file is valid."));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        stderr
-            .matches("Warning: Config key history.disabled")
-            .count(),
-        1,
-        "{stderr}"
-    );
-    assert!(stderr.contains(r#"use history.mode = "volatile" instead"#));
+    insta::assert_snapshot!(stderr, @r###"Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead."###);
 }
 
 #[cfg(unix)]
@@ -488,13 +481,7 @@ fn test_script_startup_reports_deprecated_config_warning_once_after_reexec() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        stderr
-            .matches("Warning: Config key history.disabled")
-            .count(),
-        1,
-        "{stderr}"
-    );
+    insta::assert_snapshot!(stderr, @r###"Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead."###);
 }
 
 fn config_with_deprecated_history_and_missing_r() -> (NamedTempFile, tempfile::TempDir) {
@@ -510,17 +497,20 @@ fn config_with_deprecated_history_and_missing_r() -> (NamedTempFile, tempfile::T
     (config_file, missing_r)
 }
 
-fn assert_setup_failure_reports_config_warning_once(output: Output) {
+fn assert_setup_failure_reports_config_warning_once(
+    output: Output,
+    missing_r_home: &std::path::Path,
+) {
     assert!(!output.status.success(), "R setup should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        stderr
-            .matches("Warning: Config key history.disabled")
-            .count(),
-        1,
-        "{stderr}"
-    );
-    assert!(stderr.contains("R_HOME path does not exist"), "{stderr}");
+    let normalized = stderr.replace(&missing_r_home.display().to_string(), "<missing-r-home>");
+    insta::allow_duplicates! {
+        insta::assert_snapshot!(normalized, @r###"
+Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead.
+Error: R_HOME path does not exist: <missing-r-home>
+Check your r_source configuration.
+"###);
+    }
 }
 
 #[test]
@@ -532,7 +522,10 @@ fn interactive_setup_failure_still_reports_config_warning() {
         .output()
         .expect("Failed to run interactive arf startup");
 
-    assert_setup_failure_reports_config_warning_once(output);
+    assert_setup_failure_reports_config_warning_once(
+        output,
+        &_missing_r.path().join("missing-r-home"),
+    );
 }
 
 #[test]
@@ -544,7 +537,10 @@ fn script_setup_failure_still_reports_config_warning() {
         .output()
         .expect("Failed to run arf script mode");
 
-    assert_setup_failure_reports_config_warning_once(output);
+    assert_setup_failure_reports_config_warning_once(
+        output,
+        &_missing_r.path().join("missing-r-home"),
+    );
 }
 
 #[test]
@@ -556,7 +552,10 @@ fn headless_setup_failure_still_reports_config_warning() {
         .output()
         .expect("Failed to run arf headless mode");
 
-    assert_setup_failure_reports_config_warning_once(output);
+    assert_setup_failure_reports_config_warning_once(
+        output,
+        &_missing_r.path().join("missing-r-home"),
+    );
 }
 
 #[test]
