@@ -1,6 +1,8 @@
 //! Script execution mode.
 
-use crate::app::config_load::{load_config_for_startup, report_config_load_diagnostics};
+use crate::app::config_load::{
+    load_config_for_startup, report_config_load_diagnostics, report_diagnostics_on_setup_error,
+};
 use crate::cli::Cli;
 use crate::config::ReprexMode;
 use crate::external::formatter;
@@ -13,13 +15,17 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     let (config, config_diagnostics) = load_config_for_startup(cli.r_source.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
-    let resolution = super::setup_r(
-        &config.startup.r_source,
-        &config.experimental.r_source_overrides,
-        None,
-        cli.r_source.r_home.as_deref(),
-        cli.r_source.r_version.as_deref(),
-        cli.r_source.no_r_source_overrides,
+    let (resolution, config_diagnostics) = report_diagnostics_on_setup_error(
+        super::setup_r(
+            &config.startup.r_source,
+            &config.experimental.r_source_overrides,
+            None,
+            cli.r_source.r_home.as_deref(),
+            cli.r_source.r_version.as_deref(),
+            cli.r_source.no_r_source_overrides,
+        ),
+        config_diagnostics,
+        report_config_load_diagnostics,
     )?;
     let override_notice = super::overrides::script_override_notice(&resolution);
 

@@ -14,6 +14,13 @@ pub(crate) struct ConfigLoadDiagnostic {
 }
 
 impl ConfigLoadDiagnostic {
+    pub(crate) fn user_warning(message: String) -> Self {
+        Self {
+            message,
+            log_message: None,
+        }
+    }
+
     fn emit(self) {
         eprintln!("{}", self.message);
         if let Some(message) = self.log_message {
@@ -35,6 +42,22 @@ pub(crate) struct ConfigLoadReport {
 pub(crate) fn report_config_load_diagnostics(diagnostics: Vec<ConfigLoadDiagnostic>) {
     for diagnostic in diagnostics {
         diagnostic.emit();
+    }
+}
+
+/// Keep diagnostics pending on successful R setup, but report them before
+/// returning a setup error that cannot reach the loader re-exec barrier.
+pub(crate) fn report_diagnostics_on_setup_error<T, E>(
+    result: Result<T, E>,
+    diagnostics: Vec<ConfigLoadDiagnostic>,
+    report: impl FnOnce(Vec<ConfigLoadDiagnostic>),
+) -> Result<(T, Vec<ConfigLoadDiagnostic>), E> {
+    match result {
+        Ok(value) => Ok((value, diagnostics)),
+        Err(error) => {
+            report(diagnostics);
+            Err(error)
+        }
     }
 }
 
@@ -274,6 +297,40 @@ pub(crate) fn load_config_collecting_diagnostics(
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn setup_error_reports_pending_diagnostics_once() {
+        let mut reported = None;
+        let result = report_diagnostics_on_setup_error(
+            Err::<(), _>("R setup failed"),
+            vec![ConfigLoadDiagnostic::user_warning(
+                "Warning: pending".into(),
+            )],
+            |diagnostics| reported = Some(diagnostics),
+        );
+
+        assert!(matches!(result, Err("R setup failed")));
+        let diagnostics = reported.expect("diagnostics should be reported on setup error");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "Warning: pending");
+    }
+
+    #[test]
+    fn successful_r_setup_keeps_diagnostics_pending() {
+        let mut reported = false;
+        let (value, diagnostics) = report_diagnostics_on_setup_error(
+            Ok::<_, &str>(42),
+            vec![ConfigLoadDiagnostic::user_warning(
+                "Warning: pending".into(),
+            )],
+            |_| reported = true,
+        )
+        .unwrap();
+
+        assert_eq!(value, 42);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(!reported);
+    }
 
     #[test]
     fn startup_config_load_holds_deprecation_warning_for_the_caller() {

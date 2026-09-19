@@ -25,7 +25,10 @@ mod test_utils;
 
 use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
-use app::config_load::{load_config_with_fallback, report_config_load_diagnostics};
+use app::config_load::{
+    ConfigLoadDiagnostic, load_config_with_fallback, report_config_load_diagnostics,
+    report_diagnostics_on_setup_error,
+};
 use app::headless::run_headless;
 #[cfg(windows)]
 use app::r_profiles::source_r_profiles;
@@ -328,26 +331,32 @@ fn run() -> Result<()> {
 
     // Configured format mode degrades to on when its formatter is unavailable.
     let formatter = config.reprex.formatter;
-    let mut startup_warnings = Vec::new();
+    let mut startup_diagnostics = config_diagnostics;
     if config.startup.reprex == ReprexMode::Format
         && cli.reprex.is_none()
         && external::formatter::resolve_formatter(formatter).is_none()
     {
-        startup_warnings.push(external::formatter::unavailable_message(
-            formatter,
-            external::formatter::FormatterUnavailableContext::ConfiguredMode,
+        startup_diagnostics.push(ConfigLoadDiagnostic::user_warning(
+            external::formatter::unavailable_message(
+                formatter,
+                external::formatter::FormatterUnavailableContext::ConfiguredMode,
+            ),
         ));
         config.startup.reprex = ReprexMode::On;
     }
 
     // Set up R based on r_source config (with optional CLI override)
-    let resolution = setup_r(
-        &config.startup.r_source,
-        &config.experimental.r_source_overrides,
-        None,
-        cli.r_source.r_home.as_deref(),
-        cli.r_source.r_version.as_deref(),
-        cli.r_source.no_r_source_overrides,
+    let (resolution, startup_diagnostics) = report_diagnostics_on_setup_error(
+        setup_r(
+            &config.startup.r_source,
+            &config.experimental.r_source_overrides,
+            None,
+            cli.r_source.r_home.as_deref(),
+            cli.r_source.r_version.as_deref(),
+            cli.r_source.no_r_source_overrides,
+        ),
+        startup_diagnostics,
+        report_config_load_diagnostics,
     )?;
     let r_source_status = resolution.status.clone();
     log::debug!("R source status: {:?}", r_source_status);
@@ -405,10 +414,7 @@ fn run() -> Result<()> {
     // Report startup diagnostics only after the loader re-exec boundary. If
     // ensure_ld_library_path replaced this process, only the replacement
     // process reaches this point.
-    report_config_load_diagnostics(config_diagnostics);
-    for warning in startup_warnings {
-        eprintln!("{warning}");
-    }
+    report_config_load_diagnostics(startup_diagnostics);
     resolution.emit_diagnostics();
 
     // Generate R initialization arguments from CLI flags

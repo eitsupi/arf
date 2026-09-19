@@ -5,7 +5,7 @@
 //! All tests use `std::process::Command` and work on all platforms.
 
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use tempfile::NamedTempFile;
 
 // ============================================================================
@@ -495,6 +495,68 @@ fn test_script_startup_reports_deprecated_config_warning_once_after_reexec() {
         1,
         "{stderr}"
     );
+}
+
+fn config_with_deprecated_history_and_missing_r() -> (NamedTempFile, tempfile::TempDir) {
+    let missing_r = tempfile::tempdir().expect("Failed to create temp directory");
+    let missing_r_home = missing_r.path().join("missing-r-home");
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(
+        config_file,
+        "[startup]\nr_source = {{ path = {:?} }}\n[history]\ndisabled = true\n",
+        missing_r_home.to_string_lossy()
+    )
+    .expect("Failed to write temp config file");
+    (config_file, missing_r)
+}
+
+fn assert_setup_failure_reports_config_warning_once(output: Output) {
+    assert!(!output.status.success(), "R setup should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr
+            .matches("Warning: Config key history.disabled")
+            .count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains("R_HOME path does not exist"), "{stderr}");
+}
+
+#[test]
+fn interactive_setup_failure_still_reports_config_warning() {
+    let (config_file, _missing_r) = config_with_deprecated_history_and_missing_r();
+    let output = sanitized_arf_command()
+        .env("RUST_LOG", "warn")
+        .args(["--config", config_file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run interactive arf startup");
+
+    assert_setup_failure_reports_config_warning_once(output);
+}
+
+#[test]
+fn script_setup_failure_still_reports_config_warning() {
+    let (config_file, _missing_r) = config_with_deprecated_history_and_missing_r();
+    let output = sanitized_arf_command()
+        .env("RUST_LOG", "warn")
+        .args(["--config", config_file.path().to_str().unwrap(), "-e", "42"])
+        .output()
+        .expect("Failed to run arf script mode");
+
+    assert_setup_failure_reports_config_warning_once(output);
+}
+
+#[test]
+fn headless_setup_failure_still_reports_config_warning() {
+    let (config_file, _missing_r) = config_with_deprecated_history_and_missing_r();
+    let output = sanitized_arf_command()
+        .env("RUST_LOG", "warn")
+        .args(["headless", "--config", config_file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run arf headless mode");
+
+    assert_setup_failure_reports_config_warning_once(output);
 }
 
 #[test]

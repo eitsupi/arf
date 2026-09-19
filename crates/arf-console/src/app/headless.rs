@@ -2,6 +2,7 @@
 
 use crate::app::config_load::{
     load_config_collecting_warnings, load_config_for_startup, report_config_load_diagnostics,
+    report_diagnostics_on_setup_error,
 };
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
@@ -170,14 +171,23 @@ pub(crate) fn run_headless(
     };
 
     // Set up R
-    let resolution = setup_r(
+    let setup_result = setup_r(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
         r_home,
         r_version,
         no_r_source_overrides,
-    )?;
+    );
+    let (resolution, config_diagnostics) = if json {
+        (setup_result?, config_diagnostics)
+    } else {
+        report_diagnostics_on_setup_error(
+            setup_result,
+            config_diagnostics,
+            report_config_load_diagnostics,
+        )?
+    };
     if json {
         warnings.extend(
             resolution
