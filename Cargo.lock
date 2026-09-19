@@ -175,6 +175,7 @@ version = "0.5.2"
 dependencies = [
  "arf-libr",
  "insta",
+ "libloading",
  "log",
  "once_cell",
  "r-vignette-to-md",

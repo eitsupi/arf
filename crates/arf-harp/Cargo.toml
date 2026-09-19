@@ -6,7 +6,17 @@ license.workspace = true
 repository.workspace = true
 description = "High-level R abstractions for safe R object manipulation"
 
+[features]
+command-outcome-spike = []
+
+[[example]]
+name = "command-outcome-spike"
+required-features = ["command-outcome-spike"]
+test = false
+bench = false
+
 [dev-dependencies]
+libloading.workspace = true
 tempfile.workspace = true
 insta.workspace = true
 
