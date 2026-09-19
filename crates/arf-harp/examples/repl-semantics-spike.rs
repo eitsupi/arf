@@ -1005,6 +1005,9 @@ addTaskCallback(.arf_task_observer, name = "arf-repl-semantics-observer")
                     return api.nil_value;
                 }
                 if ptr::read(visible_flag) != 0 {
+                    // Stock R 4.5.2 autoprints R_NilValue when R_Visible is true.
+                    // `R --vanilla --quiet -e 'NULL'` confirms that visible NULL prints as NULL.
+                    // Preserve this behavior; do not skip nil values here.
                     (api.print_value)(value);
                 }
                 result_index += 1;
