@@ -8,10 +8,17 @@ description = "High-level R abstractions for safe R object manipulation"
 
 [features]
 command-outcome-spike = []
+mainloop-unwind-spike = []
 
 [[example]]
 name = "command-outcome-spike"
 required-features = ["command-outcome-spike"]
+test = false
+bench = false
+
+[[example]]
+name = "mainloop-unwind-spike"
+required-features = ["mainloop-unwind-spike"]
 test = false
 bench = false
 
