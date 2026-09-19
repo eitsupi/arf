@@ -11,6 +11,7 @@ command-outcome-spike = []
 mainloop-unwind-spike = []
 repl-semantics-spike = []
 nested-recovery-spike = []
+interrupt-outcome-spike = []
 
 [[example]]
 name = "command-outcome-spike"
@@ -33,6 +34,12 @@ bench = false
 [[example]]
 name = "nested-recovery-spike"
 required-features = ["nested-recovery-spike"]
+test = false
+bench = false
+
+[[example]]
+name = "interrupt-outcome-spike"
+required-features = ["interrupt-outcome-spike"]
 test = false
 bench = false
 
