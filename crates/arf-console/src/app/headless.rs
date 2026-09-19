@@ -1,6 +1,8 @@
 //! Headless mode: R + IPC server without an interactive REPL.
 
-use crate::app::config_load::{load_config_collecting_warnings, load_config_or_warn};
+use crate::app::config_load::{
+    load_config_collecting_warnings, load_config_for_startup, report_config_load_diagnostics,
+};
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
 use crate::app::session_id::create_session_id;
@@ -158,10 +160,13 @@ pub(crate) fn run_headless(
     let mut warnings: Vec<String> = Vec::new();
 
     // Load config for r_source resolution
-    let mut config = if json {
-        load_config_collecting_warnings(config_path, &mut warnings)
+    let (mut config, config_diagnostics) = if json {
+        (
+            load_config_collecting_warnings(config_path, &mut warnings),
+            Vec::new(),
+        )
     } else {
-        load_config_or_warn(config_path)
+        load_config_for_startup(config_path)
     };
 
     // Set up R
@@ -180,13 +185,16 @@ pub(crate) fn run_headless(
                 .iter()
                 .map(|diagnostic| diagnostic.message.clone()),
         );
-    } else {
-        resolution.emit_diagnostics();
     }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
     if let Err(e) = arf_libr::ensure_ld_library_path() {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+    }
+
+    if !json {
+        report_config_load_diagnostics(config_diagnostics);
+        resolution.emit_diagnostics();
     }
 
     // Generate R initialization arguments

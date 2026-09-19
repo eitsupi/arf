@@ -5,6 +5,8 @@
 //! These cases verify interactive screen and prompt behavior; the separate
 //! `ipc_tests.rs` integration test keeps low-level JSON-RPC transport coverage.
 
+#[path = "tui/config.rs"]
+mod config;
 #[path = "tui/history.rs"]
 mod history;
 #[path = "tui/input.rs"]

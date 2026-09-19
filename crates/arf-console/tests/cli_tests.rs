@@ -410,6 +410,94 @@ Error: Config file has errors:
 }
 
 #[test]
+fn test_config_check_reports_deprecated_history_keys_as_warnings() {
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(config_file, "[history]\ndisabled = true\n").unwrap();
+
+    let output = sanitized_arf_command()
+        .env("RUST_LOG", "warn")
+        .args([
+            "config",
+            "check",
+            "--config",
+            config_file.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run arf config check");
+
+    assert!(
+        output.status.success(),
+        "valid deprecated config should pass: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Config file is valid."));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr
+            .matches("Warning: Config key history.disabled")
+            .count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains(r#"use history.mode = "volatile" instead"#));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_script_startup_reports_deprecated_config_warning_once_after_reexec() {
+    use std::env;
+
+    let Ok(library) = arf_libr::find_r_library() else {
+        return;
+    };
+    let library_dir = library.parent().expect("R library directory");
+    let r_home = library_dir
+        .parent()
+        .expect("R_HOME directory")
+        .to_path_buf();
+    let current_library_path = env::var_os("LD_LIBRARY_PATH").unwrap_or_default();
+    let paths = env::split_paths(&current_library_path)
+        .filter(|path| path != library_dir)
+        .collect::<Vec<_>>();
+    let library_path = env::join_paths(paths).expect("valid LD_LIBRARY_PATH");
+    assert!(
+        !env::split_paths(&library_path).any(|path| path == library_dir),
+        "test must force the loader re-exec"
+    );
+
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(config_file, "[history]\ndisabled = true\n").unwrap();
+
+    let output = sanitized_arf_command()
+        .env("R_HOME", r_home)
+        .env("LD_LIBRARY_PATH", library_path)
+        .env("RUST_LOG", "warn")
+        .args([
+            "--config",
+            config_file.path().to_str().unwrap(),
+            "--vanilla",
+            "-e",
+            r#"quit(save = "no")"#,
+        ])
+        .output()
+        .expect("Failed to run arf script mode");
+
+    assert!(
+        output.status.success(),
+        "script should exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr
+            .matches("Warning: Config key history.disabled")
+            .count(),
+        1,
+        "{stderr}"
+    );
+}
+
+#[test]
 fn test_top_level_no_banner_before_nested_ipc_rejected() {
     assert_top_level_scope_error(
         &["--no-banner", "ipc", "list"],

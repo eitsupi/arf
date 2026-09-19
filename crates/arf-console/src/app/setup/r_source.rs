@@ -133,7 +133,6 @@ impl RSourceResolutionReport {
             .collect::<Vec<_>>()
             .join("\n");
         eprintln!("{block}");
-        log::warn!("{block}");
     }
 
     pub(crate) fn override_info(&self) -> Option<RSourceOverrideInfo> {

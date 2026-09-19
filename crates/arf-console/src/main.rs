@@ -25,7 +25,7 @@ mod test_utils;
 
 use anyhow::Result;
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
-use app::config_load::load_config_with_fallback;
+use app::config_load::{load_config_with_fallback, report_config_load_diagnostics};
 use app::headless::run_headless;
 #[cfg(windows)]
 use app::r_profiles::source_r_profiles;
@@ -281,7 +281,11 @@ fn run() -> Result<()> {
 
     // Load configuration (from file or default)
     // Track the config path for :info command display
-    let (mut config, config_path, config_status) = load_config_with_fallback(&cli);
+    let config_report = load_config_with_fallback(&cli);
+    let mut config = config_report.config;
+    let config_path = config_report.config_path;
+    let config_status = config_report.status;
+    let config_diagnostics = config_report.diagnostics;
     log::debug!("Loaded config: {:?}", config);
 
     // Apply CLI overrides
@@ -324,17 +328,15 @@ fn run() -> Result<()> {
 
     // Configured format mode degrades to on when its formatter is unavailable.
     let formatter = config.reprex.formatter;
+    let mut startup_warnings = Vec::new();
     if config.startup.reprex == ReprexMode::Format
         && cli.reprex.is_none()
         && external::formatter::resolve_formatter(formatter).is_none()
     {
-        eprintln!(
-            "{}",
-            external::formatter::unavailable_message(
-                formatter,
-                external::formatter::FormatterUnavailableContext::ConfiguredMode
-            )
-        );
+        startup_warnings.push(external::formatter::unavailable_message(
+            formatter,
+            external::formatter::FormatterUnavailableContext::ConfiguredMode,
+        ));
         config.startup.reprex = ReprexMode::On;
     }
 
@@ -347,8 +349,7 @@ fn run() -> Result<()> {
         cli.r_source.r_version.as_deref(),
         cli.r_source.no_r_source_overrides,
     )?;
-    resolution.emit_diagnostics();
-    let r_source_status = resolution.status;
+    let r_source_status = resolution.status.clone();
     log::debug!("R source status: {:?}", r_source_status);
 
     // Ensure LD_LIBRARY_PATH includes R library directory.
@@ -400,6 +401,15 @@ fn run() -> Result<()> {
     if let Err(e) = arf_libr::ensure_ld_library_path() {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
+
+    // Report startup diagnostics only after the loader re-exec boundary. If
+    // ensure_ld_library_path replaced this process, only the replacement
+    // process reaches this point.
+    report_config_load_diagnostics(config_diagnostics);
+    for warning in startup_warnings {
+        eprintln!("{warning}");
+    }
+    resolution.emit_diagnostics();
 
     // Generate R initialization arguments from CLI flags
     let r_args = cli.r_args();
