@@ -296,13 +296,12 @@ fn run() -> Result<()> {
         let formatter = config.reprex.formatter;
         if mode == ReprexMode::Format && external::formatter::resolve_formatter(formatter).is_none()
         {
-            anyhow::bail!(
-                "{}",
-                external::formatter::unavailable_message(
-                    formatter,
-                    external::formatter::FormatterUnavailableContext::ExplicitCli
-                )
+            let message = external::formatter::unavailable_message(
+                formatter,
+                external::formatter::FormatterUnavailableContext::ExplicitCli,
             );
+            report_startup_diagnostics(config_diagnostics);
+            anyhow::bail!("{message}");
         }
         config.startup.reprex = mode;
     }

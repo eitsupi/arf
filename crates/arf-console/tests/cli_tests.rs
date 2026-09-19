@@ -435,6 +435,45 @@ fn test_config_check_reports_deprecated_history_keys_as_warnings() {
     insta::assert_snapshot!(stderr, @r###"Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead."###);
 }
 
+#[test]
+fn explicit_reprex_format_failure_reports_pending_config_warning() {
+    let empty_path = tempfile::tempdir().expect("Failed to create empty PATH directory");
+    let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
+    write!(
+        config_file,
+        r#"[history]
+disabled = true
+
+[reprex]
+formatter = "air"
+"#
+    )
+    .unwrap();
+
+    let output = sanitized_arf_command()
+        .env("PATH", empty_path.path())
+        .env("RUST_LOG", "warn")
+        .args([
+            "--config",
+            config_file.path().to_str().unwrap(),
+            "--reprex",
+            "format",
+        ])
+        .output()
+        .expect("Failed to run arf with an unavailable formatter");
+
+    assert!(
+        !output.status.success(),
+        "unavailable formatter should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    insta::assert_snapshot!(stderr, @r###"
+Warning: Config key history.disabled is deprecated; use history.mode = "volatile" instead.
+Error: Cannot use --reprex=format: Air CLI ('air' command) not found in PATH.
+Install Air CLI from https://github.com/posit-dev/air
+"###);
+}
+
 #[cfg(unix)]
 #[test]
 fn test_script_startup_reports_deprecated_config_warning_once_after_reexec() {
