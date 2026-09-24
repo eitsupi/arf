@@ -70,6 +70,7 @@ typedef struct {
 static DriverState driver;
 static CommandState command;
 static int skip_next_boundary;
+static ArfReadConsole legacy_read_console;
 
 static SEXP call0(const ArfRApi *api, SEXP function) {
     SEXP call = api->lcons(function, api->nil_value);
@@ -200,6 +201,14 @@ static void recover_unobserved_command(void) {
 }
 
 static int native_read_console(const char *prompt, char *buffer, int length, int history) {
+    /* Windows installs this callback before R initialization. Until the REPL
+       driver is configured after initialization, preserve the legacy input
+       path through the original Rust callback. That callback returns before
+       this C frame starts any jump-capable R evaluation. */
+    if (driver.input == NULL)
+        return legacy_read_console == NULL ? 0 :
+               legacy_read_console(prompt, buffer, length, history);
+
     int top_level = driver.top_level_prompt != NULL &&
                     driver.top_level_prompt(prompt, driver.context) != 0;
     if (top_level) {
@@ -207,8 +216,6 @@ static int native_read_console(const char *prompt, char *buffer, int length, int
         if (command.active == 0)
             finish_previous_command();
     }
-    if (driver.input == NULL)
-        return 0;
     uint64_t command_id = 0;
     int read = driver.input(prompt, buffer, length, history, &command_id, driver.context);
     if (read <= 0)
@@ -242,6 +249,14 @@ static int native_read_console(const char *prompt, char *buffer, int length, int
         return 1;
     }
     return 0;
+}
+
+int arf_repl_driver_read_console(const char *prompt, char *buffer, int length, int history) {
+    return native_read_console(prompt, buffer, length, history);
+}
+
+void arf_repl_driver_set_legacy_read_console(ArfReadConsole callback) {
+    legacy_read_console = callback;
 }
 
 void arf_repl_driver_test_skip_next_boundary(void) {

@@ -325,16 +325,13 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         // Set console callbacks (matching ark pattern)
         (*params_ptr).write_console = None;
         (*params_ptr).write_console_ex = Some(r_write_console_ex);
-        (*params_ptr).read_console = Some(r_read_console);
+        (*params_ptr).read_console = super::repl::windows_read_console_trampoline();
         (*params_ptr).show_message = Some(r_show_message);
         (*params_ptr).yes_no_cancel = Some(r_yes_no_cancel);
         (*params_ptr).callback = Some(r_callback);
         (*params_ptr).busy = Some(r_busy);
         (*params_ptr).suicide = Some(r_suicide);
-        log::info!(
-            "[WINDOWS] Console callbacks set (read_console={:p})",
-            r_read_console as *const ()
-        );
+        log::info!("[WINDOWS] Console callbacks set (C ReadConsole trampoline)");
 
         // Set paths
         (*params_ptr).rhome = r_home_cstr.as_ptr() as *mut c_char;

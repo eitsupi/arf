@@ -5,10 +5,12 @@
 //! called only before evaluation starts and at the next native prompt.
 //!
 //! The installer currently attaches the trampoline through Unix's mutable
-//! `ptr_R_ReadConsole` export. Windows supplies this callback in `Rstart` before
-//! initialization, so Windows wiring must select the C trampoline in
-//! `initialize_r_windows` and register callbacks before entering the mainloop.
+//! `ptr_R_ReadConsole` export. Windows selects the C trampoline through
+//! `Rstart` before initialization, forwarding to the legacy Rust callback
+//! until the driver and its callbacks are installed after initialization.
 
+#[cfg(windows)]
+use super::r_read_console;
 use crate::{ReadConsoleFunc, SEXP, r_library};
 use std::ffi::c_char;
 use std::os::raw::c_int;
@@ -114,6 +116,15 @@ unsafe impl Send for NativeApi {}
 unsafe impl Sync for NativeApi {}
 
 unsafe extern "C" {
+    #[cfg(any(windows, test))]
+    fn arf_repl_driver_read_console(
+        prompt: *const c_char,
+        buffer: *mut c_char,
+        length: c_int,
+        history: c_int,
+    ) -> c_int;
+    #[cfg(any(windows, test))]
+    fn arf_repl_driver_set_legacy_read_console(callback: ReadConsoleFunc);
     fn arf_repl_driver_install(
         api: *const NativeApi,
         parser_factory: SEXP,
@@ -132,6 +143,63 @@ pub(super) fn installed_read_console_callback() -> Option<ReadConsoleFunc> {
     INSTALLED_READ_CONSOLE.get().copied()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LEGACY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn legacy_read_console(
+        _prompt: *const c_char,
+        buffer: *mut c_char,
+        length: c_int,
+        _history: c_int,
+    ) -> c_int {
+        LEGACY_CALLS.fetch_add(1, Ordering::Relaxed);
+        if !buffer.is_null() && length > 1 {
+            unsafe {
+                *buffer = b'x' as c_char;
+                *buffer.add(1) = 0;
+            }
+        }
+        17
+    }
+
+    #[test]
+    fn native_console_trampoline_forwards_to_legacy_callback_before_install() {
+        LEGACY_CALLS.store(0, Ordering::Relaxed);
+        unsafe {
+            arf_repl_driver_set_legacy_read_console(Some(legacy_read_console));
+            let prompt = c"> ";
+            let mut buffer = [0 as c_char; 8];
+            let result = arf_repl_driver_read_console(
+                prompt.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len() as c_int,
+                1,
+            );
+            arf_repl_driver_set_legacy_read_console(None);
+
+            assert_eq!(result, 17);
+            assert_eq!(buffer[0], b'x' as c_char);
+            assert_eq!(buffer[1], 0);
+        }
+        assert_eq!(LEGACY_CALLS.load(Ordering::Relaxed), 1);
+    }
+}
+
+/// Windows chooses its ReadConsole callback before R initialization. Install
+/// the C trampoline there; until `install_repl_driver` is called, it forwards
+/// to the existing Rust callback.
+#[cfg(windows)]
+pub(super) fn windows_read_console_trampoline() -> ReadConsoleFunc {
+    unsafe {
+        arf_repl_driver_set_legacy_read_console(Some(r_read_console));
+    }
+    Some(arf_repl_driver_read_console)
+}
+
 /// Install the C-owned native ReadConsole trampoline.
 ///
 /// # Safety
@@ -141,7 +209,7 @@ pub(super) fn installed_read_console_callback() -> Option<ReadConsoleFunc> {
 /// returns positive. The prompt classifier must distinguish the true outer
 /// command prompt from browser, readline, recovery, and continuation prompts;
 /// comparing prompt text alone is insufficient when R prompt options overlap.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub unsafe fn install_repl_driver(
     parser_factory: SEXP,
     top_level_prompt: ReplTopLevelPromptCallback,
@@ -191,10 +259,13 @@ pub unsafe fn install_repl_driver(
             "failed to install native REPL driver".into(),
         ));
     }
-    if lib.ptr_r_readconsole.is_null() {
-        return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
+    #[cfg(unix)]
+    {
+        if lib.ptr_r_readconsole.is_null() {
+            return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
+        }
+        unsafe { *lib.ptr_r_readconsole = native_callback };
     }
-    unsafe { *lib.ptr_r_readconsole = native_callback };
     let _ = INSTALLED_READ_CONSOLE.set(native_callback);
     Ok(())
 }

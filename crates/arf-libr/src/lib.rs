@@ -26,7 +26,6 @@ pub use types::{Rstart, SaType, UImode};
 // sys
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
-#[cfg(unix)]
 pub use sys::install_repl_driver;
 pub use sys::{
     ReadConsolePromptInfo, ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback,

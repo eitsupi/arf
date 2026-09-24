@@ -34,7 +34,6 @@ pub use output::{
     clear_write_console_callback, finish_ipc_capture, flush_reprex_buffer, set_reprex_mode,
     set_write_console_callback, start_ipc_capture,
 };
-#[cfg(unix)]
 pub use repl::install_repl_driver;
 pub use repl::{
     ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback, ReplTopLevelPromptCallback,
