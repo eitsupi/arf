@@ -28,6 +28,10 @@ fn help_browser_exits_with_escape_and_returns_to_r() -> Result<()> {
                     && state.text.contains("Filter: _")
                     && state.text.contains("Esc exit")
             })?;
+            ensure!(
+                terminal.output()?.contains("Help Search"),
+                "help search header was not emitted to the terminal stream"
+            );
             terminal.key("Escape")?;
             wait_for_prompt_after_ui(terminal, "help browser exits")?;
             terminal.submit("42", "[1] 42", PROMPT)
@@ -130,6 +134,10 @@ fn history_browser_persists_between_sessions() -> Result<()> {
                 && state.text.contains(unique)
                 && state.text.contains("q exit")
         })?;
+        ensure!(
+            terminal.output()?.contains("History Browser"),
+            "history browser header was not emitted to the terminal stream"
+        );
         terminal.key("q")?;
         wait_for_prompt_after_ui(terminal, "history browser exits")?;
         terminal.submit("42", "[1] 42", PROMPT)
