@@ -42,6 +42,10 @@
 - IPC server for AI agent and CI integration
 - Headless mode for non-interactive environments (CI, background jobs)
 
+## Error Handling
+
+arf detects command success and failure at the native R parse, evaluation, and visible-print boundary. It does not install a global error handler or modify `options(error)`. R's configured error option, including `NULL`, a function, an expression, or `recover`, remains unchanged.
+
 ## Installation
 
 ### Pre-built Binaries
@@ -412,16 +416,6 @@ arf history import --from radian --hostname "radian-import"
 - By default, duplicate entries are skipped during import (matched by command text and timestamp). Use `--import-duplicates` to import all entries regardless.
 - Self-import is detected and rejected when importing from an arf database to the same target file.
 - **Important:** Exit arf before exporting to ensure the source databases are in a consistent state. The export itself uses atomic writes to prevent incomplete output files, but reading while arf is writing may capture inconsistent data.
-
-## Known Issues
-
-### Error detection uses `options(error = ...)`
-
-arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rlang that output error messages to stdout instead of stderr. This is necessary for accurate error tracking in command history and the status indicator.
-
-**Limitations**:
-- If you set a custom error handler via `options(error = ...)`, arf will chain to your handler, but arf's handler takes precedence. Your handler will still be called after arf records the error.
-- There is a slight performance overhead (~microseconds) on each prompt due to R API calls for checking and resetting error state. This is negligible in practice but may be noticeable in benchmarks.
 
 ## Related Projects
 

@@ -41,6 +41,42 @@ pub unsafe fn initialize_r() -> RResult<()> {
 /// # Safety
 /// This function initializes R's global state and must only be called once.
 pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
+    unsafe { initialize_r_with_stack_policy(r_args, false) }
+}
+
+/// Initialize R with an unbounded C-stack limit for isolated tests only.
+///
+/// Normal applications must use [`initialize_r_with_args`], which preserves
+/// R's detected stack limit. This escape hatch exists for tests that require
+/// legacy unbounded recursion and must only be used in a disposable process.
+///
+/// # Safety
+/// This initializes R's global state and must only be called once. R must be
+/// isolated in a process that can safely tolerate unbounded C-stack use.
+#[doc(hidden)]
+pub unsafe fn initialize_r_with_args_for_tests(r_args: &[&str]) -> RResult<()> {
+    unsafe { initialize_r_with_stack_policy(r_args, true) }
+}
+
+/// Initialize R with default arguments and the explicit test-only unbounded
+/// C-stack policy. Production code should use [`initialize_r`].
+///
+/// # Safety
+/// This initializes R's global state and must only be called once in an
+/// isolated test process.
+#[doc(hidden)]
+pub unsafe fn initialize_r_for_tests() -> RResult<()> {
+    #[cfg(unix)]
+    let args = &["--quiet", "--no-save", "--no-restore-data", "--interactive"];
+    #[cfg(windows)]
+    let args = &["--quiet", "--no-save", "--no-restore-data"];
+    unsafe { initialize_r_with_stack_policy(args, true) }
+}
+
+unsafe fn initialize_r_with_stack_policy(
+    r_args: &[&str],
+    unbounded_stack_for_tests: bool,
+) -> RResult<()> {
     // Enable color output for R packages (cli, crayon, etc.)
     // Embedded R doesn't have a TTY, so we force color output via environment variables.
     // SAFETY: We're in single-threaded initialization before R starts
@@ -88,12 +124,12 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
     // Platform-specific initialization
     #[cfg(unix)]
     unsafe {
-        initialize_r_unix(lib, r_args)?;
+        initialize_r_unix(lib, r_args, unbounded_stack_for_tests)?;
     }
 
     #[cfg(windows)]
     unsafe {
-        initialize_r_windows(lib, r_args)?;
+        initialize_r_windows(lib, r_args, unbounded_stack_for_tests)?;
     }
 
     Ok(())
@@ -101,7 +137,11 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
 
 /// Unix-specific R initialization.
 #[cfg(unix)]
-unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
+unsafe fn initialize_r_unix(
+    lib: &crate::functions::RLibrary,
+    r_args: &[&str],
+    unbounded_stack_for_tests: bool,
+) -> RResult<()> {
     normalize_empty_r_profile_user();
 
     unsafe {
@@ -143,8 +183,9 @@ unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -
             *lib.r_interactive = 1;
         }
 
-        // Disable stack checking (required for embedded R)
-        if !lib.r_cstacklimit.is_null() {
+        // Tests can explicitly restore the legacy unbounded stack behavior.
+        // Production initialization must retain R's detected C stack limit.
+        if unbounded_stack_for_tests && !lib.r_cstacklimit.is_null() {
             *lib.r_cstacklimit = usize::MAX;
         }
 
@@ -230,7 +271,11 @@ fn enable_windows_virtual_terminal() {
 /// We need to create an Rstart struct, set callbacks on it, then call R_SetParams.
 /// This follows the ark pattern for Windows R initialization.
 #[cfg(windows)]
-unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
+unsafe fn initialize_r_windows(
+    lib: &crate::functions::RLibrary,
+    r_args: &[&str],
+    unbounded_stack_for_tests: bool,
+) -> RResult<()> {
     use crate::types::{R_FALSE, Rstart, UImode};
     use std::mem::MaybeUninit;
 
@@ -341,8 +386,9 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         (lib.r_setparams)(params_ptr);
         log::info!("[WINDOWS] R_SetParams called");
 
-        // Disable stack checking (for testing - embedded R needs this)
-        if !lib.r_cstacklimit.is_null() {
+        // Tests can explicitly restore the legacy unbounded stack behavior.
+        // Production initialization must retain R's detected C stack limit.
+        if unbounded_stack_for_tests && !lib.r_cstacklimit.is_null() {
             *lib.r_cstacklimit = usize::MAX;
         }
 

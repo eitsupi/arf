@@ -122,7 +122,7 @@ fn auto_width_disabled_preserves_explicit_width_after_idle_boundary() -> Result<
 }
 
 #[test]
-fn error_handler_does_not_leak_variables_into_globalenv() -> Result<()> {
+fn native_error_detection_does_not_add_globalenv_bindings() -> Result<()> {
     run_case_with(
         Terminal::builder("error-globalenv")
             .args(["--no-auto-match"])
@@ -134,8 +134,150 @@ fn error_handler_does_not_leak_variables_into_globalenv() -> Result<()> {
                 "Error: globalenv_leak_check",
                 ERROR_PROMPT,
             )?;
-            terminal.submit("identical(ls(), character(0))", "[1] TRUE", PROMPT)?;
+            terminal.submit(
+                r#"length(grep("^\\.arf_", ls(all.names = TRUE)))"#,
+                "[1] 0",
+                PROMPT,
+            )?;
             terminal.quit()
+        },
+    )
+}
+
+#[test]
+fn startup_error_option_survives_native_driver_initialization() -> Result<()> {
+    let profile = tempfile::tempdir()?;
+    let profile_path = profile.path().join("profile.R");
+    std::fs::write(
+        &profile_path,
+        r#"
+stopifnot(is.null(getOption("error")))
+startup_handler <- function() invisible(NULL)
+options(error = startup_handler)
+stopifnot(is.call(getOption("error")), is.function(getOption("error")[[1L]]))
+startup_expression <- expression(invisible(NULL))
+options(error = startup_expression)
+stopifnot(is.expression(getOption("error")))
+options(error = utils::recover)
+stopifnot(is.call(getOption("error")), is.function(getOption("error")[[1L]]))
+cat("STARTUP_ERROR_OPTION_PRESERVED\n")
+"#,
+    )?;
+
+    run_case_with(
+        Terminal::builder("startup-error-option")
+            .args(["--no-auto-match"])
+            .vanilla(false)
+            .env(
+                "R_PROFILE_USER",
+                profile_path.to_string_lossy().into_owned(),
+            ),
+        |terminal| {
+            terminal.wait_for("startup error option profile", |state, _| {
+                state.text.contains("STARTUP_ERROR_OPTION_PRESERVED")
+            })?;
+            terminal.wait_for_first_prompt()?;
+            terminal.submit(
+                "is.call(getOption('error')) && is.function(getOption('error')[[1L]])",
+                "[1] TRUE",
+                PROMPT,
+            )?;
+            terminal.enter("options(error = NULL)")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )
+}
+
+#[test]
+fn runtime_error_options_are_preserved_and_native_outcomes_recover() -> Result<()> {
+    run_case_with(
+        Terminal::builder("runtime-error-options")
+            .args(["--no-auto-match"])
+            .config("[startup]\nshow_banner = false\n".to_owned() + DEFAULT_CONFIG),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+
+            terminal.submit(
+                "options(error = NULL); stop('null error handler')",
+                "Error: null error handler",
+                ERROR_PROMPT,
+            )?;
+            terminal.submit("is.null(getOption('error'))", "[1] TRUE", PROMPT)?;
+
+            terminal.enter(
+                "native_function_handler <- function() assign('native_function_handler_called', TRUE, envir = .GlobalEnv)",
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("options(error = native_function_handler)")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit(
+                "stop('function error handler')",
+                "Error: function error handler",
+                ERROR_PROMPT,
+            )?;
+            terminal.submit(
+                "is.call(getOption('error')) && is.function(getOption('error')[[1L]]) && isTRUE(native_function_handler_called)",
+                "[1] TRUE",
+                PROMPT,
+            )?;
+
+            terminal.submit(
+                "options(error = expression(assign('native_expression_handler_called', TRUE, envir = .GlobalEnv))); stop('expression error handler')",
+                "Error: expression error handler",
+                ERROR_PROMPT,
+            )?;
+            terminal.submit(
+                "is.expression(getOption('error')) && isTRUE(native_expression_handler_called)",
+                "[1] TRUE",
+                PROMPT,
+            )?;
+
+            terminal.submit(
+                "options(error = utils::recover); is.call(getOption('error')) && is.function(getOption('error')[[1L]])",
+                "[1] TRUE",
+                PROMPT,
+            )?;
+            terminal.enter("options(error = NULL)")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )
+}
+
+#[test]
+fn native_error_detection_survives_globalenv_clear_and_workspace_reload() -> Result<()> {
+    let workdir = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("error-workspace-reload")
+            .args(["--no-auto-match"])
+            .cwd(workdir.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.submit(
+                r#"length(grep("^\\.arf_", ls(.GlobalEnv, all.names = TRUE)))"#,
+                "[1] 0",
+                PROMPT,
+            )?;
+            terminal.enter(
+                "local({ assign('.arf_saved_detection_sentinel', TRUE, envir = .GlobalEnv); save.image('.RData') })",
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter(
+                "local({ rm(list = ls(all.names = TRUE), envir = .GlobalEnv); load('.RData', envir = .GlobalEnv) })",
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit(
+                "isTRUE(.arf_saved_detection_sentinel) && length(grep('^\\\\.arf_', ls(all.names = TRUE))) == 1",
+                "[1] TRUE",
+                PROMPT,
+            )?;
+            terminal.submit(
+                "stop('error after workspace reload')",
+                "Error: error after workspace reload",
+                ERROR_PROMPT,
+            )?;
+            terminal.submit("2 + 2", "[1] 4", PROMPT)
         },
     )
 }

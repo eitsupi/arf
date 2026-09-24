@@ -11,6 +11,21 @@
 //! Copyright (c) 2024 Posit Software, PBC
 
 fn main() {
+    // Reserve enough native stack for R's detected stack region on Windows.
+    // Limit this link argument to the product binary so test/example targets
+    // retain their own linker defaults.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => println!("cargo:rustc-link-arg-bin=arf=/STACK:10485760"),
+            Ok("gnu") => println!("cargo:rustc-link-arg-bin=arf=-Wl,--stack,10485760"),
+            other => println!(
+                "cargo:warning=No explicit Windows stack reserve for target environment {other:?}"
+            ),
+        }
+    }
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV");
+
     // Copy CHANGELOG.md to OUT_DIR for embedding in binary.
     // Navigate from CARGO_MANIFEST_DIR (crate root) to the workspace root.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();

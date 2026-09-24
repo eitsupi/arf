@@ -468,42 +468,10 @@ fn read_console_callback_impl(
             prompt_kind.is_command()
         };
 
-        // Update exit_status for the previous command when a new prompt is shown.
-        // This is called when R has finished evaluating and wants new input.
-        // Continuation prompts identified by the low-level option lookup mean
-        // we're still in the same expression.
-        // Non-command prompts (menus, etc.) should also not trigger exit status updates.
         // Track prompt state for IPC: true when R is idle at the command
         // prompt, false for continuation/menu/selection prompts so IPC
         // requests are correctly rejected during non-command prompts.
         crate::ipc::set_r_at_prompt(is_command_prompt);
-
-        if is_command_prompt && !state.prompt_config.is_shell_enabled() && !native_driver {
-            let pending_history_context = std::mem::take(&mut state.pending_history_context);
-            let had_error = match pending_history_context {
-                PendingHistoryContext::Command { store, history_id } => {
-                    let had_error = arf_libr::command_had_error();
-                    record_command_outcome(
-                        store,
-                        history_id,
-                        had_error,
-                        &state.forget_config,
-                        &mut state.sponge_queue,
-                    );
-                    had_error
-                }
-                PendingHistoryContext::None => false,
-            };
-
-            // Update prompt status indicator for the next prompt
-            state.prompt_config.set_last_command_failed(had_error);
-
-            // Calculate duration for the {duration} prompt placeholder
-            state.prompt_config.set_command_duration();
-
-            // Reset error state for the next command
-            arf_libr::reset_command_error_state();
-        }
 
         if is_command_prompt || (native_driver && prompt_kind.is_continuation()) {
             state.input_was_cancelled = false;

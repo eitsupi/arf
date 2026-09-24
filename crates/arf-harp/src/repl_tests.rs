@@ -375,7 +375,7 @@ fn c_repl_driver_recovers_failures_interrupts_gc_and_visibility() {
             FAILURES.store(0, Ordering::SeqCst);
             NESTED_INPUT_PENDING.store(0, Ordering::SeqCst);
             CONTINUATION_INDEX.store(0, Ordering::SeqCst);
-            arf_libr::initialize_r_with_args(&[
+            arf_libr::initialize_r_with_args_for_tests(&[
                 "--vanilla",
                 "--no-save",
                 "--quiet",

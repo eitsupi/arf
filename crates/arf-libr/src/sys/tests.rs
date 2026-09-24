@@ -40,6 +40,16 @@ fn prompt_info_does_not_mark_malformed_options_as_ambiguous() {
     assert!(!missing_continue.options_are_ambiguous);
 }
 
+#[test]
+fn stderr_suppression_can_be_toggled() {
+    restore_stderr();
+    assert!(!error_state::is_stderr_suppressed());
+    suppress_stderr();
+    assert!(error_state::is_stderr_suppressed());
+    restore_stderr();
+    assert!(!error_state::is_stderr_suppressed());
+}
+
 /// Combined spinner test to avoid race conditions from parallel tests sharing global state.
 /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
 #[test]
@@ -95,38 +105,6 @@ fn test_spinner_lifecycle() {
     // Cleanup
     set_spinner_frames("");
     set_spinner_color("");
-}
-
-/// Test command error state tracking.
-///
-/// These assertions are combined into a single test to avoid race conditions
-/// when tests run in parallel (they share global state via CONDITION_ERROR_OCCURRED).
-#[test]
-fn test_command_error_state() {
-    // Reset to known state first
-    reset_command_error_state();
-
-    // Initially no error
-    assert!(!command_had_error(), "initial state should be false");
-
-    // Mark an error condition
-    mark_error_condition();
-    assert!(command_had_error(), "should detect error after mark");
-
-    // Reset should clear the error state
-    reset_command_error_state();
-    assert!(
-        !command_had_error(),
-        "should be false after reset_command_error_state"
-    );
-
-    // Mark error again and verify detection
-    mark_error_condition();
-    assert!(command_had_error(), "should detect error condition");
-
-    // Final reset
-    reset_command_error_state();
-    assert!(!command_had_error(), "should be false after final reset");
 }
 
 #[test]

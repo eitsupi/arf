@@ -9,7 +9,7 @@ pub fn ensure_r_initialized() -> bool {
     static R_INITIALIZED: OnceCell<bool> = OnceCell::new();
 
     *R_INITIALIZED.get_or_init(|| unsafe {
-        match arf_libr::initialize_r() {
+        match arf_libr::initialize_r_for_tests() {
             Ok(()) => true,
             Err(e) => {
                 eprintln!("Failed to initialize R: {}", e);
@@ -38,7 +38,7 @@ where
 /// Check that `LD_LIBRARY_PATH` includes the R library directory.
 ///
 /// Tests that require package loading (e.g. utils, methods) must be skipped
-/// when this is not set, because `initialize_r()` cannot re-exec the process
+/// when this is not set, because `initialize_r_for_tests()` cannot re-exec the process
 /// as the binary does via `ensure_ld_library_path()`.
 pub fn ld_library_path_is_set() -> bool {
     let Ok(lib_path) = arf_libr::find_r_library() else {
