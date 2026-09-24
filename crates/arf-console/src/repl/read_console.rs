@@ -37,6 +37,7 @@ static PENDING_NESTED_INPUT: Mutex<String> = Mutex::new(String::new());
 enum NativeInputMode {
     TopLevel,
     Nested,
+    Continuation,
 }
 
 fn native_input_mode(mode: c_int) -> Option<NativeInputMode> {
@@ -45,6 +46,9 @@ fn native_input_mode(mode: c_int) -> Option<NativeInputMode> {
             Some(NativeInputMode::TopLevel)
         }
         value if value == arf_libr::ReplInputMode::Nested as c_int => Some(NativeInputMode::Nested),
+        value if value == arf_libr::ReplInputMode::Continuation as c_int => {
+            Some(NativeInputMode::Continuation)
+        }
         _ => None,
     }
 }
@@ -173,6 +177,7 @@ pub(super) unsafe extern "C" fn native_input_callback(
         }
         NativeInputMode::TopLevel => PromptKind::Command,
         NativeInputMode::Nested => PromptKind::Other,
+        NativeInputMode::Continuation => PromptKind::Continuation,
     };
 
     if mode == NativeInputMode::Nested {
@@ -194,6 +199,36 @@ pub(super) unsafe extern "C" fn native_input_callback(
     let Some(input) = input else {
         return arf_libr::ReplInputResult::Eof as c_int;
     };
+
+    if mode == NativeInputMode::Continuation {
+        let cancelled = REPL_STATE.with(|state| {
+            state.try_borrow_mut().ok().and_then(|mut state| {
+                state
+                    .as_mut()
+                    .map(|state| std::mem::take(&mut state.input_was_cancelled))
+            })
+        });
+        let Some(cancelled) = cancelled else {
+            log::error!("Unable to access REPL state after native continuation input");
+            return arf_libr::ReplInputResult::Eof as c_int;
+        };
+        if cancelled {
+            return arf_libr::ReplInputResult::Cancelled as c_int;
+        }
+        // An empty continuation line is still input to R's parser. Represent it
+        // as a newline so the native driver receives a nonempty fragment.
+        let fragment = if input.is_empty() {
+            "\n"
+        } else {
+            input.as_str()
+        };
+        let Some(source) = arf_libr::copy_repl_source(fragment) else {
+            arf_eprintln!("Error: failed to allocate R continuation input");
+            return arf_libr::ReplInputResult::Cancelled as c_int;
+        };
+        unsafe { *full_source_out = source };
+        return arf_libr::ReplInputResult::Text as c_int;
+    }
 
     if mode == NativeInputMode::Nested {
         let mut pending = PENDING_NESTED_INPUT
@@ -470,7 +505,7 @@ fn read_console_callback_impl(
             arf_libr::reset_command_error_state();
         }
 
-        if is_command_prompt {
+        if is_command_prompt || (native_driver && prompt_kind.is_continuation()) {
             state.input_was_cancelled = false;
         }
 
@@ -600,7 +635,13 @@ fn read_console_callback_impl(
                 // Process R events once before entering the input loop. The idle
                 // callback continues at ~30fps while reedline is waiting.
                 arf_libr::process_r_events();
-                editor.read_line(&prompt)
+                if native_driver && prompt_kind.is_continuation() {
+                    crate::editor::validator::with_native_continuation_input(|| {
+                        editor.read_line(&prompt)
+                    })
+                } else {
+                    editor.read_line(&prompt)
+                }
             });
             // Keep startup echo suppression through the raw-mode transition.
             // The original cooked mode is restored only after reedline returns,
@@ -630,6 +671,26 @@ fn read_console_callback_impl(
                         // own last-command context.
                         finalize_history(Some(&history_handle), save_outcome, false);
                         return Some(line);
+                    }
+
+                    // Native R has already parsed the accumulated source and
+                    // requested one more fragment. Keep continuation input
+                    // verbatim (apart from reprex output stripping): treating
+                    // it as a standalone command would reject valid fragments
+                    // such as `2)` and could run meta commands inside the
+                    // parent's unfinished expression.
+                    if native_driver && prompt_kind.is_continuation() {
+                        finalize_history(Some(&history_handle), save_outcome, false);
+                        let fragment = if state.reprex.is_enabled() {
+                            strip_reprex_output(&line)
+                        } else {
+                            line.clone()
+                        };
+                        if state.reprex.is_enabled() && !fragment.is_empty() {
+                            clear_input_lines(&line, &fragment);
+                        }
+                        crate::ipc::set_r_at_prompt(false);
+                        return Some(fragment);
                     }
 
                     // Check for meta commands first
@@ -737,113 +798,10 @@ fn read_console_callback_impl(
                         clear_input_lines(&original_line, &code);
                     }
 
-                    // Formatting can produce an expression that is incomplete
-                    // even when the user's original line was complete. Collect
-                    // continuation lines in the UI before returning the full
-                    // source to the native driver, which evaluates only after
-                    // this callback has released its Rust state borrow.
-                    let mut code = code;
-                    if native_driver && is_command_prompt {
-                        crate::ipc::set_r_at_prompt(false);
-                        let validator = crate::editor::validator::RValidator::new();
-                        while !validator.is_complete(&code) {
-                            let continuation_prompt =
-                                state.prompt_config.build_cont_prompt(state.reprex.mode);
-                            let continuation_result = arf_libr::with_repl_input_guard(|| {
-                                arf_libr::process_r_events();
-                                editor.read_line(&continuation_prompt)
-                            });
-                            match continuation_result {
-                                Ok(Signal::Success(line)) => {
-                                    let continuation_save = history_handle.receipt_outcome();
-                                    finalize_history(
-                                        Some(&history_handle),
-                                        continuation_save,
-                                        false,
-                                    );
-                                    if let Some(result) = process_meta_command(
-                                        &line,
-                                        &mut state.prompt_config,
-                                        &mut state.reprex,
-                                        &state.r_history,
-                                        &state.shell_history,
-                                        &state.r_source_status,
-                                        &mut state.dir_stack,
-                                        state.history_session_id.map(i64::from),
-                                        state.r_home.as_deref(),
-                                    ) {
-                                        state.prompt_config.clear_command_duration();
-                                        let ctx = SessionInfoContext {
-                                            prompt_config: &state.prompt_config,
-                                            reprex: &state.reprex,
-                                            config_path: &state.config_path,
-                                            config_status: state.config_status,
-                                            r_history: &state.r_history,
-                                            shell_history: &state.shell_history,
-                                            r_source_status: &state.r_source_status,
-                                        };
-                                        match handle_meta_command_result(result, &ctx) {
-                                            MetaAction::Continue => continue,
-                                            MetaAction::Exit => {
-                                                state.should_exit = true;
-                                                return None;
-                                            }
-                                        }
-                                    }
-
-                                    let continuation = if state.reprex.is_enabled() {
-                                        strip_reprex_output(&line)
-                                    } else {
-                                        line
-                                    };
-                                    let continuation = match state
-                                        .reprex
-                                        .maybe_format_code(&continuation)
-                                    {
-                                        Ok(code) => code,
-                                        Err(error) => {
-                                            arf_println!("{}", error);
-                                            continue;
-                                        }
-                                    };
-                                    if state.reprex.is_enabled() && !continuation.is_empty() {
-                                        clear_input_lines(&continuation, &continuation);
-                                    }
-                                    code.push('\n');
-                                    code.push_str(&continuation);
-                                }
-                                Ok(Signal::CtrlC) => {
-                                    let _ = io::stdout()
-                                        .execute(terminal::Clear(ClearType::FromCursorDown));
-                                    println!("^C");
-                                    state.input_was_cancelled = true;
-                                    return Some(String::new());
-                                }
-                                Ok(Signal::CtrlD) => {
-                                    state.should_exit = true;
-                                    return None;
-                                }
-                                Ok(Signal::ExternalBreak(buffer)) => {
-                                    if let Some(op) = crate::ipc::take_pending_ipc_operation() {
-                                        crate::ipc::reject_operation_user_typing(op, &code);
-                                    } else if !buffer.trim().is_empty() {
-                                        log::debug!("Ignoring external break during continuation input");
-                                    }
-                                }
-                                Ok(_) => {}
-                                Err(error) => {
-                                    eprintln!("Error: {error}");
-                                    state.should_exit = true;
-                                    return None;
-                                }
-                            }
-                        }
-                    }
-
                     // Record command start time for the {duration} prompt placeholder
                     // Start the spinner to indicate R is evaluating code
                     // The spinner will be stopped when R produces output or the next prompt appears
-                    if !code.is_empty() {
+                    if !code.is_empty() && !(native_driver && prompt_kind.is_continuation()) {
                         state.prompt_config.set_command_start();
                         state.prompt_config.start_spinner();
                     }
@@ -880,7 +838,7 @@ fn read_console_callback_impl(
                         arf_println!("Returned to R mode.");
                         continue;
                     }
-                    if is_command_prompt {
+                    if is_command_prompt || (native_driver && prompt_kind.is_continuation()) {
                         state.input_was_cancelled = true;
                     }
                     return Some(String::new());
@@ -901,6 +859,10 @@ fn read_console_callback_impl(
                     // IPC operation triggered a break signal.
                     // Check the editor buffer for mutual exclusion with console input.
                     if let Some(op) = crate::ipc::take_pending_ipc_operation() {
+                        if native_driver && prompt_kind.is_continuation() {
+                            crate::ipc::reject_operation_not_at_prompt(op);
+                            continue;
+                        }
                         use crate::ipc::{
                             PendingIpcKind, accept_user_input, reject_operation_user_typing,
                             run_silent_eval, setup_visible_eval,

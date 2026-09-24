@@ -518,6 +518,22 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
     }
 }
 
+/// Reject a pending IPC operation because the REPL is waiting for a
+/// continuation fragment, not a new top-level command.
+pub fn reject_operation_not_at_prompt(op: PendingIpcOperation) {
+    let response = IpcResponse::error(
+        R_NOT_AT_PROMPT,
+        "R is not at the top-level prompt".to_string(),
+    );
+    match op.kind {
+        PendingIpcKind::SilentEvaluate { reply }
+        | PendingIpcKind::VisibleEvaluate { reply, .. }
+        | PendingIpcKind::UserInput { reply } => {
+            let _ = reply.send(response);
+        }
+    }
+}
+
 /// Set up a visible evaluate: start capture and store the deferred reply.
 ///
 /// Called from the REPL after the buffer check passes. The reply will be

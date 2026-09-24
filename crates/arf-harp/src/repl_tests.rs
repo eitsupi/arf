@@ -12,6 +12,7 @@ static INPUT_INDEX: AtomicUsize = AtomicUsize::new(0);
 static OUTCOME_INDEX: AtomicUsize = AtomicUsize::new(0);
 static FAILURES: AtomicUsize = AtomicUsize::new(0);
 static NESTED_INPUT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static CONTINUATION_INDEX: AtomicUsize = AtomicUsize::new(0);
 static RLANG_AVAILABLE: AtomicUsize = AtomicUsize::new(0);
 
 const INPUTS: [&[u8]; 11] = [
@@ -28,7 +29,7 @@ const INPUTS: [&[u8]; 11] = [
     b"invisible(987654321L)",
 ];
 
-const EXPECTED: [ReplOutcome; 14] = [
+const EXPECTED: [ReplOutcome; 20] = [
     ReplOutcome {
         command_id: 100,
         expression_id: 1,
@@ -99,6 +100,36 @@ const EXPECTED: [ReplOutcome; 14] = [
         expression_id: 1,
         fact: ReplFact::Completed,
     },
+    ReplOutcome {
+        command_id: 116,
+        expression_id: 6,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 117,
+        expression_id: 2,
+        fact: ReplFact::AbortedParse,
+    },
+    ReplOutcome {
+        command_id: 118,
+        expression_id: 2,
+        fact: ReplFact::AbortedParse,
+    },
+    ReplOutcome {
+        command_id: 119,
+        expression_id: 2,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 120,
+        expression_id: 2,
+        fact: ReplFact::AbortedParse,
+    },
+    ReplOutcome {
+        command_id: 121,
+        expression_id: 2,
+        fact: ReplFact::Completed,
+    },
 ];
 
 unsafe extern "C" {
@@ -128,6 +159,51 @@ unsafe extern "C" fn input_callback(
     command_id: *mut u64,
     _context: *mut c_void,
 ) -> c_int {
+    if mode == ReplInputMode::Continuation as c_int {
+        let index = CONTINUATION_INDEX.fetch_add(1, Ordering::SeqCst);
+        let prompt_matches =
+            !prompt.is_null() && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"++ ";
+        if !prompt_matches || full_source.is_null() || command_id.is_null() {
+            FAILURES.fetch_add(1, Ordering::SeqCst);
+            return ReplInputResult::Eof as c_int;
+        }
+        if unsafe { *command_id } != 116 + index as u64 {
+            FAILURES.fetch_add(1, Ordering::SeqCst);
+            return ReplInputResult::Eof as c_int;
+        }
+        if index == 2 {
+            marker("ARF_CONTINUATION_CANCELLED");
+            return ReplInputResult::Cancelled as c_int;
+        }
+        if index == 4 {
+            marker("ARF_CONTINUATION_EOF");
+            return ReplInputResult::Eof as c_int;
+        }
+        let input: &[u8] = match index {
+            0 => b"0L;\r\n stopifnot(.arf_continuation_count == 1L); cat('ARF_SUFFIX_REACHED\\n')",
+            1 => b"* 2",
+            3 => b"2",
+            _ => {
+                FAILURES.fetch_add(1, Ordering::SeqCst);
+                return ReplInputResult::Eof as c_int;
+            }
+        };
+        if full_source.is_null() {
+            FAILURES.fetch_add(1, Ordering::SeqCst);
+            return ReplInputResult::Eof as c_int;
+        }
+        unsafe {
+            *full_source = copy_repl_source(std::str::from_utf8(input).unwrap())
+                .unwrap_or(std::ptr::null_mut());
+            if (*full_source).is_null() {
+                FAILURES.fetch_add(1, Ordering::SeqCst);
+                return ReplInputResult::Eof as c_int;
+            }
+        }
+        marker(&format!("ARF_CONTINUATION_REQUEST:{index}"));
+        return ReplInputResult::Text as c_int;
+    }
+
     if NESTED_INPUT_PENDING.load(Ordering::SeqCst) != 0
         && !prompt.is_null()
         && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"> "
@@ -165,15 +241,33 @@ unsafe extern "C" fn input_callback(
         (b"# comment-only source\n".to_vec(), 114_u64)
     } else if index == INPUTS.len() + 2 {
         (b"   \n\t".to_vec(), 115_u64)
-    } else if index == INPUTS.len() + 3 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
-        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
     } else if index == INPUTS.len() + 3 {
+        (
+            b".arf_continuation_count <- 0L; .arf_continuation_count <- .arf_continuation_count + 1L; cat('ARF_PREFIX_BEFORE_CONTINUATION\\n'); .arf_continuation_count +".to_vec(),
+            116,
+        )
+    } else if index == INPUTS.len() + 4 {
+        (b"cat('ARF_PREFIX_BEFORE_ERROR\\n'); 1 +".to_vec(), 117)
+    } else if index == INPUTS.len() + 5 {
+        (b".arf_cancel_prefix <- 1L; 1 +".to_vec(), 118)
+    } else if index == INPUTS.len() + 6 {
+        (
+            b"cat('ARF_COMMENT_PREFIX\\n'); 1 + # trailing comment".to_vec(),
+            119,
+        )
+    } else if index == INPUTS.len() + 7 {
+        (b".arf_eof_prefix <- 1L; 1 +".to_vec(), 120)
+    } else if index == INPUTS.len() + 8 {
+        (b"cat('ARF_INITIAL_CRLF\\n'); 40L +\r\n2L\r\n".to_vec(), 121)
+    } else if index == INPUTS.len() + 9 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
+    } else if index == INPUTS.len() + 9 {
         (Vec::new(), 113_u64)
-    } else if index == INPUTS.len() + 4 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+    } else if index == INPUTS.len() + 10 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
         (Vec::new(), 113_u64)
     } else {
         let cancel_index =
-            INPUTS.len() + 4 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
+            INPUTS.len() + 10 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
         if index == cancel_index {
             marker("ARF_DRIVER_CANCELLED");
             return ReplInputResult::Cancelled as c_int;
@@ -270,6 +364,7 @@ fn c_repl_driver_recovers_failures_interrupts_gc_and_visibility() {
             OUTCOME_INDEX.store(0, Ordering::SeqCst);
             FAILURES.store(0, Ordering::SeqCst);
             NESTED_INPUT_PENDING.store(0, Ordering::SeqCst);
+            CONTINUATION_INDEX.store(0, Ordering::SeqCst);
             arf_libr::initialize_r_with_args(&[
                 "--vanilla",
                 "--no-save",
@@ -355,6 +450,8 @@ function(text) {
                 ".arf_repl_print_abort <- structure(1L, class = 'arf_repl_print_abort'); print.arf_repl_print_abort <- function(x, ...) stop('uncaught print')",
             )
             .expect("print failure method should install");
+            crate::eval_string("options(continue = '++ ')")
+                .expect("custom continuation prompt should install");
             install_repl_driver(
                 parser_factory.sexp(),
                 top_level_prompt,
@@ -399,6 +496,10 @@ function(text) {
         output.status.success(),
         "mainloop child failed: {stderr}\n{stdout}"
     );
+    assert!(
+        stderr.contains("unexpected '*'"),
+        "syntax errors after continuation should retain R's native parse diagnostic: {stderr}"
+    );
     if stdout.contains("ARF_NATIVE_VISIBILITY_DIRECT") {
         assert!(
             stderr.contains("Error: uncaught eval"),
@@ -428,6 +529,17 @@ function(text) {
         "ARF_OUTCOME:112:1:completed",
         "ARF_OUTCOME:114:1:completed",
         "ARF_OUTCOME:115:1:completed",
+        "ARF_CONTINUATION_REQUEST:0",
+        "ARF_OUTCOME:116:6:completed",
+        "ARF_CONTINUATION_REQUEST:1",
+        "ARF_OUTCOME:117:2:parse",
+        "ARF_CONTINUATION_CANCELLED",
+        "ARF_OUTCOME:118:2:parse",
+        "ARF_CONTINUATION_REQUEST:3",
+        "ARF_OUTCOME:119:2:completed",
+        "ARF_CONTINUATION_EOF",
+        "ARF_OUTCOME:120:2:parse",
+        "ARF_OUTCOME:121:2:completed",
         "ARF_DRIVER_CANCELLED",
         "ARF_DRIVER_OK",
         "ARF_DRIVER_EOF",
@@ -451,6 +563,7 @@ function(text) {
             token.starts_with("ARF_DRIVER_")
                 || token.starts_with("ARF_OUTCOME:")
                 || token.starts_with("ARF_NESTED_")
+                || token.starts_with("ARF_CONTINUATION_")
                 || token.starts_with("ARF_CLOSE_")
                 || token.starts_with("ARF_NULL_INSTALL_")
         })
@@ -466,5 +579,37 @@ function(text) {
     assert!(
         !stdout.contains("987654321"),
         "invisible result was printed: {stdout}"
+    );
+    let prefix_output = stdout
+        .find("ARF_PREFIX_BEFORE_CONTINUATION")
+        .expect("complete prefix should execute before continuation request");
+    let continuation_request = stdout
+        .find("ARF_CONTINUATION_REQUEST:0")
+        .expect("frontend should receive a continuation request");
+    assert!(
+        prefix_output < continuation_request,
+        "complete prefix output must precede continuation input: {stdout}"
+    );
+    assert_eq!(
+        stdout.matches("ARF_PREFIX_BEFORE_CONTINUATION").count(),
+        1,
+        "continuation must not reevaluate the completed prefix: {stdout}"
+    );
+    assert_eq!(
+        stdout.matches("ARF_PREFIX_BEFORE_ERROR").count(),
+        1,
+        "parse-error recovery must not reevaluate the completed prefix: {stdout}"
+    );
+    assert!(
+        stdout.contains("ARF_SUFFIX_REACHED"),
+        "continued suffix should complete in the parent command: {stdout}"
+    );
+    assert!(
+        stdout.contains("ARF_COMMENT_PREFIX") && stdout.contains("[1] 3"),
+        "newline before continuation must terminate the previous line comment: {stdout}"
+    );
+    assert!(
+        stdout.contains("ARF_INITIAL_CRLF"),
+        "initial CRLF source with trailing newline should parse: {stdout}"
     );
 }

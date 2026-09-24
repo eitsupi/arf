@@ -18,6 +18,7 @@ enum {
     PHASE_PRINT = 3,
     INPUT_MODE_TOP_LEVEL = 0,
     INPUT_MODE_NESTED = 1,
+    INPUT_MODE_CONTINUATION = 2,
     INPUT_EOF = 0,
     INPUT_TEXT = 1,
     INPUT_CANCELLED = 2,
@@ -28,6 +29,7 @@ enum {
 
 typedef struct {
     SEXP (*mk_string)(const char *);
+    SEXP (*parse_vector)(SEXP, int, int *, SEXP);
     SEXP (*install)(const char *);
     SEXP (*find_var)(SEXP, SEXP);
     SEXP (*cons)(SEXP, SEXP);
@@ -103,6 +105,7 @@ static unsigned int input_callback_depth;
 static ArfReadConsole legacy_read_console;
 
 static SEXP call0(const ArfRApi *api, SEXP function);
+static void invoke_close(void *data);
 
 static void classify_n_frame_body(void *data) {
     PromptClassState *state = (PromptClassState *)data;
@@ -192,6 +195,131 @@ int arf_repl_driver_prompt_info(const ArfRApi *api, const char *raw_prompt,
     return 1;
 }
 
+static void evaluate_expression(CommandState *state, SEXP expression) {
+    const ArfRApi *api = state->api;
+    SEXP visible_fn = NULL;
+    state->phase = PHASE_EVAL;
+    SEXP value = NULL;
+    int visible = 0;
+    if (api->visible_flag != NULL) {
+        value = api->eval(expression, api->global_env);
+        /* R_Visible must be read immediately after Rf_eval, before another
+           R API call can alter it. Keep the result protected through print. */
+        visible = *api->visible_flag != 0;
+        api->protect(value);
+        if (visible) {
+            state->phase = PHASE_PRINT;
+            api->print_value(value);
+        }
+        api->unprotect(1);
+        return;
+    }
+
+    visible_fn = api->find_var(api->install("withVisible"), api->base_env);
+    SEXP args = api->cons(expression, api->nil_value);
+    api->protect(args);
+    SEXP visible_call = api->lcons(visible_fn, args);
+    api->protect(visible_call);
+    SEXP visible_result = api->eval(visible_call, api->global_env);
+    api->protect(visible_result);
+    value = api->vector_elt(visible_result, 0);
+    SEXP is_visible = api->vector_elt(visible_result, 1);
+    int *visibility = api->logical(is_visible);
+    visible = visibility != NULL && *visibility != 0;
+    if (visible) {
+        state->phase = PHASE_PRINT;
+        api->print_value(value);
+    }
+    api->unprotect(3);
+}
+
+static char *copy_continuation_prompt(const ArfRApi *api) {
+    SEXP option = api->get_option1(api->install("continue"));
+    api->protect(option);
+    const char *value = string_option_value(api, option);
+    if (value == NULL)
+        value = "+ ";
+    size_t length = strlen(value);
+    char *copy = (char *)malloc(length + 1);
+    if (copy != NULL)
+        memcpy(copy, value, length + 1);
+    api->unprotect(1);
+    return copy;
+}
+
+static void normalize_crlf(char *source) {
+    size_t read_index = 0;
+    size_t write_index = 0;
+    while (source[read_index] != '\0') {
+        if (source[read_index] == '\r' && source[read_index + 1] == '\n')
+            read_index += 1;
+        source[write_index++] = source[read_index++];
+    }
+    source[write_index] = '\0';
+}
+
+static int append_fragment(CommandState *state, char *fragment) {
+    size_t source_length = strlen(state->owned_source);
+    size_t fragment_length = strlen(fragment);
+    int need_separator = source_length != 0 && state->owned_source[source_length - 1] != '\n' &&
+                         (fragment_length == 0 || fragment[0] != '\n');
+    size_t separator_length = (size_t)need_separator;
+    if (fragment_length == 0 || fragment_length > SIZE_MAX - separator_length - 1)
+        return 0;
+    size_t added_length = fragment_length + separator_length;
+    if (source_length > SIZE_MAX - added_length - 1)
+        return 0;
+    char *combined = (char *)realloc(state->owned_source,
+                                     source_length + added_length + 1);
+    if (combined == NULL)
+        return 0;
+    if (need_separator)
+        combined[source_length++] = '\n';
+    memcpy(combined + source_length, fragment, fragment_length + 1);
+    state->owned_source = combined;
+    state->source = combined;
+    normalize_crlf(state->owned_source);
+    return 1;
+}
+
+static void replay_parse_error(CommandState *state, int ordinal) {
+    const ArfRApi *api = state->api;
+    if (state->parser != NULL) {
+        CommandState close_state = *state;
+        api->toplevel_exec(invoke_close, &close_state);
+        api->release_object(state->parser);
+        state->parser = NULL;
+        state->close_fn = NULL;
+    }
+    SEXP source = api->mk_string(state->source);
+    api->protect(source);
+    SEXP parser = call1(api, driver.parser_factory, source);
+    api->protect(parser);
+    api->preserve_object(parser);
+    state->parser = parser;
+    state->close_fn = api->vector_elt(parser, 1);
+    SEXP next_fn = api->vector_elt(parser, 0);
+    for (int i = 0; i < ordinal; ++i) {
+        state->phase = PHASE_PARSE;
+        SEXP parsed = call0(api, next_fn);
+        api->protect(parsed);
+        int length = api->length(parsed);
+        api->unprotect(1);
+        if (length == 0) {
+            state->fact = FACT_PARSE;
+            break;
+        }
+    }
+    if (state->fact == FACT_UNOBSERVED)
+        state->fact = FACT_PARSE;
+    CommandState close_state = *state;
+    api->toplevel_exec(invoke_close, &close_state);
+    api->release_object(parser);
+    state->parser = NULL;
+    state->close_fn = NULL;
+    api->unprotect(2);
+}
+
 static SEXP command_body(void *data) {
     CommandState *state = (CommandState *)data;
     const ArfRApi *api = state->api;
@@ -202,80 +330,101 @@ static SEXP command_body(void *data) {
         return api->nil_value;
     }
 
+    int ordinal = 1;
     SEXP source = api->mk_string(state->source);
     api->protect(source);
     SEXP parser = call1(api, factory, source);
     api->protect(parser);
     api->preserve_object(parser);
     state->parser = parser;
-    SEXP next_fn = api->vector_elt(parser, 0);
     state->close_fn = api->vector_elt(parser, 1);
-    SEXP visible_fn = NULL;
-    if (api->visible_flag == NULL)
-        visible_fn = api->find_var(api->install("withVisible"), api->base_env);
-
+    api->unprotect(2);
     for (;;) {
         state->phase = PHASE_PARSE;
-        SEXP parsed = call0(api, next_fn);
+        SEXP source = api->mk_string(state->source);
+        api->protect(source);
+        int parse_status = 0;
+        SEXP parsed = api->parse_vector(source, ordinal, &parse_status, api->nil_value);
         api->protect(parsed);
-        if (api->length(parsed) == 0) {
-            api->unprotect(1);
-            if (state->expression_id > 1)
-                state->expression_id -= 1;
+        int parsed_length = api->length(parsed);
+        if (parse_status == 1 && parsed_length < ordinal) {
+            state->fact = FACT_COMPLETED;
+            api->unprotect(2);
+            break;
+        }
+        if (parse_status == 1 && parsed_length >= ordinal) {
+            SEXP expression = api->vector_elt(parsed, ordinal - 1);
+            evaluate_expression(state, expression);
+            state->expression_id += 1;
+            if (ordinal == INT32_MAX) {
+                state->fact = FACT_PARSE;
+                api->unprotect(2);
+                break;
+            }
+            ordinal += 1;
+            api->unprotect(2);
+            continue;
+        }
+
+        api->unprotect(2);
+        if (parse_status == 3) {
+            replay_parse_error(state, ordinal);
+            break;
+        }
+        if (parse_status != 2) {
+            state->fact = FACT_PARSE;
             break;
         }
 
-        SEXP expression = api->vector_elt(parsed, 0);
-        state->phase = PHASE_EVAL;
-        SEXP value = NULL;
-        int visible = 0;
-        if (api->visible_flag != NULL) {
-            value = api->eval(expression, api->global_env);
-            /* R_Visible must be read immediately after Rf_eval, before another
-               R API call can alter it. Keep the result protected through print. */
-            visible = *api->visible_flag != 0;
-            api->protect(value);
-            if (visible) {
-                state->phase = PHASE_PRINT;
-                api->print_value(value);
-            }
-            api->unprotect(1);
-        } else {
-            SEXP args = api->cons(expression, api->nil_value);
-            api->protect(args);
-            SEXP visible_call = api->lcons(visible_fn, args);
-            api->protect(visible_call);
-            SEXP visible_result = api->eval(visible_call, api->global_env);
-            api->protect(visible_result);
-            value = api->vector_elt(visible_result, 0);
-            SEXP is_visible = api->vector_elt(visible_result, 1);
-            int *visibility = api->logical(is_visible);
-            visible = visibility != NULL && *visibility != 0;
-            if (visible) {
-                state->phase = PHASE_PRINT;
-                api->print_value(value);
-            }
-            api->unprotect(3);
+        char *continuation_prompt = copy_continuation_prompt(api);
+        if (continuation_prompt == NULL) {
+            state->fact = FACT_UNOBSERVED;
+            break;
         }
-        state->expression_id += 1;
+        char *fragment = NULL;
+        uint64_t continuation_command_id = state->command_id;
+        input_callback_depth += 1;
+        int read = driver.input(INPUT_MODE_CONTINUATION, continuation_prompt, NULL, 0, 1,
+                                &fragment, &continuation_command_id, driver.context);
+        input_callback_depth -= 1;
+        free(continuation_prompt);
+        if (read == INPUT_CANCELLED) {
+            free(fragment);
+            state->fact = FACT_PARSE;
+            break;
+        }
+        if (read != INPUT_TEXT || fragment == NULL || fragment[0] == '\0') {
+            free(fragment);
+            state->fact = FACT_PARSE;
+            break;
+        }
+        normalize_crlf(fragment);
+        int appended = append_fragment(state, fragment);
+        free(fragment);
+        if (!appended) {
+            state->fact = FACT_PARSE;
+            break;
+        }
     }
-
-    call0(api, state->close_fn);
-    api->release_object(parser);
-    state->parser = NULL;
-    api->unprotect(2);
+    if (state->fact == FACT_COMPLETED && state->expression_id > 1)
+        state->expression_id -= 1;
+    if (state->parser != NULL) {
+        CommandState close_state = *state;
+        api->toplevel_exec(invoke_close, &close_state);
+        api->release_object(state->parser);
+        state->parser = NULL;
+        state->close_fn = NULL;
+    }
     return api->nil_value;
 }
 
 static void command_cleanup(void *data, int jump) {
     CommandState *state = (CommandState *)data;
-    if (jump == 0 && state->fact == FACT_UNOBSERVED)
-        state->fact = FACT_COMPLETED;
-    else if (state->phase == PHASE_PARSE)
+    if (jump != 0 && state->phase == PHASE_PARSE)
         state->fact = FACT_PARSE;
-    else if (state->phase == PHASE_PRINT)
+    else if (jump != 0 && state->phase == PHASE_PRINT)
         state->fact = FACT_PRINT;
-    else
+    else if (jump != 0)
         state->fact = FACT_EVAL;
     state->active = 0;
     state->armed = 0;
@@ -422,6 +571,7 @@ static int native_read_console(const char *prompt, char *buffer, int length, int
         command.owned_source = NULL;
         command.source = NULL;
     } else {
+        normalize_crlf(command.owned_source);
         driver.api->unwind_protect(command_body, &command, command_cleanup, &command, NULL);
     }
 

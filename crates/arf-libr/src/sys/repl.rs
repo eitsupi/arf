@@ -33,6 +33,9 @@ pub enum ReplFact {
 pub enum ReplInputMode {
     TopLevel = 0,
     Nested = 1,
+    /// More source for the active command after its next expression was
+    /// incomplete. The command ID and history lifecycle stay unchanged.
+    Continuation = 2,
 }
 
 /// Result returned by a REPL input callback.
@@ -102,9 +105,12 @@ impl ReplOutcome {
 /// Rust input callback invoked by the native C ReadConsole trampoline. For
 /// top-level input, allocate and fill `full_source` with
 /// [`copy_repl_source`], then set `command_id`; `buffer` is ignored. For nested
-/// input, fill R's bounded `buffer` and leave `full_source` null. Return `Text`,
-/// `Eof`, or `Cancelled`; empty text is not a completed command. The callback
-/// has fully returned before R parsing/evaluation begins.
+/// input, fill R's bounded `buffer` and leave `full_source` null. For
+/// continuation input, fill `full_source` with only the new source fragment;
+/// C retains the current command ID and lifecycle. Its `prompt` is a stable
+/// copy of the current `options('continue')` string. Return `Text`, `Eof`, or
+/// `Cancelled`; empty text is not a completed command. The callback has fully
+/// returned before R parsing/evaluation begins.
 pub type ReplInputCallback = unsafe extern "C" fn(
     mode: c_int,
     prompt: *const c_char,
@@ -160,6 +166,7 @@ pub type ReplTopLevelPromptCallback =
 #[repr(C)]
 struct NativeApi {
     mk_string: unsafe extern "C" fn(*const c_char) -> SEXP,
+    parse_vector: unsafe extern "C" fn(SEXP, c_int, *mut crate::ParseStatus, SEXP) -> SEXP,
     install: unsafe extern "C" fn(*const c_char) -> SEXP,
     find_var: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     cons: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
@@ -228,6 +235,7 @@ fn native_api(lib: &crate::RLibrary) -> &'static NativeApi {
     NATIVE_API.get_or_init(|| unsafe {
         NativeApi {
             mk_string: lib.rf_mkstring,
+            parse_vector: lib.r_parsevector,
             install: lib.rf_install,
             find_var: lib.rf_findvar,
             cons: lib.rf_cons,

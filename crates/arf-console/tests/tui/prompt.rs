@@ -59,6 +59,125 @@ fn low_level_formatter_continuation_prompt_round_trips() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn formatter_evaluates_complete_prefix_before_continuation_input() -> Result<()> {
+    for formatter in ["air", "arity"] {
+        formatter_prefix_continuation_scenario(formatter)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn formatter_continuation_cancellation_discards_parent_and_recovers() -> Result<()> {
+    for formatter in ["air", "arity"] {
+        formatter_continuation_cancellation_scenario(formatter)?;
+    }
+    Ok(())
+}
+
+fn formatter_prefix_continuation_scenario(formatter: &str) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = build_formatter_fixture_path(&temp.path().join("bin"), formatter)?;
+    let config = r#"
+[startup]
+reprex = "format"
+
+[reprex]
+formatter = "__FORMATTER__"
+
+[prompt]
+format = "MAIN> "
+continuation = "CONT> "
+"#
+    .replace("__FORMATTER__", formatter);
+    run_case_with(
+        Terminal::builder(format!("formatter-prefix-continuation-{formatter}"))
+            .args(["--no-auto-match"])
+            .config(config)
+            .env("PATH", path)
+            .env("FORMATTER_FIXTURE_MODE", "prefix-continuation"),
+        |terminal| {
+            terminal.wait_for("formatter main prompt", |_, line| {
+                line.trim_end().ends_with("MAIN>")
+            })?;
+            terminal.enter("options(continue = '... ')")?;
+            terminal.wait_for("formatter options prompt", |state, line| {
+                state.text.contains("options(continue = '... ')")
+                    && line.trim_end().ends_with("MAIN>")
+            })?;
+
+            terminal.enter("42")?;
+            terminal.wait_for("prefix output before continuation input", |state, line| {
+                state.text.lines().any(|line| line.trim() == "#> PREFIX")
+                    && line.trim_end().ends_with("CONT>")
+            })?;
+            terminal.enter("2")?;
+            terminal.wait_for("formatted result after continuation", |state, line| {
+                state.text.lines().any(|line| line.trim() == "#> [1] 3")
+                    && line.trim_end().ends_with("MAIN>")
+            })?;
+            terminal.quit()
+        },
+    )
+}
+
+fn formatter_continuation_cancellation_scenario(formatter: &str) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = build_formatter_fixture_path(&temp.path().join("bin"), formatter)?;
+    let config = r#"
+[startup]
+reprex = "format"
+
+[reprex]
+formatter = "__FORMATTER__"
+
+[prompt]
+format = "MAIN> "
+continuation = "CONT> "
+"#
+    .replace("__FORMATTER__", formatter);
+    run_case_with(
+        Terminal::builder(format!("formatter-continuation-cancel-{formatter}"))
+            .args(["--no-auto-match"])
+            .config(config)
+            .env("PATH", path)
+            .env("FORMATTER_FIXTURE_MODE", "prefix-continuation"),
+        |terminal| {
+            terminal.wait_for("formatter main prompt", |_, line| {
+                line.trim_end().ends_with("MAIN>")
+            })?;
+            terminal.enter("options(continue = '... ')")?;
+            terminal.wait_for("formatter options prompt", |state, line| {
+                state.text.contains("options(continue = '... ')")
+                    && line.trim_end().ends_with("MAIN>")
+            })?;
+
+            let command_start = terminal.checkpoint()?;
+            terminal.enter("42")?;
+            terminal.wait_for("prefix output before continuation input", |state, line| {
+                state.text.lines().any(|line| line.trim() == "#> PREFIX")
+                    && line.trim_end().ends_with("CONT>")
+            })?;
+            terminal.key("Ctrl+C")?;
+            terminal.wait_for("prompt after continuation cancellation", |state, line| {
+                state.text.contains("^C") && line.trim_end().ends_with("MAIN>")
+            })?;
+            let cancelled_command = terminal.output_since(command_start)?;
+            ensure!(
+                cancelled_command.matches("#> PREFIX").count() == 1,
+                "the completed formatter prefix should run once before cancellation"
+            );
+
+            terminal.enter("10 + 1")?;
+            terminal.wait_for("next command after cancellation", |state, line| {
+                state.text.lines().any(|line| line.trim() == "#> [1] 11")
+                    && line.trim_end().ends_with("MAIN>")
+            })?;
+            terminal.quit()
+        },
+    )
+}
+
 fn formatter_continuation_scenario(formatter: &str) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let path = build_formatter_fixture_path(&temp.path().join("bin"), formatter)?;
@@ -94,11 +213,16 @@ continuation = "CONT> "
             terminal.wait_for("formatter continuation prompt", |_, line| {
                 line.trim_end().ends_with("CONT>")
             })?;
-            terminal.write("2")?;
+            terminal.write("2)")?;
             terminal.key("Enter")?;
             terminal.wait_for("formatted expression result", |state, line| {
                 state.text.contains("[1] 3") && line.trim_end().ends_with("MAIN>")
             })?;
+            terminal.enter("10 + 1")?;
+            terminal.wait_for("validator restored for next command", |state, line| {
+                state.text.contains("[1] 11") && line.trim_end().ends_with("MAIN>")
+            })?;
+
             terminal.quit()
         },
     )

@@ -2,6 +2,26 @@
 
 use crate::editor::mode::EditorStateRef;
 use reedline::{ValidationResult, Validator};
+use std::cell::Cell;
+
+thread_local! {
+    static NATIVE_CONTINUATION_INPUT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run a reedline input read where the native R parser already owns the
+/// accumulated expression and will decide whether this fragment is complete.
+pub(crate) fn with_native_continuation_input<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            NATIVE_CONTINUATION_INPUT.with(|flag| flag.set(self.0));
+        }
+    }
+
+    let previous = NATIVE_CONTINUATION_INPUT.with(|flag| flag.replace(true));
+    let _restore = Restore(previous);
+    f()
+}
 
 /// Validator for R expressions using tree-sitter.
 /// Checks if the input is a complete R expression or needs more input.
@@ -191,6 +211,10 @@ impl Validator for RValidator {
             // because reedline may add a newline AFTER this validator returns
             // (when validation is Incomplete). Clearing uncertain would
             // leave us with stale state thinking it's accurate.
+        }
+
+        if NATIVE_CONTINUATION_INPUT.with(Cell::get) {
+            return ValidationResult::Complete;
         }
 
         let escaped = escape_for_debug(line);

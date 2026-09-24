@@ -2,7 +2,9 @@
 //! `format --stdin-file-path arf-reprex.R --force`, while Arity accepts
 //! `format -`, and both read stdin. `FORMATTER_FIXTURE_MODE=failure` makes
 //! input `42` write a diagnostic to stderr and exit 17; `continuation` writes
-//! `1 +`; otherwise the fixture echoes input.
+//! `sum(1,` and rejects a standalone continuation fragment; `prefix-continuation`
+//! writes a visible expression followed by `1 +`;
+//! otherwise the fixture echoes input.
 
 use std::io::{self, Read, Write};
 use std::process;
@@ -43,7 +45,12 @@ fn format_stdin() -> io::Result<()> {
             eprintln!("synthetic formatter failure");
             process::exit(17);
         }
-        ("continuation", b"42") => io::stdout().write_all(b"1 +"),
+        ("continuation", b"42") => io::stdout().write_all(b"sum(1,"),
+        ("continuation", b"2)") => {
+            eprintln!("the continuation fragment must bypass the formatter");
+            process::exit(19);
+        }
+        ("prefix-continuation", b"42") => io::stdout().write_all(b"cat('PREFIX\\n'); 1 +"),
         _ => io::stdout().write_all(&input),
     }
 }
