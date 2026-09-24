@@ -13,6 +13,8 @@ mod history;
 mod input;
 #[path = "tui/ipc.rs"]
 mod ipc;
+#[path = "tui/outcomes.rs"]
+mod outcomes;
 #[path = "tui/output.rs"]
 mod output;
 #[path = "tui/prompt.rs"]
