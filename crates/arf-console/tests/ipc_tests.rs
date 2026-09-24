@@ -343,11 +343,6 @@ fn send_ipc_request_windows(socket_path: &str, body: &str) -> Result<serde_json:
 // Tests
 // ===========================================================================
 
-// On Windows, crossterm's cursor::position() uses WinAPI which doesn't work
-// inside ConPTY. This prevents reedline from initializing, so arf never
-// reaches the prompt and the IPC server never starts. True Windows IPC
-// testing requires a headless mode (no reedline, just R + IPC server).
-
 /// Test that IPC `evaluate` captures a visible R value.
 #[test]
 fn test_ipc_evaluate_value() {
