@@ -28,17 +28,19 @@ pub use types::{Rstart, SaType, UImode};
 pub use sys::askpass_handler_code;
 pub use sys::install_repl_driver;
 pub use sys::{
-    ReadConsolePromptInfo, ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback,
-    ReplTopLevelPromptCallback, clear_r_interrupt_pending, clear_write_console_callback,
-    command_had_error, ensure_ld_library_path, find_r_library, finish_ipc_capture,
-    flush_reprex_buffer, get_r_home, global_error_handler_code, initialize_r,
-    initialize_r_with_args, is_r_auto_discovery_disabled, is_r_awaiting_console_input,
-    is_r_interrupt_flag_available, is_spinner_active, mark_error_condition,
-    mark_global_error_handler_initialized, process_r_events, r_home_from_library_path,
-    r_home_from_rhome_output, r_library_path, reset_command_error_state, restore_stderr,
-    run_r_mainloop, set_r_auto_discovery_disabled, set_r_interrupt_pending,
+    ReadConsolePromptInfo, ReplFact, ReplInputCallback, ReplInputMode, ReplInputResult,
+    ReplOutcome, ReplOutcomeCallback, ReplPromptClass, ReplReadConsoleStart,
+    ReplTopLevelPromptCallback, begin_repl_read_console, classify_repl_prompt,
+    clear_r_interrupt_pending, clear_write_console_callback, command_had_error, copy_repl_source,
+    ensure_ld_library_path, find_r_library, finish_ipc_capture, flush_reprex_buffer, get_r_home,
+    global_error_handler_code, initialize_r, initialize_r_with_args, is_r_auto_discovery_disabled,
+    is_r_awaiting_console_input, is_r_interrupt_flag_available, is_spinner_active,
+    mark_error_condition, mark_global_error_handler_initialized, process_r_events,
+    r_home_from_library_path, r_home_from_rhome_output, r_library_path, reset_command_error_state,
+    restore_stderr, run_r_mainloop, set_r_auto_discovery_disabled, set_r_interrupt_pending,
     set_read_console_callback, set_reprex_mode, set_spinner_color, set_spinner_frames,
     set_write_console_callback, start_ipc_capture, start_spinner, stop_spinner, suppress_stderr,
+    with_repl_input_guard,
 };
 #[cfg(unix)]
 pub use sys::{

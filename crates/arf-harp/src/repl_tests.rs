@@ -1,4 +1,7 @@
 use arf_libr::{ReplFact, ReplOutcome, install_repl_driver};
+use arf_libr::{
+    ReplInputMode, ReplInputResult, ReplPromptClass, classify_repl_prompt, copy_repl_source,
+};
 use std::ffi::c_void;
 use std::io::Read;
 use std::os::raw::{c_char, c_int};
@@ -25,7 +28,7 @@ const INPUTS: [&[u8]; 11] = [
     b"invisible(987654321L)",
 ];
 
-const EXPECTED: [ReplOutcome; 11] = [
+const EXPECTED: [ReplOutcome; 12] = [
     ReplOutcome {
         command_id: 100,
         expression_id: 1,
@@ -81,6 +84,11 @@ const EXPECTED: [ReplOutcome; 11] = [
         expression_id: 1,
         fact: ReplFact::Completed,
     },
+    ReplOutcome {
+        command_id: 112,
+        expression_id: 1,
+        fact: ReplFact::Completed,
+    },
 ];
 
 unsafe extern "C" {
@@ -88,18 +96,25 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" fn top_level_prompt(prompt: *const c_char, _context: *mut c_void) -> c_int {
+    let class = classify_repl_prompt();
+    if class != ReplPromptClass::TopLevel {
+        return class as c_int;
+    }
     if !prompt.is_null() && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"> " {
-        1
+        ReplPromptClass::TopLevel as c_int
     } else {
-        0
+        marker("ARF_PROMPT_CLASSIFICATION_FAILED");
+        ReplPromptClass::Unobserved as c_int
     }
 }
 
 unsafe extern "C" fn input_callback(
+    mode: c_int,
     prompt: *const c_char,
     buffer: *mut c_char,
     buffer_len: c_int,
     _history: c_int,
+    full_source: *mut *mut c_char,
     command_id: *mut u64,
     _context: *mut c_void,
 ) -> c_int {
@@ -108,7 +123,12 @@ unsafe extern "C" fn input_callback(
         && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"> "
     {
         let input = b"nested input";
-        if buffer.is_null() || command_id.is_null() || buffer_len as usize <= input.len() + 1 {
+        if mode != ReplInputMode::Nested as c_int
+            || buffer.is_null()
+            || command_id.is_null()
+            || full_source.is_null()
+            || buffer_len as usize <= input.len() + 1
+        {
             FAILURES.fetch_add(1, Ordering::SeqCst);
             return 0;
         }
@@ -120,31 +140,49 @@ unsafe extern "C" fn input_callback(
         }
         NESTED_INPUT_PENDING.store(0, Ordering::SeqCst);
         marker("ARF_NESTED_INPUT");
-        return 1;
+        return ReplInputResult::Text as c_int;
     }
 
     let index = INPUT_INDEX.fetch_add(1, Ordering::SeqCst);
     let (input, selected_command_id) = if let Some(input) = INPUTS.get(index) {
-        (*input, 100 + index as u64)
-    } else if index == INPUTS.len() && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
-        (b"rlang::abort('uncaught rlang abort')".as_slice(), 111_u64)
+        (input.to_vec(), 100 + index as u64)
+    } else if index == INPUTS.len() {
+        (
+            format!("{}43L", "# source padding beyond R buffer\n".repeat(600)).into_bytes(),
+            112,
+        )
+    } else if index == INPUTS.len() + 1 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
+    } else if index == INPUTS.len() + 1 {
+        (Vec::new(), 113_u64)
+    } else if index == INPUTS.len() + 2 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (Vec::new(), 113_u64)
     } else {
+        let cancel_index =
+            INPUTS.len() + 2 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
+        if index == cancel_index {
+            marker("ARF_DRIVER_CANCELLED");
+            return ReplInputResult::Cancelled as c_int;
+        }
         marker(if FAILURES.load(Ordering::SeqCst) == 0 {
             "ARF_DRIVER_OK"
         } else {
             "ARF_DRIVER_FAILURES"
         });
         marker("ARF_DRIVER_EOF");
-        return 0;
+        return ReplInputResult::Eof as c_int;
     };
-    if buffer.is_null() || command_id.is_null() || buffer_len as usize <= input.len() + 1 {
+    if command_id.is_null() || full_source.is_null() || mode != ReplInputMode::TopLevel as c_int {
         FAILURES.fetch_add(1, Ordering::SeqCst);
-        return 0;
+        return ReplInputResult::Eof as c_int;
     }
     unsafe {
-        std::ptr::copy_nonoverlapping(input.as_ptr().cast::<c_char>(), buffer, input.len());
-        buffer.add(input.len()).write(b'\n' as c_char);
-        buffer.add(input.len() + 1).write(0);
+        *full_source = copy_repl_source(std::str::from_utf8(&input).unwrap())
+            .unwrap_or_else(|| std::ptr::null_mut());
+        if (*full_source).is_null() {
+            FAILURES.fetch_add(1, Ordering::SeqCst);
+            return ReplInputResult::Eof as c_int;
+        }
         *command_id = selected_command_id;
     }
     if index == 6 {
@@ -153,7 +191,7 @@ unsafe extern "C" fn input_callback(
     if index == 7 {
         arf_libr::set_r_interrupt_pending();
     }
-    1
+    ReplInputResult::Text as c_int
 }
 
 unsafe extern "C" fn outcome_callback(
@@ -169,8 +207,13 @@ unsafe extern "C" fn outcome_callback(
         fact: ReplFact::AbortedEval,
     };
     let expected = EXPECTED.get(index).or_else(|| {
-        (index == EXPECTED.len() && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0)
-            .then_some(&rlang_expected)
+        if index != EXPECTED.len() {
+            None
+        } else if RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+            Some(&rlang_expected)
+        } else {
+            None
+        }
     });
     let Some(expected) = expected else {
         FAILURES.fetch_add(1, Ordering::SeqCst);
@@ -353,6 +396,8 @@ function(text) {
         "ARF_OUTCOME:108:3:completed",
         "ARF_OUTCOME:109:1:completed",
         "ARF_OUTCOME:110:1:completed",
+        "ARF_OUTCOME:112:1:completed",
+        "ARF_DRIVER_CANCELLED",
         "ARF_DRIVER_OK",
         "ARF_DRIVER_EOF",
     ];

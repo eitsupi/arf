@@ -12,7 +12,7 @@
 #[cfg(windows)]
 use super::r_read_console;
 use crate::{ReadConsoleFunc, SEXP, r_library};
-use std::ffi::c_char;
+use std::ffi::{CStr, c_char};
 use std::os::raw::c_int;
 use std::sync::OnceLock;
 
@@ -24,6 +24,54 @@ pub enum ReplFact {
     AbortedParse = 2,
     AbortedEval = 3,
     AbortedPrint = 4,
+}
+
+/// Whether the native trampoline is reading an outer command or input for R
+/// code that is already running.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplInputMode {
+    TopLevel = 0,
+    Nested = 1,
+}
+
+/// Result returned by a REPL input callback.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplInputResult {
+    Eof = 0,
+    Text = 1,
+    Cancelled = 2,
+}
+
+/// R frame classification returned by the guarded native prompt probe.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplPromptClass {
+    Unobserved = 0,
+    TopLevel = 1,
+    Nested = 2,
+}
+
+unsafe extern "C" {
+    fn arf_repl_driver_classify_prompt() -> c_int;
+    fn arf_repl_driver_prompt_info(
+        api: *const NativeApi,
+        raw_prompt: *const c_char,
+        is_continuation: *mut c_int,
+        options_are_ambiguous: *mut c_int,
+    ) -> c_int;
+}
+
+/// Determine whether R is at its outer evaluation frame. The R call is made
+/// entirely inside `R_ToplevelExec` from C, so an R error cannot unwind across
+/// this Rust frame. Returns `Unobserved` if the probe fails.
+pub fn classify_repl_prompt() -> ReplPromptClass {
+    match unsafe { arf_repl_driver_classify_prompt() } {
+        1 => ReplPromptClass::TopLevel,
+        2 => ReplPromptClass::Nested,
+        _ => ReplPromptClass::Unobserved,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,17 +99,44 @@ impl ReplOutcome {
     }
 }
 
-/// Rust input callback invoked by the native C ReadConsole trampoline. It must
-/// fill `buffer` and set `command_id` when returning positive; the callback has
-/// fully returned before R parsing/evaluation begins.
+/// Rust input callback invoked by the native C ReadConsole trampoline. For
+/// top-level input, allocate and fill `full_source` with
+/// [`copy_repl_source`], then set `command_id`; `buffer` is ignored. For nested
+/// input, fill R's bounded `buffer` and leave `full_source` null. Return `Text`,
+/// `Eof`, or `Cancelled`; empty text is not a completed command. The callback
+/// has fully returned before R parsing/evaluation begins.
 pub type ReplInputCallback = unsafe extern "C" fn(
+    mode: c_int,
     prompt: *const c_char,
     buffer: *mut c_char,
     buffer_len: c_int,
     history: c_int,
+    full_source: *mut *mut c_char,
     command_id: *mut u64,
     context: *mut std::ffi::c_void,
 ) -> c_int;
+
+unsafe extern "C" {
+    fn arf_repl_driver_alloc_source(length: usize) -> *mut c_char;
+}
+
+/// Copy a complete top-level command into C-owned memory for the native
+/// trampoline. The C driver frees the allocation after evaluation or recovery.
+/// Interior NUL bytes cannot be represented in an R parser input string.
+pub fn copy_repl_source(source: &str) -> Option<*mut c_char> {
+    if source.as_bytes().contains(&0) {
+        return None;
+    }
+    let ptr = unsafe { arf_repl_driver_alloc_source(source.len()) };
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(source.as_ptr(), ptr.cast::<u8>(), source.len());
+        ptr.add(source.len()).write(0);
+    }
+    Some(ptr)
+}
 
 /// Rust callback invoked once at the next native ReadConsole entry after a
 /// command completes or aborts. Nested prompts do not observe a pending fact.
@@ -72,9 +147,13 @@ pub type ReplOutcomeCallback = unsafe extern "C" fn(
     context: *mut std::ffi::c_void,
 );
 
-/// Prompt classifier owned by the frontend. The prompt text alone may be
-/// ambiguous when `options(prompt)` and `options(continue)` match, so the C
-/// driver never infers top-level status itself.
+/// Prompt classifier owned by the frontend. It is called only when R command
+/// evaluation is not running and no input callback is on the stack; an armed
+/// command awaiting first execution or Unobserved recovery may still be active.
+/// Return the integer value of [`ReplPromptClass`]. `Unobserved` makes the C
+/// driver fail closed without consuming a pending outcome or starting input.
+/// The prompt text alone may be ambiguous when `options(prompt)` and
+/// `options(continue)` match, so the C driver never infers top-level status.
 pub type ReplTopLevelPromptCallback =
     unsafe extern "C" fn(prompt: *const c_char, context: *mut std::ffi::c_void) -> c_int;
 
@@ -91,6 +170,11 @@ struct NativeApi {
     length: unsafe extern "C" fn(SEXP) -> c_int,
     vector_elt: unsafe extern "C" fn(SEXP, isize) -> SEXP,
     logical: unsafe extern "C" fn(SEXP) -> *mut c_int,
+    integer: unsafe extern "C" fn(SEXP) -> *mut c_int,
+    type_of: unsafe extern "C" fn(SEXP) -> c_int,
+    get_option1: unsafe extern "C" fn(SEXP) -> SEXP,
+    string_elt: unsafe extern "C" fn(SEXP, isize) -> SEXP,
+    char_string: unsafe extern "C" fn(SEXP) -> *const c_char,
     print_value: unsafe extern "C" fn(SEXP),
     toplevel_exec: unsafe extern "C" fn(
         Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
@@ -138,6 +222,54 @@ unsafe extern "C" {
 
 static NATIVE_API: OnceLock<NativeApi> = OnceLock::new();
 static INSTALLED_READ_CONSOLE: OnceLock<ReadConsoleFunc> = OnceLock::new();
+
+fn native_api(lib: &crate::RLibrary) -> &'static NativeApi {
+    NATIVE_API.get_or_init(|| unsafe {
+        NativeApi {
+            mk_string: lib.rf_mkstring,
+            install: lib.rf_install,
+            find_var: lib.rf_findvar,
+            cons: lib.rf_cons,
+            lcons: lib.rf_lcons,
+            eval: lib.rf_eval,
+            protect: lib.rf_protect,
+            unprotect: lib.rf_unprotect,
+            length: lib.rf_length,
+            vector_elt: lib.vector_elt,
+            logical: lib.logical,
+            integer: lib.integer,
+            type_of: lib.rf_typeof,
+            get_option1: lib.rf_get_option1,
+            string_elt: lib.string_elt,
+            char_string: lib.r_charsxp,
+            print_value: lib.rf_printvalue,
+            toplevel_exec: lib.r_toplevelexec,
+            unwind_protect: lib.r_unwindprotect,
+            preserve_object: lib.r_preserve_object,
+            release_object: lib.r_release_object,
+            nil_value: *lib.r_nilvalue,
+            unbound_value: *lib.r_unboundvalue,
+            global_env: *lib.r_globalenv,
+            base_env: *lib.r_baseenv,
+        }
+    })
+}
+
+pub(super) fn guarded_prompt_info(raw_prompt: &CStr) -> Option<(bool, bool)> {
+    let lib = crate::r_library().ok()?;
+    let api = native_api(lib);
+    let mut is_continuation = 0;
+    let mut options_are_ambiguous = 0;
+    let succeeded = unsafe {
+        arf_repl_driver_prompt_info(
+            api,
+            raw_prompt.as_ptr(),
+            &mut is_continuation,
+            &mut options_are_ambiguous,
+        )
+    };
+    (succeeded != 0).then_some((is_continuation != 0, options_are_ambiguous != 0))
+}
 
 pub(super) fn installed_read_console_callback() -> Option<ReadConsoleFunc> {
     INSTALLED_READ_CONSOLE.get().copied()
@@ -206,7 +338,8 @@ pub(super) fn windows_read_console_trampoline() -> ReadConsoleFunc {
 /// Must be called on R's main thread after R initialization and before entering
 /// `run_Rmainloop`. The callbacks and context must remain valid for the whole
 /// R session. The input callback must release all Rust locks/guards before it
-/// returns positive. The prompt classifier must distinguish the true outer
+/// returns `Text`, use [`copy_repl_source`] for complete top-level input, and
+/// leave `full_source` null for nested input. The prompt classifier must distinguish the true outer
 /// command prompt from browser, readline, recovery, and continuation prompts;
 /// comparing prompt text alone is insufficient when R prompt options overlap.
 #[cfg(any(unix, windows))]
@@ -228,30 +361,7 @@ pub unsafe fn install_repl_driver(
         return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
     }
 
-    let api = NATIVE_API.get_or_init(|| unsafe {
-        NativeApi {
-            mk_string: lib.rf_mkstring,
-            install: lib.rf_install,
-            find_var: lib.rf_findvar,
-            cons: lib.rf_cons,
-            lcons: lib.rf_lcons,
-            eval: lib.rf_eval,
-            protect: lib.rf_protect,
-            unprotect: lib.rf_unprotect,
-            length: lib.rf_length,
-            vector_elt: lib.vector_elt,
-            logical: lib.logical,
-            print_value: lib.rf_printvalue,
-            toplevel_exec: lib.r_toplevelexec,
-            unwind_protect: lib.r_unwindprotect,
-            preserve_object: lib.r_preserve_object,
-            release_object: lib.r_release_object,
-            nil_value: *lib.r_nilvalue,
-            unbound_value: *lib.r_unboundvalue,
-            global_env: *lib.r_globalenv,
-            base_env: *lib.r_baseenv,
-        }
-    });
+    let api = native_api(lib);
     let mut native_callback = None;
     let installed = unsafe {
         arf_repl_driver_install(

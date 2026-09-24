@@ -36,7 +36,8 @@ pub use output::{
 };
 pub use repl::install_repl_driver;
 pub use repl::{
-    ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback, ReplTopLevelPromptCallback,
+    ReplFact, ReplInputCallback, ReplInputMode, ReplInputResult, ReplOutcome, ReplOutcomeCallback,
+    ReplPromptClass, ReplTopLevelPromptCallback, classify_repl_prompt, copy_repl_source,
 };
 pub use spinner::{
     is_spinner_active, set_spinner_color, set_spinner_frames, start_spinner, stop_spinner,
@@ -51,15 +52,21 @@ use spinner::SPINNER_THREAD;
 #[cfg(test)]
 mod test_utils;
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-
-use crate::SexpType;
 
 #[cfg(unix)]
 use askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_termios};
 use interrupt::AwaitConsoleInputGuard;
 use output::REPREX_SETTINGS;
+
+/// Run a native REPL input callback while the signal handler treats Ctrl+C as
+/// cancellation of input acquisition. The guard is dropped when this function
+/// returns, before the C trampoline starts R parsing or evaluation.
+pub fn with_repl_input_guard<T>(operation: impl FnOnce() -> T) -> T {
+    let _guard = AwaitConsoleInputGuard::new();
+    operation()
+}
 
 /// Option-derived metadata for one ReadConsole invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,49 +77,19 @@ pub struct ReadConsolePromptInfo {
     pub options_are_ambiguous: bool,
 }
 
+/// Result of preparing one native ReadConsole request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplReadConsoleStart {
+    Input(ReadConsolePromptInfo),
+    Askpass(c_int),
+}
+
 /// ReadConsole callback receives the raw R prompt and option-derived metadata.
 type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<String>;
 
 static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
 
 const DEFAULT_CONTINUATION_PROMPT: &str = "+ ";
-
-/// Read a scalar string option without evaluating any R code.
-fn string_option(option_name: &'static [u8]) -> Option<String> {
-    let lib = crate::r_library().ok()?;
-
-    // SAFETY: R is initialized while ReadConsole is invoked. Callers provide a
-    // static NUL-terminated option name. The returned SEXP is borrowed from R.
-    let option = unsafe {
-        let symbol = (lib.rf_install)(option_name.as_ptr() as *const c_char);
-        (lib.rf_get_option1)(symbol)
-    };
-
-    if option.is_null() {
-        return None;
-    }
-
-    // Prompt options must be character vectors with exactly one element. Treat
-    // all other values as malformed.
-    let is_string = unsafe { (lib.rf_typeof)(option) == SexpType::StrSxp as c_int };
-    if !is_string || unsafe { (lib.rf_length)(option) } != 1 {
-        return None;
-    }
-
-    // SAFETY: The type and length were checked above. R's STRING_ELT and R_CHAR
-    // accessors return borrowed objects valid for this ReadConsole invocation.
-    let chars = unsafe {
-        let element = (lib.string_elt)(option, 0);
-        (lib.r_charsxp)(element)
-    };
-    if chars.is_null() {
-        return None;
-    }
-
-    // R strings are not necessarily valid UTF-8. The console callback accepts
-    // UTF-8, so reject malformed values rather than panicking.
-    unsafe { CStr::from_ptr(chars).to_str().ok().map(str::to_owned) }
-}
 
 fn prompt_info_from_options(
     raw_prompt: &str,
@@ -136,13 +113,67 @@ fn prompt_info_from_options(
 /// This is intentionally performed for every invocation because R code may
 /// change either option during a session. Values are not cached.
 fn read_console_prompt_info(raw_prompt: &str) -> ReadConsolePromptInfo {
-    let main_prompt = string_option(b"prompt\0");
-    let continuation_prompt = string_option(b"continue\0");
-    prompt_info_from_options(
-        raw_prompt,
-        main_prompt.as_deref(),
-        continuation_prompt.as_deref(),
-    )
+    let prompt = CString::new(raw_prompt).ok();
+    let guarded = prompt.as_deref().and_then(repl::guarded_prompt_info);
+    if let Some((is_continuation, options_are_ambiguous)) = guarded {
+        ReadConsolePromptInfo {
+            is_continuation,
+            options_are_ambiguous,
+        }
+    } else {
+        prompt_info_from_options(raw_prompt, None, None)
+    }
+}
+
+/// Run the shared ReadConsole prelude for either the legacy Rust callback or
+/// the C-owned native REPL adapter. Askpass remains outside the input-wait
+/// guard because its blocking tty read must observe Ctrl+C directly.
+///
+/// # Safety
+/// `prompt` must be null or a valid R C string. For an askpass prompt, `buffer`
+/// must be writable for `buflen` bytes as required by `read_password_from_tty`.
+pub unsafe fn begin_repl_read_console(
+    prompt: *const c_char,
+    buffer: *mut c_char,
+    buflen: c_int,
+) -> ReplReadConsoleStart {
+    stop_spinner();
+    clear_r_interrupt_pending();
+    #[cfg(unix)]
+    recover_pending_termios();
+
+    let prompt_str = if prompt.is_null() {
+        ""
+    } else {
+        // SAFETY: guaranteed by this function's contract.
+        unsafe { CStr::from_ptr(prompt) }
+            .to_str()
+            .unwrap_or_default()
+    };
+    let prompt_info = read_console_prompt_info(prompt_str);
+
+    #[cfg(unix)]
+    if !prompt.is_null() {
+        let prompt_bytes = unsafe { CStr::from_ptr(prompt) }.to_bytes();
+        if prompt_bytes.starts_with(ASKPASS_PROMPT_PREFIX) {
+            let real_prompt = unsafe { prompt.add(ASKPASS_PROMPT_PREFIX.len()) };
+            return ReplReadConsoleStart::Askpass(unsafe {
+                read_password_from_tty(real_prompt, buffer, buflen)
+            });
+        }
+    }
+
+    if let Ok(mut settings) = REPREX_SETTINGS.write()
+        && settings.enabled
+        && settings.had_output
+    {
+        let is_main_prompt = !prompt_info.is_continuation && !prompt_str.trim().is_empty();
+        if is_main_prompt {
+            println!();
+            settings.had_output = false;
+        }
+    }
+    ReplReadConsoleStart::Input(prompt_info)
 }
 
 /// Buffer for input that exceeds R's buffer size.
@@ -163,25 +194,11 @@ pub(super) unsafe extern "C" fn r_read_console(
     _hist: c_int,
 ) -> c_int {
     log::info!("r_read_console: called with buflen={}", buflen);
-
-    // Stop the spinner when a new prompt is displayed
-    // This handles cases where R finishes evaluation without producing output
-    stop_spinner();
-
-    // Clear any pending interrupt flag at the start of every ReadConsole
-    // invocation (including nested prompts such as readline(), browser(), etc.).
-    // This prevents stale Ctrl+C signals from interrupting the next input read.
-    clear_r_interrupt_pending();
-
-    // Safety net: if a previous password read (via rpassword) was interrupted
-    // by longjmp (SIGINT), the terminal settings snapshot stored in
-    // PENDING_TERMIOS_RESTORE may still need to be reapplied. Recover here at
-    // the earliest safe point by restoring any pending termios state.
-    #[cfg(unix)]
-    recover_pending_termios();
-
-    // Read the prompt options once per invocation and share the resulting
-    // metadata with both the reprex bookkeeping and high-level callback.
+    let start = unsafe { begin_repl_read_console(prompt, buf, buflen) };
+    let prompt_info = match start {
+        ReplReadConsoleStart::Input(prompt_info) => prompt_info,
+        ReplReadConsoleStart::Askpass(result) => return result,
+    };
     let prompt_str: &str = if prompt.is_null() {
         ""
     } else {
@@ -190,44 +207,11 @@ pub(super) unsafe extern "C" fn r_read_console(
             .to_str()
             .unwrap_or_default()
     };
-    let prompt_info = read_console_prompt_info(prompt_str);
-
-    // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
-    // This runs before the input-wait guard on purpose: no Rust loop pumps R
-    // events during the blocking tty read, so the longjmp hazard the guard
-    // prevents does not exist here, and dropping SIGINT would make Ctrl+C at
-    // a password prompt entirely inert. With the flag allowed through,
-    // SA_RESTART resumes the read and the pending interrupt cancels the
-    // requesting operation as soon as the read returns.
-    #[cfg(unix)]
-    if !prompt.is_null() {
-        let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
-        if prompt_bytes.starts_with(ASKPASS_PROMPT_PREFIX) {
-            let real_prompt = unsafe { prompt.add(ASKPASS_PROMPT_PREFIX.len()) };
-            return unsafe { read_password_from_tty(real_prompt, buf, buflen) };
-        }
-    }
 
     // Mark that R is waiting for console input until this call returns, so
     // the Ctrl+C handler drops interrupts instead of setting R's flag while
     // Rust input loops are pumping R events (see R_AWAITING_CONSOLE_INPUT).
     let _await_input_guard = AwaitConsoleInputGuard::new();
-
-    // In reprex mode, print a blank line between expressions for readability
-    // Only print for main prompts (not continuation prompts like "+")
-    if let Ok(mut settings) = REPREX_SETTINGS.write()
-        && settings.enabled
-        && settings.had_output
-    {
-        // Check if this is a main prompt (not continuation). Use the same
-        // option-derived classification passed to the high-level callback.
-        let is_main_prompt = !prompt_info.is_continuation && !prompt_str.trim().is_empty();
-
-        if is_main_prompt {
-            println!();
-            settings.had_output = false;
-        }
-    }
 
     // Get input - either from pending buffer or from callback
     let input = {

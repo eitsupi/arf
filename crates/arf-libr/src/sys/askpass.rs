@@ -8,12 +8,12 @@ use std::os::raw::{c_char, c_int};
 #[cfg(unix)]
 pub(super) const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 
-/// Safety net for termios restoration after longjmp.
+/// Safety net for termios restoration if a password reader exits abnormally.
 ///
-/// When R's SIGINT handler fires during password reading, it may longjmp
-/// out of `read_password_from_tty`, bypassing the normal echo-restoration
-/// path in the password-reading code. This can leave the terminal with echo
-/// disabled — a critical UX issue.
+/// The REPL installs its own SIGINT handler and disables R's signal handlers.
+/// The password reader normally restores terminal state through its own RAII,
+/// including when interrupted. Keep a separate snapshot so the next prompt can
+/// restore the terminal if an abnormal exit bypasses that cleanup.
 ///
 /// Before disabling echo we store `(fd, old_termios)` here; on successful
 /// restoration we clear it. `r_read_console` checks this on every entry
@@ -22,11 +22,11 @@ pub(super) const ASKPASS_PROMPT_PREFIX: &[u8] = b"\x01ASKPASS\x02";
 static PENDING_TERMIOS_RESTORE: std::sync::Mutex<Option<(c_int, libc::termios)>> =
     std::sync::Mutex::new(None);
 
-/// Recover terminal settings if a previous `read_password_from_tty` was
-/// interrupted by longjmp (e.g. SIGINT → R's error handler).
+/// Recover terminal settings if a previous `read_password_from_tty` exited
+/// before clearing its terminal snapshot.
 ///
-/// Called at the top of `r_read_console` so recovery happens at the earliest
-/// safe point after the longjmp lands.
+/// Called at the start of every ReadConsole request so recovery happens before
+/// another password read begins.
 #[cfg(unix)]
 pub(super) fn recover_pending_termios() {
     let mut guard = match PENDING_TERMIOS_RESTORE.lock() {
@@ -66,11 +66,10 @@ pub(super) fn recover_pending_termios() {
             break;
         }
         if let Some(close_fd) = clear_snapshot {
-            let leaked = guard.take();
-            if close_fd && let Some((fd, _)) = leaked {
-                // Close the /dev/tty fd that was leaked by the interrupted read.
-                // This fd is still open because longjmp skipped File's destructor;
-                // the OS won't reuse an open fd number, so double-close cannot happen.
+            let stale_snapshot = guard.take();
+            if close_fd && let Some((fd, _)) = stale_snapshot {
+                // Close the /dev/tty fd retained by the stale snapshot after
+                // terminal state has been restored.
                 unsafe { libc::close(fd) };
             }
         }
@@ -100,10 +99,10 @@ unsafe fn write_empty_password(buf: *mut c_char, buflen: c_int) {
 /// Uses `rpassword::prompt_password` which handles `/dev/tty` open, echo
 /// suppression via termios, reading, restoration, and newline echo internally.
 ///
-/// **longjmp safety**: Before calling rpassword, we snapshot the current
-/// terminal state into [`PENDING_TERMIOS_RESTORE`]. If R's SIGINT handler
-/// longjmps past rpassword's internal cleanup, `r_read_console` recovers
-/// on its next invocation.
+/// Before calling rpassword, we snapshot the current terminal state into
+/// [`PENDING_TERMIOS_RESTORE`]. The REPL's SIGINT path lets the password reader
+/// return normally so its internal cleanup can restore terminal echo. The
+/// separate snapshot remains a fallback for abnormal exits.
 ///
 /// **Fail-closed**: on any error, writes an empty password to `buf` so R's
 /// handler treats it as cancellation. Never falls back to reedline.
@@ -142,14 +141,9 @@ pub(super) unsafe fn read_password_from_tty(
             .into_owned()
     };
 
-    // Snapshot terminal state BEFORE rpassword modifies it.
-    // If R's SIGINT handler longjmps during the read, rpassword's internal
-    // RAII is also skipped. r_read_console checks PENDING_TERMIOS_RESTORE
-    // on each entry and restores the terminal at the earliest safe point.
-    //
-    // Note: this fd is separate from the one rpassword opens internally.
-    // On longjmp, rpassword's fd leaks (one fd table entry until process
-    // exit) but the terminal state is correctly recovered via our snapshot.
+    // Snapshot terminal state BEFORE rpassword modifies it. This fd is
+    // separate from the one rpassword opens internally and lets the next
+    // ReadConsole request recover if the reader exits before its normal cleanup.
     let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
     if tty_fd >= 0 {
         let mut old_termios: libc::termios = unsafe { std::mem::zeroed() };
