@@ -10,7 +10,7 @@ static OUTCOME_INDEX: AtomicUsize = AtomicUsize::new(0);
 static FAILURES: AtomicUsize = AtomicUsize::new(0);
 static NESTED_INPUT_PENDING: AtomicUsize = AtomicUsize::new(0);
 
-const INPUTS: [&[u8]; 7] = [
+const INPUTS: [&[u8]; 11] = [
     b"42L",
     b".arf_incremental_side_effect <- 7L; 1 + * 2",
     b"stop('uncaught eval')",
@@ -18,9 +18,13 @@ const INPUTS: [&[u8]; 7] = [
     b"tryCatch(stop('handled'), error = function(e) 42)",
     b"stopifnot(identical(.arf_incremental_side_effect, 7L)); 42L",
     b"stopifnot(identical(readline('> '), 'nested input')); 7L",
+    b"Sys.sleep(0.01)",
+    b"gctorture(100); local({ x <- lapply(seq_len(100), function(i) paste0('gc-', i)); x[[100L]] }); invisible(gctorture(FALSE))",
+    b"NULL",
+    b"invisible(987654321L)",
 ];
 
-const EXPECTED: [ReplOutcome; 7] = [
+const EXPECTED: [ReplOutcome; 11] = [
     ReplOutcome {
         command_id: 100,
         expression_id: 1,
@@ -54,6 +58,26 @@ const EXPECTED: [ReplOutcome; 7] = [
     ReplOutcome {
         command_id: 106,
         expression_id: 2,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 107,
+        expression_id: 1,
+        fact: ReplFact::AbortedEval,
+    },
+    ReplOutcome {
+        command_id: 108,
+        expression_id: 3,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 109,
+        expression_id: 1,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 110,
+        expression_id: 1,
         fact: ReplFact::Completed,
     },
 ];
@@ -113,8 +137,11 @@ unsafe extern "C" fn input_callback(
         buffer.add(input.len() + 1).write(0);
         *command_id = 100 + index as u64;
     }
-    if index + 1 == INPUTS.len() {
+    if index == 6 {
         NESTED_INPUT_PENDING.store(1, Ordering::SeqCst);
+    }
+    if index == 7 {
+        arf_libr::set_r_interrupt_pending();
     }
     1
 }
@@ -157,9 +184,9 @@ fn marker(text: &str) {
 
 #[test]
 #[ignore = "runs an incremental command driver in the native R mainloop"]
-fn c_repl_driver_recovers_parse_eval_print_and_handled_conditions() {
+fn c_repl_driver_recovers_failures_interrupts_gc_and_visibility() {
     const TEST_NAME: &str =
-        "repl_tests::c_repl_driver_recovers_parse_eval_print_and_handled_conditions";
+        "repl_tests::c_repl_driver_recovers_failures_interrupts_gc_and_visibility";
     const CHILD_ENV: &str = "ARF_C_REPL_DRIVER_CHILD";
     if std::env::var(CHILD_ENV).as_deref() == Ok("1") {
         unsafe {
@@ -257,6 +284,10 @@ function(text) {
         "ARF_OUTCOME:105:2:completed",
         "ARF_NESTED_INPUT",
         "ARF_OUTCOME:106:2:completed",
+        "ARF_OUTCOME:107:1:eval",
+        "ARF_OUTCOME:108:3:completed",
+        "ARF_OUTCOME:109:1:completed",
+        "ARF_OUTCOME:110:1:completed",
         "ARF_DRIVER_EOF",
     ];
     let actual = stdout
@@ -271,5 +302,13 @@ function(text) {
     assert_eq!(
         actual, expected_markers,
         "child stdout: {stdout}\nchild stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("NULL"),
+        "visible NULL was not printed: {stdout}"
+    );
+    assert!(
+        !stdout.contains("987654321"),
+        "invisible result was printed: {stdout}"
     );
 }
