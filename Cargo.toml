@@ -96,7 +96,6 @@ ctrlc = { version = "3.4", features = ["termination"] }
 # Testing
 insta = "1.46"
 serial_test = "4"
-portable-pty = "0.9"
 regex = "1.11"
 tempfile = "3"
 tui-test-rs = { version = "=0.1.0-beta.5", default-features = false }

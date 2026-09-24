@@ -147,7 +147,6 @@ dependencies = [
  "nu-ansi-term",
  "nucleo-matcher",
  "once_cell",
- "portable-pty",
  "pulldown-cmark",
  "ratatui",
  "reedline",
