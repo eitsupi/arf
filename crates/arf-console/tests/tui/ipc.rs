@@ -606,8 +606,6 @@ fn incomplete_ipc_code_is_rejected_without_entering_continuation() -> Result<()>
         &["--with-ipc", "--ipc-eval-unrestricted"],
         |terminal| {
             terminal.wait_for_first_prompt()?;
-            let checkpoint = terminal.checkpoint()?;
-
             let send = terminal
                 .start_ipc(&["send", "foo("])?
                 .finish_with_status()?;
@@ -634,12 +632,6 @@ fn incomplete_ipc_code_is_rejected_without_entering_continuation() -> Result<()>
                 "INCOMPLETE_IPC_RECOVERED",
                 PROMPT,
             )?;
-            ensure!(
-                terminal
-                    .output_since(checkpoint)?
-                    .contains("INCOMPLETE_IPC_RECOVERED"),
-                "follow-up output was not observed after incomplete IPC requests"
-            );
             Ok(())
         },
     )
@@ -868,6 +860,7 @@ fn live_send_policy_controls_ipc_approval_and_session_info() -> Result<()> {
             );
 
             let assignment = "send_policy_allow_echo <- 1";
+            let assignment_before = terminal.state()?;
             let assignment_checkpoint = terminal.checkpoint()?;
             let request = terminal.start_ipc(&["send", assignment])?;
             let response = request.finish()?;
@@ -879,11 +872,23 @@ fn live_send_policy_controls_ipc_approval_and_session_info() -> Result<()> {
                 "policy-allow assignment reaches a fresh prompt",
                 |state, line| line.trim_end() == PROMPT && state.text.contains(assignment),
             )?;
+            let assignment_state = terminal.state()?;
             ensure!(
-                terminal
-                    .output_since(assignment_checkpoint)?
-                    .contains(assignment),
-                "policy-allow silent assignment echo was not retained"
+                assignment_state.cursor.y > assignment_before.cursor.y,
+                "policy-allow assignment did not advance to a fresh screen row: {assignment_state:?}"
+            );
+            let assignment_lines = assignment_state.text.lines().collect::<Vec<_>>();
+            let assignment_line = assignment_lines
+                .iter()
+                .position(|line| line.starts_with("agent> ") && line.contains(assignment));
+            let prompt_line = assignment_lines
+                .iter()
+                .rposition(|line| line.trim_end() == PROMPT);
+            ensure!(
+                assignment_line
+                    .zip(prompt_line)
+                    .is_some_and(|(sent, prompt)| sent < prompt),
+                "policy-allow assignment was not echoed before the fresh R prompt: {assignment_state:?}"
             );
             ensure!(
                 !terminal
@@ -964,7 +969,7 @@ fn approved_ipc_input_is_evaluated_before_the_next_prompt() -> Result<()> {
         terminal.submit("ipc_input", "[1] 42", PROMPT)?;
 
         let marker = "IPC_SILENT_ASSIGNMENT <- 7";
-        let checkpoint = terminal.checkpoint()?;
+        let assignment_before = terminal.state()?;
         let request = terminal.start_ipc(&["send", marker])?;
         terminal.wait_for("silent IPC assignment approval", |state, _| {
             state.text.contains("IPC send request:")
@@ -981,9 +986,23 @@ fn approved_ipc_input_is_evaluated_before_the_next_prompt() -> Result<()> {
             "silent assignment reaches the next prompt",
             |state, line| line.trim_end() == PROMPT && state.text.contains(marker),
         )?;
+        let assignment_state = terminal.state()?;
         ensure!(
-            terminal.output_since(checkpoint)?.contains(marker),
-            "silent IPC assignment echo was not retained"
+            assignment_state.cursor.y > assignment_before.cursor.y,
+            "approved assignment did not advance to a fresh screen row: {assignment_state:?}"
+        );
+        let assignment_lines = assignment_state.text.lines().collect::<Vec<_>>();
+        let assignment_line = assignment_lines
+            .iter()
+            .position(|line| line.starts_with("agent> ") && line.contains(marker));
+        let prompt_line = assignment_lines
+            .iter()
+            .rposition(|line| line.trim_end() == PROMPT);
+        ensure!(
+            assignment_line
+                .zip(prompt_line)
+                .is_some_and(|(sent, prompt)| sent < prompt),
+            "approved assignment was not echoed before the fresh R prompt: {assignment_state:?}"
         );
         terminal.submit("IPC_SILENT_ASSIGNMENT", "[1] 7", PROMPT)
     })

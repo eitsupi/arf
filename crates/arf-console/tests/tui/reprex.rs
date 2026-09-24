@@ -200,25 +200,37 @@ on_exit_only = false
                     .any(|(command, status)| { command == "42" && *status == Some(1) })
             );
 
-            let follow_up_checkpoint = terminal.checkpoint()?;
             let follow_up = "cat('FOLLOW_UP_ONE\\n'); 1";
+            let before_follow_up = terminal.state()?;
             terminal.enter(follow_up)?;
             terminal.wait_for("follow-up success", |state, line| {
                 state.text.contains("FOLLOW_UP_ONE")
                     && state.text.contains("[1] 1")
                     && line.trim_end().ends_with("ARF>")
             })?;
-            ensure!(
-                terminal
-                    .output_since(follow_up_checkpoint)?
-                    .contains("[1] 1"),
-                "follow-up result was not emitted after its checkpoint"
-            );
             wait_for_history(&history, "history forget after follow-up", |rows| {
                 rows.iter().any(|(command, status)| {
                     command.contains("FOLLOW_UP_ONE") && *status == Some(0)
                 }) && !rows.iter().any(|(command, _)| command == "42")
             })?;
+            let follow_up_state = terminal.state()?;
+            ensure!(
+                follow_up_state.cursor.y > before_follow_up.cursor.y,
+                "follow-up evaluation did not advance to a fresh screen row: {follow_up_state:?}"
+            );
+            let lines = follow_up_state.text.lines().collect::<Vec<_>>();
+            let follow_up_marker = lines.iter().position(|line| line.contains("FOLLOW_UP_ONE"));
+            let result = lines.iter().rposition(|line| line.contains("[1] 1"));
+            let prompt = lines
+                .iter()
+                .rposition(|line| line.trim_end().ends_with("ARF>"));
+            ensure!(
+                follow_up_marker
+                    .zip(result)
+                    .zip(prompt)
+                    .is_some_and(|((marker, result), prompt)| marker < result && result < prompt),
+                "follow-up marker and result were not visible in order before the fresh prompt: {follow_up_state:?}"
+            );
             terminal.quit()
         },
     )
