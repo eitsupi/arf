@@ -25,13 +25,9 @@ fn help_browser_exits_with_escape_and_returns_to_r() -> Result<()> {
             terminal.enter(":h")?;
             terminal.wait_for("help browser", |state, _| {
                 state.exited.is_none()
-                    && state.text.contains("Filter: ")
+                    && state.text.contains("Filter: _")
                     && state.text.contains("Esc exit")
             })?;
-            ensure!(
-                terminal.output()?.contains("Help Search"),
-                "help browser title was not rendered"
-            );
             terminal.key("Escape")?;
             wait_for_prompt_after_ui(terminal, "help browser exits")?;
             terminal.submit("42", "[1] 42", PROMPT)
@@ -130,12 +126,10 @@ fn history_browser_persists_between_sessions() -> Result<()> {
     run_session_with_history("history-persist-read", history.path(), |terminal| {
         terminal.enter(":history browse")?;
         terminal.wait_for("history browser restored command", |state, _| {
-            state.text.contains(unique) && state.text.contains("q exit")
+            state.text.contains("Filter: host:")
+                && state.text.contains(unique)
+                && state.text.contains("q exit")
         })?;
-        ensure!(
-            terminal.output()?.contains("History Browser"),
-            "history browser title was not rendered"
-        );
         terminal.key("q")?;
         wait_for_prompt_after_ui(terminal, "history browser exits")?;
         terminal.submit("42", "[1] 42", PROMPT)

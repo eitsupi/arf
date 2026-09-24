@@ -426,7 +426,10 @@ impl Terminal {
     pub fn wait_for_prompt(&self, output: Option<&str>, prompt: &str) -> Result<()> {
         // A new, independent output line plus the cursor's prompt line avoids
         // matching old prompts and source echoes. Each command's marker must be
-        // unique within the session. For repeated output use recording checkpoints.
+        // unique within the session. For repeated commands, require a fresh
+        // screen row/cursor generation and distinct result text; recording
+        // checkpoints are for stream-only checks such as erased output, echoes,
+        // and non-leak behavior.
         // arf emits no shell integration: WaitReady/WaitCommand are not suitable.
         // tui-test's text locator currently takes only the first character in each cell
         // and treats empty wide-character continuation cells as spaces, so it

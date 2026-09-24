@@ -31,16 +31,10 @@ continuation = "CONT> "
             .config(config),
         |terminal| {
             terminal.wait_for("custom main prompt", |_, line| line.trim_end() == "MAIN>")?;
-            let options_checkpoint = terminal.checkpoint()?;
             terminal.enter("options(continue = '... ')")?;
             terminal.wait_for("main prompt after options", |state, line| {
                 state.text.contains("options(continue = '... ')") && line.trim_end() == "MAIN>"
             })?;
-            ensure!(
-                terminal
-                    .output_since(options_checkpoint)?
-                    .contains("options(continue ")
-            );
             terminal.write(r#"x <- r"(hello"#)?;
             terminal.key("Enter")?;
             terminal.wait_for("custom continuation prompt", |_, line| {
@@ -113,19 +107,12 @@ continuation = "CONT> "
             terminal.wait_for("formatter main prompt", |_, line| {
                 line.trim_end().ends_with("MAIN>")
             })?;
-            let options_checkpoint = terminal.checkpoint()?;
             terminal.enter("options(continue = '... ')")?;
             terminal.wait_for("formatter options prompt", |state, line| {
                 state.text.contains("options(continue = '... ')")
                     && line.trim_end().ends_with("MAIN>")
             })?;
-            ensure!(
-                terminal
-                    .output_since(options_checkpoint)?
-                    .contains("options(continue ")
-            );
 
-            let formatted_checkpoint = terminal.checkpoint()?;
             terminal.enter("42")?;
             terminal.wait_for("formatter continuation prompt", |_, line| {
                 line.trim_end().ends_with("CONT>")
@@ -135,11 +122,6 @@ continuation = "CONT> "
             terminal.wait_for("formatted expression result", |state, line| {
                 state.text.contains("[1] 3") && line.trim_end().ends_with("MAIN>")
             })?;
-            ensure!(
-                terminal
-                    .output_since(formatted_checkpoint)?
-                    .contains("[1] 3")
-            );
             terminal.quit()
         },
     )
