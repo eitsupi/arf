@@ -94,6 +94,14 @@ pub struct ReplState {
     pub shell_history: crate::history::HistoryRuntime,
     /// History context for the command whose evaluation just completed.
     pub pending_history_context: PendingHistoryContext,
+    /// Reducer state for the command currently running in the native driver.
+    pub command_lifecycle: Option<CommandLifecycle>,
+    /// Command whose deferred history result is currently pending.
+    pub pending_history_command_id: Option<CommandId>,
+    /// Origin to assign to the next command returned by the top-level input UI.
+    pub next_command_origin: Option<CommandOrigin>,
+    /// Set when reedline returned Ctrl+C while acquiring top-level input.
+    pub input_was_cancelled: bool,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

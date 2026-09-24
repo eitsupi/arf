@@ -8,10 +8,17 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 use reedline::{HistoryItemId, Signal};
+use std::ffi::{CStr, c_void};
 use std::io::{self, Write};
+use std::os::raw::{c_char, c_int};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::history::{finalize_history, save_ipc_history};
-use super::state::{PendingHistoryContext, SpongeQueue};
+use super::state::{
+    CommandEvent, CommandId, CommandOrigin, CommandPhase, HistoryEffect, NativeTerminalFact,
+    PendingHistoryContext, PromptEffect, SpongeEffect, SpongeQueue, reduce_command,
+};
 use super::{
     MetaAction, REPL_STATE, RPrompt, SessionInfoContext, arf_eprintln, arf_println,
     clear_input_lines, execute_shell_command, handle_meta_command_result, meta_command,
@@ -21,6 +28,48 @@ use super::{
 struct ApprovedInteractiveIpcOperation {
     reply: tokio::sync::oneshot::Sender<crate::ipc::protocol::IpcResponse>,
     wrote_newline: bool,
+}
+
+static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
+static PENDING_NESTED_INPUT: Mutex<String> = Mutex::new(String::new());
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeInputMode {
+    TopLevel,
+    Nested,
+}
+
+fn native_input_mode(mode: c_int) -> Option<NativeInputMode> {
+    match mode {
+        value if value == arf_libr::ReplInputMode::TopLevel as c_int => {
+            Some(NativeInputMode::TopLevel)
+        }
+        value if value == arf_libr::ReplInputMode::Nested as c_int => Some(NativeInputMode::Nested),
+        _ => None,
+    }
+}
+
+fn is_no_command_input(input: &str) -> bool {
+    input.trim().is_empty()
+}
+
+fn native_outcome_matches_command(
+    command_id: u64,
+    active_command: CommandId,
+    pending_history_command: Option<CommandId>,
+) -> bool {
+    active_command.0 == command_id && pending_history_command == Some(active_command)
+}
+
+fn discard_unstarted_history_context() {
+    REPL_STATE.with(|state| {
+        if let Ok(mut state) = state.try_borrow_mut()
+            && let Some(state) = state.as_mut()
+        {
+            state.pending_history_context = PendingHistoryContext::None;
+            state.pending_history_command_id = None;
+        }
+    });
 }
 
 /// Record the outcome for a command that has already been saved by reedline.
@@ -77,15 +126,256 @@ fn approve_interactive_ipc_operation(
     }
 }
 
+pub(super) unsafe extern "C" fn native_top_level_prompt_callback(
+    _prompt: *const c_char,
+    _context: *mut c_void,
+) -> c_int {
+    arf_libr::classify_repl_prompt() as c_int
+}
+
+pub(super) unsafe extern "C" fn native_input_callback(
+    mode: c_int,
+    prompt: *const c_char,
+    buffer: *mut c_char,
+    buffer_len: c_int,
+    _history: c_int,
+    full_source_out: *mut *mut c_char,
+    command_id_out: *mut u64,
+    _context: *mut c_void,
+) -> c_int {
+    let Some(mode) = native_input_mode(mode) else {
+        return arf_libr::ReplInputResult::Eof as c_int;
+    };
+    let start = unsafe { arf_libr::begin_repl_read_console(prompt, buffer, buffer_len) };
+    let prompt_info = match start {
+        arf_libr::ReplReadConsoleStart::Input(info) => info,
+        arf_libr::ReplReadConsoleStart::Askpass(result) => {
+            return if result == 0 {
+                arf_libr::ReplInputResult::Eof as c_int
+            } else {
+                arf_libr::ReplInputResult::Text as c_int
+            };
+        }
+    };
+    let prompt_text = if prompt.is_null() {
+        ""
+    } else {
+        unsafe { CStr::from_ptr(prompt) }
+            .to_str()
+            .unwrap_or_default()
+    };
+    let forced_kind = match mode {
+        NativeInputMode::TopLevel => PromptKind::Command,
+        NativeInputMode::Nested => PromptKind::Other,
+    };
+
+    if mode == NativeInputMode::Nested {
+        let mut pending = PENDING_NESTED_INPUT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !pending.is_empty() {
+            return write_nested_input(&mut pending, buffer, buffer_len);
+        }
+    }
+
+    let input = read_console_callback_impl(prompt_text, prompt_info, Some(forced_kind), true);
+    let Some(input) = input else {
+        return arf_libr::ReplInputResult::Eof as c_int;
+    };
+
+    if mode == NativeInputMode::Nested {
+        let mut pending = PENDING_NESTED_INPUT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *pending = input;
+        return write_nested_input(&mut pending, buffer, buffer_len);
+    }
+
+    let Some((cancelled, origin)) = REPL_STATE.with(|state| {
+        let mut state = state.try_borrow_mut().ok()?;
+        let state = state.as_mut()?;
+        let cancelled = std::mem::take(&mut state.input_was_cancelled);
+        let origin = state
+            .next_command_origin
+            .take()
+            .unwrap_or(CommandOrigin::User);
+        Some((cancelled, origin))
+    }) else {
+        log::error!("Unable to access REPL state after native input callback");
+        return arf_libr::ReplInputResult::Cancelled as c_int;
+    };
+
+    if cancelled {
+        return arf_libr::ReplInputResult::Cancelled as c_int;
+    }
+    if is_no_command_input(&input) {
+        return arf_libr::copy_repl_source("")
+            .map(|source| {
+                unsafe { *full_source_out = source };
+                arf_libr::ReplInputResult::Text as c_int
+            })
+            .unwrap_or(arf_libr::ReplInputResult::Cancelled as c_int);
+    }
+    let Some(source) = arf_libr::copy_repl_source(&input) else {
+        arf_eprintln!("Error: failed to allocate R command input");
+        discard_unstarted_history_context();
+        return arf_libr::ReplInputResult::Cancelled as c_int;
+    };
+    let id = NEXT_COMMAND_ID.fetch_add(1, Ordering::Relaxed).max(1);
+    unsafe { *full_source_out = source };
+    let id = CommandId(id);
+    let reduction = reduce_command(None, CommandEvent::Accepted { id, origin });
+    let started = reduce_command(reduction.lifecycle, CommandEvent::Started { id });
+    let started = reduce_command(
+        started.lifecycle,
+        CommandEvent::PhaseChanged {
+            id,
+            phase: CommandPhase::Parse,
+        },
+    );
+    let stored = REPL_STATE.with(|state| {
+        if let Ok(mut state) = state.try_borrow_mut()
+            && let Some(state) = state.as_mut()
+        {
+            state.command_lifecycle = started.lifecycle;
+            state.pending_history_command_id = Some(id);
+            return true;
+        }
+        false
+    });
+    if !stored {
+        log::error!("Unable to store accepted native R command lifecycle");
+        discard_unstarted_history_context();
+        return arf_libr::ReplInputResult::Cancelled as c_int;
+    }
+    unsafe { *command_id_out = id.0 };
+    arf_libr::ReplInputResult::Text as c_int
+}
+
+fn write_nested_input(input: &mut String, buffer: *mut c_char, buffer_len: c_int) -> c_int {
+    if buffer.is_null() || buffer_len <= 2 {
+        return arf_libr::ReplInputResult::Eof as c_int;
+    }
+    let max = (buffer_len as usize).saturating_sub(2);
+    let mut end = input.len().min(max);
+    while !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut chunk = input.drain(..end).collect::<String>();
+    if input.is_empty() {
+        chunk.push('\n');
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(chunk.as_ptr(), buffer.cast::<u8>(), chunk.len());
+        buffer.add(chunk.len()).write(0);
+    }
+    arf_libr::ReplInputResult::Text as c_int
+}
+
+pub(super) unsafe extern "C" fn native_outcome_callback(
+    command_id: u64,
+    _expression_id: u32,
+    fact: u8,
+    _context: *mut c_void,
+) {
+    if command_id == 0 {
+        return;
+    }
+    let Some(outcome) = arf_libr::ReplOutcome::from_native(command_id, _expression_id, fact) else {
+        return;
+    };
+    let fact = match outcome.fact {
+        arf_libr::ReplFact::Completed => NativeTerminalFact::Completed,
+        arf_libr::ReplFact::AbortedParse => NativeTerminalFact::Aborted(CommandPhase::Parse),
+        arf_libr::ReplFact::AbortedEval => NativeTerminalFact::Aborted(CommandPhase::Eval),
+        arf_libr::ReplFact::AbortedPrint => NativeTerminalFact::Aborted(CommandPhase::Print),
+        arf_libr::ReplFact::Unobserved => NativeTerminalFact::Unobserved,
+    };
+    REPL_STATE.with(|state| {
+        let Ok(mut borrowed) = state.try_borrow_mut() else {
+            return;
+        };
+        let Some(state) = borrowed.as_mut() else {
+            return;
+        };
+        let Some(lifecycle) = state.command_lifecycle else {
+            return;
+        };
+        let id = lifecycle.id;
+        if !native_outcome_matches_command(command_id, id, state.pending_history_command_id) {
+            log::warn!("Ignoring stale native R outcome for command {command_id}");
+            return;
+        }
+        let awaiting = reduce_command(Some(lifecycle), CommandEvent::AwaitingTopLevel { id });
+        let terminal = reduce_command(
+            awaiting.lifecycle,
+            CommandEvent::NativeTerminal { id, fact },
+        );
+        let Some(finalized) = terminal.finalized else {
+            return;
+        };
+        state.command_lifecycle = terminal.lifecycle;
+        state.pending_history_command_id = None;
+        PENDING_NESTED_INPUT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        arf_libr::stop_spinner();
+        crate::ipc::set_r_at_prompt(true);
+
+        let projection = finalized.consumer_projection();
+        match projection.prompt {
+            PromptEffect::SetSuccess => state.prompt_config.set_last_command_failed(false),
+            PromptEffect::SetFailure => state.prompt_config.set_last_command_failed(true),
+            PromptEffect::Keep => {}
+        }
+        if !matches!(projection.prompt, PromptEffect::Keep) {
+            state.prompt_config.set_command_duration();
+        }
+        let pending = std::mem::take(&mut state.pending_history_context);
+        let (store, history_id) = match pending {
+            PendingHistoryContext::Command { store, history_id } => (store, history_id),
+            PendingHistoryContext::None => (None, None),
+        };
+        match (projection.history, projection.sponge) {
+            (HistoryEffect::Success, SpongeEffect::RecordSuccess) => record_command_outcome(
+                store,
+                history_id,
+                false,
+                &state.forget_config,
+                &mut state.sponge_queue,
+            ),
+            (HistoryEffect::Failure, SpongeEffect::RecordFailure) => record_command_outcome(
+                store,
+                history_id,
+                true,
+                &state.forget_config,
+                &mut state.sponge_queue,
+            ),
+            _ => {}
+        }
+    });
+}
+
 /// ReadConsole callback function.
 /// This is called by R when it needs user input.
 ///
 /// With the Validator in place, reedline handles multiline input internally.
 /// The callback receives complete expressions (possibly with embedded newlines)
 /// from reedline and passes them to R.
+#[allow(dead_code)] // Retained as the legacy path for the next cleanup slice.
 pub(super) fn read_console_callback(
     r_prompt: &str,
     prompt_info: arf_libr::ReadConsolePromptInfo,
+) -> Option<String> {
+    read_console_callback_impl(r_prompt, prompt_info, None, false)
+}
+
+fn read_console_callback_impl(
+    r_prompt: &str,
+    prompt_info: arf_libr::ReadConsolePromptInfo,
+    forced_prompt_kind: Option<PromptKind>,
+    native_driver: bool,
 ) -> Option<String> {
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
@@ -122,7 +412,8 @@ pub(super) fn read_console_callback(
         // supplies their metadata here. Classify the prompt once so every
         // lifecycle, IPC, display, menu, formatter, and history decision shares
         // one value.
-        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation);
+        let prompt_kind = forced_prompt_kind
+            .unwrap_or_else(|| classify_prompt(r_prompt, prompt_info.is_continuation));
 
         // Update exit_status for the previous command when a new prompt is shown.
         // This is called when R has finished evaluating and wants new input.
@@ -134,7 +425,7 @@ pub(super) fn read_console_callback(
         // requests are correctly rejected during non-command prompts.
         crate::ipc::set_r_at_prompt(prompt_kind.is_command());
 
-        if prompt_kind.is_command() && !state.prompt_config.is_shell_enabled() {
+        if prompt_kind.is_command() && !state.prompt_config.is_shell_enabled() && !native_driver {
             let pending_history_context = std::mem::take(&mut state.pending_history_context);
             let had_error = match pending_history_context {
                 PendingHistoryContext::Command { store, history_id } => {
@@ -161,6 +452,10 @@ pub(super) fn read_console_callback(
             arf_libr::reset_command_error_state();
         }
 
+        if prompt_kind.is_command() {
+            state.input_was_cancelled = false;
+        }
+
         // Check for pending IPC operations before entering the reedline input loop.
         // At this point reedline hasn't started, so there's no editor buffer to
         // conflict with — we can always accept.
@@ -177,7 +472,14 @@ pub(super) fn read_console_callback(
                     // Unlike visible eval / user_input, silent eval does not return
                     // code to R. It runs synchronously here and then falls through
                     // to the reedline loop below to wait for user input.
+                    drop(guard);
                     run_silent_eval(&op.code, reply);
+                    return read_console_callback_impl(
+                        r_prompt,
+                        prompt_info,
+                        forced_prompt_kind,
+                        native_driver,
+                    );
                 }
                 PendingIpcKind::VisibleEvaluate { reply, timeout } => {
                     if let Some(ApprovedInteractiveIpcOperation { reply, .. }) =
@@ -204,6 +506,7 @@ pub(super) fn read_console_callback(
                             state.prompt_config.start_spinner();
                         }
                         crate::ipc::set_r_at_prompt(false);
+                        state.next_command_origin = Some(CommandOrigin::VisibleIpc);
                         return Some(op.code);
                     }
                 }
@@ -232,6 +535,7 @@ pub(super) fn read_console_callback(
                             state.prompt_config.start_spinner();
                         }
                         crate::ipc::set_r_at_prompt(false);
+                        state.next_command_origin = Some(CommandOrigin::VisibleIpc);
                         return Some(op.code);
                     }
                 }
@@ -267,15 +571,18 @@ pub(super) fn read_console_callback(
                 &mut state.line_editor
             };
 
-            // Process R events once before entering the input loop.
-            // The idle callback will continue processing events at ~30fps while waiting for input,
-            // keeping graphics windows (plot(), help browser) responsive.
-            arf_libr::process_r_events();
-
             // Track whether we're in a non-standard prompt mode (menu selection, etc.)
             let is_menu_prompt = prompt_kind.is_other();
 
-            let read_result = editor.read_line(&prompt);
+            // Event processing and the terminal wait both run while the REPL
+            // state is borrowed. Keep R's interrupt forwarding disabled for
+            // the whole interval so an R longjmp cannot cross these Rust frames.
+            let read_result = arf_libr::with_repl_input_guard(|| {
+                // Process R events once before entering the input loop. The idle
+                // callback continues at ~30fps while reedline is waiting.
+                arf_libr::process_r_events();
+                editor.read_line(&prompt)
+            });
             // Keep startup echo suppression through the raw-mode transition.
             // The original cooked mode is restored only after reedline returns,
             // so early PTY input cannot pass through an echo window.
@@ -436,6 +743,9 @@ pub(super) fn read_console_callback(
                             history_id,
                         };
                     }
+                    if prompt_kind.is_command() {
+                        state.next_command_origin = Some(CommandOrigin::User);
+                    }
                     return Some(code);
                 }
                 Ok(Signal::CtrlC) => {
@@ -447,6 +757,9 @@ pub(super) fn read_console_callback(
                         state.prompt_config.set_shell(false);
                         arf_println!("Returned to R mode.");
                         continue;
+                    }
+                    if prompt_kind.is_command() {
+                        state.input_was_cancelled = true;
                     }
                     return Some(String::new());
                 }
@@ -498,6 +811,7 @@ pub(super) fn read_console_callback(
                                 let _ = out.flush();
                             }
 
+                            drop(guard);
                             run_silent_eval(&op.code, reply);
 
                             // Clear the indicator — reedline will repaint the prompt
@@ -507,7 +821,12 @@ pub(super) fn read_console_callback(
                                 let _ = out.execute(terminal::Clear(ClearType::CurrentLine));
                             }
 
-                            continue;
+                            return read_console_callback_impl(
+                                r_prompt,
+                                prompt_info,
+                                forced_prompt_kind,
+                                native_driver,
+                            );
                         }
 
                         // Visible evaluate / user input: accept, inject code into REPL.
@@ -568,6 +887,9 @@ pub(super) fn read_console_callback(
                         }
 
                         crate::ipc::set_r_at_prompt(false);
+                        if prompt_kind.is_command() {
+                            state.next_command_origin = Some(CommandOrigin::VisibleIpc);
+                        }
                         return Some(op.code);
                     }
                     // No pending operation (spurious signal), continue waiting
@@ -646,9 +968,12 @@ fn should_warn_prompt_ambiguity(was_ambiguous: &mut bool, is_ambiguous: bool) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        PromptKind, classify_prompt, formatter_failure_updates_lifecycle,
-        should_warn_prompt_ambiguity,
+        NativeInputMode, PromptKind, classify_prompt, formatter_failure_updates_lifecycle,
+        is_no_command_input, native_input_mode, native_outcome_matches_command,
+        should_warn_prompt_ambiguity, write_nested_input,
     };
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
 
     #[test]
     fn continuation_formatter_failure_keeps_outer_lifecycle_context() {
@@ -676,5 +1001,66 @@ mod tests {
         assert!(!should_warn_prompt_ambiguity(&mut was_ambiguous, true));
         assert!(!should_warn_prompt_ambiguity(&mut was_ambiguous, false));
         assert!(should_warn_prompt_ambiguity(&mut was_ambiguous, true));
+    }
+
+    #[test]
+    fn native_input_modes_reject_unknown_values() {
+        assert_eq!(
+            native_input_mode(arf_libr::ReplInputMode::TopLevel as i32),
+            Some(NativeInputMode::TopLevel)
+        );
+        assert_eq!(
+            native_input_mode(arf_libr::ReplInputMode::Nested as i32),
+            Some(NativeInputMode::Nested)
+        );
+        assert_eq!(native_input_mode(-1), None);
+    }
+
+    #[test]
+    fn whitespace_is_no_command_but_comment_input_is_a_command() {
+        assert!(is_no_command_input(" \t\n"));
+        assert!(!is_no_command_input("# a comment"));
+    }
+
+    #[test]
+    fn native_outcome_requires_matching_command_and_history_identity() {
+        let id = super::CommandId(17);
+        assert!(native_outcome_matches_command(17, id, Some(id)));
+        assert!(!native_outcome_matches_command(18, id, Some(id)));
+        assert!(!native_outcome_matches_command(17, id, None));
+        assert!(!native_outcome_matches_command(
+            17,
+            id,
+            Some(super::CommandId(18))
+        ));
+    }
+
+    #[test]
+    fn nested_input_chunks_preserve_utf8_and_terminate_only_at_the_end() {
+        let mut input = "あbc".to_string();
+        let mut buffer = [0 as c_char; 6];
+
+        assert_eq!(write_nested_input(&mut input, buffer.as_mut_ptr(), 6), 1);
+        assert_eq!(
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_str().unwrap(),
+            "あb"
+        );
+        assert_eq!(input, "c");
+
+        assert_eq!(write_nested_input(&mut input, buffer.as_mut_ptr(), 6), 1);
+        assert_eq!(
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_str().unwrap(),
+            "c\n"
+        );
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn undersized_nested_buffer_does_not_consume_input() {
+        let mut input = "keep".to_string();
+        let mut buffer = [0 as c_char; 2];
+
+        assert_eq!(write_nested_input(&mut input, buffer.as_mut_ptr(), 2), 0);
+        assert_eq!(input, "keep");
     }
 }

@@ -52,7 +52,6 @@ use history::setup_history;
 use meta_command::{MetaCommandResult, process_meta_command};
 use pager_ui::{run_pager_help_browser, run_pager_history_browser, with_ipc_alternate_guard};
 use prompt::RPrompt;
-use read_console::read_console_callback;
 use reprex::ReprexRuntime;
 use reprex::{clear_input_lines, strip_reprex_output};
 use shell::{execute_shell_command, restart_process};
@@ -669,6 +668,10 @@ impl Repl {
                 r_history: r_history_handle,
                 shell_history: shell_history_handle,
                 pending_history_context: PendingHistoryContext::None,
+                command_lifecycle: None,
+                pending_history_command_id: None,
+                next_command_origin: None,
+                input_was_cancelled: false,
             });
         });
 
@@ -706,8 +709,25 @@ impl Repl {
             sync_r_width();
         }
 
-        // Set up the ReadConsole callback
-        arf_libr::set_read_console_callback(read_console_callback);
+        // Initialize the R-owned incremental parser and install the C-owned
+        // top-level driver before entering R's mainloop. The Rust input callback
+        // returns before the C driver starts parse/eval/print.
+        let parser_factory = arf_harp::initialize_repl_engine().map_err(|error| {
+            anyhow::anyhow!("failed to initialize the native REPL parser: {error}")
+        })?;
+        unsafe {
+            arf_libr::install_repl_driver(
+                parser_factory.sexp(),
+                read_console::native_top_level_prompt_callback,
+                read_console::native_input_callback,
+                read_console::native_outcome_callback,
+                std::ptr::null_mut(),
+            )
+            .map_err(|error| {
+                anyhow::anyhow!("failed to install the native REPL driver: {error}")
+            })?;
+        }
+        drop(parser_factory);
 
         // Note: the Ctrl+C handler that forwards interrupts to R is installed
         // in main() around R initialization (see install_r_interrupt_handler),
