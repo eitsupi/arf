@@ -9,6 +9,7 @@ static INPUT_INDEX: AtomicUsize = AtomicUsize::new(0);
 static OUTCOME_INDEX: AtomicUsize = AtomicUsize::new(0);
 static FAILURES: AtomicUsize = AtomicUsize::new(0);
 static NESTED_INPUT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static RLANG_AVAILABLE: AtomicUsize = AtomicUsize::new(0);
 
 const INPUTS: [&[u8]; 11] = [
     b"42L",
@@ -123,7 +124,16 @@ unsafe extern "C" fn input_callback(
     }
 
     let index = INPUT_INDEX.fetch_add(1, Ordering::SeqCst);
-    let Some(input) = INPUTS.get(index) else {
+    let (input, selected_command_id) = if let Some(input) = INPUTS.get(index) {
+        (*input, 100 + index as u64)
+    } else if index == INPUTS.len() && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (b"rlang::abort('uncaught rlang abort')".as_slice(), 111_u64)
+    } else {
+        marker(if FAILURES.load(Ordering::SeqCst) == 0 {
+            "ARF_DRIVER_OK"
+        } else {
+            "ARF_DRIVER_FAILURES"
+        });
         marker("ARF_DRIVER_EOF");
         return 0;
     };
@@ -135,7 +145,7 @@ unsafe extern "C" fn input_callback(
         std::ptr::copy_nonoverlapping(input.as_ptr().cast::<c_char>(), buffer, input.len());
         buffer.add(input.len()).write(b'\n' as c_char);
         buffer.add(input.len() + 1).write(0);
-        *command_id = 100 + index as u64;
+        *command_id = selected_command_id;
     }
     if index == 6 {
         NESTED_INPUT_PENDING.store(1, Ordering::SeqCst);
@@ -153,7 +163,16 @@ unsafe extern "C" fn outcome_callback(
     _context: *mut c_void,
 ) {
     let index = OUTCOME_INDEX.fetch_add(1, Ordering::SeqCst);
-    let Some(expected) = EXPECTED.get(index) else {
+    let rlang_expected = ReplOutcome {
+        command_id: 111,
+        expression_id: 1,
+        fact: ReplFact::AbortedEval,
+    };
+    let expected = EXPECTED.get(index).or_else(|| {
+        (index == EXPECTED.len() && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0)
+            .then_some(&rlang_expected)
+    });
+    let Some(expected) = expected else {
         FAILURES.fetch_add(1, Ordering::SeqCst);
         return;
     };
@@ -201,6 +220,51 @@ fn c_repl_driver_recovers_failures_interrupts_gc_and_visibility() {
                 "--interactive",
             ])
             .expect("R should initialize in the dedicated mainloop child");
+            let rlang_available = crate::eval_string("requireNamespace('rlang', quietly = TRUE)")
+                .map(|result| {
+                    let lib = arf_libr::r_library().expect("R library should stay available");
+                    *(lib.logical)(result.sexp()) != 0
+                })
+                .expect("rlang availability probe should evaluate");
+            RLANG_AVAILABLE.store(usize::from(rlang_available), Ordering::SeqCst);
+            marker(if rlang_available {
+                "ARF_RLANG_PRESENT"
+            } else {
+                "ARF_RLANG_ABSENT"
+            });
+
+            let lib = arf_libr::r_library().expect("R library should stay available");
+            #[cfg(unix)]
+            let previous_read_console = *lib.ptr_r_readconsole;
+            let rejected = install_repl_driver(
+                std::ptr::null_mut(),
+                top_level_prompt,
+                input_callback,
+                outcome_callback,
+                std::ptr::null_mut(),
+            );
+            assert!(
+                matches!(
+                    &rejected,
+                    Err(arf_libr::RError::EvalError(message))
+                        if message.contains("failed to install native REPL driver")
+                ),
+                "null parser factory should produce an explicit install error: {rejected:?}"
+            );
+            #[cfg(unix)]
+            {
+                let callback_unchanged = match (*lib.ptr_r_readconsole, previous_read_console) {
+                    (Some(current), Some(previous)) => std::ptr::fn_addr_eq(current, previous),
+                    (None, None) => true,
+                    _ => false,
+                };
+                assert!(
+                    callback_unchanged,
+                    "failed installation must not replace ReadConsole"
+                );
+            }
+            marker("ARF_NULL_INSTALL_REJECTED");
+
             let parser_factory =
                 crate::initialize_repl_engine().expect("R parser factory should initialize");
             assert_eq!(crate::repl_engine_state(), crate::ReplEngineState::Ready);
@@ -274,6 +338,7 @@ function(text) {
         "mainloop child failed: {stderr}\n{stdout}"
     );
     let expected_markers = [
+        "ARF_NULL_INSTALL_REJECTED",
         "ARF_DRIVER_READY",
         "ARF_OUTCOME:100:1:unobserved",
         "ARF_OUTCOME:101:2:parse",
@@ -288,8 +353,22 @@ function(text) {
         "ARF_OUTCOME:108:3:completed",
         "ARF_OUTCOME:109:1:completed",
         "ARF_OUTCOME:110:1:completed",
+        "ARF_DRIVER_OK",
         "ARF_DRIVER_EOF",
     ];
+    let mut expected_markers = expected_markers.to_vec();
+    if stdout.contains("ARF_RLANG_PRESENT") {
+        let eof_index = expected_markers
+            .iter()
+            .position(|marker| *marker == "ARF_DRIVER_OK")
+            .expect("expected successful driver marker");
+        expected_markers.insert(eof_index, "ARF_OUTCOME:111:1:eval");
+    } else {
+        assert!(
+            stdout.contains("ARF_RLANG_ABSENT"),
+            "child did not report rlang availability: {stdout}"
+        );
+    }
     let actual = stdout
         .split_whitespace()
         .filter(|token| {
@@ -297,6 +376,7 @@ function(text) {
                 || token.starts_with("ARF_OUTCOME:")
                 || token.starts_with("ARF_NESTED_")
                 || token.starts_with("ARF_CLOSE_")
+                || token.starts_with("ARF_NULL_INSTALL_")
         })
         .collect::<Vec<_>>();
     assert_eq!(

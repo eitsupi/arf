@@ -218,6 +218,16 @@ pub unsafe fn install_repl_driver(
     context: *mut std::ffi::c_void,
 ) -> Result<(), crate::RError> {
     let lib = r_library()?;
+    if parser_factory.is_null() {
+        return Err(crate::RError::EvalError(
+            "failed to install native REPL driver".into(),
+        ));
+    }
+    #[cfg(unix)]
+    if lib.ptr_r_readconsole.is_null() {
+        return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
+    }
+
     let api = NATIVE_API.get_or_init(|| unsafe {
         NativeApi {
             mk_string: lib.rf_mkstring,
@@ -261,9 +271,6 @@ pub unsafe fn install_repl_driver(
     }
     #[cfg(unix)]
     {
-        if lib.ptr_r_readconsole.is_null() {
-            return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
-        }
         unsafe { *lib.ptr_r_readconsole = native_callback };
     }
     let _ = INSTALLED_READ_CONSOLE.set(native_callback);
