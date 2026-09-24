@@ -35,6 +35,10 @@ jobs:
           cargo fmt \
             --all \
             --check
+          rustfmt \
+            --edition 2024 \
+            --check \
+            crates/arf-console/tests/fixtures/formatter.rs
 
   cargo-clippy:
     strategy:

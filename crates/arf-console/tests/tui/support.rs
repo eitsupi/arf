@@ -8,6 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +21,73 @@ use tui_test::{
 const WAIT: Duration = Duration::from_secs(30);
 pub const PROMPT: &str = "ARF>";
 pub const ERROR_PROMPT: &str = "ERR ARF>";
+
+struct FormatterFixture {
+    bytes: Vec<u8>,
+}
+
+static FORMATTER_FIXTURE: OnceLock<std::result::Result<FormatterFixture, String>> = OnceLock::new();
+
+fn compiled_formatter_fixture() -> Result<&'static FormatterFixture> {
+    match FORMATTER_FIXTURE.get_or_init(|| {
+        let build_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let fixture_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("formatter.rs");
+        let fixture = build_dir
+            .path()
+            .join(format!("formatter{}", std::env::consts::EXE_SUFFIX));
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let output = Command::new(compiler)
+            .arg(fixture_source)
+            .arg("--edition=2024")
+            .arg("-D")
+            .arg("warnings")
+            .arg("-o")
+            .arg(&fixture)
+            .output()
+            .map_err(|error| {
+                format!("failed to run rustc for the formatter test fixture: {error}")
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "failed to compile the formatter test fixture: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let bytes = fs::read(fixture)
+            .map_err(|error| format!("failed to read the formatter test fixture: {error}"))?;
+        Ok(FormatterFixture { bytes })
+    }) {
+        Ok(fixture) => Ok(fixture),
+        Err(error) => bail!("{error}"),
+    }
+}
+
+pub fn build_formatter_fixture_path(
+    directory: &std::path::Path,
+    formatter: &str,
+) -> Result<String> {
+    ensure!(
+        matches!(formatter, "air" | "arity"),
+        "unsupported formatter fixture: {formatter}"
+    );
+    fs::create_dir_all(directory)?;
+    let fixture = directory.join(format!("{formatter}{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&fixture, &compiled_formatter_fixture()?.bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fixture, fs::Permissions::from_mode(0o755))?;
+    }
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(directory.to_path_buf()).chain(std::env::split_paths(&current_path)),
+    )?;
+    Ok(path.to_string_lossy().into_owned())
+}
 
 pub const DEFAULT_CONFIG: &str = r#"[prompt]
 format = '{status}ARF> '
