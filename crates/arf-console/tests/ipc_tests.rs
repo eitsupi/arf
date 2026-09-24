@@ -191,10 +191,17 @@ fn find_socket_path(pid: Option<u32>, sessions_dir: &Path, timeout: Duration) ->
                     {
                         continue;
                     }
-                    if let Some(socket) = info.get("socket_path").and_then(|v| v.as_str())
-                        && is_connectable(socket)
-                    {
-                        return Some(socket.to_string());
+                    if let Some(socket) = info.get("socket_path").and_then(|v| v.as_str()) {
+                        #[cfg(unix)]
+                        let ready = is_connectable(socket);
+                        #[cfg(windows)]
+                        // The server writes metadata only after creating its
+                        // first pipe instance. Opening it as a probe consumes
+                        // that instance and races the real client.
+                        let ready = true;
+                        if ready {
+                            return Some(socket.to_string());
+                        }
                     }
                 }
             }
@@ -205,19 +212,10 @@ fn find_socket_path(pid: Option<u32>, sessions_dir: &Path, timeout: Duration) ->
     None
 }
 
-/// Check if a socket/pipe is connectable.
+/// Check whether the Unix socket is accepting connections.
 #[cfg(unix)]
 fn is_connectable(socket_path: &str) -> bool {
     std::os::unix::net::UnixStream::connect(socket_path).is_ok()
-}
-
-#[cfg(windows)]
-fn is_connectable(socket_path: &str) -> bool {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(socket_path)
-        .is_ok()
 }
 
 // ---------------------------------------------------------------------------
