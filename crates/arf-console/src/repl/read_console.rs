@@ -164,7 +164,13 @@ pub(super) unsafe extern "C" fn native_input_callback(
             .to_str()
             .unwrap_or_default()
     };
+    let is_native_top_level = mode == NativeInputMode::TopLevel;
     let forced_kind = match mode {
+        NativeInputMode::TopLevel
+            if prompt_info.options_are_ambiguous && prompt_info.is_continuation =>
+        {
+            PromptKind::Continuation
+        }
         NativeInputMode::TopLevel => PromptKind::Command,
         NativeInputMode::Nested => PromptKind::Other,
     };
@@ -178,7 +184,13 @@ pub(super) unsafe extern "C" fn native_input_callback(
         }
     }
 
-    let input = read_console_callback_impl(prompt_text, prompt_info, Some(forced_kind), true);
+    let input = read_console_callback_impl(
+        prompt_text,
+        prompt_info,
+        Some(forced_kind),
+        true,
+        is_native_top_level,
+    );
     let Some(input) = input else {
         return arf_libr::ReplInputResult::Eof as c_int;
     };
@@ -368,7 +380,7 @@ pub(super) fn read_console_callback(
     r_prompt: &str,
     prompt_info: arf_libr::ReadConsolePromptInfo,
 ) -> Option<String> {
-    read_console_callback_impl(r_prompt, prompt_info, None, false)
+    read_console_callback_impl(r_prompt, prompt_info, None, false, false)
 }
 
 fn read_console_callback_impl(
@@ -376,6 +388,7 @@ fn read_console_callback_impl(
     prompt_info: arf_libr::ReadConsolePromptInfo,
     forced_prompt_kind: Option<PromptKind>,
     native_driver: bool,
+    native_top_level: bool,
 ) -> Option<String> {
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
@@ -414,6 +427,11 @@ fn read_console_callback_impl(
         // one value.
         let prompt_kind = forced_prompt_kind
             .unwrap_or_else(|| classify_prompt(r_prompt, prompt_info.is_continuation));
+        let is_command_prompt = if native_driver {
+            native_top_level
+        } else {
+            prompt_kind.is_command()
+        };
 
         // Update exit_status for the previous command when a new prompt is shown.
         // This is called when R has finished evaluating and wants new input.
@@ -423,9 +441,9 @@ fn read_console_callback_impl(
         // Track prompt state for IPC: true when R is idle at the command
         // prompt, false for continuation/menu/selection prompts so IPC
         // requests are correctly rejected during non-command prompts.
-        crate::ipc::set_r_at_prompt(prompt_kind.is_command());
+        crate::ipc::set_r_at_prompt(is_command_prompt);
 
-        if prompt_kind.is_command() && !state.prompt_config.is_shell_enabled() && !native_driver {
+        if is_command_prompt && !state.prompt_config.is_shell_enabled() && !native_driver {
             let pending_history_context = std::mem::take(&mut state.pending_history_context);
             let had_error = match pending_history_context {
                 PendingHistoryContext::Command { store, history_id } => {
@@ -452,14 +470,14 @@ fn read_console_callback_impl(
             arf_libr::reset_command_error_state();
         }
 
-        if prompt_kind.is_command() {
+        if is_command_prompt {
             state.input_was_cancelled = false;
         }
 
         // Check for pending IPC operations before entering the reedline input loop.
         // At this point reedline hasn't started, so there's no editor buffer to
         // conflict with — we can always accept.
-        if prompt_kind.is_command()
+        if is_command_prompt
             && !state.prompt_config.is_shell_enabled()
             && let Some(op) = crate::ipc::take_pending_ipc_operation()
         {
@@ -479,6 +497,7 @@ fn read_console_callback_impl(
                         prompt_info,
                         forced_prompt_kind,
                         native_driver,
+                        native_top_level,
                     );
                 }
                 PendingIpcKind::VisibleEvaluate { reply, timeout } => {
@@ -692,7 +711,7 @@ fn read_console_callback_impl(
                             // command. It must not finalize that command's
                             // history or sponge state merely because formatting
                             // this piece failed.
-                            if formatter_failure_updates_lifecycle(prompt_kind) {
+                            if formatter_failure_updates_lifecycle(is_command_prompt) {
                                 let history_id = match save_outcome {
                                     Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
                                     _ => None,
@@ -718,6 +737,109 @@ fn read_console_callback_impl(
                         clear_input_lines(&original_line, &code);
                     }
 
+                    // Formatting can produce an expression that is incomplete
+                    // even when the user's original line was complete. Collect
+                    // continuation lines in the UI before returning the full
+                    // source to the native driver, which evaluates only after
+                    // this callback has released its Rust state borrow.
+                    let mut code = code;
+                    if native_driver && is_command_prompt {
+                        crate::ipc::set_r_at_prompt(false);
+                        let validator = crate::editor::validator::RValidator::new();
+                        while !validator.is_complete(&code) {
+                            let continuation_prompt =
+                                state.prompt_config.build_cont_prompt(state.reprex.mode);
+                            let continuation_result = arf_libr::with_repl_input_guard(|| {
+                                arf_libr::process_r_events();
+                                editor.read_line(&continuation_prompt)
+                            });
+                            match continuation_result {
+                                Ok(Signal::Success(line)) => {
+                                    let continuation_save = history_handle.receipt_outcome();
+                                    finalize_history(
+                                        Some(&history_handle),
+                                        continuation_save,
+                                        false,
+                                    );
+                                    if let Some(result) = process_meta_command(
+                                        &line,
+                                        &mut state.prompt_config,
+                                        &mut state.reprex,
+                                        &state.r_history,
+                                        &state.shell_history,
+                                        &state.r_source_status,
+                                        &mut state.dir_stack,
+                                        state.history_session_id.map(i64::from),
+                                        state.r_home.as_deref(),
+                                    ) {
+                                        state.prompt_config.clear_command_duration();
+                                        let ctx = SessionInfoContext {
+                                            prompt_config: &state.prompt_config,
+                                            reprex: &state.reprex,
+                                            config_path: &state.config_path,
+                                            config_status: state.config_status,
+                                            r_history: &state.r_history,
+                                            shell_history: &state.shell_history,
+                                            r_source_status: &state.r_source_status,
+                                        };
+                                        match handle_meta_command_result(result, &ctx) {
+                                            MetaAction::Continue => continue,
+                                            MetaAction::Exit => {
+                                                state.should_exit = true;
+                                                return None;
+                                            }
+                                        }
+                                    }
+
+                                    let continuation = if state.reprex.is_enabled() {
+                                        strip_reprex_output(&line)
+                                    } else {
+                                        line
+                                    };
+                                    let continuation = match state
+                                        .reprex
+                                        .maybe_format_code(&continuation)
+                                    {
+                                        Ok(code) => code,
+                                        Err(error) => {
+                                            arf_println!("{}", error);
+                                            continue;
+                                        }
+                                    };
+                                    if state.reprex.is_enabled() && !continuation.is_empty() {
+                                        clear_input_lines(&continuation, &continuation);
+                                    }
+                                    code.push('\n');
+                                    code.push_str(&continuation);
+                                }
+                                Ok(Signal::CtrlC) => {
+                                    let _ = io::stdout()
+                                        .execute(terminal::Clear(ClearType::FromCursorDown));
+                                    println!("^C");
+                                    state.input_was_cancelled = true;
+                                    return Some(String::new());
+                                }
+                                Ok(Signal::CtrlD) => {
+                                    state.should_exit = true;
+                                    return None;
+                                }
+                                Ok(Signal::ExternalBreak(buffer)) => {
+                                    if let Some(op) = crate::ipc::take_pending_ipc_operation() {
+                                        crate::ipc::reject_operation_user_typing(op, &code);
+                                    } else if !buffer.trim().is_empty() {
+                                        log::debug!("Ignoring external break during continuation input");
+                                    }
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    eprintln!("Error: {error}");
+                                    state.should_exit = true;
+                                    return None;
+                                }
+                            }
+                        }
+                    }
+
                     // Record command start time for the {duration} prompt placeholder
                     // Start the spinner to indicate R is evaluating code
                     // The spinner will be stopped when R produces output or the next prompt appears
@@ -733,7 +855,7 @@ fn read_console_callback_impl(
                     // Only a top-level command starts a new Reedline history
                     // context. Continuation prompts remain part of the outer
                     // command, so preserve its context until evaluation ends.
-                    if prompt_kind.is_command() && !code.trim().is_empty() {
+                    if is_command_prompt && !code.trim().is_empty() {
                         let history_id = match save_outcome {
                             Some(crate::history::HistorySaveOutcome::Saved(id)) => Some(id),
                             _ => None,
@@ -743,7 +865,7 @@ fn read_console_callback_impl(
                             history_id,
                         };
                     }
-                    if prompt_kind.is_command() {
+                    if is_command_prompt {
                         state.next_command_origin = Some(CommandOrigin::User);
                     }
                     return Some(code);
@@ -758,7 +880,7 @@ fn read_console_callback_impl(
                         arf_println!("Returned to R mode.");
                         continue;
                     }
-                    if prompt_kind.is_command() {
+                    if is_command_prompt {
                         state.input_was_cancelled = true;
                     }
                     return Some(String::new());
@@ -826,6 +948,7 @@ fn read_console_callback_impl(
                                 prompt_info,
                                 forced_prompt_kind,
                                 native_driver,
+                                native_top_level,
                             );
                         }
 
@@ -887,7 +1010,7 @@ fn read_console_callback_impl(
                         }
 
                         crate::ipc::set_r_at_prompt(false);
-                        if prompt_kind.is_command() {
+                        if is_command_prompt {
                             state.next_command_origin = Some(CommandOrigin::VisibleIpc);
                         }
                         return Some(op.code);
@@ -954,8 +1077,8 @@ fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
 
 /// Formatter failures only finalize lifecycle state for top-level commands.
 /// Continuation prompts belong to the outer command and retain its context.
-fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
-    prompt_kind.is_command()
+fn formatter_failure_updates_lifecycle(is_command_prompt: bool) -> bool {
+    is_command_prompt
 }
 
 /// Warn once for each transition into an ambiguous prompt-option state.
@@ -977,9 +1100,8 @@ mod tests {
 
     #[test]
     fn continuation_formatter_failure_keeps_outer_lifecycle_context() {
-        assert!(!formatter_failure_updates_lifecycle(
-            PromptKind::Continuation
-        ));
+        assert!(!formatter_failure_updates_lifecycle(false));
+        assert!(formatter_failure_updates_lifecycle(true));
     }
 
     #[test]
