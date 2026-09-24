@@ -116,8 +116,8 @@ impl IpcTestProcess {
         send_ipc_request(&self.socket_path, method, params)
     }
 
-    /// Wait for text to appear in the PTY output.
-    fn wait_for_output(&self, expected: &str) -> Result<(), String> {
+    /// Wait for text to appear on the emulated screen.
+    fn wait_for_screen_text(&self, expected: &str) -> Result<(), String> {
         let deadline = Instant::now() + REQUEST_TIMEOUT;
         // tui-test's screen text omits trailing blank cells from each row.
         let expected = expected.trim_end();
@@ -132,12 +132,12 @@ impl IpcTestProcess {
             }
             if state.exited.is_some() {
                 return Err(format!(
-                    "arf exited waiting for PTY output '{expected}': {state:?}"
+                    "arf exited waiting for screen text '{expected}': {state:?}"
                 ));
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "Timed out waiting for PTY output '{expected}'. Current state:\n{state:?}"
+                    "Timed out waiting for screen text '{expected}'. Current emulated screen state:\n{state:?}"
                 ));
             }
             thread::sleep(Duration::from_millis(25));
@@ -453,8 +453,8 @@ fn test_ipc_evaluate_visible() {
         )
     });
     process
-        .wait_for_output("Press y to approve, any other key declines: ")
-        .expect("approval prompt should appear on the PTY");
+        .wait_for_screen_text("Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the emulated screen");
     process.submit("y").expect("approve visible evaluate");
     let response = request
         .join()
@@ -492,8 +492,8 @@ fn test_ipc_user_input() {
         )
     });
     process
-        .wait_for_output("Press y to approve, any other key declines: ")
-        .expect("approval prompt should appear on the PTY");
+        .wait_for_screen_text("Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the emulated screen");
     process.submit("y").expect("approve user_input");
     let response = request
         .join()

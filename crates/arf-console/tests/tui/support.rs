@@ -428,7 +428,9 @@ impl Terminal {
         // matching old prompts and source echoes. Each command's marker must be
         // unique within the session. For repeated output use recording checkpoints.
         // arf emits no shell integration: WaitReady/WaitCommand are not suitable.
-        // beta.3's locator also loses wide/combining characters; use text/cells.
+        // tui-test's text locator currently takes only the first character in each cell
+        // and treats empty wide-character continuation cells as spaces, so it
+        // can miss wide or combining text; use State.text/cells instead.
         self.wait_for("output and input prompt", |state, line| {
             line.trim_end() == prompt
                 && usize::from(state.cursor.x) == prompt.len() + 1
