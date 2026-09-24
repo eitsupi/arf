@@ -102,6 +102,9 @@ pub struct RLibrary {
     // Stack limit (for embedded R)
     pub r_cstacklimit: *mut usize,
 
+    // Optional internal visibility flag. R does not document this as public API.
+    pub r_visible: *mut c_int,
+
     // Console callbacks (Unix only - Windows uses Rstart params)
     #[cfg(unix)]
     pub ptr_r_readconsole: *mut ReadConsoleFunc,
@@ -369,6 +372,23 @@ impl RLibrary {
             // Load stack limit pointer
             load_ptr!(r_cstacklimit, b"R_CStackLimit\0", usize);
 
+            // R_Visible is an internal symbol and is not exported by every build.
+            // Keep it optional; callers retain a public-API fallback. Request
+            // `usize` so libloading accepts the pointer-sized symbol address;
+            // this value is not read as an R integer.
+            #[cfg(unix)]
+            let r_visible = match library.get::<usize>(b"R_Visible\0") {
+                Ok(symbol) => symbol.into_raw().into_raw() as *mut c_int,
+                Err(_) => std::ptr::null_mut(),
+            };
+            #[cfg(windows)]
+            let r_visible = library
+                .get::<usize>(b"R_Visible\0")
+                .ok()
+                .and_then(|symbol| symbol.into_raw().into_raw())
+                .map(|symbol| symbol as usize as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
+
             // Load console callbacks (Unix only - Windows uses Rstart params)
             #[cfg(unix)]
             load_ptr!(ptr_r_readconsole, b"ptr_R_ReadConsole\0", ReadConsoleFunc);
@@ -634,6 +654,7 @@ impl RLibrary {
                 rf_scalarlogical,
                 rf_get_option1,
                 r_cstacklimit,
+                r_visible,
                 #[cfg(unix)]
                 ptr_r_readconsole,
                 #[cfg(unix)]

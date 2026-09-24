@@ -39,6 +39,7 @@ typedef struct {
     SEXP (*vector_elt)(SEXP, ptrdiff_t);
     int *(*logical)(SEXP);
     int *(*integer)(SEXP);
+    int *visible_flag;
     int (*type_of)(SEXP);
     SEXP (*get_option1)(SEXP);
     SEXP (*string_elt)(SEXP, ptrdiff_t);
@@ -209,7 +210,9 @@ static SEXP command_body(void *data) {
     state->parser = parser;
     SEXP next_fn = api->vector_elt(parser, 0);
     state->close_fn = api->vector_elt(parser, 1);
-    SEXP visible_fn = api->find_var(api->install("withVisible"), api->base_env);
+    SEXP visible_fn = NULL;
+    if (api->visible_flag == NULL)
+        visible_fn = api->find_var(api->install("withVisible"), api->base_env);
 
     for (;;) {
         state->phase = PHASE_PARSE;
@@ -224,20 +227,36 @@ static SEXP command_body(void *data) {
 
         SEXP expression = api->vector_elt(parsed, 0);
         state->phase = PHASE_EVAL;
-        SEXP args = api->cons(expression, api->nil_value);
-        api->protect(args);
-        SEXP visible_call = api->lcons(visible_fn, args);
-        api->protect(visible_call);
-        SEXP visible_result = api->eval(visible_call, api->global_env);
-        api->protect(visible_result);
-        SEXP value = api->vector_elt(visible_result, 0);
-        SEXP is_visible = api->vector_elt(visible_result, 1);
-        int *visible = api->logical(is_visible);
-        if (visible != NULL && *visible != 0) {
-            state->phase = PHASE_PRINT;
-            api->print_value(value);
+        SEXP value = NULL;
+        int visible = 0;
+        if (api->visible_flag != NULL) {
+            value = api->eval(expression, api->global_env);
+            /* R_Visible must be read immediately after Rf_eval, before another
+               R API call can alter it. Keep the result protected through print. */
+            visible = *api->visible_flag != 0;
+            api->protect(value);
+            if (visible) {
+                state->phase = PHASE_PRINT;
+                api->print_value(value);
+            }
+            api->unprotect(1);
+        } else {
+            SEXP args = api->cons(expression, api->nil_value);
+            api->protect(args);
+            SEXP visible_call = api->lcons(visible_fn, args);
+            api->protect(visible_call);
+            SEXP visible_result = api->eval(visible_call, api->global_env);
+            api->protect(visible_result);
+            value = api->vector_elt(visible_result, 0);
+            SEXP is_visible = api->vector_elt(visible_result, 1);
+            int *visibility = api->logical(is_visible);
+            visible = visibility != NULL && *visibility != 0;
+            if (visible) {
+                state->phase = PHASE_PRINT;
+                api->print_value(value);
+            }
+            api->unprotect(3);
         }
-        api->unprotect(4);
         state->expression_id += 1;
     }
 

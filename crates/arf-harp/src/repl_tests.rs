@@ -291,6 +291,11 @@ fn c_repl_driver_recovers_failures_interrupts_gc_and_visibility() {
             });
 
             let lib = arf_libr::r_library().expect("R library should stay available");
+            marker(if lib.r_visible.is_null() {
+                "ARF_NATIVE_VISIBILITY_FALLBACK"
+            } else {
+                "ARF_NATIVE_VISIBILITY_DIRECT"
+            });
             #[cfg(unix)]
             let previous_read_console = *lib.ptr_r_readconsole;
             let rejected = install_repl_driver(
@@ -394,6 +399,16 @@ function(text) {
         output.status.success(),
         "mainloop child failed: {stderr}\n{stdout}"
     );
+    if stdout.contains("ARF_NATIVE_VISIBILITY_DIRECT") {
+        assert!(
+            stderr.contains("Error: uncaught eval"),
+            "native evaluation did not preserve R's direct error text: {stderr}"
+        );
+        assert!(
+            !stderr.contains("Error in function (x) : uncaught eval"),
+            "native evaluation added the withVisible wrapper to the error call: {stderr}"
+        );
+    }
     let expected_markers = [
         "ARF_NULL_INSTALL_REJECTED",
         "ARF_DRIVER_READY",
