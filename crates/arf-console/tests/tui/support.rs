@@ -21,6 +21,41 @@ const WAIT: Duration = Duration::from_secs(30);
 pub const PROMPT: &str = "ARF>";
 pub const ERROR_PROMPT: &str = "ERR ARF>";
 
+pub fn build_formatter_fixture_path(
+    directory: &std::path::Path,
+    formatter: &str,
+) -> Result<String> {
+    ensure!(
+        matches!(formatter, "air" | "arity"),
+        "unsupported formatter fixture: {formatter}"
+    );
+    fs::create_dir_all(directory)?;
+    let fixture_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("formatter.rs");
+    let fixture = directory.join(format!("{formatter}{}", std::env::consts::EXE_SUFFIX));
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(compiler)
+        .arg(fixture_source)
+        .arg("--edition=2024")
+        .arg("-o")
+        .arg(&fixture)
+        .output()
+        .with_context(|| format!("failed to run rustc for the {formatter} test fixture"))?;
+    ensure!(
+        output.status.success(),
+        "failed to compile the {formatter} test fixture: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(directory.to_path_buf()).chain(std::env::split_paths(&current_path)),
+    )?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 pub const DEFAULT_CONFIG: &str = r#"[prompt]
 format = '{status}ARF> '
 [prompt.status.symbol]

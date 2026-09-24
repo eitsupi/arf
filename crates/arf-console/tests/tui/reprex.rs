@@ -1,4 +1,6 @@
-use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
+use super::support::{
+    ERROR_PROMPT, PROMPT, Terminal, build_formatter_fixture_path, run_case, run_case_with,
+};
 use anyhow::{Result, bail, ensure};
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
@@ -95,48 +97,23 @@ fn reprex_paste_strips_output_lines() -> Result<()> {
 }
 
 #[test]
-#[cfg(unix)]
 fn formatter_failure_updates_lifecycle_without_evaluation() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    for formatter in ["air", "arity"] {
+        formatter_failure_scenario(formatter)?;
+    }
+    Ok(())
+}
 
+fn formatter_failure_scenario(formatter: &str) -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let bin = temp.path().join("bin");
-    std::fs::create_dir(&bin)?;
-    let arity = bin.join("arity");
-    std::fs::write(
-        &arity,
-        r##"#!/bin/sh
-case "$1" in
-  --version) echo 'arity test stub'; exit 0 ;;
-  format)
-    input=$(cat)
-    if [ "$input" = 42 ]; then
-      echo 'synthetic formatter failure' >&2
-      exit 17
-    fi
-    printf '%s' "$input"
-    exit 0
-    ;;
-  *) exit 18 ;;
-esac
-"##,
-    )?;
-    let mut permissions = std::fs::metadata(&arity)?.permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&arity, permissions)?;
-
-    let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path =
-        std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&current_path)))?
-            .to_string_lossy()
-            .into_owned();
     let history = temp.path().join("history");
+    let path = build_formatter_fixture_path(&temp.path().join("bin"), formatter)?;
     let config = r#"
 [startup]
 reprex = "format"
 
 [reprex]
-formatter = "arity"
+formatter = "__FORMATTER__"
 
 [prompt]
 format = "{status}{duration}ARF> "
@@ -154,12 +131,14 @@ frames = ""
 enabled = true
 delay = 1
 on_exit_only = false
-"#;
+"#
+    .replace("__FORMATTER__", formatter);
     run_case_with(
-        Terminal::builder("formatter-failure")
+        Terminal::builder(format!("formatter-failure-{formatter}"))
             .args(["--no-auto-match"])
             .config(config)
             .env("PATH", path)
+            .env("FORMATTER_FIXTURE_MODE", "failure")
             .history_dir(&history),
         |terminal| {
             terminal.wait_for("formatter prompt", |_, line| {
