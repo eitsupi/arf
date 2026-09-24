@@ -13,6 +13,10 @@ enum {
     FACT_PARSE = 2,
     FACT_EVAL = 3,
     FACT_PRINT = 4,
+    PARSE_NULL = 0,
+    PARSE_OK = 1,
+    PARSE_INCOMPLETE = 2,
+    PARSE_ERROR = 3,
     PHASE_PARSE = 1,
     PHASE_EVAL = 2,
     PHASE_PRINT = 3,
@@ -347,12 +351,13 @@ static SEXP command_body(void *data) {
         SEXP parsed = api->parse_vector(source, ordinal, &parse_status, api->nil_value);
         api->protect(parsed);
         int parsed_length = api->length(parsed);
-        if (parse_status == 1 && parsed_length < ordinal) {
+        if ((parse_status == PARSE_OK || parse_status == PARSE_NULL) &&
+            parsed_length < ordinal) {
             state->fact = FACT_COMPLETED;
             api->unprotect(2);
             break;
         }
-        if (parse_status == 1 && parsed_length >= ordinal) {
+        if (parse_status == PARSE_OK && parsed_length >= ordinal) {
             SEXP expression = api->vector_elt(parsed, ordinal - 1);
             evaluate_expression(state, expression);
             state->expression_id += 1;
@@ -367,11 +372,11 @@ static SEXP command_body(void *data) {
         }
 
         api->unprotect(2);
-        if (parse_status == 3) {
+        if (parse_status == PARSE_ERROR) {
             replay_parse_error(state, ordinal);
             break;
         }
-        if (parse_status != 2) {
+        if (parse_status != PARSE_INCOMPLETE) {
             state->fact = FACT_PARSE;
             break;
         }

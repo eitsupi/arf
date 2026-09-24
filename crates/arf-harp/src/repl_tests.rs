@@ -29,7 +29,7 @@ const INPUTS: [&[u8]; 11] = [
     b"invisible(987654321L)",
 ];
 
-const EXPECTED: [ReplOutcome; 20] = [
+const EXPECTED: [ReplOutcome; 21] = [
     ReplOutcome {
         command_id: 100,
         expression_id: 1,
@@ -128,6 +128,11 @@ const EXPECTED: [ReplOutcome; 20] = [
     ReplOutcome {
         command_id: 121,
         expression_id: 2,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 122,
+        expression_id: 1,
         fact: ReplFact::Completed,
     },
 ];
@@ -259,15 +264,20 @@ unsafe extern "C" fn input_callback(
         (b".arf_eof_prefix <- 1L; 1 +".to_vec(), 120)
     } else if index == INPUTS.len() + 8 {
         (b"cat('ARF_INITIAL_CRLF\\n'); 40L +\r\n2L\r\n".to_vec(), 121)
-    } else if index == INPUTS.len() + 9 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
-        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
     } else if index == INPUTS.len() + 9 {
-        (Vec::new(), 113_u64)
+        (
+            b"cat('ARF_PREFIX_COMMENT_ONLY\\n'); # trailing comment\n# second comment\n".to_vec(),
+            122,
+        )
     } else if index == INPUTS.len() + 10 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
+    } else if index == INPUTS.len() + 10 {
+        (Vec::new(), 113_u64)
+    } else if index == INPUTS.len() + 11 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
         (Vec::new(), 113_u64)
     } else {
         let cancel_index =
-            INPUTS.len() + 10 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
+            INPUTS.len() + 11 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
         if index == cancel_index {
             marker("ARF_DRIVER_CANCELLED");
             return ReplInputResult::Cancelled as c_int;
@@ -540,6 +550,7 @@ function(text) {
         "ARF_CONTINUATION_EOF",
         "ARF_OUTCOME:120:2:parse",
         "ARF_OUTCOME:121:2:completed",
+        "ARF_OUTCOME:122:1:completed",
         "ARF_DRIVER_CANCELLED",
         "ARF_DRIVER_OK",
         "ARF_DRIVER_EOF",
@@ -611,5 +622,10 @@ function(text) {
     assert!(
         stdout.contains("ARF_INITIAL_CRLF"),
         "initial CRLF source with trailing newline should parse: {stdout}"
+    );
+    assert_eq!(
+        stdout.matches("ARF_PREFIX_COMMENT_ONLY").count(),
+        1,
+        "comment-only remainder after a completed prefix should complete once: {stdout}"
     );
 }
