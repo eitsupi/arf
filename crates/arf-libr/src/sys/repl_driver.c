@@ -70,7 +70,6 @@ typedef struct {
     uint8_t running;
     const char *source;
     char *owned_source;
-    uint8_t expression_count;
     SEXP parser;
     SEXP close_fn;
 } CommandState;
@@ -240,7 +239,6 @@ static SEXP command_body(void *data) {
         }
         api->unprotect(4);
         state->expression_id += 1;
-        state->expression_count = 1;
     }
 
     call0(api, state->close_fn);
@@ -253,7 +251,7 @@ static SEXP command_body(void *data) {
 static void command_cleanup(void *data, int jump) {
     CommandState *state = (CommandState *)data;
     if (jump == 0 && state->fact == FACT_UNOBSERVED)
-        state->fact = state->expression_count != 0 ? FACT_COMPLETED : FACT_UNOBSERVED;
+        state->fact = FACT_COMPLETED;
     else if (state->phase == PHASE_PARSE)
         state->fact = FACT_PARSE;
     else if (state->phase == PHASE_PRINT)
@@ -397,7 +395,6 @@ static int native_read_console(const char *prompt, char *buffer, int length, int
     command.running = 0;
     command.source = full_source;
     command.owned_source = full_source;
-    command.expression_count = 0;
     command.parser = NULL;
     command.close_fn = NULL;
     if (skip_next_boundary != 0) {

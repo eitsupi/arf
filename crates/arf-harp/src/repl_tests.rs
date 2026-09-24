@@ -28,7 +28,7 @@ const INPUTS: [&[u8]; 11] = [
     b"invisible(987654321L)",
 ];
 
-const EXPECTED: [ReplOutcome; 12] = [
+const EXPECTED: [ReplOutcome; 14] = [
     ReplOutcome {
         command_id: 100,
         expression_id: 1,
@@ -86,6 +86,16 @@ const EXPECTED: [ReplOutcome; 12] = [
     },
     ReplOutcome {
         command_id: 112,
+        expression_id: 1,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 114,
+        expression_id: 1,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 115,
         expression_id: 1,
         fact: ReplFact::Completed,
     },
@@ -151,15 +161,19 @@ unsafe extern "C" fn input_callback(
             format!("{}43L", "# source padding beyond R buffer\n".repeat(600)).into_bytes(),
             112,
         )
-    } else if index == INPUTS.len() + 1 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
-        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
     } else if index == INPUTS.len() + 1 {
+        (b"# comment-only source\n".to_vec(), 114_u64)
+    } else if index == INPUTS.len() + 2 {
+        (b"   \n\t".to_vec(), 115_u64)
+    } else if index == INPUTS.len() + 3 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+        (b"rlang::abort('uncaught rlang abort')".to_vec(), 111_u64)
+    } else if index == INPUTS.len() + 3 {
         (Vec::new(), 113_u64)
-    } else if index == INPUTS.len() + 2 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
+    } else if index == INPUTS.len() + 4 && RLANG_AVAILABLE.load(Ordering::SeqCst) != 0 {
         (Vec::new(), 113_u64)
     } else {
         let cancel_index =
-            INPUTS.len() + 2 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
+            INPUTS.len() + 4 + usize::from(RLANG_AVAILABLE.load(Ordering::SeqCst) != 0);
         if index == cancel_index {
             marker("ARF_DRIVER_CANCELLED");
             return ReplInputResult::Cancelled as c_int;
@@ -397,6 +411,8 @@ function(text) {
         "ARF_OUTCOME:109:1:completed",
         "ARF_OUTCOME:110:1:completed",
         "ARF_OUTCOME:112:1:completed",
+        "ARF_OUTCOME:114:1:completed",
+        "ARF_OUTCOME:115:1:completed",
         "ARF_DRIVER_CANCELLED",
         "ARF_DRIVER_OK",
         "ARF_DRIVER_EOF",
