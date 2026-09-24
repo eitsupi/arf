@@ -136,6 +136,9 @@ pub unsafe fn begin_repl_read_console(
     buffer: *mut c_char,
     buflen: c_int,
 ) -> ReplReadConsoleStart {
+    #[cfg(not(unix))]
+    let _ = (buffer, buflen);
+
     stop_spinner();
     clear_r_interrupt_pending();
     #[cfg(unix)]

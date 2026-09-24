@@ -15,6 +15,7 @@ use super::interrupt::R_INTERRUPT_FLAG;
 #[cfg(windows)]
 use super::output::decode_windows_native;
 use super::output::r_write_console_ex;
+#[cfg(unix)]
 use super::r_read_console;
 
 /// Initialize R with default settings.

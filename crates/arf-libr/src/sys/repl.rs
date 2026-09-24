@@ -281,54 +281,9 @@ pub(super) fn guarded_prompt_info(raw_prompt: &CStr) -> Option<(bool, bool)> {
     (succeeded != 0).then_some((is_continuation != 0, options_are_ambiguous != 0))
 }
 
+#[cfg(unix)]
 pub(super) fn installed_read_console_callback() -> Option<ReadConsoleFunc> {
     INSTALLED_READ_CONSOLE.get().copied()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static LEGACY_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn legacy_read_console(
-        _prompt: *const c_char,
-        buffer: *mut c_char,
-        length: c_int,
-        _history: c_int,
-    ) -> c_int {
-        LEGACY_CALLS.fetch_add(1, Ordering::Relaxed);
-        if !buffer.is_null() && length > 1 {
-            unsafe {
-                *buffer = b'x' as c_char;
-                *buffer.add(1) = 0;
-            }
-        }
-        17
-    }
-
-    #[test]
-    fn native_console_trampoline_forwards_to_legacy_callback_before_install() {
-        LEGACY_CALLS.store(0, Ordering::Relaxed);
-        unsafe {
-            arf_repl_driver_set_legacy_read_console(Some(legacy_read_console));
-            let prompt = c"> ";
-            let mut buffer = [0 as c_char; 8];
-            let result = arf_repl_driver_read_console(
-                prompt.as_ptr(),
-                buffer.as_mut_ptr(),
-                buffer.len() as c_int,
-                1,
-            );
-            arf_repl_driver_set_legacy_read_console(None);
-
-            assert_eq!(result, 17);
-            assert_eq!(buffer[0], b'x' as c_char);
-            assert_eq!(buffer[1], 0);
-        }
-        assert_eq!(LEGACY_CALLS.load(Ordering::Relaxed), 1);
-    }
 }
 
 /// Windows chooses its ReadConsole callback before R initialization. Install
@@ -395,4 +350,50 @@ pub unsafe fn install_repl_driver(
     }
     let _ = INSTALLED_READ_CONSOLE.set(native_callback);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LEGACY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn legacy_read_console(
+        _prompt: *const c_char,
+        buffer: *mut c_char,
+        length: c_int,
+        _history: c_int,
+    ) -> c_int {
+        LEGACY_CALLS.fetch_add(1, Ordering::Relaxed);
+        if !buffer.is_null() && length > 1 {
+            unsafe {
+                *buffer = b'x' as c_char;
+                *buffer.add(1) = 0;
+            }
+        }
+        17
+    }
+
+    #[test]
+    fn native_console_trampoline_forwards_to_legacy_callback_before_install() {
+        LEGACY_CALLS.store(0, Ordering::Relaxed);
+        unsafe {
+            arf_repl_driver_set_legacy_read_console(Some(legacy_read_console));
+            let prompt = c"> ";
+            let mut buffer = [0 as c_char; 8];
+            let result = arf_repl_driver_read_console(
+                prompt.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len() as c_int,
+                1,
+            );
+            arf_repl_driver_set_legacy_read_console(None);
+
+            assert_eq!(result, 17);
+            assert_eq!(buffer[0], b'x' as c_char);
+            assert_eq!(buffer[1], 0);
+        }
+        assert_eq!(LEGACY_CALLS.load(Ordering::Relaxed), 1);
+    }
 }
