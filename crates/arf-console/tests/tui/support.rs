@@ -8,6 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +21,73 @@ use tui_test::{
 const WAIT: Duration = Duration::from_secs(30);
 pub const PROMPT: &str = "ARF>";
 pub const ERROR_PROMPT: &str = "ERR ARF>";
+
+struct FormatterFixture {
+    bytes: Vec<u8>,
+}
+
+static FORMATTER_FIXTURE: OnceLock<std::result::Result<FormatterFixture, String>> = OnceLock::new();
+
+fn compiled_formatter_fixture() -> Result<&'static FormatterFixture> {
+    match FORMATTER_FIXTURE.get_or_init(|| {
+        let build_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let fixture_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("formatter.rs");
+        let fixture = build_dir
+            .path()
+            .join(format!("formatter{}", std::env::consts::EXE_SUFFIX));
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let output = Command::new(compiler)
+            .arg(fixture_source)
+            .arg("--edition=2024")
+            .arg("-D")
+            .arg("warnings")
+            .arg("-o")
+            .arg(&fixture)
+            .output()
+            .map_err(|error| {
+                format!("failed to run rustc for the formatter test fixture: {error}")
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "failed to compile the formatter test fixture: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let bytes = fs::read(fixture)
+            .map_err(|error| format!("failed to read the formatter test fixture: {error}"))?;
+        Ok(FormatterFixture { bytes })
+    }) {
+        Ok(fixture) => Ok(fixture),
+        Err(error) => bail!("{error}"),
+    }
+}
+
+pub fn build_formatter_fixture_path(
+    directory: &std::path::Path,
+    formatter: &str,
+) -> Result<String> {
+    ensure!(
+        matches!(formatter, "air" | "arity"),
+        "unsupported formatter fixture: {formatter}"
+    );
+    fs::create_dir_all(directory)?;
+    let fixture = directory.join(format!("{formatter}{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&fixture, &compiled_formatter_fixture()?.bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fixture, fs::Permissions::from_mode(0o755))?;
+    }
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(directory.to_path_buf()).chain(std::env::split_paths(&current_path)),
+    )?;
+    Ok(path.to_string_lossy().into_owned())
+}
 
 pub const DEFAULT_CONFIG: &str = r#"[prompt]
 format = '{status}ARF> '
@@ -61,6 +129,8 @@ pub struct TerminalBuilder {
     args: Vec<String>,
     config: Option<ConfigSource>,
     env: Vec<(String, String)>,
+    #[cfg(unix)]
+    env_remove: Vec<String>,
     cwd: Option<PathBuf>,
     cols: u16,
     rows: u16,
@@ -82,6 +152,8 @@ impl TerminalBuilder {
             args: Vec::new(),
             config: None,
             env: Vec::new(),
+            #[cfg(unix)]
+            env_remove: Vec::new(),
             cwd: None,
             cols: 100,
             rows: 32,
@@ -115,6 +187,13 @@ impl TerminalBuilder {
 
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Remove inherited environment variables before starting arf.
+    #[cfg(unix)]
+    pub fn env_remove(mut self, key: impl Into<String>) -> Self {
+        self.env_remove.push(key.into());
         self
     }
 
@@ -218,6 +297,22 @@ impl TerminalBuilder {
             history_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(self.args);
+        #[cfg(unix)]
+        let program = if self.env_remove.is_empty() {
+            env!("CARGO_BIN_EXE_arf").to_owned()
+        } else {
+            let mut wrapper_args = Vec::with_capacity(self.env_remove.len() * 2 + args.len() + 1);
+            for key in self.env_remove {
+                wrapper_args.push("-u".to_owned());
+                wrapper_args.push(key);
+            }
+            wrapper_args.push(env!("CARGO_BIN_EXE_arf").to_owned());
+            wrapper_args.extend(args);
+            args = wrapper_args;
+            "/usr/bin/env".to_owned()
+        };
+        #[cfg(not(unix))]
+        let program = env!("CARGO_BIN_EXE_arf").to_owned();
         let cwd = self.cwd.unwrap_or_else(|| work.path().to_path_buf());
         let mut env = self.env;
         if let Some((_, value)) = env
@@ -243,7 +338,7 @@ impl TerminalBuilder {
         terminal.stage("spawn")?;
         let opened = terminal.session.run(RunOptions {
             backend: defaults.backend,
-            program: env!("CARGO_BIN_EXE_arf").into(),
+            program,
             args,
             profile: defaults.profile,
             cols,
@@ -298,7 +393,7 @@ impl Terminal {
 
     pub fn state(&self) -> Result<State> {
         match self.execute(Operation::State)? {
-            OperationResult::State(state) => Ok(state),
+            OperationResult::State(state) => Ok(*state),
             _ => bail!("unexpected state response"),
         }
     }
@@ -399,9 +494,14 @@ impl Terminal {
     pub fn wait_for_prompt(&self, output: Option<&str>, prompt: &str) -> Result<()> {
         // A new, independent output line plus the cursor's prompt line avoids
         // matching old prompts and source echoes. Each command's marker must be
-        // unique within the session. For repeated output use recording checkpoints.
+        // unique within the session. For repeated commands, compare the cursor
+        // row before and after submission, then check the result on screen.
+        // Recording checkpoints are for stream-only checks such as erased
+        // output, complete echoes, and non-leak behavior.
         // arf emits no shell integration: WaitReady/WaitCommand are not suitable.
-        // beta.3's locator also loses wide/combining characters; use text/cells.
+        // tui-test's text locator currently takes only the first character in each cell
+        // and treats empty wide-character continuation cells as spaces, so it
+        // can miss wide or combining text; use State.text/cells instead.
         self.wait_for("output and input prompt", |state, line| {
             line.trim_end() == prompt
                 && usize::from(state.cursor.x) == prompt.len() + 1
@@ -562,7 +662,7 @@ impl CliSession {
 
     pub fn state(&self) -> Result<State> {
         match self.session.execute(Operation::State)? {
-            OperationResult::State(state) => Ok(state),
+            OperationResult::State(state) => Ok(*state),
             _ => bail!("unexpected CLI state response"),
         }
     }

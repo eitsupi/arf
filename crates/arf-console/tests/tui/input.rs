@@ -114,7 +114,7 @@ fn cursor_position_tracks_empty_input_and_interrupt() -> Result<()> {
 }
 
 #[test]
-fn screen_state_tracks_results_and_checkpointed_output() -> Result<()> {
+fn screen_state_tracks_repeated_results_on_fresh_rows() -> Result<()> {
     run_case(
         "screen-state",
         &["--no-auto-match", "--no-completion"],
@@ -130,13 +130,17 @@ fn screen_state_tracks_results_and_checkpointed_output() -> Result<()> {
             ensure!(after_first.text.contains("[1] 100"));
             ensure!(after_first.cursor.x == initial.cursor.x);
 
-            // The checkpoint replaces the legacy PTY output-buffer clearing
-            // while retaining the observable result of the second command.
-            let checkpoint = terminal.checkpoint()?;
             terminal.submit("200", "[1] 200", PROMPT)?;
+            let after_second = terminal.state()?;
             ensure!(
-                terminal.output_since(checkpoint)?.contains("[1] 200"),
-                "second result was not emitted after the checkpoint"
+                after_second.cursor.y > after_first.cursor.y,
+                "second command did not produce a fresh screen row: {after_second:?}"
+            );
+            let result_line =
+                terminal.screen_line(after_second.cursor.y.saturating_sub(1), after_second.cols)?;
+            ensure!(
+                result_line.trim_end() == "[1] 200",
+                "second result was not visible immediately above the prompt: {result_line:?}"
             );
             Ok(())
         },

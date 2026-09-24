@@ -182,8 +182,19 @@ fn run_formatter_command(
     virtual_path: &Path,
     code: &str,
 ) -> Result<String, FormatterError> {
+    run_formatter_command_with_prefix_args(formatter, command, &[], virtual_path, code)
+}
+
+fn run_formatter_command_with_prefix_args(
+    formatter: FormatterBackend,
+    command: &OsStr,
+    prefix_args: &[&str],
+    virtual_path: &Path,
+    code: &str,
+) -> Result<String, FormatterError> {
     let args = formatter_args(formatter, virtual_path);
     let mut child = Command::new(command)
+        .args(prefix_args)
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -375,85 +386,97 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn formatter_process_receives_stdin_and_expected_arguments() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let command = directory.path().join("fake-air");
-        std::fs::write(
-            &command,
-            "#!/bin/sh\n[ \"$1\" = format ] || exit 10\n[ \"$2\" = --stdin-file-path ] || exit 11\n[ \"$3\" = virtual.R ] || exit 12\n[ \"$4\" = --force ] || exit 13\ncat\n",
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&command, permissions).unwrap();
-
-        let result = run_formatter_command(
+        let command = std::env::current_exe().unwrap();
+        let result = run_formatter_command_with_prefix_args(
             FormatterBackend::Air,
             command.as_os_str(),
+            &test_formatter_prefix_args(),
             Path::new("virtual.R"),
             "x <- 1",
         );
-        assert_eq!(result.unwrap(), "x <- 1");
+        assert_eq!(test_formatter_output(&result.unwrap()), "x <- 1");
     }
 
-    #[cfg(unix)]
     #[test]
     fn arity_process_receives_stdin_and_expected_arguments() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let command = directory.path().join("fake-arity");
-        std::fs::write(
-            &command,
-            "#!/bin/sh\n[ \"$1\" = format ] || exit 10\n[ \"$2\" = - ] || exit 11\n[ -z \"$3\" ] || exit 12\ncat\n",
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&command, permissions).unwrap();
-
-        let result = run_formatter_command(
+        let command = std::env::current_exe().unwrap();
+        let result = run_formatter_command_with_prefix_args(
             FormatterBackend::Arity,
             command.as_os_str(),
+            &test_formatter_prefix_args(),
             Path::new("virtual.R"),
             "x <- 1",
         );
-        assert_eq!(result.unwrap(), "x <- 1");
+        assert_eq!(test_formatter_output(&result.unwrap()), "x <- 1");
     }
 
-    #[cfg(unix)]
     #[test]
     fn formatter_process_failure_is_returned_as_an_error() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let command = directory.path().join("fake-air");
-        std::fs::write(
-            &command,
-            r###"#!/bin/sh
-cat >/dev/null
-echo formatter failed >&2
-exit 17
-"###,
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&command).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&command, permissions).unwrap();
-
-        let result = run_formatter_command(
+        let command = std::env::current_exe().unwrap();
+        let result = run_formatter_command_with_prefix_args(
             FormatterBackend::Air,
             command.as_os_str(),
+            &test_formatter_prefix_args(),
             Path::new("virtual.R"),
-            "x <- 1",
+            "formatter failure test",
         );
         assert!(
             matches!(result, Err(FormatterError::FormatFailed { stderr, .. }) if stderr.contains("formatter failed"))
         );
+    }
+
+    fn test_formatter_prefix_args() -> [&'static str; 3] {
+        [
+            "--exact",
+            "external::formatter::tests::formatter_test_helper_process",
+            "--",
+        ]
+    }
+
+    fn test_formatter_output(output: &str) -> &str {
+        const START: &str = "\0formatter-output-start\0";
+        const END: &str = "\0formatter-output-end\0";
+        output
+            .split_once(START)
+            .and_then(|(_, output)| output.split_once(END))
+            .map(|(output, _)| output)
+            .expect("test formatter output markers are present")
+    }
+
+    #[test]
+    fn formatter_test_helper_process() {
+        let args: Vec<_> = std::env::args_os().collect();
+        let helper_prefix = [
+            OsStr::new("--exact"),
+            OsStr::new("external::formatter::tests::formatter_test_helper_process"),
+            OsStr::new("--"),
+        ];
+        if !args.get(1..4).is_some_and(|args| args == helper_prefix) {
+            return;
+        }
+        let formatter_args: Vec<_> = args[4..]
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            formatter_args == ["format", "--stdin-file-path", "virtual.R", "--force"]
+                || formatter_args == ["format", "-"],
+            "unexpected formatter arguments: {formatter_args:?}"
+        );
+
+        use std::io::{Read, Write};
+        let mut input = String::new();
+        std::io::stdin().read_to_string(&mut input).unwrap();
+        if input == "formatter failure test" {
+            writeln!(std::io::stderr(), "formatter failed").unwrap();
+            std::process::exit(17);
+        }
+        let mut stdout = std::io::stdout();
+        stdout.write_all(b"\0formatter-output-start\0").unwrap();
+        stdout.write_all(input.as_bytes()).unwrap();
+        stdout.write_all(b"\0formatter-output-end\0").unwrap();
     }
 
     #[test]

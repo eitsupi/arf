@@ -1,4 +1,4 @@
-use super::support::{PROMPT, Terminal, run_case, run_case_with};
+use super::support::{PROMPT, Terminal, build_formatter_fixture_path, run_case, run_case_with};
 use anyhow::{Result, ensure};
 
 #[test]
@@ -31,16 +31,10 @@ continuation = "CONT> "
             .config(config),
         |terminal| {
             terminal.wait_for("custom main prompt", |_, line| line.trim_end() == "MAIN>")?;
-            let options_checkpoint = terminal.checkpoint()?;
             terminal.enter("options(continue = '... ')")?;
             terminal.wait_for("main prompt after options", |state, line| {
                 state.text.contains("options(continue = '... ')") && line.trim_end() == "MAIN>"
             })?;
-            ensure!(
-                terminal
-                    .output_since(options_checkpoint)?
-                    .contains("options(continue ")
-            );
             terminal.write(r#"x <- r"(hello"#)?;
             terminal.key("Enter")?;
             terminal.wait_for("custom continuation prompt", |_, line| {
@@ -58,74 +52,44 @@ continuation = "CONT> "
 }
 
 #[test]
-#[cfg(unix)]
 fn low_level_formatter_continuation_prompt_round_trips() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    for formatter in ["air", "arity"] {
+        formatter_continuation_scenario(formatter)?;
+    }
+    Ok(())
+}
 
+fn formatter_continuation_scenario(formatter: &str) -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let bin = temp.path().join("bin");
-    std::fs::create_dir(&bin)?;
-    let arity = bin.join("arity");
-    std::fs::write(
-        &arity,
-        r##"#!/bin/sh
-case "$1" in
-  --version) echo 'arity test stub'; exit 0 ;;
-  format)
-    input=$(cat)
-    if [ "$input" = 42 ]; then
-      printf '%s' '1 +'
-    else
-      printf '%s' "$input"
-    fi
-    exit 0
-    ;;
-  *) exit 18 ;;
-esac
-"##,
-    )?;
-    let mut permissions = std::fs::metadata(&arity)?.permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&arity, permissions)?;
-
-    let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path =
-        std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&current_path)))?
-            .to_string_lossy()
-            .into_owned();
+    let path = build_formatter_fixture_path(&temp.path().join("bin"), formatter)?;
     let config = r#"
 [startup]
 reprex = "format"
 
 [reprex]
-formatter = "arity"
+formatter = "__FORMATTER__"
 
 [prompt]
 format = "MAIN> "
 continuation = "CONT> "
-"#;
+"#
+    .replace("__FORMATTER__", formatter);
     run_case_with(
-        Terminal::builder("low-level-formatter-continuation")
+        Terminal::builder(format!("low-level-formatter-continuation-{formatter}"))
             .args(["--no-auto-match"])
             .config(config)
-            .env("PATH", path),
+            .env("PATH", path)
+            .env("FORMATTER_FIXTURE_MODE", "continuation"),
         |terminal| {
             terminal.wait_for("formatter main prompt", |_, line| {
                 line.trim_end().ends_with("MAIN>")
             })?;
-            let options_checkpoint = terminal.checkpoint()?;
             terminal.enter("options(continue = '... ')")?;
             terminal.wait_for("formatter options prompt", |state, line| {
                 state.text.contains("options(continue = '... ')")
                     && line.trim_end().ends_with("MAIN>")
             })?;
-            ensure!(
-                terminal
-                    .output_since(options_checkpoint)?
-                    .contains("options(continue ")
-            );
 
-            let formatted_checkpoint = terminal.checkpoint()?;
             terminal.enter("42")?;
             terminal.wait_for("formatter continuation prompt", |_, line| {
                 line.trim_end().ends_with("CONT>")
@@ -135,11 +99,6 @@ continuation = "CONT> "
             terminal.wait_for("formatted expression result", |state, line| {
                 state.text.contains("[1] 3") && line.trim_end().ends_with("MAIN>")
             })?;
-            ensure!(
-                terminal
-                    .output_since(formatted_checkpoint)?
-                    .contains("[1] 3")
-            );
             terminal.quit()
         },
     )
