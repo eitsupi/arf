@@ -26,8 +26,11 @@ pub use types::{Rstart, SaType, UImode};
 // sys
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
+#[cfg(unix)]
+pub use sys::install_repl_driver;
 pub use sys::{
-    ReadConsolePromptInfo, clear_r_interrupt_pending, clear_write_console_callback,
+    ReadConsolePromptInfo, ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback,
+    ReplTopLevelPromptCallback, clear_r_interrupt_pending, clear_write_console_callback,
     command_had_error, ensure_ld_library_path, find_r_library, finish_ipc_capture,
     flush_reprex_buffer, get_r_home, global_error_handler_code, initialize_r,
     initialize_r_with_args, is_r_auto_discovery_disabled, is_r_awaiting_console_input,

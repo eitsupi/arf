@@ -9,15 +9,20 @@ pub mod help;
 pub mod lib_paths;
 mod object;
 mod protect;
+mod repl;
 pub mod startup;
 
 #[cfg(test)]
 mod test_support;
 
+#[cfg(test)]
+mod repl_tests;
+
 pub use error::*;
 pub use help::*;
 pub use object::*;
 pub use protect::*;
+pub use repl::{ReplEngineState, initialize_repl_engine, repl_engine_state};
 #[cfg(windows)]
 pub use startup::override_platform_gui;
 pub use startup::{

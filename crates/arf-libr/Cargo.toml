@@ -12,6 +12,9 @@ once_cell.workspace = true
 log.workspace = true
 thiserror.workspace = true
 
+[build-dependencies]
+cc = "1.2"
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 exec.workspace = true

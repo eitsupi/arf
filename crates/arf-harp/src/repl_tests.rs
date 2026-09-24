@@ -1,0 +1,276 @@
+use arf_libr::{ReplFact, ReplOutcome, install_repl_driver};
+use std::ffi::c_void;
+use std::io::Read;
+use std::os::raw::{c_char, c_int};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static INPUT_INDEX: AtomicUsize = AtomicUsize::new(0);
+static OUTCOME_INDEX: AtomicUsize = AtomicUsize::new(0);
+static FAILURES: AtomicUsize = AtomicUsize::new(0);
+static NESTED_INPUT_PENDING: AtomicUsize = AtomicUsize::new(0);
+
+const INPUTS: [&[u8]; 7] = [
+    b"42L",
+    b".arf_incremental_side_effect <- 7L; 1 + * 2",
+    b"stop('uncaught eval')",
+    b".arf_repl_print_abort",
+    b"tryCatch(stop('handled'), error = function(e) 42)",
+    b"stopifnot(identical(.arf_incremental_side_effect, 7L)); 42L",
+    b"stopifnot(identical(readline('> '), 'nested input')); 7L",
+];
+
+const EXPECTED: [ReplOutcome; 7] = [
+    ReplOutcome {
+        command_id: 100,
+        expression_id: 1,
+        fact: ReplFact::Unobserved,
+    },
+    ReplOutcome {
+        command_id: 101,
+        expression_id: 2,
+        fact: ReplFact::AbortedParse,
+    },
+    ReplOutcome {
+        command_id: 102,
+        expression_id: 1,
+        fact: ReplFact::AbortedEval,
+    },
+    ReplOutcome {
+        command_id: 103,
+        expression_id: 1,
+        fact: ReplFact::AbortedPrint,
+    },
+    ReplOutcome {
+        command_id: 104,
+        expression_id: 1,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 105,
+        expression_id: 2,
+        fact: ReplFact::Completed,
+    },
+    ReplOutcome {
+        command_id: 106,
+        expression_id: 2,
+        fact: ReplFact::Completed,
+    },
+];
+
+unsafe extern "C" {
+    fn arf_repl_driver_test_skip_next_boundary();
+}
+
+unsafe extern "C" fn top_level_prompt(prompt: *const c_char, _context: *mut c_void) -> c_int {
+    if !prompt.is_null() && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"> " {
+        1
+    } else {
+        0
+    }
+}
+
+unsafe extern "C" fn input_callback(
+    prompt: *const c_char,
+    buffer: *mut c_char,
+    buffer_len: c_int,
+    _history: c_int,
+    command_id: *mut u64,
+    _context: *mut c_void,
+) -> c_int {
+    if NESTED_INPUT_PENDING.load(Ordering::SeqCst) != 0
+        && !prompt.is_null()
+        && unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes() == b"> "
+    {
+        let input = b"nested input";
+        if buffer.is_null() || command_id.is_null() || buffer_len as usize <= input.len() + 1 {
+            FAILURES.fetch_add(1, Ordering::SeqCst);
+            return 0;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(input.as_ptr().cast::<c_char>(), buffer, input.len());
+            buffer.add(input.len()).write(b'\n' as c_char);
+            buffer.add(input.len() + 1).write(0);
+            *command_id = 0;
+        }
+        NESTED_INPUT_PENDING.store(0, Ordering::SeqCst);
+        marker("ARF_NESTED_INPUT");
+        return 1;
+    }
+
+    let index = INPUT_INDEX.fetch_add(1, Ordering::SeqCst);
+    let Some(input) = INPUTS.get(index) else {
+        marker("ARF_DRIVER_EOF");
+        return 0;
+    };
+    if buffer.is_null() || command_id.is_null() || buffer_len as usize <= input.len() + 1 {
+        FAILURES.fetch_add(1, Ordering::SeqCst);
+        return 0;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(input.as_ptr().cast::<c_char>(), buffer, input.len());
+        buffer.add(input.len()).write(b'\n' as c_char);
+        buffer.add(input.len() + 1).write(0);
+        *command_id = 100 + index as u64;
+    }
+    if index + 1 == INPUTS.len() {
+        NESTED_INPUT_PENDING.store(1, Ordering::SeqCst);
+    }
+    1
+}
+
+unsafe extern "C" fn outcome_callback(
+    command_id: u64,
+    expression_id: u32,
+    fact: u8,
+    _context: *mut c_void,
+) {
+    let index = OUTCOME_INDEX.fetch_add(1, Ordering::SeqCst);
+    let Some(expected) = EXPECTED.get(index) else {
+        FAILURES.fetch_add(1, Ordering::SeqCst);
+        return;
+    };
+    if ReplOutcome::from_native(command_id, expression_id, fact) != Some(*expected) {
+        eprintln!(
+            "unexpected repl outcome: command={command_id} expression={expression_id} fact={fact}; expected={expected:?}"
+        );
+        FAILURES.fetch_add(1, Ordering::SeqCst);
+    }
+    let marker_text = match fact {
+        0 => "unobserved",
+        1 => "completed",
+        2 => "parse",
+        3 => "eval",
+        4 => "print",
+        _ => "unknown",
+    };
+    marker(&format!(
+        "ARF_OUTCOME:{command_id}:{expression_id}:{marker_text}"
+    ));
+}
+
+fn marker(text: &str) {
+    use std::io::Write;
+    println!("{text}");
+    let _ = std::io::stdout().flush();
+}
+
+#[test]
+#[ignore = "runs an incremental command driver in the native R mainloop"]
+fn c_repl_driver_recovers_parse_eval_print_and_handled_conditions() {
+    const TEST_NAME: &str =
+        "repl_tests::c_repl_driver_recovers_parse_eval_print_and_handled_conditions";
+    const CHILD_ENV: &str = "ARF_C_REPL_DRIVER_CHILD";
+    if std::env::var(CHILD_ENV).as_deref() == Ok("1") {
+        unsafe {
+            INPUT_INDEX.store(0, Ordering::SeqCst);
+            OUTCOME_INDEX.store(0, Ordering::SeqCst);
+            FAILURES.store(0, Ordering::SeqCst);
+            NESTED_INPUT_PENDING.store(0, Ordering::SeqCst);
+            arf_libr::initialize_r_with_args(&[
+                "--vanilla",
+                "--no-save",
+                "--quiet",
+                "--interactive",
+            ])
+            .expect("R should initialize in the dedicated mainloop child");
+            let parser_factory =
+                crate::initialize_repl_engine().expect("R parser factory should initialize");
+            assert_eq!(crate::repl_engine_state(), crate::ReplEngineState::Ready);
+            drop(parser_factory);
+            let parser_factory = crate::eval_string_with_visibility(
+                r#"
+function(text) {
+    connection <- base::textConnection(text, open = "r")
+    list(
+        function() base::parse(connection, n = 1L),
+        function() {
+            base::close(connection)
+            if (grepl("uncaught eval", text, fixed = TRUE)) {
+                cat("ARF_CLOSE_FAILURE_INJECTED\n")
+                stop("injected close failure")
+            }
+            invisible(NULL)
+        }
+    )
+}
+"#,
+            )
+            .expect("test parser factory should evaluate")
+            .value;
+            crate::eval_string(
+                ".arf_repl_print_abort <- structure(1L, class = 'arf_repl_print_abort'); print.arf_repl_print_abort <- function(x, ...) stop('uncaught print')",
+            )
+            .expect("print failure method should install");
+            install_repl_driver(
+                parser_factory.sexp(),
+                top_level_prompt,
+                input_callback,
+                outcome_callback,
+                std::ptr::null_mut(),
+            )
+            .expect("native C driver should install");
+            arf_repl_driver_test_skip_next_boundary();
+            marker("ARF_DRIVER_READY");
+            let lib = arf_libr::r_library().expect("R library should be loaded");
+            (lib.run_rmainloop)();
+            unreachable!("R exits its process after ReadConsole returns EOF");
+        }
+    }
+
+    let mut child = Command::new(std::env::current_exe().expect("test binary path"))
+        .args([
+            "--exact",
+            TEST_NAME,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_ENV, "1")
+        .env("R_DEFAULT_PACKAGES", "NULL")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("mainloop child should start");
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    let output = child
+        .wait_with_output()
+        .expect("mainloop child should exit");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "mainloop child failed: {stderr}\n{stdout}"
+    );
+    let expected_markers = [
+        "ARF_DRIVER_READY",
+        "ARF_OUTCOME:100:1:unobserved",
+        "ARF_OUTCOME:101:2:parse",
+        "ARF_CLOSE_FAILURE_INJECTED",
+        "ARF_OUTCOME:102:1:eval",
+        "ARF_OUTCOME:103:1:print",
+        "ARF_OUTCOME:104:1:completed",
+        "ARF_OUTCOME:105:2:completed",
+        "ARF_NESTED_INPUT",
+        "ARF_OUTCOME:106:2:completed",
+        "ARF_DRIVER_EOF",
+    ];
+    let actual = stdout
+        .split_whitespace()
+        .filter(|token| {
+            token.starts_with("ARF_DRIVER_")
+                || token.starts_with("ARF_OUTCOME:")
+                || token.starts_with("ARF_NESTED_")
+                || token.starts_with("ARF_CLOSE_")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual, expected_markers,
+        "child stdout: {stdout}\nchild stderr: {stderr}"
+    );
+}

@@ -23,6 +23,8 @@ pub struct RLibrary {
     pub setup_rmainloop: unsafe extern "C" fn(),
     pub run_rmainloop: unsafe extern "C" fn(),
     pub rf_endembeddedr: unsafe extern "C" fn(c_int),
+    pub r_preserve_object: unsafe extern "C" fn(SEXP),
+    pub r_release_object: unsafe extern "C" fn(SEXP),
 
     // Parsing and evaluation
     pub r_parsevector: unsafe extern "C" fn(SEXP, c_int, *mut ParseStatus, SEXP) -> SEXP,
@@ -69,6 +71,15 @@ pub struct RLibrary {
         Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
         *mut std::ffi::c_void,
     ) -> Rboolean,
+
+    /// R_UnwindProtect provides native cleanup when R performs a non-local exit.
+    pub r_unwindprotect: unsafe extern "C" fn(
+        Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> SEXP>,
+        *mut std::ffi::c_void,
+        Option<unsafe extern "C" fn(*mut std::ffi::c_void, c_int)>,
+        *mut std::ffi::c_void,
+        SEXP,
+    ) -> SEXP,
 
     // Eval (without error handling - use inside R_ToplevelExec)
     pub rf_eval: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
@@ -293,6 +304,8 @@ impl RLibrary {
             load_symbol!(setup_rmainloop, b"setup_Rmainloop\0");
             load_symbol!(run_rmainloop, b"run_Rmainloop\0");
             load_symbol!(rf_endembeddedr, b"Rf_endEmbeddedR\0");
+            load_symbol!(r_preserve_object, b"R_PreserveObject\0");
+            load_symbol!(r_release_object, b"R_ReleaseObject\0");
 
             // Load parsing and evaluation functions
             load_symbol!(r_parsevector, b"R_ParseVector\0");
@@ -336,6 +349,7 @@ impl RLibrary {
 
             // Load top-level execution
             load_symbol!(r_toplevelexec, b"R_ToplevelExec\0");
+            load_symbol!(r_unwindprotect, b"R_UnwindProtect\0");
             load_symbol!(rf_eval, b"Rf_eval\0");
 
             // Load global symbols
@@ -583,6 +597,8 @@ impl RLibrary {
                 setup_rmainloop,
                 run_rmainloop,
                 rf_endembeddedr,
+                r_preserve_object,
+                r_release_object,
                 r_parsevector,
                 rf_protect,
                 rf_unprotect,
@@ -606,6 +622,7 @@ impl RLibrary {
                 logical,
                 integer,
                 r_toplevelexec,
+                r_unwindprotect,
                 rf_eval,
                 r_nilvalue,
                 r_globalenv,

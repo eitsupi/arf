@@ -6,6 +6,7 @@ mod error_state;
 mod init;
 mod interrupt;
 mod output;
+mod repl;
 mod spinner;
 
 #[cfg(unix)]
@@ -32,6 +33,11 @@ pub use interrupt::{
 pub use output::{
     clear_write_console_callback, finish_ipc_capture, flush_reprex_buffer, set_reprex_mode,
     set_write_console_callback, start_ipc_capture,
+};
+#[cfg(unix)]
+pub use repl::install_repl_driver;
+pub use repl::{
+    ReplFact, ReplInputCallback, ReplOutcome, ReplOutcomeCallback, ReplTopLevelPromptCallback,
 };
 pub use spinner::{
     is_spinner_active, set_spinner_color, set_spinner_frames, start_spinner, stop_spinner,

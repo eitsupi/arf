@@ -191,6 +191,7 @@ dependencies = [
 name = "arf-libr"
 version = "0.5.2"
 dependencies = [
+ "cc",
  "encoding_rs",
  "exec",
  "libc",
