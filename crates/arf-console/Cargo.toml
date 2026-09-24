@@ -61,5 +61,4 @@ insta.workspace = true
 regex.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
-portable-pty.workspace = true
 tui-test-rs.workspace = true

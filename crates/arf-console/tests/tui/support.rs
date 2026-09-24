@@ -61,6 +61,8 @@ pub struct TerminalBuilder {
     args: Vec<String>,
     config: Option<ConfigSource>,
     env: Vec<(String, String)>,
+    #[cfg(unix)]
+    env_remove: Vec<String>,
     cwd: Option<PathBuf>,
     cols: u16,
     rows: u16,
@@ -82,6 +84,8 @@ impl TerminalBuilder {
             args: Vec::new(),
             config: None,
             env: Vec::new(),
+            #[cfg(unix)]
+            env_remove: Vec::new(),
             cwd: None,
             cols: 100,
             rows: 32,
@@ -115,6 +119,13 @@ impl TerminalBuilder {
 
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Remove inherited environment variables before starting arf.
+    #[cfg(unix)]
+    pub fn env_remove(mut self, key: impl Into<String>) -> Self {
+        self.env_remove.push(key.into());
         self
     }
 
@@ -218,6 +229,22 @@ impl TerminalBuilder {
             history_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(self.args);
+        #[cfg(unix)]
+        let program = if self.env_remove.is_empty() {
+            env!("CARGO_BIN_EXE_arf").to_owned()
+        } else {
+            let mut wrapper_args = Vec::with_capacity(self.env_remove.len() * 2 + args.len() + 1);
+            for key in self.env_remove {
+                wrapper_args.push("-u".to_owned());
+                wrapper_args.push(key);
+            }
+            wrapper_args.push(env!("CARGO_BIN_EXE_arf").to_owned());
+            wrapper_args.extend(args);
+            args = wrapper_args;
+            "/usr/bin/env".to_owned()
+        };
+        #[cfg(not(unix))]
+        let program = env!("CARGO_BIN_EXE_arf").to_owned();
         let cwd = self.cwd.unwrap_or_else(|| work.path().to_path_buf());
         let mut env = self.env;
         if let Some((_, value)) = env
@@ -243,7 +270,7 @@ impl TerminalBuilder {
         terminal.stage("spawn")?;
         let opened = terminal.session.run(RunOptions {
             backend: defaults.backend,
-            program: env!("CARGO_BIN_EXE_arf").into(),
+            program,
             args,
             profile: defaults.profile,
             cols,
@@ -298,7 +325,7 @@ impl Terminal {
 
     pub fn state(&self) -> Result<State> {
         match self.execute(Operation::State)? {
-            OperationResult::State(state) => Ok(state),
+            OperationResult::State(state) => Ok(*state),
             _ => bail!("unexpected state response"),
         }
     }
@@ -401,7 +428,9 @@ impl Terminal {
         // matching old prompts and source echoes. Each command's marker must be
         // unique within the session. For repeated output use recording checkpoints.
         // arf emits no shell integration: WaitReady/WaitCommand are not suitable.
-        // beta.3's locator also loses wide/combining characters; use text/cells.
+        // tui-test's text locator currently takes only the first character in each cell
+        // and treats empty wide-character continuation cells as spaces, so it
+        // can miss wide or combining text; use State.text/cells instead.
         self.wait_for("output and input prompt", |state, line| {
             line.trim_end() == prompt
                 && usize::from(state.cursor.x) == prompt.len() + 1
@@ -562,7 +591,7 @@ impl CliSession {
 
     pub fn state(&self) -> Result<State> {
         match self.session.execute(Operation::State)? {
-            OperationResult::State(state) => Ok(state),
+            OperationResult::State(state) => Ok(*state),
             _ => bail!("unexpected CLI state response"),
         }
     }
