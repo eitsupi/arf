@@ -7,7 +7,9 @@
 //! child for other signals, neither of which sends an external Unix signal to arf.
 
 use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
-use anyhow::{Context, Result, ensure};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::{Result, ensure};
 #[cfg(unix)]
 use std::ffi::CStr;
 #[cfg(unix)]

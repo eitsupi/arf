@@ -61,6 +61,7 @@ pub struct TerminalBuilder {
     args: Vec<String>,
     config: Option<ConfigSource>,
     env: Vec<(String, String)>,
+    #[cfg(unix)]
     env_remove: Vec<String>,
     cwd: Option<PathBuf>,
     cols: u16,
@@ -83,6 +84,7 @@ impl TerminalBuilder {
             args: Vec::new(),
             config: None,
             env: Vec::new(),
+            #[cfg(unix)]
             env_remove: Vec::new(),
             cwd: None,
             cols: 100,
@@ -121,6 +123,7 @@ impl TerminalBuilder {
     }
 
     /// Remove inherited environment variables before starting arf.
+    #[cfg(unix)]
     pub fn env_remove(mut self, key: impl Into<String>) -> Self {
         self.env_remove.push(key.into());
         self
@@ -226,6 +229,7 @@ impl TerminalBuilder {
             history_dir.to_string_lossy().into_owned(),
         ]);
         args.extend(self.args);
+        #[cfg(unix)]
         let program = if self.env_remove.is_empty() {
             env!("CARGO_BIN_EXE_arf").to_owned()
         } else {
@@ -239,6 +243,8 @@ impl TerminalBuilder {
             args = wrapper_args;
             "/usr/bin/env".to_owned()
         };
+        #[cfg(not(unix))]
+        let program = env!("CARGO_BIN_EXE_arf").to_owned();
         let cwd = self.cwd.unwrap_or_else(|| work.path().to_path_buf());
         let mut env = self.env;
         if let Some((_, value)) = env

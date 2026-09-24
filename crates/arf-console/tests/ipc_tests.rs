@@ -13,7 +13,9 @@
 //!
 //! Each test spawns a fresh arf process with an isolated IPC session directory.
 
-use std::io::{Read, Write};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
