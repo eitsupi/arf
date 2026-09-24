@@ -9,7 +9,7 @@
 //! initialization, so Windows wiring must select the C trampoline in
 //! `initialize_r_windows` and register callbacks before entering the mainloop.
 
-use crate::{SEXP, r_library};
+use crate::{ReadConsoleFunc, SEXP, r_library};
 use std::ffi::c_char;
 use std::os::raw::c_int;
 use std::sync::OnceLock;
@@ -126,6 +126,11 @@ unsafe extern "C" {
 }
 
 static NATIVE_API: OnceLock<NativeApi> = OnceLock::new();
+static INSTALLED_READ_CONSOLE: OnceLock<ReadConsoleFunc> = OnceLock::new();
+
+pub(super) fn installed_read_console_callback() -> Option<ReadConsoleFunc> {
+    INSTALLED_READ_CONSOLE.get().copied()
+}
 
 /// Install the C-owned native ReadConsole trampoline.
 ///
@@ -190,5 +195,6 @@ pub unsafe fn install_repl_driver(
         return Err(crate::RError::FunctionNotFound("ptr_R_ReadConsole".into()));
     }
     unsafe { *lib.ptr_r_readconsole = native_callback };
+    let _ = INSTALLED_READ_CONSOLE.set(native_callback);
     Ok(())
 }

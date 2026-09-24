@@ -511,7 +511,8 @@ pub unsafe fn run_r_mainloop() {
     #[cfg(unix)]
     unsafe {
         if !lib.ptr_r_readconsole.is_null() {
-            *lib.ptr_r_readconsole = Some(r_read_console);
+            *lib.ptr_r_readconsole =
+                super::repl::installed_read_console_callback().unwrap_or(Some(r_read_console));
         }
     }
 

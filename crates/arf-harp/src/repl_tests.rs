@@ -212,8 +212,7 @@ function(text) {
             .expect("native C driver should install");
             arf_repl_driver_test_skip_next_boundary();
             marker("ARF_DRIVER_READY");
-            let lib = arf_libr::r_library().expect("R library should be loaded");
-            (lib.run_rmainloop)();
+            arf_libr::run_r_mainloop();
             unreachable!("R exits its process after ReadConsole returns EOF");
         }
     }
