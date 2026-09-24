@@ -11,10 +11,20 @@ use reedline::{HistoryItemId, HistorySessionId, Reedline};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+mod outcome;
+#[cfg(test)]
+mod outcome_tests;
 mod sponge;
 #[cfg(test)]
 mod sponge_tests;
 
+#[allow(unused_imports)] // The next REPL slice wires these exports into ReadConsole.
+pub use outcome::{
+    CommandEvent, CommandId, CommandLifecycle, CommandOrigin, CommandPhase, CommandProgress,
+    CommandReduction, ConsumerProjection, FinalizedCommand, HistoryEffect, IgnoreReason,
+    NativeTerminalFact, PromptEffect, ReductionDisposition, SpongeEffect, TerminalOutcome,
+    TransitionError, reduce_command,
+};
 pub use sponge::SpongeQueue;
 
 use super::prompt::RPrompt;
