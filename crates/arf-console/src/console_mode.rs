@@ -55,6 +55,19 @@ mod imp {
         }
     }
 
+    /// Complete the handoff from startup input suppression to reedline.
+    ///
+    /// The patched crossterm Windows implementation does not restore a
+    /// pre-raw snapshot when `disable_raw_mode()` runs. It reads the current
+    /// mode and re-enables the three non-raw bits (`ENABLE_LINE_INPUT`,
+    /// `ENABLE_ECHO_INPUT`, and `ENABLE_PROCESSED_INPUT`), so startup's
+    /// echo-off mode cannot remain as the cooked baseline after the first
+    /// read. Keep the guard's full snapshot until process exit, though, so
+    /// cleanup still restores all console state, including VT-input bits.
+    pub(crate) fn handoff_to_reedline() -> std::io::Result<()> {
+        Ok(())
+    }
+
     fn stdin_handle() -> Option<HANDLE> {
         let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
         if handle.is_null() || handle == INVALID_HANDLE_VALUE {
@@ -129,6 +142,10 @@ mod imp {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     static ORIGINAL_TERMIOS: Mutex<Option<libc::termios>> = Mutex::new(None);
+    // The startup snapshot remains available for Drop/atexit restoration after
+    // the one-time handoff. Keeping these responsibilities separate prevents
+    // the startup guard from becoming reedline's baseline terminal state.
+    static STARTUP_RESTORE_PENDING: AtomicBool = AtomicBool::new(false);
     static ATEXIT_REGISTERED: AtomicBool = AtomicBool::new(false);
 
     /// Restores the original terminal mode when dropped.
@@ -148,6 +165,7 @@ mod imp {
                 let mut mode: libc::termios = unsafe { std::mem::zeroed() };
                 if unsafe { libc::tcgetattr(libc::STDIN_FILENO, &mut mode) } == 0 {
                     *original = Some(mode);
+                    STARTUP_RESTORE_PENDING.store(true, Ordering::Release);
                     disable_echo_input(&mode);
                 }
             }
@@ -163,6 +181,44 @@ mod imp {
     impl Drop for ConsoleModeGuard {
         fn drop(&mut self) {
             restore_original_input_mode();
+        }
+    }
+
+    /// Restore the mode captured before startup suppression after reedline has
+    /// returned from its first raw-mode read.
+    ///
+    /// Unix crossterm snapshots the complete termios immediately before
+    /// enabling raw mode, then restores that snapshot in
+    /// `disable_raw_mode()`. Because startup already cleared ECHO, that
+    /// snapshot would otherwise become the cooked baseline again. This
+    /// explicit handoff restores the true startup mode after the first read.
+    ///
+    /// This is deliberately called after `read_line()` returns. Restoring just
+    /// before that call would leave a window in which early PTY input could be
+    /// echoed before reedline enables raw mode. A failed restore leaves both
+    /// the pending flag and the snapshot intact solely so Drop/atexit cleanup
+    /// can retry it; normal R or standalone processing must stop while the
+    /// terminal state is unknown.
+    pub(crate) fn handoff_to_reedline() -> std::io::Result<()> {
+        if !STARTUP_RESTORE_PENDING.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        let original = match ORIGINAL_TERMIOS.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let Some(mode) = original.as_ref() else {
+            STARTUP_RESTORE_PENDING.store(false, Ordering::Release);
+            return Ok(());
+        };
+
+        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, mode) } == 0 {
+            STARTUP_RESTORE_PENDING.store(false, Ordering::Release);
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
         }
     }
 
@@ -207,6 +263,7 @@ mod imp {
 
         if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, mode) } == 0 {
             *original = None;
+            STARTUP_RESTORE_PENDING.store(false, Ordering::Release);
         } else {
             log::warn!(
                 "Failed to restore terminal input mode: {}",
@@ -229,5 +286,6 @@ mod imp {
 }
 
 pub(crate) use imp::ConsoleModeGuard;
+pub(crate) use imp::handoff_to_reedline;
 #[cfg(unix)]
 pub(crate) use imp::restore_original_input_mode;

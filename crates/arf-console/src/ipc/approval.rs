@@ -45,10 +45,7 @@ pub fn approve_user_input(
             wrote_newline: false,
         };
     }
-    let prompt = approval_prompt(code);
     use std::io::Write;
-    print!("{prompt}");
-    let _ = std::io::stdout().flush();
     let finish = |approved: bool| {
         // Raw terminals do not translate LF to CRLF; return to column zero
         // explicitly so the agent echo is rendered on the next line.
@@ -67,7 +64,8 @@ pub fn approve_user_input(
     // Reedline normally owns raw mode, but the fast path can reach this
     // helper before it starts reading. Preserve whichever state we inherit.
     let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-    if !was_raw && crossterm::terminal::enable_raw_mode().is_err() {
+    if !was_raw && let Err(error) = crossterm::terminal::enable_raw_mode() {
+        log::debug!("IPC send approval could not enable raw mode: {error}");
         return finish(false);
     }
     struct RawModeGuard {
@@ -81,6 +79,13 @@ pub fn approve_user_input(
         }
     }
     let _raw_mode_guard = RawModeGuard { was_raw };
+
+    // On Windows, cooked mode can consume Ctrl+C as a processed signal just
+    // after the prompt is displayed; publish the prompt only after the raw
+    // mode guard is established so every visible prompt can receive key events.
+    let prompt = approval_prompt(code);
+    print!("{prompt}");
+    let _ = std::io::stdout().flush();
 
     loop {
         if reply.is_closed() {

@@ -4,6 +4,7 @@
 //! [`CombinedCompleter`] which dispatches to the appropriate sub-completer.
 
 use super::r_completer::RCompleter;
+use arf_harp::completion::StaticFormalsPolicy;
 use reedline::{Completer, CompletionResult};
 
 // Re-export so external code can keep using `crate::completion::completer::MetaCommandCompleter`.
@@ -54,6 +55,27 @@ impl CombinedCompleter {
         fuzzy_namespace: bool,
         package_functions: Vec<String>,
     ) -> Self {
+        Self::with_settings_full_and_static_formals(
+            timeout_ms,
+            debounce_ms,
+            auto_paren_limit,
+            rig_enabled,
+            fuzzy_namespace,
+            package_functions,
+            StaticFormalsPolicy::off(),
+        )
+    }
+
+    /// Create a completer with all settings, including static formal policy.
+    pub fn with_settings_full_and_static_formals(
+        timeout_ms: u64,
+        debounce_ms: u64,
+        auto_paren_limit: usize,
+        rig_enabled: bool,
+        fuzzy_namespace: bool,
+        package_functions: Vec<String>,
+        static_formals: StaticFormalsPolicy,
+    ) -> Self {
         // Build exclusion list: always exclude `:r` in R mode
         let mut exclusions: Vec<&'static str> = vec!["r"];
 
@@ -63,12 +85,13 @@ impl CombinedCompleter {
         }
 
         CombinedCompleter {
-            r_completer: RCompleter::with_settings_full(
+            r_completer: RCompleter::with_settings_full_and_static_formals(
                 timeout_ms,
                 debounce_ms,
                 auto_paren_limit,
                 fuzzy_namespace,
                 package_functions,
+                static_formals,
             ),
             meta_completer: MetaCommandCompleter::with_exclusions(exclusions),
         }

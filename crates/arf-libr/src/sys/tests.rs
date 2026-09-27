@@ -186,7 +186,7 @@ fn test_strip_cr() {
 
     // Standalone CR should also be stripped
     let stripped = strip_cr("Error: \"{\r\" の)");
-    assert_eq!(stripped, "Error: \"{\" の)");
+    assert_eq!(stripped, r#"Error: "{" の)"#);
 
     // Mixed line endings: all CR should be removed
     let stripped = strip_cr("line1\r\nline2\nline3\r");

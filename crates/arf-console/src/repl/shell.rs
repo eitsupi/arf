@@ -1,7 +1,7 @@
 //! Shell command execution and process management.
 
 use crate::external::rig::{self, RigError};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
@@ -150,13 +150,17 @@ where
 /// returns, so mutating its environment directly would leak into it.
 fn build_restart_command(
     exe: &std::path::Path,
-    args: &[String],
+    args: &[OsString],
     changes: &EnvChanges,
     startup_env_carrier: &str,
 ) -> Command {
     let mut cmd = Command::new(exe);
     cmd.args(args);
     cmd.env(crate::STARTUP_ENV_CARRIER, startup_env_carrier);
+    #[cfg(unix)]
+    if let Some(fd) = crate::pid_file::restart_fd_carrier() {
+        cmd.env(crate::pid_file::RESTART_PID_FD_ENV, fd);
+    }
     for (var, value) in &changes.restored {
         cmd.env(var, value);
     }
@@ -244,14 +248,14 @@ pub fn restart_process(version: Option<&str>) {
 
     // Get command-line arguments (skip the program name, we'll use current_exe instead)
     // Also filter out any existing --with-r-version argument if we're switching versions
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<OsString> = crate::normalized_args();
 
     if let Some(v) = &version {
         // Remove existing --with-r-version arguments
         args = filter_r_version_args(args);
         // Add the new version
-        args.push("--with-r-version".to_string());
-        args.push(v.to_string());
+        args.push(OsString::from("--with-r-version"));
+        args.push(OsString::from(v));
     }
 
     let changes = env_changes_for_switch(version, crate::startup_env_value);
@@ -263,6 +267,14 @@ pub fn restart_process(version: Option<&str>) {
     {
         use std::os::unix::process::CommandExt;
 
+        let _pid_fd_guard = match crate::pid_file::prepare_pid_fd_for_exec() {
+            Some(Ok(guard)) => Some(guard),
+            Some(Err(error)) => {
+                arf_eprintln!("Error: Failed to prepare PID file for restart: {error}");
+                return;
+            }
+            None => None,
+        };
         let mut cmd = build_restart_command(&exe, &args, &changes, &startup_env_carrier);
 
         // exec() replaces the current process - this should not return
@@ -272,6 +284,16 @@ pub fn restart_process(version: Option<&str>) {
 
     #[cfg(not(unix))]
     {
+        // A spawned replacement cannot safely share the parent's PID file.
+        // Stop serving first, then relinquish the file; on failure the old
+        // file is left alone and no child is started.
+        crate::ipc::stop_server();
+        if let Some(pid_path) = crate::pid_file::initial_pid_file_path()
+            && let Err(e) = crate::pid_file::relinquish_pid_file_for_restart(&pid_path)
+        {
+            arf_eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
         // On non-Unix platforms, spawn a new process and wait for it to exit.
         // Unlike Unix exec(), this doesn't replace the current process, so we
         // wait for the child and then exit with its status code. This keeps the
@@ -316,7 +338,7 @@ where
 }
 
 /// Filter out --with-r-version and its value from command-line arguments.
-fn filter_r_version_args(args: Vec<String>) -> Vec<String> {
+fn filter_r_version_args(args: Vec<OsString>) -> Vec<OsString> {
     let mut result = Vec::new();
     let mut skip_next = false;
 
@@ -326,13 +348,13 @@ fn filter_r_version_args(args: Vec<String>) -> Vec<String> {
             continue;
         }
 
-        if arg == "--with-r-version" {
+        if arg == OsStr::new("--with-r-version") {
             // Skip this and the next argument (the version value)
             skip_next = true;
             continue;
         }
 
-        if arg.starts_with("--with-r-version=") {
+        if arg.to_string_lossy().starts_with("--with-r-version=") {
             // Skip --with-r-version=value form
             continue;
         }

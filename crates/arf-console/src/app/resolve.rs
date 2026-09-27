@@ -335,6 +335,7 @@ fn selected_by(
         let format = match resolution.provider.as_deref() {
             Some("version-file") => Some("text"),
             Some("toml-key") => Some("toml"),
+            Some("json-key") => Some("json"),
             _ => None,
         };
         return SelectedBy {

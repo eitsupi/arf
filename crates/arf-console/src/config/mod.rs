@@ -16,6 +16,7 @@ pub use completion::CompletionConfig;
 pub use editor::{AutoSuggestions, EditorConfig, EditorMode};
 pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
+    StaticFormalsMode,
 };
 pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;
@@ -265,8 +266,7 @@ fn removed_reprex_keys(document: &toml::Value) -> Option<String> {
         .and_then(|value| value.get("mode"))
         .is_some()
     {
-        messages
-            .push("[startup.mode] was removed; use [startup] reprex = \"off\"|\"on\"|\"format\"");
+        messages.push(r#"[startup.mode] was removed; use [startup] reprex = "off"|"on"|"format""#);
     }
     if document
         .get("mode")
@@ -303,11 +303,11 @@ fn history_migration_warning(document: &toml::Value) -> Option<String> {
     let has_legacy_dir = history.contains_key("dir");
     match (has_mode, has_legacy_dir, disabled) {
         (true, _, Some(_)) => Some("Config key history.disabled is deprecated and ignored because history.mode is set; use history.mode only.".to_string()),
-        (false, true, Some(true)) => Some("Config keys history.disabled and history.dir are deprecated; use history.mode = \"volatile\" instead.".to_string()),
-        (false, true, Some(false)) => Some("Config keys history.disabled and history.dir are deprecated; use persistent history.mode = { dir = \"...\" } instead.".to_string()),
-        (false, true, None) => Some("Config key history.dir is deprecated; use history.mode = { dir = \"...\" } instead.".to_string()),
-        (false, false, Some(true)) => Some("Config key history.disabled is deprecated; use history.mode = \"volatile\" instead.".to_string()),
-        (false, false, Some(false)) => Some("Config key history.disabled is deprecated; use history.mode = \"persistent\" instead.".to_string()),
+        (false, true, Some(true)) => Some(r#"Config keys history.disabled and history.dir are deprecated; use history.mode = "volatile" instead."#.to_string()),
+        (false, true, Some(false)) => Some(r#"Config keys history.disabled and history.dir are deprecated; use persistent history.mode = { dir = "..." } instead."#.to_string()),
+        (false, true, None) => Some(r#"Config key history.dir is deprecated; use history.mode = { dir = "..." } instead."#.to_string()),
+        (false, false, Some(true)) => Some(r#"Config key history.disabled is deprecated; use history.mode = "volatile" instead."#.to_string()),
+        (false, false, Some(false)) => Some(r#"Config key history.disabled is deprecated; use history.mode = "persistent" instead."#.to_string()),
         _ => None,
     }
 }
@@ -715,7 +715,7 @@ mode = "volatile"
         let serialized = toml::to_string(&config).unwrap();
         assert!(
             serialized.contains("[history.mode]")
-                && serialized.contains("dir = \"/custom/history\""),
+                && serialized.contains(r#"dir = "/custom/history""#),
             "serialized history config used an unexpected TOML shape: {serialized}"
         );
         assert!(!serialized.contains("[history]\ndir = "));
@@ -1094,7 +1094,7 @@ allowed_functions = ["mean", "stats::median", "+"]
 
         // Reprex mode is part of the startup section.
         assert!(
-            config_str.contains("reprex = \"off\""),
+            config_str.contains(r#"reprex = "off""#),
             "Should have reprex mode in startup section"
         );
 
@@ -1124,7 +1124,7 @@ allowed_functions = ["mean", "stats::median", "+"]
             "Should have [editor] section"
         );
         assert!(
-            config_str.contains("mode = \"persistent\""),
+            config_str.contains(r#"mode = "persistent""#),
             "History should default to persistent mode"
         );
         assert!(

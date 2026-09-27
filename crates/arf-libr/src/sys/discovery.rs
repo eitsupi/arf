@@ -290,6 +290,18 @@ pub fn ensure_ld_library_path_with_pre_exec<F>(pre_exec: F) -> RResult<bool>
 where
     F: FnOnce(),
 {
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    ensure_ld_library_path_with_pre_exec_and_args(&args, pre_exec)
+}
+
+#[cfg(unix)]
+pub fn ensure_ld_library_path_with_pre_exec_and_args<F>(
+    args: &[std::ffi::OsString],
+    pre_exec: F,
+) -> RResult<bool>
+where
+    F: FnOnce(),
+{
     let lib_path = find_r_library()?;
     let Some(lib_dir) = lib_path.parent() else {
         return Ok(false);
@@ -313,9 +325,8 @@ where
     // SAFETY: We're about to exec, so modifying environment is safe
     unsafe { env::set_var("LD_LIBRARY_PATH", &new_path) };
 
-    // Re-execute the current process. Preserve OsString arguments so non-UTF-8
-    // paths (for example --ipc-pid-file) do not panic during re-exec.
-    let args: Vec<_> = env::args_os().skip(1).collect();
+    // Re-execute the current process with the caller's authoritative argv.
+    // Preserve OsString arguments so non-UTF-8 values do not get rewritten.
     let exe = env::current_exe().map_err(|e| RError::LibraryNotFound(e.to_string()))?;
 
     log::info!("Re-executing with LD_LIBRARY_PATH={}", new_path);

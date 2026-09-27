@@ -43,6 +43,47 @@ pub enum TomlKeyError {
     NotString(String),
 }
 
+/// An error returned when reading an R version from a JSON key.
+#[derive(Debug)]
+pub enum JsonKeyError {
+    /// The JSON file could not be read.
+    Read(io::Error),
+    /// The JSON document could not be parsed.
+    Parse(serde_json::Error),
+    /// The requested key path does not exist.
+    MissingKey(String),
+    /// The requested key does not contain a string.
+    NotString(String),
+}
+
+impl fmt::Display for JsonKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read(error) => write!(formatter, "failed to read JSON file: {error}"),
+            Self::Parse(_) => formatter.write_str("failed to parse JSON"),
+            Self::MissingKey(key) => write!(formatter, "JSON key not found: {key}"),
+            Self::NotString(key) => write!(formatter, "JSON key is not a string: {key}"),
+        }
+    }
+}
+
+impl std::error::Error for JsonKeyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read(error) => Some(error),
+            Self::Parse(error) => Some(error),
+            Self::MissingKey(_) | Self::NotString(_) => None,
+        }
+    }
+}
+
+impl JsonKeyError {
+    /// Return whether this error means that the configured file is absent.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Read(error) if error.kind() == io::ErrorKind::NotFound)
+    }
+}
+
 impl fmt::Display for TomlKeyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -134,6 +175,29 @@ pub fn read_toml_key(path: &Path, key: &str) -> Result<String, TomlKeyError> {
         .as_str()
         .map(|version| version.trim().to_owned())
         .ok_or_else(|| TomlKeyError::NotString(key.to_owned()))
+}
+
+/// Read a string value from a dot-separated key path in a JSON file.
+pub fn read_json_key(path: &Path, key: &str) -> Result<String, JsonKeyError> {
+    let contents = fs::read_to_string(path).map_err(JsonKeyError::Read)?;
+    let document =
+        serde_json::from_str::<serde_json::Value>(&contents).map_err(JsonKeyError::Parse)?;
+
+    let mut value = &document;
+    for component in key.split('.') {
+        if component.is_empty() {
+            return Err(JsonKeyError::MissingKey(key.to_owned()));
+        }
+        value = value
+            .as_object()
+            .and_then(|object| object.get(component))
+            .ok_or_else(|| JsonKeyError::MissingKey(key.to_owned()))?;
+    }
+
+    value
+        .as_str()
+        .map(|version| version.trim().to_owned())
+        .ok_or_else(|| JsonKeyError::NotString(key.to_owned()))
 }
 
 impl fmt::Display for VersionSpecParseError {
@@ -515,6 +579,79 @@ mod tests {
         assert!(matches!(
             read_toml_key(file.path(), "project.r_version"),
             Err(TomlKeyError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn json_key_reads_nested_string() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"R":{"Version":"4.4"}}"#).unwrap();
+
+        assert_eq!(read_json_key(file.path(), "R.Version").unwrap(), "4.4");
+    }
+
+    #[test]
+    fn json_key_reports_missing_key() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"R":{"Platform":"x86_64"}}"#).unwrap();
+
+        assert!(matches!(
+            read_json_key(file.path(), "R.Version"),
+            Err(JsonKeyError::MissingKey(_))
+        ));
+    }
+
+    #[test]
+    fn json_key_reports_non_string_value() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"R":{"Version":4.4}}"#).unwrap();
+
+        assert!(matches!(
+            read_json_key(file.path(), "R.Version"),
+            Err(JsonKeyError::NotString(_))
+        ));
+    }
+
+    #[test]
+    fn json_key_reports_parse_errors_without_disclosing_contents() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let contents = r#"{"private":"SUPER-SECRET-JSON-CONTENTS""#;
+        std::fs::write(file.path(), contents).unwrap();
+
+        let error = read_json_key(file.path(), "R.Version").unwrap_err();
+        assert!(matches!(&error, JsonKeyError::Parse(_)));
+        assert_eq!(error.to_string(), "failed to parse JSON");
+        assert!(!error.to_string().contains("SUPER-SECRET-JSON-CONTENTS"));
+    }
+
+    #[test]
+    fn json_key_reports_read_errors_and_not_found() {
+        let path = Path::new("file-that-does-not-exist.json");
+
+        let error = read_json_key(path, "R.Version").unwrap_err();
+        assert!(error.is_not_found());
+        assert!(matches!(error, JsonKeyError::Read(_)));
+    }
+
+    #[test]
+    fn json_key_empty_component_is_missing_key() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"R":{"Version":"4.4"}}"#).unwrap();
+
+        assert!(matches!(
+            read_json_key(file.path(), "R..Version"),
+            Err(JsonKeyError::MissingKey(_))
+        ));
+    }
+
+    #[test]
+    fn json_key_does_not_support_array_indexes() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), r#"{"R":[{"Version":"4.4"}]}"#).unwrap();
+
+        assert!(matches!(
+            read_json_key(file.path(), "R.0.Version"),
+            Err(JsonKeyError::MissingKey(_))
         ));
     }
 }

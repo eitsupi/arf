@@ -373,7 +373,7 @@ mod tests {
         assert!(is_incomplete(validator.validate("x[")));
 
         // Unclosed strings
-        assert!(is_incomplete(validator.validate("\"hello")));
+        assert!(is_incomplete(validator.validate(r#""hello"#)));
         assert!(is_incomplete(validator.validate("'world")));
 
         // Trailing operators
@@ -504,7 +504,7 @@ mod tests {
         // Raw-string-like text that is actually just content of an ordinary
         // unclosed double-quoted string must not be misdetected here; it's
         // still correctly caught as Incomplete by the generic MISSING-close check.
-        assert!(is_incomplete(validator.validate("\"foo r'(bar")));
+        assert!(is_incomplete(validator.validate(r#""foo r'(bar"#)));
 
         // Malformed non-raw forms (missing quote/delimiter) are not raw
         // strings at all and must not spuriously match this workaround;

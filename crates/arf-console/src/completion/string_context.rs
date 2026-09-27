@@ -184,8 +184,8 @@ pub fn detect_string_context(line: &str, cursor_pos: usize) -> Option<StringCont
         let string_text = &line[string_start..string_end.min(line.len())];
 
         // Determine quote type and extract content
-        let (quote_char, content_start_offset) = if string_text.starts_with("r\"")
-            || string_text.starts_with("R\"")
+        let (quote_char, content_start_offset) = if string_text.starts_with(r#"r""#)
+            || string_text.starts_with(r#"R""#)
             || string_text.starts_with("r'")
             || string_text.starts_with("R'")
         {

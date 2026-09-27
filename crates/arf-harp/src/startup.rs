@@ -470,7 +470,7 @@ fn r_user_home() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::test_support::ENV_LOCK;
 
     #[test]
     fn test_find_site_r_profile_empty_r_profile_falls_through() {

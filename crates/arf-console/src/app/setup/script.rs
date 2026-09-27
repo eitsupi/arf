@@ -1,6 +1,8 @@
 //! Script execution mode.
 
-use crate::app::config_load::load_config_or_warn;
+use crate::app::config_load::{
+    load_config_for_startup, report_diagnostics_on_setup_error, report_startup_diagnostics,
+};
 use crate::cli::Cli;
 use crate::config::ReprexMode;
 use crate::external::formatter;
@@ -10,25 +12,32 @@ use std::fs;
 /// Run in script execution mode (non-interactive).
 pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     // Load configuration (from file or default)
-    let config = load_config_or_warn(cli.r_source.config.as_ref());
+    let (config, config_diagnostics) = load_config_for_startup(cli.r_source.config.as_ref());
 
     // Set up R based on r_source config (with optional CLI override)
-    let resolution = super::setup_r(
-        &config.startup.r_source,
-        &config.experimental.r_source_overrides,
-        None,
-        cli.r_source.r_home.as_deref(),
-        cli.r_source.r_version.as_deref(),
-        cli.r_source.no_r_source_overrides,
+    let (resolution, config_diagnostics) = report_diagnostics_on_setup_error(
+        super::setup_r(
+            &config.startup.r_source,
+            &config.experimental.r_source_overrides,
+            None,
+            cli.r_source.r_home.as_deref(),
+            cli.r_source.r_version.as_deref(),
+            cli.r_source.no_r_source_overrides,
+        ),
+        config_diagnostics,
+        report_startup_diagnostics,
     )?;
-    resolution.emit_diagnostics();
-    if let Some(notice) = super::overrides::script_override_notice(&resolution) {
-        eprintln!("{notice}");
-    }
+    let override_notice = super::overrides::script_override_notice(&resolution);
 
     // Ensure LD_LIBRARY_PATH includes R library directory
     if let Err(e) = arf_libr::ensure_ld_library_path() {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+    }
+
+    report_startup_diagnostics(config_diagnostics);
+    resolution.emit_diagnostics();
+    if let Some(notice) = override_notice {
+        eprintln!("{notice}");
     }
 
     // Generate R initialization arguments from CLI flags

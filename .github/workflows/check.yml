@@ -35,6 +35,10 @@ jobs:
           cargo fmt \
             --all \
             --check
+          rustfmt \
+            --edition 2024 \
+            --check \
+            crates/arf-console/tests/fixtures/formatter.rs
 
   cargo-clippy:
     strategy:
@@ -80,22 +84,32 @@ jobs:
       - name: Set up Air CLI
         uses: posit-dev/setup-air@cf390573ff4fe0f198f35df3a642b1409328d859 # v1
       - name: Install R
-        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
+        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
         with:
           r-version: ${{ matrix.r-version }}
           use-public-rspm: true
           Ncpus: "2"
       - name: Install R packages for tests
-        uses: r-lib/actions/setup-r-dependencies@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
+        uses: r-lib/actions/setup-r-dependencies@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
         with:
           working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run tests
+        timeout-minutes: 20
+        env:
+          ARF_TUI_TEST_ARTIFACTS: ${{ runner.temp }}/arf-tui-tests
         run: >
           cargo test
           --all-targets
           --all-features
           --workspace
           --locked
+      - name: Upload terminal diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tui-${{ matrix.os }}-${{ matrix.r-version }}
+          path: ${{ runner.temp }}/arf-tui-tests
+          if-no-files-found: ignore

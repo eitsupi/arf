@@ -10,12 +10,14 @@ mod spinner;
 
 #[cfg(unix)]
 pub use askpass::askpass_handler_code;
-#[cfg(unix)]
-pub use discovery::ensure_ld_library_path_with_pre_exec;
 pub use discovery::{
     ensure_ld_library_path, find_r_library, get_r_home, is_r_auto_discovery_disabled,
     r_home_from_library_path, r_home_from_rhome_output, r_library_path,
     set_r_auto_discovery_disabled,
+};
+#[cfg(unix)]
+pub use discovery::{
+    ensure_ld_library_path_with_pre_exec, ensure_ld_library_path_with_pre_exec_and_args,
 };
 pub use error_state::{
     command_had_error, global_error_handler_code, mark_error_condition,

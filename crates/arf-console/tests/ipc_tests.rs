@@ -3,194 +3,107 @@
 //! These tests verify IPC functionality without relying on terminal output
 //! verification, making them runnable on both Unix and Windows.
 //!
-//! Key differences from `pty_ipc_tests.rs`:
-//! - No terminal output assertions (no vt100 screen parsing)
-//! - Platform-aware transport (Unix sockets / Windows named pipes)
-//! - Only JSON-RPC responses are verified
+//! These tests complement `tui_tests.rs`: the TUI cases verify interactive
+//! screen and prompt behavior, while this file keeps low-level JSON-RPC and
+//! transport coverage independent of those assertions.
 //!
-//! Each test spawns a fresh arf process. Run with `--test-threads=1` to avoid
-//! resource contention from multiple R processes starting simultaneously.
+//! These tests verify JSON-RPC responses over platform-aware transport (Unix
+//! sockets / Windows named pipes). TUI state is used only to synchronize
+//! approval prompts for interactive requests.
+//!
+//! Each test spawns a fresh arf process with an isolated IPC session directory.
 
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::path::Path;
+use tempfile::TempDir;
+use tui_test::{AutomaticRecording, OpenOptions, Operation, OperationResult, RunOptions, Session};
 
 /// Timeout for waiting for IPC server to start.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Timeout for IPC request/response.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Minimal process wrapper for cross-platform IPC testing.
 ///
-/// Spawns arf in a PTY (required by reedline) with `--with-ipc` and waits
-/// for the IPC server to become connectable. Does not parse terminal output.
+/// Spawns arf in a tui-test session with `--with-ipc` and waits for the IPC
+/// server to become connectable. Application output is only observed when a
+/// test needs to approve an interactive request.
 struct IpcTestProcess {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    _pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pty_output: Arc<(Mutex<String>, Condvar)>,
-    shutdown: Arc<AtomicBool>,
-    _reader_handle: Option<thread::JoinHandle<()>>,
+    session: Session,
     socket_path: String,
+    _sessions_dir: TempDir,
+    _watchdog_done: mpsc::Sender<()>,
 }
 
 impl IpcTestProcess {
     /// Spawn arf with `--with-ipc` and wait for IPC server to be ready.
     fn spawn() -> Result<Self, String> {
-        let bin_path = env!("CARGO_BIN_EXE_arf");
-
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows: 24,
-                cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| format!("Failed to open PTY: {e}"))?;
-
-        let mut cmd = CommandBuilder::new(bin_path);
-        cmd.arg("--no-history");
-        cmd.arg("--with-ipc");
-        // These transport/capture tests predate the eval policy and exercise
-        // arbitrary R expressions. Policy behavior is covered separately.
-        cmd.arg("--ipc-eval-unrestricted");
-
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| format!("Failed to spawn arf: {e}"))?;
-
-        let pty_writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| format!("Failed to get PTY writer: {e}"))?;
-        let mut pty_reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
-
-        drop(pair.slave);
-
-        let pty_writer = Arc::new(Mutex::new(pty_writer));
-        let pty_output = Arc::new((Mutex::new(String::new()), Condvar::new()));
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = Arc::clone(&shutdown);
-        let pty_output_clone = Arc::clone(&pty_output);
-
-        // On Unix, reedline sends CSI 6n (cursor position query) via the PTY.
-        // We must respond or crossterm blocks with a timeout, slowing startup.
-        // On Windows, crossterm uses WinAPI for cursor position — no query needed.
-        #[cfg(unix)]
-        let pty_writer_clone = Arc::clone(&pty_writer);
-
-        let reader_handle = thread::spawn(move || {
-            #[cfg(unix)]
-            {
-                // Use vt100 parser to reliably detect CSI 6n across read boundaries.
-                let (query_tx, query_rx) = std::sync::mpsc::channel::<()>();
-
-                struct QueryDetector {
-                    tx: std::sync::mpsc::Sender<()>,
-                }
-                impl vt100::Callbacks for QueryDetector {
-                    fn unhandled_csi(
-                        &mut self,
-                        _screen: &mut vt100::Screen,
-                        _prefix: Option<u8>,
-                        _intermediate: Option<u8>,
-                        params: &[&[u16]],
-                        c: char,
-                    ) {
-                        if c == 'n'
-                            && (params.is_empty()
-                                || (params.len() == 1 && params[0].len() == 1 && params[0][0] == 6))
-                        {
-                            let _ = self.tx.send(());
-                        }
-                    }
-                }
-
-                let callbacks = QueryDetector { tx: query_tx };
-                let mut parser = vt100::Parser::new_with_callbacks(24, 80, 0, callbacks);
-                let mut buf = [0u8; 4096];
-
-                loop {
-                    if shutdown_clone.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    match pty_reader.read(&mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Ok(mut output) = pty_output_clone.0.lock() {
-                                output.push_str(&String::from_utf8_lossy(&buf[..n]));
-                                pty_output_clone.1.notify_all();
-                            }
-                            parser.process(&buf[..n]);
-                            // Respond to any cursor queries detected
-                            while query_rx.try_recv().is_ok() {
-                                let response = b"\x1b[1;1R";
-                                if let Ok(mut writer) = pty_writer_clone.lock() {
-                                    let _ = writer.write_all(response);
-                                    let _ = writer.flush();
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if e.kind() != std::io::ErrorKind::WouldBlock
-                                && e.kind() != std::io::ErrorKind::Interrupted
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            #[cfg(not(unix))]
-            {
-                // On Windows, just consume PTY output to prevent buffer fill-up.
-                let mut buf = [0u8; 4096];
-                loop {
-                    if shutdown_clone.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    match pty_reader.read(&mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Ok(mut output) = pty_output_clone.0.lock() {
-                                output.push_str(&String::from_utf8_lossy(&buf[..n]));
-                                pty_output_clone.1.notify_all();
-                            }
-                        }
-                        Err(e) => {
-                            if e.kind() != std::io::ErrorKind::WouldBlock
-                                && e.kind() != std::io::ErrorKind::Interrupted
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
+        let (watchdog_done, watchdog) = mpsc::channel();
+        thread::spawn(move || {
+            if matches!(
+                watchdog.recv_timeout(TEST_TIMEOUT),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
+                let message = "tui-test IPC session exceeded 180s; terminating test process\n";
+                let _ = std::io::stderr().lock().write_all(message.as_bytes());
+                std::process::exit(1);
             }
         });
 
-        // Wait for session file to appear (indicates IPC server is ready)
-        let pid = child.process_id();
-        let socket_path = find_socket_path(pid, STARTUP_TIMEOUT)
-            .ok_or("IPC server did not start within timeout")?;
+        let session = Session::new("arf-ipc-tests");
+        let sessions_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let defaults = OpenOptions::default();
+        let opened = session
+            .run(RunOptions {
+                backend: defaults.backend,
+                program: env!("CARGO_BIN_EXE_arf").into(),
+                args: [
+                    "--no-history",
+                    "--with-ipc",
+                    // Keep arbitrary-expression coverage separate from policy tests.
+                    "--ipc-eval-unrestricted",
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+                profile: defaults.profile,
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                env: vec![(
+                    "ARF_IPC_SESSIONS_DIR".to_owned(),
+                    sessions_dir.path().to_string_lossy().into_owned(),
+                )],
+                wait_ready: Some(false),
+                restart: false,
+                timeouts: defaults.timeouts,
+                recording: AutomaticRecording::default(),
+            })
+            .map_err(|e| format!("Failed to spawn arf: {e}"))?;
+
+        // Wait for session metadata to appear (indicates IPC server startup).
+        let socket_path =
+            match find_socket_path(opened.shell_pid, sessions_dir.path(), STARTUP_TIMEOUT) {
+                Some(path) => path,
+                None => {
+                    let _ = session.close();
+                    return Err("IPC server did not start within timeout".into());
+                }
+            };
 
         Ok(IpcTestProcess {
-            child,
-            _pty_writer: pty_writer,
-            pty_output,
-            shutdown,
-            _reader_handle: Some(reader_handle),
+            session,
             socket_path,
+            _sessions_dir: sessions_dir,
+            _watchdog_done: watchdog_done,
         })
     }
 
@@ -203,55 +116,56 @@ impl IpcTestProcess {
         send_ipc_request(&self.socket_path, method, params)
     }
 
-    /// Wait for text to appear in the PTY output.
-    fn wait_for_output(&self, expected: &str) -> Result<(), String> {
+    /// Wait for text to appear on the emulated screen.
+    fn wait_for_screen_text(&self, expected: &str) -> Result<(), String> {
         let deadline = Instant::now() + REQUEST_TIMEOUT;
-        let (output_lock, output_ready) = &*self.pty_output;
-        let mut output = output_lock.lock().map_err(|e| e.to_string())?;
-
+        // tui-test's screen text omits trailing blank cells from each row.
+        let expected = expected.trim_end();
         loop {
-            if output.contains(expected) {
+            let state = match self.session.execute(Operation::State) {
+                Ok(OperationResult::State(state)) => *state,
+                Ok(_) => return Err("tui-test returned an unexpected state response".into()),
+                Err(error) => return Err(error.to_string()),
+            };
+            if state.text.contains(expected) {
                 return Ok(());
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
+            if state.exited.is_some() {
                 return Err(format!(
-                    "Timed out waiting for PTY output '{expected}'. Current output:\n{output}"
+                    "arf exited waiting for screen text '{expected}': {state:?}"
                 ));
             }
-            let (new_output, timeout) = output_ready
-                .wait_timeout(output, remaining)
-                .map_err(|e| e.to_string())?;
-            output = new_output;
-            if timeout.timed_out() && !output.contains(expected) {
+            if Instant::now() >= deadline {
                 return Err(format!(
-                    "Timed out waiting for PTY output '{expected}'. Current output:\n{output}"
+                    "Timed out waiting for screen text '{expected}'. Current emulated screen state:\n{state:?}"
                 ));
             }
+            thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// Send a line of terminal input through tui-test's portable input path.
+    fn submit(&self, text: &str) -> Result<(), String> {
+        self.session
+            .execute(Operation::Submit {
+                data: Some(text.to_owned()),
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn close(&self) {
+        let _ = self.submit("q()");
+        let _ = self.session.execute(Operation::WaitExit {
+            timeout_ms: Some(500),
+        });
+        let _ = self.session.close();
     }
 }
 
 impl Drop for IpcTestProcess {
     fn drop(&mut self) {
-        // Signal the reader thread to stop first, so it can exit during the
-        // grace period rather than remaining blocked on pty_reader.read().
-        self.shutdown.store(true, Ordering::Relaxed);
-
-        // Send q() to trigger clean shutdown (session file cleanup, etc.)
-        if let Ok(mut writer) = self._pty_writer.lock() {
-            let _ = writer.write_all(b"q()\n");
-            let _ = writer.flush();
-        }
-        // Give it a moment to shut down cleanly
-        thread::sleep(Duration::from_millis(500));
-        let _ = self.child.kill();
-
-        // Intentionally do NOT join the reader thread — it may be permanently
-        // blocked on pty_reader.read() after child kill, which would hang Drop
-        // (and thus the entire test run). Leaking the thread is acceptable for
-        // tests; the OS reclaims it on process exit.
-        let _ = self._reader_handle.take();
+        self.close();
     }
 }
 
@@ -261,16 +175,11 @@ impl Drop for IpcTestProcess {
 
 /// Find the IPC socket path by scanning session files.
 /// Retries until a connectable session appears or timeout is reached.
-///
-/// When `pid` is `None` (e.g., platform can't retrieve child PID), this
-/// connects to any available session. In parallel test runs this could cause
-/// cross-talk; use `--test-threads=1` to avoid this.
-fn find_socket_path(pid: Option<u32>, timeout: Duration) -> Option<String> {
-    let sessions_dir = dirs::cache_dir()?.join("arf").join("sessions");
+fn find_socket_path(pid: Option<u32>, sessions_dir: &Path, timeout: Duration) -> Option<String> {
     let start = Instant::now();
 
     while start.elapsed() < timeout {
-        if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
+        if let Ok(entries) = std::fs::read_dir(sessions_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().is_some_and(|ext| ext == "json")
@@ -282,33 +191,31 @@ fn find_socket_path(pid: Option<u32>, timeout: Duration) -> Option<String> {
                     {
                         continue;
                     }
-                    if let Some(socket) = info.get("socket_path").and_then(|v| v.as_str())
-                        && is_connectable(socket)
-                    {
-                        return Some(socket.to_string());
+                    if let Some(socket) = info.get("socket_path").and_then(|v| v.as_str()) {
+                        #[cfg(unix)]
+                        let ready = is_connectable(socket);
+                        #[cfg(windows)]
+                        // The server writes metadata only after creating its
+                        // first pipe instance. Opening it as a probe consumes
+                        // that instance and races the real client.
+                        let ready = true;
+                        if ready {
+                            return Some(socket.to_string());
+                        }
                     }
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(100));
     }
 
     None
 }
 
-/// Check if a socket/pipe is connectable.
+/// Check whether the Unix socket is accepting connections.
 #[cfg(unix)]
 fn is_connectable(socket_path: &str) -> bool {
     std::os::unix::net::UnixStream::connect(socket_path).is_ok()
-}
-
-#[cfg(windows)]
-fn is_connectable(socket_path: &str) -> bool {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(socket_path)
-        .is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -434,14 +341,8 @@ fn send_ipc_request_windows(socket_path: &str, body: &str) -> Result<serde_json:
 // Tests
 // ===========================================================================
 
-// On Windows, crossterm's cursor::position() uses WinAPI which doesn't work
-// inside ConPTY. This prevents reedline from initializing, so arf never
-// reaches the prompt and the IPC server never starts. True Windows IPC
-// testing requires a headless mode (no reedline, just R + IPC server).
-
 /// Test that IPC `evaluate` captures a visible R value.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_value() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -463,7 +364,6 @@ fn test_ipc_evaluate_value() {
 
 /// Test that IPC `evaluate` captures stdout from `cat()`.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_stdout() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -486,7 +386,6 @@ fn test_ipc_evaluate_stdout() {
 
 /// Test that IPC `evaluate` captures R errors via `tryCatch`.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_error() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -509,7 +408,6 @@ fn test_ipc_evaluate_error() {
 
 /// Test that IPC `evaluate` captures both stdout and value in a mixed expression.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_mixed() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -537,10 +435,9 @@ fn test_ipc_evaluate_mixed() {
 
 /// Test that `visible=true` evaluate returns captured output.
 ///
-/// Unlike pty_ipc_tests, we cannot verify the output appeared in the terminal.
-/// We only verify the JSON-RPC response contains the expected captured data.
+/// This transport-only test verifies the JSON-RPC response; the corresponding
+/// tui-test case additionally verifies terminal output and prompt completion.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_visible() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -556,16 +453,9 @@ fn test_ipc_evaluate_visible() {
         )
     });
     process
-        .wait_for_output("Press y to approve, any other key declines: ")
-        .expect("approval prompt should appear on the PTY");
-    {
-        let mut writer = process
-            ._pty_writer
-            .lock()
-            .expect("PTY writer should not be poisoned");
-        writer.write_all(b"y\n").expect("approve visible evaluate");
-        writer.flush().expect("flush approval");
-    }
+        .wait_for_screen_text("Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the emulated screen");
+    process.submit("y").expect("approve visible evaluate");
     let response = request
         .join()
         .expect("request thread should not panic")
@@ -590,7 +480,6 @@ fn test_ipc_evaluate_visible() {
 
 /// Test that IPC `user_input` is accepted when R is at the prompt.
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_user_input() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -603,16 +492,9 @@ fn test_ipc_user_input() {
         )
     });
     process
-        .wait_for_output("Press y to approve, any other key declines: ")
-        .expect("approval prompt should appear on the PTY");
-    {
-        let mut writer = process
-            ._pty_writer
-            .lock()
-            .expect("PTY writer should not be poisoned");
-        writer.write_all(b"y\n").expect("approve user_input");
-        writer.flush().expect("flush approval");
-    }
+        .wait_for_screen_text("Press y to approve, any other key declines: ")
+        .expect("approval prompt should appear on the emulated screen");
+    process.submit("y").expect("approve user_input");
     let response = request
         .join()
         .expect("request thread should not panic")
@@ -630,7 +512,6 @@ fn test_ipc_user_input() {
 
 /// Test that `shutdown` is rejected in REPL mode (only available in headless).
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_shutdown_rejected_in_repl() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 
@@ -650,7 +531,6 @@ fn test_ipc_shutdown_rejected_in_repl() {
 
 /// Test that sequential evaluations work correctly (no stale state).
 #[test]
-#[cfg_attr(windows, ignore = "ConPTY cursor position incompatibility")]
 fn test_ipc_evaluate_sequential() {
     let process = IpcTestProcess::spawn().expect("Failed to spawn arf with IPC");
 

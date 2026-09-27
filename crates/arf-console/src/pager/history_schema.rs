@@ -217,11 +217,11 @@ fn generate_schema_lines(history_path: &str) -> Vec<String> {
     lines.push(String::new());
     lines.push("con <- dbConnect(".to_string());
     lines.push("  RSQLite::SQLite(),".to_string());
-    lines.push(format!("  \"{}/r.db\"", history_path));
+    lines.push(format!(r#"  "{}/r.db""#, history_path));
     lines.push(")".to_string());
     lines.push("history_data <- dbGetQuery(".to_string());
     lines.push("  con,".to_string());
-    lines.push("  \"SELECT * FROM history ORDER BY id DESC LIMIT 10\"".to_string());
+    lines.push(r#"  "SELECT * FROM history ORDER BY id DESC LIMIT 10""#.to_string());
     lines.push(") |>".to_string());
     lines.push("  as_tibble()".to_string());
     lines.push("dbDisconnect(con)".to_string());
@@ -646,7 +646,7 @@ fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
     println!("  RSQLite::{}(),", s.r_keyword.paint("SQLite"));
     println!(
         "  {}",
-        s.r_string.paint(format!("\"{}/r.db\"", history_path))
+        s.r_string.paint(format!(r#""{}/r.db""#, history_path))
     );
     println!(")");
 
@@ -660,7 +660,7 @@ fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
     println!(
         "  {}",
         s.r_string
-            .paint("\"SELECT * FROM history ORDER BY id DESC LIMIT 10\"")
+            .paint(r#""SELECT * FROM history ORDER BY id DESC LIMIT 10""#)
     );
     println!(") {}", s.r_operator.paint("|>"));
     println!("  {}()", s.r_keyword.paint("as_tibble"));

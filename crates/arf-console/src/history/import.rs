@@ -849,7 +849,7 @@ fn read_history_table(
     // Table names are validated by validate_table_name() before reaching here.
     let columns = HistoryTableColumns::read(db, table_name)?;
     let query = format!(
-        "SELECT id, command_line, start_timestamp, {}, {}, {}, {}, {}, {} FROM \"{}\" ORDER BY id",
+        r#"SELECT id, command_line, start_timestamp, {}, {}, {}, {}, {}, {} FROM "{}" ORDER BY id"#,
         columns.expression("session_id"),
         columns.expression("hostname"),
         columns.expression("cwd"),
@@ -954,7 +954,7 @@ struct HistoryTableColumns {
 impl HistoryTableColumns {
     fn read(db: &rusqlite::Connection, table_name: &str) -> Result<Self> {
         let mut names = HashSet::new();
-        let query = format!("PRAGMA table_info(\"{}\")", table_name);
+        let query = format!(r#"PRAGMA table_info("{}")"#, table_name);
         let mut stmt = db
             .prepare(&query)
             .context("Failed to inspect history table")?;

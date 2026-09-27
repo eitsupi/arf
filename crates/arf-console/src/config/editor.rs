@@ -45,7 +45,7 @@ pub enum AutoSuggestions {
 /// Custom JSON schema for AutoSuggestions that accepts both boolean and string values.
 fn auto_suggestions_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "History-based autosuggestions mode. Accepts boolean (true/false) or string (\"none\", \"all\", \"cwd\").",
+        "description": r#"History-based autosuggestions mode. Accepts boolean (true/false) or string ("none", "all", "cwd")."#,
         "oneOf": [
             {
                 "type": "boolean",
@@ -101,7 +101,7 @@ impl<'de> Deserialize<'de> for AutoSuggestions {
             type Value = AutoSuggestions;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a boolean or string (\"none\", \"all\", \"cwd\")")
+                formatter.write_str(r#"a boolean or string ("none", "all", "cwd")"#)
             }
 
             fn visit_bool<E>(self, value: bool) -> Result<AutoSuggestions, E>
