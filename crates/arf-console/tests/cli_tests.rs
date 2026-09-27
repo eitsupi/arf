@@ -387,6 +387,18 @@ fn test_top_level_history_dir_before_history_schema_uses_explicit_directory() {
 }
 
 #[test]
+fn test_no_history_before_history_schema_is_rejected_as_interactive_only() {
+    assert_top_level_scope_error(
+        &["--no-history", "history", "schema"],
+        &[
+            "--no-history",
+            "not used by the 'history schema' subcommand",
+            "arf --no-history",
+        ],
+    );
+}
+
+#[test]
 fn test_top_level_config_before_config_check_rejected_with_nested_corrected_form() {
     let output = sanitized_arf_command()
         .args(["--config", "x", "config", "check"])

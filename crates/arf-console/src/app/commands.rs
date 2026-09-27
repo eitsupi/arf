@@ -66,13 +66,14 @@ pub(crate) fn handle_history_command(
     action: &HistoryAction,
     config_path: Option<&std::path::PathBuf>,
     cli_history_dir: Option<&std::path::PathBuf>,
-    no_history: bool,
 ) -> Result<()> {
     let config = load_config_or_warn(config_path);
+    // `--no-history` configures the in-memory HistoryRuntime for interactive/headless sessions;
+    // history subcommands create no runtime and reject that session-only option by scope.
     let mode = config::history_mode_with_overrides(
         &config.history.mode,
         cli_history_dir.map(|path| path.as_path()),
-        no_history,
+        false,
     );
     let history_location = config::resolved_history_location(&mode);
 

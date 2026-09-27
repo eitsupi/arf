@@ -211,7 +211,6 @@ fn run() -> Result<()> {
                 &args.action,
                 cli.r_source.config.as_ref(),
                 cli.history.history_dir.as_ref(),
-                cli.history.no_history,
             );
         }
         Some(Commands::Ipc(args)) => {
@@ -1005,6 +1004,7 @@ fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {
 }
 
 fn is_history_option_allowed(path: &[String], long: &str) -> bool {
+    // History subcommands opt in only to options they consume; `--no-history` remains session-only.
     matches!(long, "config" | "history-dir")
         && path.len() == 2
         && path[0] == "history"
