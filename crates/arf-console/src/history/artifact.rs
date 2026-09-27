@@ -95,6 +95,26 @@ pub(crate) fn read_artifact_from_path(path: &Path) -> Result<HistoryArtifact> {
     read_artifact(&connection)
 }
 
+/// Validate a database as the expected single-history artifact.
+/// Metadata-less legacy databases remain accepted for compatibility.
+pub(crate) fn validate_history_artifact(
+    connection: &Connection,
+    expected_kind: HistoryKind,
+) -> Result<()> {
+    match read_artifact(connection)? {
+        HistoryArtifact::Legacy => Ok(()),
+        HistoryArtifact::History(actual_kind) if actual_kind == expected_kind => Ok(()),
+        HistoryArtifact::History(actual_kind) => bail!(
+            "history database kind mismatch: expected '{}', metadata says '{}'",
+            expected_kind.as_str(),
+            actual_kind.as_str()
+        ),
+        HistoryArtifact::Export => {
+            bail!("cannot open a unified history export as a single history database")
+        }
+    }
+}
+
 /// Validate an existing history artifact or publish a fully prepared new one.
 /// The target never becomes visible before its complete arf metadata exists.
 pub(crate) fn prepare_history_path(path: &Path, kind: HistoryKind) -> Result<()> {
@@ -168,18 +188,9 @@ fn publish_staged_history_database(
 }
 
 fn validate_history_path(path: &Path, kind: HistoryKind) -> Result<()> {
-    match read_artifact_from_path(path)? {
-        HistoryArtifact::Legacy => Ok(()),
-        HistoryArtifact::History(actual_kind) if actual_kind == kind => Ok(()),
-        HistoryArtifact::History(actual_kind) => bail!(
-            "history database kind mismatch: requested '{}', metadata says '{}'",
-            kind.as_str(),
-            actual_kind.as_str()
-        ),
-        HistoryArtifact::Export => {
-            bail!("cannot open a unified history export as a single history database")
-        }
-    }
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open history database {}", path.display()))?;
+    validate_history_artifact(&connection, kind)
 }
 
 pub(crate) fn initialize_history_metadata(

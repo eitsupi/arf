@@ -150,6 +150,7 @@ fn export_to_file(
     r_table: &str,
     shell_table: &str,
 ) -> Result<ExportResult> {
+    use super::artifact::HistoryKind;
     use rusqlite::{Connection, OpenFlags};
 
     // Create output database
@@ -164,6 +165,8 @@ fn export_to_file(
     if r_db_path.exists() {
         let r_db = Connection::open_with_flags(r_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open R history: {}", r_db_path.display()))?;
+        super::artifact::validate_history_artifact(&r_db, HistoryKind::R)
+            .with_context(|| format!("Invalid R history artifact: {}", r_db_path.display()))?;
         result.r_exported = copy_history_table(&r_db, &mut output_db, r_table)?;
     }
 
@@ -173,6 +176,14 @@ fn export_to_file(
             .with_context(|| {
                 format!("Failed to open shell history: {}", shell_db_path.display())
             })?;
+        super::artifact::validate_history_artifact(&shell_db, HistoryKind::Shell).with_context(
+            || {
+                format!(
+                    "Invalid shell history artifact: {}",
+                    shell_db_path.display()
+                )
+            },
+        )?;
         result.shell_exported = copy_history_table(&shell_db, &mut output_db, shell_table)?;
     }
 
@@ -309,6 +320,39 @@ mod tests {
                     exit_status: None,
                     more_info: None,
                 })
+                .unwrap();
+        }
+    }
+
+    fn write_artifact_metadata(
+        path: &Path,
+        artifact: &str,
+        format_version: &str,
+        history_kind: Option<&str>,
+    ) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection
+            .execute_batch(
+                r#"CREATE TABLE arf_metadata (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                )"#,
+            )
+            .unwrap();
+        let mut entries = vec![
+            ("artifact", artifact),
+            ("format_version", format_version),
+            ("created_by_version", env!("CARGO_PKG_VERSION")),
+        ];
+        if let Some(kind) = history_kind {
+            entries.push(("history_kind", kind));
+        }
+        for (key, value) in entries {
+            connection
+                .execute(
+                    "INSERT INTO arf_metadata (key, value) VALUES (?1, ?2)",
+                    [key, value],
+                )
                 .unwrap();
         }
     }
@@ -589,6 +633,51 @@ mod tests {
             entries.is_empty(),
             "Temp files should be cleaned up on copy failure"
         );
+    }
+
+    #[test]
+    fn test_export_rejects_incompatible_r_artifacts_and_cleans_up_temp_files() {
+        for (artifact, format_version, kind, expected_error) in [
+            ("history", "1", Some("shell"), "kind mismatch"),
+            ("history-export", "1", None, "unified history export"),
+            (
+                "history",
+                "2",
+                Some("r"),
+                "unsupported arf artifact format version 2",
+            ),
+        ] {
+            let temp_dir = TempDir::new().unwrap();
+            let r_path = temp_dir.path().join("r.db");
+            write_artifact_metadata(&r_path, artifact, format_version, kind);
+            let output_path = temp_dir.path().join("export.db");
+
+            let error = export_history(
+                &r_path,
+                &temp_dir.path().join("missing-shell.db"),
+                &output_path,
+                "r",
+                "shell",
+            )
+            .unwrap_err();
+
+            assert!(format!("{error:#}").contains(expected_error));
+            assert!(!output_path.exists());
+            let temp_files: Vec<_> = std::fs::read_dir(temp_dir.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("arf-export-tmp")
+                })
+                .collect();
+            assert!(
+                temp_files.is_empty(),
+                "export temp file leaked for {artifact}"
+            );
+        }
     }
 
     #[test]

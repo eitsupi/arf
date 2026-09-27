@@ -215,12 +215,18 @@ fn handle_history_import(
                 let r_path = history_dir.join("r.db");
                 let shell_path = history_dir.join("shell.db");
                 let r_dedup = if r_path.exists() {
-                    Some(DedupSet::from_db(&r_path)?)
+                    Some(DedupSet::from_db(
+                        &r_path,
+                        history::artifact::HistoryKind::R,
+                    )?)
                 } else {
                     None
                 };
                 let shell_dedup = if shell_path.exists() {
-                    Some(DedupSet::from_db(&shell_path)?)
+                    Some(DedupSet::from_db(
+                        &shell_path,
+                        history::artifact::HistoryKind::Shell,
+                    )?)
                 } else {
                     None
                 };

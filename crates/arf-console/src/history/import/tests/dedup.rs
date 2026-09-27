@@ -2,6 +2,52 @@ use super::super::*;
 use super::support::*;
 
 #[test]
+fn dry_run_dedup_rejects_incompatible_versioned_artifacts() {
+    for (artifact, version, kind, expected_error) in [
+        ("history", "1", Some("shell"), "kind mismatch"),
+        ("history-export", "1", None, "unified history export"),
+        (
+            "history",
+            "2",
+            Some("r"),
+            "unsupported arf artifact format version 2",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("target.db");
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            r#"CREATE TABLE arf_metadata (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            )"#,
+        )
+        .unwrap();
+        let mut entries = vec![
+            ("artifact", artifact),
+            ("format_version", version),
+            ("created_by_version", "test"),
+        ];
+        if let Some(kind) = kind {
+            entries.push(("history_kind", kind));
+        }
+        for (key, value) in entries {
+            db.execute(
+                "INSERT INTO arf_metadata (key, value) VALUES (?1, ?2)",
+                [key, value],
+            )
+            .unwrap();
+        }
+        drop(db);
+
+        let error = DedupSet::from_db(&path, crate::history::artifact::HistoryKind::R)
+            .err()
+            .expect("incompatible target artifact should be rejected");
+        assert!(format!("{error:#}").contains(expected_error));
+    }
+}
+
+#[test]
 fn dedup_key_matrix_is_command_and_optional_timestamp() {
     let dir = tempfile::tempdir().unwrap();
     let r_path = dir.path().join("r.db");
@@ -9,8 +55,9 @@ fn dedup_key_matrix_is_command_and_optional_timestamp() {
     let ts = timestamp("2024-06-15T14:30:45Z");
     create_reedline_db(&r_path, &[r("same").at(ts).item, r("untimestamped").item]);
     create_reedline_db(&shell_path, &[shell("same").item]);
-    let r_dedup = DedupSet::from_db(&r_path).unwrap();
-    let shell_dedup = DedupSet::from_db(&shell_path).unwrap();
+    let r_dedup = DedupSet::from_db(&r_path, crate::history::artifact::HistoryKind::R).unwrap();
+    let shell_dedup =
+        DedupSet::from_db(&shell_path, crate::history::artifact::HistoryKind::Shell).unwrap();
 
     let cases = [
         (r("same").at(ts), EntryPlan::Duplicate),
@@ -130,7 +177,7 @@ fn stale_duplicate_repair_skips_when_command_line_changed() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("selected")]);
     let path = fixture.targets.r_history.path().unwrap().to_owned();
-    let r_dedup = DedupSet::from_db(&path).unwrap();
+    let r_dedup = DedupSet::from_db(&path, crate::history::artifact::HistoryKind::R).unwrap();
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute(
@@ -161,7 +208,7 @@ fn stale_duplicate_repair_skips_when_timestamp_changed() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("timestamp selected").at(original_timestamp)]);
     let path = fixture.targets.r_history.path().unwrap().to_owned();
-    let r_dedup = DedupSet::from_db(&path).unwrap();
+    let r_dedup = DedupSet::from_db(&path, crate::history::artifact::HistoryKind::R).unwrap();
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute(
@@ -325,7 +372,7 @@ fn malformed_existing_metadata_is_duplicate_in_real_and_dry_paths() {
     assert_eq!(real.duplicates_skipped, 1);
     assert_eq!(real.warnings.len(), 1);
 
-    let dedup = DedupSet::from_db(&path).unwrap();
+    let dedup = DedupSet::from_db(&path, crate::history::artifact::HistoryKind::R).unwrap();
     let dry = import_entries_dry_run(&[incoming], Some(&dedup), None);
     assert_eq!(dry.duplicates_skipped, 1);
     assert_eq!(dry.r_imported, 0);
@@ -340,7 +387,11 @@ fn repeated_repairs_have_the_same_dry_run_and_real_counts() {
     let mut fixture = ImportFixture::new();
     fixture.import([r("repeated repair").at(timestamp)]);
 
-    let dedup = DedupSet::from_db(fixture.targets.r_history.path().unwrap()).unwrap();
+    let dedup = DedupSet::from_db(
+        fixture.targets.r_history.path().unwrap(),
+        crate::history::artifact::HistoryKind::R,
+    )
+    .unwrap();
     let dry = import_entries_dry_run(&entries, Some(&dedup), None);
     let real = fixture.import_with(
         entries,
@@ -387,7 +438,7 @@ fn dry_run_dedup_is_partial_and_does_not_write_or_create_side_files() {
     assert!(!wal.exists());
     assert!(!shm.exists());
 
-    let dedup = DedupSet::from_db(&path);
+    let dedup = DedupSet::from_db(&path, crate::history::artifact::HistoryKind::R);
     assert!(dedup.is_ok());
     assert!(!wal.exists());
     assert!(!shm.exists());
@@ -471,7 +522,7 @@ fn dry_run_repair_matches_real_import_and_keeps_source_read_only() {
         .save_imported(r("dry repair").at(timestamp).item)
         .unwrap();
 
-    let dedup = DedupSet::from_db(&r_path).unwrap();
+    let dedup = DedupSet::from_db(&r_path, crate::history::artifact::HistoryKind::R).unwrap();
     let dry = import_entries_dry_run(&parsed.entries, Some(&dedup), None);
     let real = import_entries(&mut targets, parsed.entries, None, true).unwrap();
 

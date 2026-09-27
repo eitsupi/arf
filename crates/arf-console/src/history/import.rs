@@ -256,9 +256,9 @@ pub fn parse_r_history(path: &Path) -> Result<ParsedImport> {
 
 /// Copy entries from another arf SQLite history database.
 ///
-/// The mode is inferred from the filename:
-/// - Files named `shell.db` are treated as shell history
-/// - All other files are treated as R history
+/// Versioned arf metadata determines the history kind. For metadata-less legacy
+/// databases, the mode is inferred from the filename: `shell.db` is shell history
+/// and all other names are treated as R history.
 pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
     if !path.exists() {
         bail!("arf history database not found: {}", path.display());
@@ -363,11 +363,16 @@ impl DedupSet {
     ///
     /// Used in the dry-run path to avoid WAL/shm side-effect files that
     /// `SqliteBackedHistory::with_file()` would create.
-    pub fn from_db(path: &Path) -> Result<Self> {
+    pub(crate) fn from_db(
+        path: &Path,
+        expected_kind: super::artifact::HistoryKind,
+    ) -> Result<Self> {
         use rusqlite::{Connection, OpenFlags};
 
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open history database: {}", path.display()))?;
+        super::artifact::validate_history_artifact(&db, expected_kind)
+            .with_context(|| format!("Invalid history database: {}", path.display()))?;
         Self::from_connection(db)
     }
 

@@ -122,6 +122,10 @@ fn print_schema_colored(history_path: &Path) {
     print_indexes(&s);
     println!();
 
+    // arf artifact metadata section
+    print_artifact_metadata(&s);
+    println!();
+
     // R example code
     print_r_example_code(&s, &r_path);
 }
@@ -209,6 +213,25 @@ fn generate_schema_lines(history_path: &Path) -> Vec<String> {
     lines.push("- idx_history_cwd         ON history(cwd)".to_string());
     lines.push("- idx_history_exit_status ON history(exit_status)".to_string());
     lines.push("- idx_history_cmd         ON history(command_line)".to_string());
+    lines.push(String::new());
+
+    // arf artifact metadata section
+    lines.push("## arf Artifact Metadata".to_string());
+    lines.push(String::new());
+    lines.push("Newly created single-history databases also contain:".to_string());
+    lines.push("```sql".to_string());
+    lines.push("CREATE TABLE arf_metadata (".to_string());
+    lines.push("    key   TEXT PRIMARY KEY NOT NULL,".to_string());
+    lines.push("    value TEXT NOT NULL".to_string());
+    lines.push(");".to_string());
+    lines.push("```".to_string());
+    lines.push("- `artifact`: `history`".to_string());
+    lines.push("- `format_version`: `1`".to_string());
+    lines.push("- `history_kind`: `r` or `shell`".to_string());
+    lines.push("- `created_by_version`: the arf package version".to_string());
+    lines.push(
+        "Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`.".to_string(),
+    );
     lines.push(String::new());
 
     // R example code
@@ -641,6 +664,41 @@ fn print_indexes(s: &SchemaStyles) {
     );
 }
 
+/// Print the arf-owned artifact metadata schema and keys.
+fn print_artifact_metadata(s: &SchemaStyles) {
+    println!("{}", s.heading.paint("## arf Artifact Metadata"));
+    println!();
+    println!("Newly created single-history databases also contain:");
+    println!("{}", s.code_fence.paint("```sql"));
+    println!(
+        "{} {} {} (",
+        s.sql_keyword.paint("CREATE"),
+        s.sql_keyword.paint("TABLE"),
+        s.sql_identifier.paint("arf_metadata")
+    );
+    println!(
+        "    {}   {} {},",
+        s.sql_identifier.paint("key"),
+        s.sql_keyword.paint("TEXT"),
+        s.sql_keyword.paint("PRIMARY KEY NOT NULL")
+    );
+    println!(
+        "    {} {} {}",
+        s.sql_identifier.paint("value"),
+        s.sql_keyword.paint("TEXT"),
+        s.sql_keyword.paint("NOT NULL")
+    );
+    println!(");");
+    println!("{}", s.code_fence.paint("```"));
+    println!("- `artifact`: `history`");
+    println!("- `format_version`: `1`");
+    println!("- `history_kind`: `r` or `shell`");
+    println!("- `created_by_version`: the arf package version");
+    println!(
+        "Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`."
+    );
+}
+
 /// Print example R code for accessing the history database.
 fn print_r_example_code(s: &SchemaStyles, r_path: &Path) {
     println!("{}", s.heading.paint("## Analyze or Export"));
@@ -753,12 +811,13 @@ mod tests {
         assert!(lines.iter().any(|l| l == "## Location"));
         assert!(lines.iter().any(|l| l == "## SQLite Schema"));
         assert!(lines.iter().any(|l| l == "## Indexes"));
+        assert!(lines.iter().any(|l| l == "## arf Artifact Metadata"));
         assert!(lines.iter().any(|l| l == "## Analyze or Export"));
 
         // Check for code fences
         assert!(lines.iter().any(|l| l == "```sql"));
         assert!(lines.iter().any(|l| l == "```r"));
-        assert!(lines.iter().filter(|l| *l == "```").count() == 2);
+        assert!(lines.iter().filter(|l| *l == "```").count() == 3);
 
         // Check path is included
         assert!(
@@ -776,6 +835,26 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("CREATE TABLE history")));
         assert!(lines.iter().any(|l| l.contains("command_line")));
         assert!(lines.iter().any(|l| l.contains("start_timestamp")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("CREATE TABLE arf_metadata"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("key   TEXT PRIMARY KEY NOT NULL"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("`history_kind`: `r` or `shell`"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("artifact = history-export"))
+        );
 
         // Check R code elements
         assert!(lines.iter().any(|l| l.contains("library(DBI)")));
@@ -786,15 +865,15 @@ mod tests {
     #[test]
     fn test_generate_schema_lines_count() {
         let lines = generate_schema_lines(Path::new("/test/path"));
-        // Ensure we have a reasonable number of lines (schema should be ~50 lines)
+        // Ensure the schema stays within its expected 50–70 line range.
         assert!(
-            lines.len() >= 40,
-            "Expected at least 40 lines, got {}",
+            lines.len() >= 50,
+            "Expected at least 50 lines, got {}",
             lines.len()
         );
         assert!(
-            lines.len() <= 60,
-            "Expected at most 60 lines, got {}",
+            lines.len() <= 70,
+            "Expected at most 70 lines, got {}",
             lines.len()
         );
     }

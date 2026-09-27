@@ -1,6 +1,5 @@
 ---
 source: crates/arf-console/src/pager/history_schema.rs
-assertion_line: 843
 expression: output
 ---
 # History Database
@@ -32,6 +31,21 @@ CREATE TABLE history (
 - idx_history_cwd         ON history(cwd)
 - idx_history_exit_status ON history(exit_status)
 - idx_history_cmd         ON history(command_line)
+
+## arf Artifact Metadata
+
+Newly created single-history databases also contain:
+```sql
+CREATE TABLE arf_metadata (
+    key   TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+```
+- `artifact`: `history`
+- `format_version`: `1`
+- `history_kind`: `r` or `shell`
+- `created_by_version`: the arf package version
+Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`.
 
 ## Analyze or Export
 
