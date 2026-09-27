@@ -513,11 +513,23 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
             let name = topic.qualified_name();
             let name_score = fuzzy_match(query, &name).map(|m| m.score);
             let topic_score = fuzzy_match(query, &topic.topic).map(|m| m.score);
-            let alias_score = topic
-                .aliases
-                .iter()
-                .filter_map(|alias| fuzzy_match(query, alias).map(|m| m.score))
-                .max();
+            let max_alias_len = topic.aliases.iter().map(String::len).max().unwrap_or(0);
+            let mut qualified_alias =
+                String::with_capacity(topic.package.len() + 2 + max_alias_len);
+            let mut alias_score = None;
+            for alias in &topic.aliases {
+                if let Some(score) = fuzzy_match(query, alias).map(|m| m.score) {
+                    alias_score = Some(alias_score.map_or(score, |best: u32| best.max(score)));
+                }
+
+                qualified_alias.clear();
+                qualified_alias.push_str(&topic.package);
+                qualified_alias.push_str("::");
+                qualified_alias.push_str(alias);
+                if let Some(score) = fuzzy_match(query, &qualified_alias).map(|m| m.score) {
+                    alias_score = Some(alias_score.map_or(score, |best: u32| best.max(score)));
+                }
+            }
             let title_score = fuzzy_match(query, &topic.title).map(|m| m.score / 2); // Title matches weighted less
 
             // Take the best score
@@ -768,9 +780,13 @@ mod tests {
             entry_type: "help".to_string(),
         };
 
-        let results = fuzzy_search_topics(&[topic], "print.value");
+        let results = fuzzy_search_topics(&[topic.clone()], "print.value");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0.topic, "print");
+
+        let results = fuzzy_search_topics(&[topic], "base::print.value");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.qualified_name(), "base::print");
     }
 
     #[test]
