@@ -286,12 +286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64fa3c856b712db6612c019f14756e64e4bcea13337a6b33b696333a9eaa2d06"
 
 [[package]]
-name = "bytecount"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
-
-[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -908,12 +902,6 @@ dependencies = [
  "crc32fast",
  "miniz_oxide",
 ]
-
-[[package]]
-name = "fnv"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldhash"
@@ -1594,17 +1582,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "papergrid"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0984e668274d34691bc2b262ef0d115de5fa9973bcdee7ae32213f93099153e"
-dependencies = [
- "bytecount",
- "fnv",
- "unicode-width",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1893,9 +1870,9 @@ dependencies = [
 
 [[package]]
 name = "rd-ast"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31cc72afa6eaaa5eb717af1970dfd40cd2393993a8f37f911c511f818db8454"
+checksum = "e0131d929d280f631d1710c953a69455748feba04c24bf88d219d089aa5716b7"
 dependencies = [
  "rd-rds",
  "serde",
@@ -1903,9 +1880,9 @@ dependencies = [
 
 [[package]]
 name = "rd-helpdb"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "218f4d8faae391e6652659a39a447fdb969920bc16b07938f16a4ce72f65808f"
+checksum = "28bf1094dccc2c2c31ec19eb3292e19d7ea00256c150c905caac3a80f22a28de"
 dependencies = [
  "rd-rds",
  "thiserror 2.0.20",
@@ -1913,9 +1890,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bebce80a9bccefd7fb281dea2b0e911aad541514aa6e07d64d1f8a93648dcd1"
+checksum = "f287f25401c983839e6bf24e6427ce3bdb272141b12b1214c35fc02fb9838606"
 dependencies = [
  "bzip2",
  "flate2",
@@ -1926,30 +1903,31 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa991633d50c48148763cb05de96e879625dbe16d6ab35e5d78d1530e7e90041"
+checksum = "9cd41dd2231b04009ad8ec9b63d7e3286c9e90020ffe763a7c390716cb4c1444"
 dependencies = [
  "rd-ast",
 ]
 
 [[package]]
 name = "rd2qmd-core"
-version = "0.5.3"
-source = "git+https://github.com/eitsupi/rd2qmd.git?rev=8fa352e9c000d2c035a4c7865e84d45f8b6a9d69#8fa352e9c000d2c035a4c7865e84d45f8b6a9d69"
+version = "0.6.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b459588c26e5088457a5d6774915a30f8991f6a99c04b21916f837af1ef2e620"
 dependencies = [
  "rd-ast",
  "rd2qmd-mdast",
  "serde",
  "serde_json",
- "tabled",
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "rd2qmd-mdast"
-version = "0.5.3"
-source = "git+https://github.com/eitsupi/rd2qmd.git?rev=8fa352e9c000d2c035a4c7865e84d45f8b6a9d69#8fa352e9c000d2c035a4c7865e84d45f8b6a9d69"
+version = "0.6.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e023c4f388e44a6509d3fa96581577cad69b673712685d8ed519aa609a768faf"
 dependencies = [
  "serde",
 ]
@@ -2522,16 +2500,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tabled"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d2596a104db1900b943f97d793a6c99addca918c4525c999f751a0f17d472eb"
-dependencies = [
- "papergrid",
- "testing_table",
-]
-
-[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2552,15 +2520,6 @@ checksum = "c4790fc369d5a530f4b544b094e31388b9b3a37c0f4652ade4505945f5660d24"
 dependencies = [
  "new_debug_unreachable",
  "utf-8",
-]
-
-[[package]]
-name = "testing_table"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f8daae29995a24f65619e19d8d31dea5b389f3d853d8bf297bbf607cd0014cc"
-dependencies = [
- "unicode-width",
 ]
 
 [[package]]
