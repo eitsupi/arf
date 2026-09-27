@@ -362,6 +362,14 @@ pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<Strin
     }
 }
 
+fn rd_convert_options() -> rd2qmd_core::RdConvertOptions {
+    let mut options = rd2qmd_core::RdConvertOptions::default();
+    options.code.quarto_code_blocks = false;
+    options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+    options.describe_format = rd2qmd_core::DescribeFormat::Headings;
+    options
+}
+
 /// Get package help as Markdown without evaluating R for the help database.
 ///
 /// The package directory is selected from the startup-cached library paths,
@@ -405,9 +413,7 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
         key: key.clone(),
         source: Box::new(source),
     })?;
-    let mut options = rd2qmd_core::RdConvertOptions::default();
-    options.code.quarto_code_blocks = false;
-    options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+    let options = rd_convert_options();
     Ok(rd2qmd_core::convert_rd_document(&doc, &options))
 }
 
@@ -439,9 +445,7 @@ fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
             e
         )))
     })?;
-    let mut options = rd2qmd_core::RdConvertOptions::default();
-    options.code.quarto_code_blocks = false;
-    options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+    let options = rd_convert_options();
     Ok(rd2qmd_core::convert_rd_document(
         parsed.document(),
         &options,
@@ -622,9 +626,7 @@ More text after.
 "#;
 
         let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
-        let mut options = rd2qmd_core::RdConvertOptions::default();
-        options.code.quarto_code_blocks = false;
-        options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+        let options = rd_convert_options();
         let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_strips_if_html_content", qmd);
@@ -649,9 +651,7 @@ More text after.
 "#;
 
         let parsed = rd_source::parse(rd_content.as_bytes()).unwrap();
-        let mut options = rd2qmd_core::RdConvertOptions::default();
-        options.code.quarto_code_blocks = false;
-        options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
+        let options = rd_convert_options();
         let qmd = rd2qmd_core::convert_rd_document(parsed.document(), &options);
 
         insta::assert_snapshot!("rd_conversion_arguments_preserves_blocks", qmd);
