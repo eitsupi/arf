@@ -383,9 +383,9 @@ mod tests {
     #[test]
     fn delimiter_context_tracks_each_delimiter_independently() {
         assert!(cursor_in_unclosed_delimiter("'text", 5, '\''));
-        assert!(!cursor_in_unclosed_delimiter("'text\"", 6, '"'));
-        assert!(cursor_in_unclosed_delimiter("\"text", 5, '"'));
-        assert!(!cursor_in_unclosed_delimiter("\"text'", 6, '\''));
+        assert!(!cursor_in_unclosed_delimiter(r#"'text""#, 6, '"'));
+        assert!(cursor_in_unclosed_delimiter(r#""text"#, 5, '"'));
+        assert!(!cursor_in_unclosed_delimiter(r#""text'"#, 6, '\''));
         assert!(cursor_in_unclosed_delimiter("`text", 5, '`'));
         assert!(!cursor_in_unclosed_delimiter("`text'", 6, '\''));
     }
@@ -399,7 +399,7 @@ mod tests {
             '"'
         ));
 
-        let multibyte = "\"日";
+        let multibyte = r#""日"#;
         assert!(cursor_in_unclosed_delimiter(
             multibyte,
             multibyte.len(),
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn raw_string_prefix_is_not_detected_inside_strings_or_comments() {
-        assert!(!is_r_raw_string_prefix("\"r", 2));
+        assert!(!is_r_raw_string_prefix(r#""r"#, 2));
         assert!(!is_r_raw_string_prefix("'r", 2));
         assert!(!is_r_raw_string_prefix("`r", 2));
         assert!(!is_r_raw_string_prefix("# r", 3));
@@ -453,7 +453,7 @@ mod tests {
 
         // Once the raw string has started, the closing quote is vetoed by the
         // raw-string context rather than treated as a new pair.
-        let raw_body = "r\"(text)";
+        let raw_body = r#"r"(text)"#;
         assert!(!should_open_auto_pair(
             raw_body,
             raw_body.len(),
@@ -465,10 +465,10 @@ mod tests {
     #[test]
     fn raw_string_context_allows_internal_quotes_and_dashed_delimiters() {
         for (body, quote) in [
-            ("r\"(hello \"world\")", '"'),
-            ("r'---(hello \"world\")---", '\''),
-            ("r\"[hello \"world\"]", '"'),
-            ("r\"{hello \"world\"}", '"'),
+            (r#"r"(hello "world")"#, '"'),
+            (r#"r'---(hello "world")---"#, '\''),
+            (r#"r"[hello "world"]"#, '"'),
+            (r#"r"{hello "world"}"#, '"'),
         ] {
             assert!(
                 cursor_in_unclosed_delimiter(body, body.len(), quote),
@@ -482,7 +482,7 @@ mod tests {
             ));
         }
 
-        let complete = "r\"---(hello \"world\")---\"";
+        let complete = r#"r"---(hello "world")---""#;
         assert!(!cursor_in_unclosed_delimiter(complete, complete.len(), '"'));
         assert!(should_open_auto_pair(
             complete,

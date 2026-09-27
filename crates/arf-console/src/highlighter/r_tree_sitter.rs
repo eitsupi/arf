@@ -82,7 +82,7 @@ fn node_to_token_type(node: &Node, source: &[u8]) -> TokenType {
         // Operators
         "?" | ":=" | "=" | "<-" | "<<-" | "->" | "->>" | "~" | "|>" | "||" | "|" | "&&" | "&"
         | "<" | "<=" | ">" | ">=" | "==" | "!=" | "+" | "-" | "*" | "/" | "::" | ":::" | "**"
-        | "^" | "$" | "@" | ":" | "!" | "\\" | "special" => TokenType::Operator,
+        | "^" | "$" | "@" | ":" | "!" | r#"\"# | "special" => TokenType::Operator,
 
         // Punctuation
         "(" | ")" | "{" | "}" | "[" | "]" | "[[" | "]]" => TokenType::Punctuation,

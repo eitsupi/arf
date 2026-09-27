@@ -268,9 +268,9 @@ fn history_recall_keeps_quote_pair_backspace_state_in_sync() -> Result<()> {
         "history-recall-quote-pair-backspace",
         &["--no-completion"],
         |terminal| {
-            terminal.write("\"")?;
+            terminal.write(r#"""#)?;
             terminal.wait_for("empty auto-matched quote pair", |_, line| {
-                line.trim_end() == "ARF> \"\""
+                line.trim_end() == r#"ARF> """#
             })?;
             terminal.key("Enter")?;
             terminal.wait_for_prompt(Some(r#"[1] """#), PROMPT)?;
@@ -279,12 +279,12 @@ fn history_recall_keeps_quote_pair_backspace_state_in_sync() -> Result<()> {
             terminal.key("Up")?;
             terminal.key("Up")?;
             terminal.wait_for("recalled empty quote pair", |_, line| {
-                line.trim_end() == "ARF> \"\""
+                line.trim_end() == r#"ARF> """#
             })?;
             terminal.key("Down")?;
             terminal.key("Up")?;
             terminal.wait_for("quote pair survives history navigation", |_, line| {
-                line.trim_end() == "ARF> \"\""
+                line.trim_end() == r#"ARF> """#
             })?;
             terminal.key("Left")?;
             terminal.key("Backspace")?;

@@ -114,7 +114,7 @@ impl EditorState {
                 //
                 // If the user presses Right arrow while a hint is shown, the hint
                 // gets completed and the buffer changes from "pr" to
-                // "print(\"hello\")". Without marking uncertain,
+                // `print("hello")`. Without marking uncertain,
                 // the shadow state would incorrectly think cursor just moved right.
                 for e in events {
                     if matches!(
