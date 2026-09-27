@@ -24,7 +24,10 @@ pub use error_state::{
     mark_global_error_handler_initialized, reset_command_error_state, restore_stderr,
     suppress_stderr,
 };
-pub use init::{initialize_r, initialize_r_with_args, run_r_mainloop};
+pub use init::{
+    initialize_r, initialize_r_for_tests, initialize_r_with_args, initialize_r_with_args_for_tests,
+    run_r_mainloop,
+};
 pub use interrupt::{
     clear_r_interrupt_pending, is_r_awaiting_console_input, is_r_interrupt_flag_available,
     process_r_events, set_r_interrupt_pending,

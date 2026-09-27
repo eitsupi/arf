@@ -41,6 +41,46 @@ pub unsafe fn initialize_r() -> RResult<()> {
 /// # Safety
 /// This function initializes R's global state and must only be called once.
 pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
+    // SAFETY: This function has the same initialization contract as its caller.
+    unsafe { initialize_r_with_args_impl(r_args, false) }
+}
+
+/// Initialize R with an unbounded C-stack policy for tests.
+///
+/// Use this only from an isolated test process. An unbounded C-stack policy
+/// can let runaway recursion exhaust the process stack. This is public only so
+/// downstream test crates can use it.
+///
+/// # Safety
+/// This function initializes R's global state and must only be called once.
+#[doc(hidden)]
+pub unsafe fn initialize_r_for_tests() -> RResult<()> {
+    // Use default arguments
+    // Note: --interactive is only needed on Unix; Windows uses Rstart.r_interactive
+    #[cfg(unix)]
+    let args = &["--quiet", "--no-save", "--no-restore-data", "--interactive"];
+    #[cfg(windows)]
+    let args = &["--quiet", "--no-save", "--no-restore-data"];
+
+    // SAFETY: This function has the same initialization contract as its caller.
+    unsafe { initialize_r_with_args_for_tests(args) }
+}
+
+/// Initialize R with custom arguments and an unbounded C-stack policy for tests.
+///
+/// Use this only from an isolated test process. An unbounded C-stack policy
+/// can let runaway recursion exhaust the process stack. This is public only so
+/// downstream test crates can use it.
+///
+/// # Safety
+/// This function initializes R's global state and must only be called once.
+#[doc(hidden)]
+pub unsafe fn initialize_r_with_args_for_tests(r_args: &[&str]) -> RResult<()> {
+    // SAFETY: This function has the same initialization contract as its caller.
+    unsafe { initialize_r_with_args_impl(r_args, true) }
+}
+
+unsafe fn initialize_r_with_args_impl(r_args: &[&str], disable_cstack_check: bool) -> RResult<()> {
     // Enable color output for R packages (cli, crayon, etc.)
     // Embedded R doesn't have a TTY, so we force color output via environment variables.
     // SAFETY: We're in single-threaded initialization before R starts
@@ -88,12 +128,12 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
     // Platform-specific initialization
     #[cfg(unix)]
     unsafe {
-        initialize_r_unix(lib, r_args)?;
+        initialize_r_unix(lib, r_args, disable_cstack_check)?;
     }
 
     #[cfg(windows)]
     unsafe {
-        initialize_r_windows(lib, r_args)?;
+        initialize_r_windows(lib, r_args, disable_cstack_check)?;
     }
 
     Ok(())
@@ -101,7 +141,11 @@ pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
 
 /// Unix-specific R initialization.
 #[cfg(unix)]
-unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
+unsafe fn initialize_r_unix(
+    lib: &crate::functions::RLibrary,
+    r_args: &[&str],
+    disable_cstack_check: bool,
+) -> RResult<()> {
     normalize_empty_r_profile_user();
 
     unsafe {
@@ -143,8 +187,8 @@ unsafe fn initialize_r_unix(lib: &crate::functions::RLibrary, r_args: &[&str]) -
             *lib.r_interactive = 1;
         }
 
-        // Disable stack checking (required for embedded R)
-        if !lib.r_cstacklimit.is_null() {
+        // Disable stack checking only for legacy tests that need deep recursion.
+        if disable_cstack_check && !lib.r_cstacklimit.is_null() {
             *lib.r_cstacklimit = usize::MAX;
         }
 
@@ -230,7 +274,11 @@ fn enable_windows_virtual_terminal() {
 /// We need to create an Rstart struct, set callbacks on it, then call R_SetParams.
 /// This follows the ark pattern for Windows R initialization.
 #[cfg(windows)]
-unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]) -> RResult<()> {
+unsafe fn initialize_r_windows(
+    lib: &crate::functions::RLibrary,
+    r_args: &[&str],
+    disable_cstack_check: bool,
+) -> RResult<()> {
     use crate::types::{R_FALSE, Rstart, UImode};
     use std::mem::MaybeUninit;
 
@@ -344,8 +392,8 @@ unsafe fn initialize_r_windows(lib: &crate::functions::RLibrary, r_args: &[&str]
         (lib.r_setparams)(params_ptr);
         log::info!("[WINDOWS] R_SetParams called");
 
-        // Disable stack checking (for testing - embedded R needs this)
-        if !lib.r_cstacklimit.is_null() {
+        // Disable stack checking only for legacy tests that need deep recursion.
+        if disable_cstack_check && !lib.r_cstacklimit.is_null() {
             *lib.r_cstacklimit = usize::MAX;
         }
 

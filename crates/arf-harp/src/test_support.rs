@@ -34,7 +34,7 @@ pub(crate) fn with_r_in_subprocess(qualified_name: &str, test: impl FnOnce()) {
 
         // SAFETY: Only this exact test runs in the child process, and it is the
         // sole owner of R initialization and all subsequent R calls.
-        unsafe { arf_libr::initialize_r() }.expect("R should initialize");
+        unsafe { arf_libr::initialize_r_for_tests() }.expect("R should initialize");
         test();
         return;
     }
