@@ -18,7 +18,6 @@ static GLOBAL_ERROR_HANDLER_INITIALIZED: RwLock<bool> = RwLock::new(false);
 
 /// The outcome R could reliably report for the previous command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum CommandOutcome {
     Success,
     Failure,
@@ -65,16 +64,6 @@ pub fn command_outcome() -> CommandOutcome {
         Some(false) => CommandOutcome::Success,
         None => CommandOutcome::Unavailable,
     }
-}
-
-/// Check whether the previous command failed, preserving the legacy fail-open behavior.
-#[deprecated(note = "use command_outcome() instead")]
-pub fn command_had_error() -> bool {
-    outcome_had_error(command_outcome())
-}
-
-fn outcome_had_error(outcome: CommandOutcome) -> bool {
-    outcome == CommandOutcome::Failure
 }
 
 /// Suppress stderr output from R.
@@ -374,14 +363,7 @@ fn reset_r_error_state() {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandOutcome, outcome_had_error, valid_had_error_value};
-
-    #[test]
-    fn deprecated_boolean_projection_only_reports_known_failure() {
-        assert!(outcome_had_error(CommandOutcome::Failure));
-        assert!(!outcome_had_error(CommandOutcome::Success));
-        assert!(!outcome_had_error(CommandOutcome::Unavailable));
-    }
+    use super::valid_had_error_value;
 
     #[test]
     fn malformed_error_values_are_unavailable() {

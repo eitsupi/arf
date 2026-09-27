@@ -667,7 +667,6 @@ fn outcome_failure_projection(outcome: arf_libr::CommandOutcome) -> Option<bool>
         arf_libr::CommandOutcome::Success => Some(false),
         arf_libr::CommandOutcome::Failure => Some(true),
         arf_libr::CommandOutcome::Unavailable => None,
-        _ => None,
     }
 }
 

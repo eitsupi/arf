@@ -19,11 +19,10 @@ pub use discovery::{
 pub use discovery::{
     ensure_ld_library_path_with_pre_exec, ensure_ld_library_path_with_pre_exec_and_args,
 };
-#[allow(deprecated)]
 pub use error_state::{
-    CommandOutcome, command_had_error, command_outcome, global_error_handler_code,
-    mark_error_condition, mark_global_error_handler_initialized, reset_command_error_state,
-    restore_stderr, suppress_stderr,
+    CommandOutcome, command_outcome, global_error_handler_code, mark_error_condition,
+    mark_global_error_handler_initialized, reset_command_error_state, restore_stderr,
+    suppress_stderr,
 };
 pub use init::{
     initialize_r, initialize_r_for_tests, initialize_r_with_args, initialize_r_with_args_for_tests,
