@@ -211,6 +211,7 @@ fn run() -> Result<()> {
                 &args.action,
                 cli.r_source.config.as_ref(),
                 cli.history.history_dir.as_ref(),
+                cli.history.no_history,
             );
         }
         Some(Commands::Ipc(args)) => {
@@ -320,13 +321,11 @@ fn run() -> Result<()> {
     ipc::policy::set_policy(eval_allowlist, cli.ipc_eval_unrestricted);
 
     // History configuration: CLI flag overrides default XDG location
-    if cli.history.no_history {
-        config.history.mode = config::HistoryMode::Volatile;
-    } else if let Some(history_dir) = &cli.history.history_dir {
-        config.history.mode = config::HistoryMode::Persistent {
-            dir: Some(history_dir.clone()),
-        };
-    }
+    config.history.mode = config::history_mode_with_overrides(
+        &config.history.mode,
+        cli.history.history_dir.as_deref(),
+        cli.history.no_history,
+    );
 
     // Configured format mode degrades to on when its formatter is unavailable.
     let formatter = config.reprex.formatter;
@@ -1009,7 +1008,7 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
     matches!(long, "config" | "history-dir")
         && path.len() == 2
         && path[0] == "history"
-        && matches!(path[1].as_str(), "import" | "export")
+        && matches!(path[1].as_str(), "import" | "export" | "schema")
 }
 
 #[cfg(test)]

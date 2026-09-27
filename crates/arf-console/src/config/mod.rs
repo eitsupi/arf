@@ -19,6 +19,7 @@ pub use experimental::{
     StaticFormalsMode,
 };
 pub use history::{HistoryConfig, HistoryMode};
+pub(crate) use history::{HistoryLocationSource, ResolvedHistoryLocation};
 pub use ipc::IpcConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
@@ -34,7 +35,7 @@ pub use startup::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Status of config file loading, for display in `:info`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,15 +164,33 @@ pub fn history_dir() -> Option<PathBuf> {
     data_dir().map(|p| p.join("history"))
 }
 
-/// Resolve the on-disk history directory for a configured mode.
+/// Resolve history mode against the current default directory without probing
+/// the filesystem. Volatile mode does not query the default path at all.
+pub(crate) fn resolved_history_location(mode: &HistoryMode) -> ResolvedHistoryLocation {
+    let default_directory = match mode {
+        HistoryMode::Persistent { dir: None } => history_dir(),
+        HistoryMode::Persistent { dir: Some(_) } | HistoryMode::Volatile => None,
+    };
+    history::resolve_history_location(mode, default_directory)
+}
+
+/// Apply command-line history overrides to a configured mode.
 ///
-/// Volatile history deliberately has no path: it must not expose, read, or
-/// create the persistent XDG directory. Persistent mode uses its explicit
-/// directory when present and otherwise the XDG default.
-pub fn history_dir_for_mode(mode: &HistoryMode) -> Option<PathBuf> {
-    match mode {
-        HistoryMode::Persistent { .. } => mode.persistent_dir().cloned().or_else(history_dir),
-        HistoryMode::Volatile => None,
+/// Clap supplies `ARF_HISTORY_DIR` through `cli_history_dir`, so the CLI value
+/// (whether entered as a flag or environment variable) precedes config.
+pub(crate) fn history_mode_with_overrides(
+    configured: &HistoryMode,
+    cli_history_dir: Option<&Path>,
+    no_history: bool,
+) -> HistoryMode {
+    if no_history {
+        HistoryMode::Volatile
+    } else if let Some(directory) = cli_history_dir {
+        HistoryMode::Persistent {
+            dir: Some(directory.to_path_buf()),
+        }
+    } else {
+        configured.clone()
     }
 }
 
@@ -851,18 +870,24 @@ mode = "volatile"
     }
 
     #[test]
-    fn test_history_dir_for_mode_never_exposes_a_volatile_path() {
+    fn history_mode_overrides_keep_cli_env_config_default_precedence() {
+        let configured_dir = PathBuf::from("/config/history");
+        let configured = HistoryMode::Persistent {
+            dir: Some(configured_dir.clone()),
+        };
+        let cli_dir = PathBuf::from("/cli-or-env/history");
+
         assert_eq!(
-            history_dir_for_mode(&HistoryMode::Volatile),
-            None,
-            "volatile history must not expose the persistent XDG directory"
+            history_mode_with_overrides(&configured, Some(&cli_dir), false),
+            HistoryMode::Persistent { dir: Some(cli_dir) }
         );
-        let explicit = std::path::PathBuf::from("/tmp/arf-history");
         assert_eq!(
-            history_dir_for_mode(&HistoryMode::Persistent {
-                dir: Some(explicit.clone()),
-            }),
-            Some(explicit)
+            history_mode_with_overrides(&configured, None, false),
+            configured
+        );
+        assert_eq!(
+            history_mode_with_overrides(&HistoryMode::Persistent { dir: None }, None, true),
+            HistoryMode::Volatile
         );
     }
 

@@ -4,7 +4,7 @@
 //! and example R code for accessing it, used by both CLI and REPL commands.
 
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
-use crate::config::history_dir;
+use crate::config::{HistoryLocationSource, ResolvedHistoryLocation};
 use crate::highlighter::RTreeSitterHighlighter;
 use crate::pager::style_convert::styled_text_to_line;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -21,7 +21,7 @@ pub struct HistoryDirError;
 
 impl std::fmt::Display for HistoryDirError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Could not determine history directory")
+        write!(f, "No persistent history directory is available")
     }
 }
 
@@ -77,9 +77,15 @@ impl Default for SchemaStyles {
 /// # Errors
 ///
 /// Returns an error if the history directory cannot be determined.
-pub fn print_schema() -> Result<(), HistoryDirError> {
-    let history_path = history_dir().ok_or(HistoryDirError)?;
-    let history_path = history_path.display().to_string();
+pub fn print_schema(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
+    if location.source() == HistoryLocationSource::Volatile {
+        return Err(HistoryDirError);
+    }
+    let history_path = location
+        .directory()
+        .ok_or(HistoryDirError)?
+        .display()
+        .to_string();
 
     // Check if stdout is a terminal - only use colors if it is
     if io::stdout().is_terminal() {
@@ -140,9 +146,15 @@ fn print_schema_plain(history_path: &str) {
 /// # Errors
 ///
 /// Returns an error if the history directory cannot be determined.
-pub fn show_schema_pager() -> Result<(), HistoryDirError> {
-    let history_path = history_dir().ok_or(HistoryDirError)?;
-    let history_path = history_path.display().to_string();
+pub fn show_schema_pager(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
+    if location.source() == HistoryLocationSource::Volatile {
+        return Err(HistoryDirError);
+    }
+    let history_path = location
+        .directory()
+        .ok_or(HistoryDirError)?
+        .display()
+        .to_string();
 
     // Generate content lines
     let lines = generate_schema_lines(&history_path);
@@ -700,11 +712,21 @@ mod tests {
 
     #[test]
     fn test_print_schema_runs() {
-        // print_schema reads HOME/XDG variables indirectly through history_dir.
+        // Resolve the default through the same location resolver used by consumers.
         let _guard = crate::test_utils::lock_env();
-        // On systems with XDG support, this should succeed
-        // On other systems (or in restrictive environments), it may fail
-        let _ = print_schema();
+        let location =
+            crate::config::resolved_history_location(&crate::config::HistoryMode::Persistent {
+                dir: None,
+            });
+        let _ = print_schema(&location);
+    }
+
+    #[test]
+    fn volatile_schema_does_not_resolve_or_display_a_persistent_path() {
+        let location =
+            crate::config::resolved_history_location(&crate::config::HistoryMode::Volatile);
+        assert!(location.directory().is_none());
+        assert!(print_schema(&location).is_err());
     }
 
     #[test]
