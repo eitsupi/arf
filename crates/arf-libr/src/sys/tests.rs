@@ -108,20 +108,21 @@ fn test_command_error_state() {
     // Reset to known state first
     reset_command_error_state();
 
-    // Without initialized R tracking, a successful outcome cannot be confirmed.
+    // Without the safe binding-inspection API, command outcomes are unavailable.
     assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
-    // Mark an error condition
+    // Without the safe binding-inspection API, even independently observed
+    // conditions cannot provide the complete command outcome contract.
     mark_error_condition();
-    assert_eq!(command_outcome(), CommandOutcome::Failure);
+    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
     // Reset should clear the error state
     reset_command_error_state();
     assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
-    // Mark error again and verify detection
+    // Mark an error again; tracking remains unavailable without R support.
     mark_error_condition();
-    assert_eq!(command_outcome(), CommandOutcome::Failure);
+    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
     // Final reset
     reset_command_error_state();

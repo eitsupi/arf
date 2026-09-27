@@ -129,13 +129,17 @@ pub(super) fn read_console_callback(
         // first real command prompt, before returning any user input to R.
         if prompt_kind.is_command() && !state.error_handler_setup_attempted {
             state.error_handler_setup_attempted = true;
-            match arf_harp::eval_string_with_visibility(arf_libr::global_error_handler_code()) {
-                Ok(_) => {
-                    log::info!("R error handler initialized after startup");
-                    arf_libr::mark_global_error_handler_initialized();
-                }
-                Err(error) => {
-                    log::warn!("Failed to initialize R error handler: {error:?}");
+            if !arf_libr::command_outcome_tracking_available() {
+                log::info!("R library lacks safe error-state inspection; command outcomes are unavailable");
+            } else {
+                match arf_harp::eval_string_in_base(arf_libr::global_error_handler_code()) {
+                    Ok(_) => {
+                        log::info!("R error handler initialized after startup");
+                        arf_libr::mark_global_error_handler_initialized();
+                    }
+                    Err(error) => {
+                        log::warn!("Failed to initialize R error handler: {error:?}");
+                    }
                 }
             }
         }

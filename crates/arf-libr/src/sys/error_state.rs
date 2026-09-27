@@ -51,6 +51,10 @@ pub fn mark_error_condition() {
 /// because many R functions (e.g., install.packages) write informational messages
 /// to stderr that are not errors.
 pub fn command_outcome() -> CommandOutcome {
+    if !command_outcome_tracking_available() {
+        return CommandOutcome::Unavailable;
+    }
+
     let had_condition = match CONDITION_ERROR_OCCURRED.read() {
         Ok(state) => *state,
         Err(_) => return CommandOutcome::Unavailable,
@@ -64,6 +68,17 @@ pub fn command_outcome() -> CommandOutcome {
         Some(false) => CommandOutcome::Success,
         None => CommandOutcome::Unavailable,
     }
+}
+
+/// Whether this R library exposes the APIs needed for safe outcome tracking.
+///
+/// `R_existsVarInFrame` became public in R 4.2. This API is not required for
+/// normal REPL operation, but outcome tracking is unavailable without it because
+/// bindings cannot be inspected safely without possibly running active bindings.
+pub fn command_outcome_tracking_available() -> bool {
+    r_library()
+        .map(|lib| lib.r_exists_var_in_frame.is_some())
+        .unwrap_or(false)
 }
 
 /// Suppress stderr output from R.
@@ -102,7 +117,7 @@ pub(super) fn is_stderr_suppressed() -> bool {
 /// already configured in `options(error)`.
 ///
 /// Call this from the application layer (e.g., arf-console) and use arf-harp's
-/// eval_string to evaluate the returned code.
+/// `eval_string_in_base` to evaluate the returned code.
 pub fn global_error_handler_code() -> &'static str {
     GLOBAL_ERROR_HANDLER_CODE
 }
@@ -283,7 +298,10 @@ fn check_r_error_state() -> Option<bool> {
 /// Check whether a binding exists in this frame without resolving its value.
 /// This avoids evaluating active bindings before inspecting their properties.
 unsafe fn binding_exists(lib: &crate::RLibrary, env: SEXP, symbol: SEXP) -> bool {
-    unsafe { (lib.r_exists_var_in_frame)(env, symbol) != 0 }
+    match lib.r_exists_var_in_frame {
+        Some(r_exists_var_in_frame) => unsafe { r_exists_var_in_frame(env, symbol) != 0 },
+        None => false,
+    }
 }
 
 fn valid_had_error_value(value: Option<i32>) -> Option<bool> {

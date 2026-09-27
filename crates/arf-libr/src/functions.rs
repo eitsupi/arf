@@ -86,7 +86,8 @@ pub struct RLibrary {
     pub rf_findvar: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     /// Rf_findVarInFrame takes the environment first and looks only in it.
     pub rf_findvar_in_frame: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
-    pub r_exists_var_in_frame: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
+    /// Available since R 4.2.0; used to inspect bindings without evaluating active bindings.
+    pub r_exists_var_in_frame: Option<unsafe extern "C" fn(SEXP, SEXP) -> Rboolean>,
     /// R_BindingIsActive and R_BindingIsLocked take the symbol before the environment.
     pub r_binding_is_active: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
     pub r_binding_is_locked: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
@@ -357,7 +358,10 @@ impl RLibrary {
             // Rf_findVar takes (symbol, env) and searches through enclosing environments
             load_symbol!(rf_findvar, b"Rf_findVar\0");
             load_symbol!(rf_findvar_in_frame, b"Rf_findVarInFrame\0");
-            load_symbol!(r_exists_var_in_frame, b"R_existsVarInFrame\0");
+            let r_exists_var_in_frame = library
+                .get::<unsafe extern "C" fn(SEXP, SEXP) -> Rboolean>(b"R_existsVarInFrame\0")
+                .ok()
+                .map(|symbol| *symbol);
             load_symbol!(r_binding_is_active, b"R_BindingIsActive\0");
             load_symbol!(r_binding_is_locked, b"R_BindingIsLocked\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
