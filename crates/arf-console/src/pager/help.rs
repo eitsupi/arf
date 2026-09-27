@@ -1,7 +1,8 @@
 //! Interactive fuzzy help search for R documentation.
 //!
 //! This module provides a terminal-based fuzzy search interface for R help topics
-//! loaded from installed packages' `Meta/hsearch.rds` files.
+//! loaded from installed packages' `Meta/Rd.rds`, `Meta/vignette.rds`, and
+//! `Meta/demo.rds` independently.
 //!
 //! # Acknowledgment
 //!
@@ -20,7 +21,10 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use arf_harp::help::{HelpTopic, get_help_topics, get_package_help_markdown, get_vignette_text};
+use arf_harp::help::{
+    HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key,
+    get_vignette_text,
+};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -246,10 +250,18 @@ demo("{name}", package = "{pkg}")"#,
                                         }
                                         _ => {
                                             // "help" and any other types
-                                            match get_package_help_markdown(
-                                                &topic.topic,
-                                                &topic.package,
-                                            ) {
+                                            let help = match topic.help_key.as_deref() {
+                                                Some(key) => get_package_help_markdown_by_key(
+                                                    &topic.topic,
+                                                    key,
+                                                    &topic.package,
+                                                ),
+                                                None => get_package_help_markdown(
+                                                    &topic.topic,
+                                                    &topic.package,
+                                                ),
+                                            };
+                                            match help {
                                                 Ok(text) => {
                                                     if let Err(e) =
                                                         display_help_pager(&title, &text)
@@ -501,12 +513,43 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
             let name = topic.qualified_name();
             let name_score = fuzzy_match(query, &name).map(|m| m.score);
             let topic_score = fuzzy_match(query, &topic.topic).map(|m| m.score);
+            let max_candidate_len = topic
+                .aliases
+                .iter()
+                .map(String::len)
+                .chain(topic.help_key.iter().map(String::len))
+                .max()
+                .unwrap_or(0);
+            let mut qualified_candidate =
+                String::with_capacity(topic.package.len() + 2 + max_candidate_len);
+            let mut alias_key_score = None;
+            for candidate in topic
+                .aliases
+                .iter()
+                .map(String::as_str)
+                .chain(topic.help_key.as_deref())
+            {
+                if let Some(score) = fuzzy_match(query, candidate).map(|m| m.score) {
+                    alias_key_score =
+                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
+                }
+
+                qualified_candidate.clear();
+                qualified_candidate.push_str(&topic.package);
+                qualified_candidate.push_str("::");
+                qualified_candidate.push_str(candidate);
+                if let Some(score) = fuzzy_match(query, &qualified_candidate).map(|m| m.score) {
+                    alias_key_score =
+                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
+                }
+            }
             let title_score = fuzzy_match(query, &topic.title).map(|m| m.score / 2); // Title matches weighted less
 
             // Take the best score
             let best_score = name_score
                 .into_iter()
                 .chain(topic_score)
+                .chain(alias_key_score)
                 .chain(title_score)
                 .max();
 
@@ -684,12 +727,16 @@ mod tests {
             HelpTopic {
                 package: "base".to_string(),
                 topic: "print".to_string(),
+                aliases: vec!["print.default".to_string()],
+                help_key: Some("print".to_string()),
                 title: "Print Values".to_string(),
                 entry_type: "help".to_string(),
             },
             HelpTopic {
                 package: "dplyr".to_string(),
                 topic: "mutate".to_string(),
+                aliases: vec![],
+                help_key: None,
                 title: "Create, modify, and delete columns".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -709,6 +756,8 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            aliases: vec![],
+            help_key: None,
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -723,12 +772,52 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            aliases: vec![],
+            help_key: None,
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
 
         let results = fuzzy_search_topics(&topics, "xyz123");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn fuzzy_search_matches_aliases_without_duplicating_topic_results() {
+        let topic = HelpTopic {
+            package: "base".to_string(),
+            topic: "print".to_string(),
+            aliases: vec!["print.default".to_string(), "print.value".to_string()],
+            help_key: Some("print".to_string()),
+            title: "Print Values".to_string(),
+            entry_type: "help".to_string(),
+        };
+
+        let results = fuzzy_search_topics(std::slice::from_ref(&topic), "print.value");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.topic, "print");
+
+        let results = fuzzy_search_topics(&[topic], "base::print.value");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.qualified_name(), "base::print");
+    }
+
+    #[test]
+    fn fuzzy_search_matches_help_key_bare_and_qualified_without_changing_display_topic() {
+        let topic = HelpTopic {
+            package: "base".to_string(),
+            topic: "[.data.frame".to_string(),
+            aliases: vec!["[.data.frame".to_string()],
+            help_key: Some("Extract.data.frame".to_string()),
+            title: "Extract or Replace Parts of an Object".to_string(),
+            entry_type: "help".to_string(),
+        };
+
+        for query in ["Extract.data.frame", "base::Extract.data.frame"] {
+            let results = fuzzy_search_topics(std::slice::from_ref(&topic), query);
+            assert_eq!(results.len(), 1, "query {query:?}");
+            assert_eq!(results[0].0.topic, "[.data.frame");
+        }
     }
 
     #[test]
