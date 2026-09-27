@@ -27,6 +27,7 @@ const AUTO_PAIR_FOLLOWING_CLOSERS: [char; 6] = [')', ']', '}', '\'', '"', '`'];
 pub struct CombinedHighlighter {
     meta_highlighter: MetaCommandHighlighter,
     r_highlighter: RTreeSitterHighlighter,
+    editor_state: Option<EditorStateRef>,
 }
 
 impl CombinedHighlighter {
@@ -34,14 +35,29 @@ impl CombinedHighlighter {
         CombinedHighlighter {
             meta_highlighter: MetaCommandHighlighter::new(config.meta),
             r_highlighter: RTreeSitterHighlighter::new(config.r, highlight_matching_bracket),
+            editor_state: None,
         }
     }
 
     /// Set the editor state reference used to resynchronize shadow state after
     /// history navigation and other out-of-band buffer changes.
     pub fn with_editor_state(mut self, state: EditorStateRef) -> Self {
-        self.r_highlighter = self.r_highlighter.with_editor_state(state);
+        self.editor_state = Some(state);
         self
+    }
+
+    fn sync_editor_state(&self, line: &str, cursor: usize) {
+        if let Some(state_ref) = &self.editor_state
+            && let Ok(mut state) = state_ref.lock()
+        {
+            state.buffer = line.to_string();
+            state.buffer_len = line.chars().count();
+            state.cursor_pos = line
+                .char_indices()
+                .take_while(|(byte_pos, _)| *byte_pos < cursor)
+                .count();
+            state.uncertain = false;
+        }
     }
 }
 
@@ -53,6 +69,7 @@ impl Default for CombinedHighlighter {
 
 impl Highlighter for CombinedHighlighter {
     fn highlight(&self, line: &str, cursor: usize) -> StyledText {
+        self.sync_editor_state(line, cursor);
         if line.trim_start().starts_with(':') {
             self.meta_highlighter.highlight(line, cursor)
         } else {
@@ -273,6 +290,7 @@ fn parse_raw_string_start(source: &str) -> Option<(RawStringContext, usize)> {
         Some(b'(') => (')', index - 2),
         Some(b'[') => (']', index - 2),
         Some(b'{') => ('}', index - 2),
+        Some(b'|') => ('|', index - 2),
         _ => return None,
     };
 
@@ -373,6 +391,48 @@ mod tests {
     }
 
     #[test]
+    fn combined_highlighter_syncs_editor_state_for_r_code_with_utf8_cursor() {
+        let editor_state = crate::editor::mode::new_editor_state_ref();
+        let highlighter = CombinedHighlighter::default().with_editor_state(editor_state.clone());
+        let line = "x <- '日'";
+        let cursor = line.len() - 1;
+        {
+            let mut state = editor_state.lock().unwrap();
+            state.uncertain = true;
+        }
+
+        highlighter.highlight(line, cursor);
+
+        let state = editor_state.lock().unwrap();
+        assert_eq!(state.buffer, line);
+        assert_eq!(state.buffer_len, 8);
+        assert_eq!(state.cursor_pos, 7);
+        assert!(!state.uncertain);
+    }
+
+    #[test]
+    fn combined_highlighter_syncs_editor_state_for_indented_meta_commands() {
+        let editor_state = crate::editor::mode::new_editor_state_ref();
+        let highlighter = CombinedHighlighter::default().with_editor_state(editor_state.clone());
+        let line = "  :reprex";
+        {
+            let mut state = editor_state.lock().unwrap();
+            state.buffer = "stale".to_string();
+            state.buffer_len = 5;
+            state.cursor_pos = 5;
+            state.uncertain = true;
+        }
+
+        highlighter.highlight(line, 4);
+
+        let state = editor_state.lock().unwrap();
+        assert_eq!(state.buffer, line);
+        assert_eq!(state.buffer_len, line.chars().count());
+        assert_eq!(state.cursor_pos, 4);
+        assert!(!state.uncertain);
+    }
+
+    #[test]
     fn test_no_highlighter() {
         let highlighter = NoHighlighter::new();
         let styled = highlighter.highlight("x <- 42", 0);
@@ -469,6 +529,7 @@ mod tests {
             (r#"r'---(hello "world")---"#, '\''),
             (r#"r"[hello "world"]"#, '"'),
             (r#"r"{hello "world"}"#, '"'),
+            (r#"r"|hello "world"|"#, '"'),
         ] {
             assert!(
                 cursor_in_unclosed_delimiter(body, body.len(), quote),
@@ -487,6 +548,19 @@ mod tests {
         assert!(should_open_auto_pair(
             complete,
             complete.len(),
+            ('"', '"'),
+            None
+        ));
+
+        let complete_pipe = r#"r"|hello "world"|""#;
+        assert!(!cursor_in_unclosed_delimiter(
+            complete_pipe,
+            complete_pipe.len(),
+            '"'
+        ));
+        assert!(should_open_auto_pair(
+            complete_pipe,
+            complete_pipe.len(),
             ('"', '"'),
             None
         ));

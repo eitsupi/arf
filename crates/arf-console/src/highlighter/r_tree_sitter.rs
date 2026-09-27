@@ -3,12 +3,7 @@
 //! This module implements R syntax highlighting using tree-sitter-r,
 //! providing more accurate parsing than the regex-based approach.
 //!
-//! This highlighter also synchronizes the shared editor state with the actual
-//! buffer content on every redraw, keeping stateful editor features accurate
-//! after history navigation and other out-of-band edits.
-
 use crate::config::RColorConfig;
-use crate::editor::mode::EditorStateRef;
 use crate::r_parser::{is_atomic_node, parse_r};
 use nu_ansi_term::{Color, Style};
 use once_cell::sync::Lazy;
@@ -207,7 +202,6 @@ pub fn tokenize_r(source: &str) -> Vec<Token> {
 pub struct RTreeSitterHighlighter {
     config: RColorConfig,
     highlight_matching_bracket: bool,
-    editor_state: Option<EditorStateRef>,
 }
 
 impl RTreeSitterHighlighter {
@@ -215,23 +209,6 @@ impl RTreeSitterHighlighter {
         RTreeSitterHighlighter {
             config,
             highlight_matching_bracket,
-            editor_state: None,
-        }
-    }
-
-    pub fn with_editor_state(mut self, state: EditorStateRef) -> Self {
-        self.editor_state = Some(state);
-        self
-    }
-
-    fn sync_editor_state(&self, line: &str, cursor: usize) {
-        if let Some(state_ref) = &self.editor_state
-            && let Ok(mut state) = state_ref.lock()
-        {
-            state.buffer = line.to_string();
-            state.buffer_len = line.chars().count();
-            state.cursor_pos = line[..cursor.min(line.len())].chars().count();
-            state.uncertain = false;
         }
     }
 }
@@ -244,7 +221,6 @@ impl Default for RTreeSitterHighlighter {
 
 impl Highlighter for RTreeSitterHighlighter {
     fn highlight(&self, line: &str, cursor: usize) -> StyledText {
-        self.sync_editor_state(line, cursor);
         let mut styled = StyledText::new();
 
         let tree = parse_r(line);

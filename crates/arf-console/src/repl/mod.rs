@@ -815,6 +815,13 @@ impl Repl {
             }
         };
 
+        let highlighter = CombinedHighlighter::new(
+            self.config.colors.clone(),
+            self.config.editor.highlight_matching_bracket,
+        )
+        .with_editor_state(editor_state.clone());
+        line_editor = line_editor.with_highlighter(Box::new(highlighter));
+
         // Set up history-based autosuggestion (fish/nushell style)
         // Uses RLanguageHinter for proper R token handling (e.g., |> as single token)
         if let Some(hinter) = self.create_r_hinter() {
