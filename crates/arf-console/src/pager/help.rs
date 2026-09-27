@@ -513,21 +513,34 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
             let name = topic.qualified_name();
             let name_score = fuzzy_match(query, &name).map(|m| m.score);
             let topic_score = fuzzy_match(query, &topic.topic).map(|m| m.score);
-            let max_alias_len = topic.aliases.iter().map(String::len).max().unwrap_or(0);
-            let mut qualified_alias =
-                String::with_capacity(topic.package.len() + 2 + max_alias_len);
-            let mut alias_score = None;
-            for alias in &topic.aliases {
-                if let Some(score) = fuzzy_match(query, alias).map(|m| m.score) {
-                    alias_score = Some(alias_score.map_or(score, |best: u32| best.max(score)));
+            let max_candidate_len = topic
+                .aliases
+                .iter()
+                .map(String::len)
+                .chain(topic.help_key.iter().map(String::len))
+                .max()
+                .unwrap_or(0);
+            let mut qualified_candidate =
+                String::with_capacity(topic.package.len() + 2 + max_candidate_len);
+            let mut alias_key_score = None;
+            for candidate in topic
+                .aliases
+                .iter()
+                .map(String::as_str)
+                .chain(topic.help_key.as_deref())
+            {
+                if let Some(score) = fuzzy_match(query, candidate).map(|m| m.score) {
+                    alias_key_score =
+                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
                 }
 
-                qualified_alias.clear();
-                qualified_alias.push_str(&topic.package);
-                qualified_alias.push_str("::");
-                qualified_alias.push_str(alias);
-                if let Some(score) = fuzzy_match(query, &qualified_alias).map(|m| m.score) {
-                    alias_score = Some(alias_score.map_or(score, |best: u32| best.max(score)));
+                qualified_candidate.clear();
+                qualified_candidate.push_str(&topic.package);
+                qualified_candidate.push_str("::");
+                qualified_candidate.push_str(candidate);
+                if let Some(score) = fuzzy_match(query, &qualified_candidate).map(|m| m.score) {
+                    alias_key_score =
+                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
                 }
             }
             let title_score = fuzzy_match(query, &topic.title).map(|m| m.score / 2); // Title matches weighted less
@@ -536,7 +549,7 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
             let best_score = name_score
                 .into_iter()
                 .chain(topic_score)
-                .chain(alias_score)
+                .chain(alias_key_score)
                 .chain(title_score)
                 .max();
 
@@ -787,6 +800,24 @@ mod tests {
         let results = fuzzy_search_topics(&[topic], "base::print.value");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0.qualified_name(), "base::print");
+    }
+
+    #[test]
+    fn fuzzy_search_matches_help_key_bare_and_qualified_without_changing_display_topic() {
+        let topic = HelpTopic {
+            package: "base".to_string(),
+            topic: "[.data.frame".to_string(),
+            aliases: vec!["[.data.frame".to_string()],
+            help_key: Some("Extract.data.frame".to_string()),
+            title: "Extract or Replace Parts of an Object".to_string(),
+            entry_type: "help".to_string(),
+        };
+
+        for query in ["Extract.data.frame", "base::Extract.data.frame"] {
+            let results = fuzzy_search_topics(std::slice::from_ref(&topic), query);
+            assert_eq!(results.len(), 1, "query {query:?}");
+            assert_eq!(results[0].0.topic, "[.data.frame");
+        }
     }
 
     #[test]
