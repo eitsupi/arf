@@ -124,6 +124,22 @@ pub(super) fn read_console_callback(
         // one value.
         let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation);
 
+        // R startup and user profiles can replace options(error) after
+        // initialize_r returns. Capture and wrap the resulting handler at the
+        // first real command prompt, before returning any user input to R.
+        if prompt_kind.is_command() && !state.error_handler_setup_attempted {
+            state.error_handler_setup_attempted = true;
+            match arf_harp::eval_string_with_visibility(arf_libr::global_error_handler_code()) {
+                Ok(_) => {
+                    log::info!("R error handler initialized after startup");
+                    arf_libr::mark_global_error_handler_initialized();
+                }
+                Err(error) => {
+                    log::warn!("Failed to initialize R error handler: {error:?}");
+                }
+            }
+        }
+
         // Update exit_status for the previous command when a new prompt is shown.
         // This is called when R has finished evaluating and wants new input.
         // Continuation prompts identified by the low-level option lookup mean
@@ -136,23 +152,27 @@ pub(super) fn read_console_callback(
 
         if prompt_kind.is_command() && !state.prompt_config.is_shell_enabled() {
             let pending_history_context = std::mem::take(&mut state.pending_history_context);
-            let had_error = match pending_history_context {
+            let outcome = match pending_history_context {
                 PendingHistoryContext::Command { store, history_id } => {
-                    let had_error = arf_libr::command_had_error();
-                    record_command_outcome(
-                        store,
-                        history_id,
-                        had_error,
-                        &state.forget_config,
-                        &mut state.sponge_queue,
-                    );
-                    had_error
+                    let outcome = arf_libr::command_outcome();
+                    if let Some(failed) = outcome_failure_projection(outcome) {
+                        record_command_outcome(
+                            store,
+                            history_id,
+                            failed,
+                            &state.forget_config,
+                            &mut state.sponge_queue,
+                        );
+                    }
+                    Some(outcome)
                 }
-                PendingHistoryContext::None => false,
+                PendingHistoryContext::None => None,
             };
 
             // Update prompt status indicator for the next prompt
-            state.prompt_config.set_last_command_failed(had_error);
+            if let Some(failed) = outcome.and_then(outcome_failure_projection) {
+                state.prompt_config.set_last_command_failed(failed);
+            }
 
             // Calculate duration for the {duration} prompt placeholder
             state.prompt_config.set_command_duration();
@@ -637,6 +657,16 @@ fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
     prompt_kind.is_command()
 }
 
+/// Project a reliable R outcome into the prompt, history, and sponge lifecycle.
+/// An unavailable outcome deliberately leaves those consumers untouched.
+fn outcome_failure_projection(outcome: arf_libr::CommandOutcome) -> Option<bool> {
+    match outcome {
+        arf_libr::CommandOutcome::Success => Some(false),
+        arf_libr::CommandOutcome::Failure => Some(true),
+        arf_libr::CommandOutcome::Unavailable => None,
+    }
+}
+
 /// Warn once for each transition into an ambiguous prompt-option state.
 fn should_warn_prompt_ambiguity(was_ambiguous: &mut bool, is_ambiguous: bool) -> bool {
     let should_warn = is_ambiguous && !*was_ambiguous;
@@ -648,8 +678,24 @@ fn should_warn_prompt_ambiguity(was_ambiguous: &mut bool, is_ambiguous: bool) ->
 mod tests {
     use super::{
         PromptKind, classify_prompt, formatter_failure_updates_lifecycle,
-        should_warn_prompt_ambiguity,
+        outcome_failure_projection, should_warn_prompt_ambiguity,
     };
+
+    #[test]
+    fn unavailable_outcome_does_not_project_to_lifecycle_consumers() {
+        assert_eq!(
+            outcome_failure_projection(arf_libr::CommandOutcome::Unavailable),
+            None
+        );
+        assert_eq!(
+            outcome_failure_projection(arf_libr::CommandOutcome::Success),
+            Some(false)
+        );
+        assert_eq!(
+            outcome_failure_projection(arf_libr::CommandOutcome::Failure),
+            Some(true)
+        );
+    }
 
     #[test]
     fn continuation_formatter_failure_keeps_outer_lifecycle_context() {

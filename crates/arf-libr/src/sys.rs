@@ -20,7 +20,7 @@ pub use discovery::{
     ensure_ld_library_path_with_pre_exec, ensure_ld_library_path_with_pre_exec_and_args,
 };
 pub use error_state::{
-    command_had_error, global_error_handler_code, mark_error_condition,
+    CommandOutcome, command_outcome, global_error_handler_code, mark_error_condition,
     mark_global_error_handler_initialized, reset_command_error_state, restore_stderr,
     suppress_stderr,
 };

@@ -86,6 +86,148 @@ fn history_records_success_and_error_exit_status() -> Result<()> {
 }
 
 #[test]
+fn replacing_error_option_leaves_history_status_unavailable() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("history-error-option-unavailable")
+            .args(["--no-auto-match"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.submit("42", "[1] 42", PROMPT)?;
+            terminal.submit(
+                "stop('known_before_handler_change')",
+                "Error: known_before_handler_change",
+                ERROR_PROMPT,
+            )?;
+            terminal.enter("options(error = function() stop('replacement_handler_error'))")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.enter("stop('unhandled_with_replacement')")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.enter("options(error = NULL)")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.enter("stop('unhandled_after_error_option_removal')")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let initial_success = rows
+        .iter()
+        .find(|(saved, _)| saved == "42")
+        .context("initial successful command missing from history")?;
+    ensure!(
+        initial_success.1 == Some(0),
+        "wrapper should record success before the handler is changed: {initial_success:?}"
+    );
+    let known_error = rows
+        .iter()
+        .find(|(saved, _)| saved == "stop('known_before_handler_change')")
+        .context("known error command missing from history")?;
+    ensure!(
+        known_error.1 == Some(1),
+        "wrapper should record failure before the handler is changed: {known_error:?}"
+    );
+    for command in [
+        "options(error = function() stop('replacement_handler_error'))",
+        "stop('unhandled_with_replacement')",
+        "options(error = NULL)",
+        "stop('unhandled_after_error_option_removal')",
+    ] {
+        let row = rows
+            .iter()
+            .find(|(saved, _)| saved == command)
+            .with_context(|| format!("history entry missing for {command}"))?;
+        ensure!(
+            row.1.is_none(),
+            "{command} should have unknown status: {row:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn removed_error_state_keeps_history_and_forget_outcomes_unknown() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    let config = r#"
+[experimental.history_forget]
+enabled = true
+delay = 0
+on_exit_only = false
+"#
+    .to_owned()
+        + DEFAULT_CONFIG;
+    run_case_with(
+        Terminal::builder("history-error-state-removed")
+            .args(["--no-auto-match"])
+            .config(config)
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal
+                .enter("rm('.arf_error_state', envir = .GlobalEnv); stop('untracked_error')")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let untracked_error = rows
+        .iter()
+        .find(|(command, _)| command.contains("untracked_error"))
+        .context("untracked failed command missing from history")?;
+    ensure!(
+        untracked_error.1.is_none(),
+        "error after tracking removal should have unknown status: {untracked_error:?}"
+    );
+    ensure!(
+        rows.iter()
+            .any(|(command, _)| command.contains("untracked_error")),
+        "unavailable command should stay in history instead of being forgotten"
+    );
+    Ok(())
+}
+
+#[test]
+fn chained_user_error_handler_failure_is_still_recorded() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    let profile = tempfile::tempdir()?;
+    let profile_path = profile.path().join(".Rprofile");
+    std::fs::write(
+        &profile_path,
+        "options(error = function() stop('nested_handler_error'))\n",
+    )?;
+    run_case_with(
+        Terminal::builder("history-chained-error-handler")
+            .args(["--no-auto-match"])
+            .vanilla(false)
+            .env(
+                "R_PROFILE_USER",
+                profile_path.to_string_lossy().into_owned(),
+            )
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter("stop('wrapper_marks_before_chaining')")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let failed = rows
+        .iter()
+        .find(|(command, _)| command.contains("wrapper_marks_before_chaining"))
+        .context("chained-handler command missing from history")?;
+    ensure!(
+        failed.1 == Some(1),
+        "chained handler error should remain a known failure: {failed:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn history_forget_delay_one_removes_old_errors_and_keeps_success() -> Result<()> {
     let history = tempfile::tempdir()?;
     let config = r#"

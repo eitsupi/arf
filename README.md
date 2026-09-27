@@ -420,7 +420,7 @@ arf history import --from radian --hostname "radian-import"
 arf uses R's `options(error = ...)` to detect errors from packages like dplyr/rlang that output error messages to stdout instead of stderr. This is necessary for accurate error tracking in command history and the status indicator.
 
 **Limitations**:
-- If you set a custom error handler via `options(error = ...)`, arf will chain to your handler, but arf's handler takes precedence. Your handler will still be called after arf records the error.
+- A custom error handler set before arf starts is chained after arf records the error. If `options(error)` is later replaced or removed, or arf's error-tracking state is removed, arf respects that change and cannot reliably report command outcomes. Such commands keep a `NULL` history exit status, leave the prompt status unchanged, and do not advance history-forget.
 - There is a slight performance overhead (~microseconds) on each prompt due to R API calls for checking and resetting error state. This is negligible in practice but may be noticeable in benchmarks.
 
 ## Related Projects

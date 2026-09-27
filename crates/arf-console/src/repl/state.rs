@@ -86,6 +86,8 @@ pub struct ReplState {
     pub shell_history: crate::history::HistoryRuntime,
     /// History context for the command whose evaluation just completed.
     pub pending_history_context: PendingHistoryContext,
+    /// Whether initial R error-handler setup has been attempted after R startup.
+    pub error_handler_setup_attempted: bool,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.

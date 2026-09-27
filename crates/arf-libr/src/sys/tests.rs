@@ -103,30 +103,29 @@ fn test_spinner_lifecycle() {
 /// when tests run in parallel (they share global state via CONDITION_ERROR_OCCURRED).
 #[test]
 fn test_command_error_state() {
+    use super::CommandOutcome;
+
     // Reset to known state first
     reset_command_error_state();
 
-    // Initially no error
-    assert!(!command_had_error(), "initial state should be false");
+    // Without initialized R tracking, a successful outcome cannot be confirmed.
+    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
     // Mark an error condition
     mark_error_condition();
-    assert!(command_had_error(), "should detect error after mark");
+    assert_eq!(command_outcome(), CommandOutcome::Failure);
 
     // Reset should clear the error state
     reset_command_error_state();
-    assert!(
-        !command_had_error(),
-        "should be false after reset_command_error_state"
-    );
+    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
     // Mark error again and verify detection
     mark_error_condition();
-    assert!(command_had_error(), "should detect error condition");
+    assert_eq!(command_outcome(), CommandOutcome::Failure);
 
     // Final reset
     reset_command_error_state();
-    assert!(!command_had_error(), "should be false after final reset");
+    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 }
 
 #[test]

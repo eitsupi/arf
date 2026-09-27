@@ -57,6 +57,7 @@ pub struct RLibrary {
     // List construction
     pub rf_lcons: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     pub rf_cons: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    pub car: unsafe extern "C" fn(SEXP) -> SEXP,
 
     // Logical vector access
     pub logical: unsafe extern "C" fn(SEXP) -> *mut c_int,
@@ -83,6 +84,8 @@ pub struct RLibrary {
     // Environment and variable manipulation
     // Rf_findVar searches through enclosing environments
     pub rf_findvar: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    /// Rf_findVarInFrame takes the environment first and looks only in it.
+    pub rf_findvar_in_frame: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     pub rf_definevar: unsafe extern "C" fn(SEXP, SEXP, SEXP),
     pub rf_scalarlogical: unsafe extern "C" fn(c_int) -> SEXP,
     /// Get an R option directly without evaluating R code.
@@ -327,6 +330,7 @@ impl RLibrary {
             // Load list construction
             load_symbol!(rf_lcons, b"Rf_lcons\0");
             load_symbol!(rf_cons, b"Rf_cons\0");
+            load_symbol!(car, b"CAR\0");
 
             // Load logical access
             load_symbol!(logical, b"LOGICAL\0");
@@ -348,6 +352,7 @@ impl RLibrary {
             // Load environment and variable manipulation functions
             // Rf_findVar takes (symbol, env) and searches through enclosing environments
             load_symbol!(rf_findvar, b"Rf_findVar\0");
+            load_symbol!(rf_findvar_in_frame, b"Rf_findVarInFrame\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
             load_symbol!(rf_scalarlogical, b"Rf_ScalarLogical\0");
             load_symbol!(rf_get_option1, b"Rf_GetOption1\0");
@@ -603,6 +608,7 @@ impl RLibrary {
                 rf_install,
                 rf_lcons,
                 rf_cons,
+                car,
                 logical,
                 integer,
                 r_toplevelexec,
@@ -613,6 +619,7 @@ impl RLibrary {
                 r_basenamespace,
                 r_unboundvalue,
                 rf_findvar,
+                rf_findvar_in_frame,
                 rf_definevar,
                 rf_scalarlogical,
                 rf_get_option1,
