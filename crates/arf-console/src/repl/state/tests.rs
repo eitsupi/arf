@@ -361,6 +361,15 @@ fn test_status_override_prompt_color() {
         "Should contain error symbol and prompt, got: {}",
         rendered
     );
+
+    config.set_last_command_outcome_unknown();
+    assert_eq!(config.get_status_prompt_color(), Color::LightGreen);
+    let prompt = config.build_main_prompt(ReprexMode::Off);
+    let rendered = prompt.render_prompt_left();
+    assert!(
+        !rendered.contains("✗") && rendered.contains("r>"),
+        "Unknown status should clear the symbol and retain the main prompt: {rendered}"
+    );
 }
 
 #[test]

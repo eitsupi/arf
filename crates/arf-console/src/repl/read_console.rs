@@ -170,8 +170,11 @@ pub(super) fn read_console_callback(
             };
 
             // Update prompt status indicator for the next prompt
-            if let Some(failed) = outcome.and_then(outcome_failure_projection) {
-                state.prompt_config.set_last_command_failed(failed);
+            if let Some(outcome) = outcome {
+                match outcome_failure_projection(outcome) {
+                    Some(failed) => state.prompt_config.set_last_command_failed(failed),
+                    None => state.prompt_config.set_last_command_outcome_unknown(),
+                }
             }
 
             // Calculate duration for the {duration} prompt placeholder
@@ -658,12 +661,13 @@ fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
 }
 
 /// Project a reliable R outcome into the prompt, history, and sponge lifecycle.
-/// An unavailable outcome deliberately leaves those consumers untouched.
+/// An unavailable outcome has no reliable boolean projection.
 fn outcome_failure_projection(outcome: arf_libr::CommandOutcome) -> Option<bool> {
     match outcome {
         arf_libr::CommandOutcome::Success => Some(false),
         arf_libr::CommandOutcome::Failure => Some(true),
         arf_libr::CommandOutcome::Unavailable => None,
+        _ => None,
     }
 }
 

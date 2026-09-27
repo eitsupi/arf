@@ -5,7 +5,7 @@
 ### Fixed
 
 - Normal `arf` startup now preserves R's detected C stack limit, allowing recoverable C stack overflow errors without disabling R's stack checks.
-- Interactive command outcomes are left unavailable when the `options(error)` handler or arf's tracking state changes, preserving `NULL` history statuses and avoiding incorrect prompt or history-forget updates.
+- Interactive command outcomes are left unavailable when the `options(error)` handler or arf's tracking state changes, preserving `NULL` history statuses, clearing the prompt status symbol, and avoiding incorrect history-forget updates.
 
 ## [0.5.3] - 2026-09-27
 

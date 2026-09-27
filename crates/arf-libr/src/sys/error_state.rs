@@ -1,3 +1,4 @@
+use crate::SEXP;
 use crate::functions::r_library;
 use std::sync::RwLock;
 
@@ -17,6 +18,7 @@ static GLOBAL_ERROR_HANDLER_INITIALIZED: RwLock<bool> = RwLock::new(false);
 
 /// The outcome R could reliably report for the previous command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CommandOutcome {
     Success,
     Failure,
@@ -63,6 +65,16 @@ pub fn command_outcome() -> CommandOutcome {
         Some(false) => CommandOutcome::Success,
         None => CommandOutcome::Unavailable,
     }
+}
+
+/// Check whether the previous command failed, preserving the legacy fail-open behavior.
+#[deprecated(note = "use command_outcome() instead")]
+pub fn command_had_error() -> bool {
+    outcome_had_error(command_outcome())
+}
+
+fn outcome_had_error(outcome: CommandOutcome) -> bool {
+    outcome == CommandOutcome::Failure
 }
 
 /// Suppress stderr output from R.
@@ -130,43 +142,46 @@ fn is_global_error_handler_initialized() -> bool {
 /// The error handler is called at the end of R's error handling, right before
 /// returning to the prompt. This catches all errors, including rlang/dplyr errors.
 ///
-/// The handler stores the error state in an environment variable that we can
-/// check from Rust using Rf_findVar.
+/// The handler stores the error state in a dedicated environment that Rust can
+/// inspect through R's C API.
 const GLOBAL_ERROR_HANDLER_CODE: &str = r#"
-local({
-    # Create an environment to store error state
-    .arf_error_state <- new.env(parent = emptyenv())
-    .arf_error_state$had_error <- FALSE
+base::local({
+    state <- base::new.env(parent = base::emptyenv())
+    base::assign("had_error", FALSE, envir = state)
+    previous <- base::getOption("error")
 
-    # Store it in global environment for persistence
-    assign(".arf_error_state", .arf_error_state, envir = globalenv())
-
-    # Store the user's previous error handler (if any) so we can chain to it
-    prev_handler <- getOption("error")
-    assign(".arf_prev_error_handler", prev_handler, envir = globalenv())
-
-    # Retain the exact wrapper closure so Rust can detect later user changes.
-    arf_error_handler <- function() {
-        # Mark an error before calling a previous user handler. That handler
-        # may itself error, but the command still failed.
-        env <- get(".arf_error_state", envir = globalenv())
-        env$had_error <- TRUE
-
-        prev <- get(".arf_prev_error_handler", envir = globalenv())
-        if (!is.null(prev)) {
-            if (is.function(prev)) prev() else eval(prev, envir = globalenv())
+    # Keep both values in the closure so removal of the observable global state
+    # does not interfere with normal R error handling or a user's handler.
+    handler <- base::local({
+        captured_state <- state
+        captured_previous <- previous
+        function() {
+            if (base::exists("had_error", envir = captured_state, inherits = FALSE) &&
+                !base::bindingIsActive("had_error", captured_state) &&
+                !base::bindingIsLocked("had_error", captured_state)) {
+                base::assign("had_error", TRUE, envir = captured_state)
+            }
+            if (!base::is.null(captured_previous)) {
+                if (base::is.function(captured_previous)) {
+                    captured_previous()
+                } else {
+                    base::eval(captured_previous, envir = base::globalenv())
+                }
+            }
+            base::invisible(NULL)
         }
-    }
-    .arf_error_state$handler <- arf_error_handler
-    options(error = arf_error_handler)
-
-    invisible(NULL)
+    })
+    base::assign("handler", handler, envir = state)
+    base::assign(".arf_error_state", state, envir = base::globalenv())
+    base::options(error = handler)
+    base::invisible(NULL)
 })
 "#;
 
 /// Check R's tracked error state and verify that the wrapper still owns options(error).
 ///
-/// This reads `.arf_error_state$had_error` from the global environment.
+/// This reads `.arf_error_state$had_error` from the state environment exposed in
+/// the global environment.
 /// The `options(error)` wrapper sets this to TRUE when an error occurs.
 ///
 /// # Safety
@@ -191,6 +206,11 @@ fn check_r_error_state() -> Option<bool> {
         };
 
         let global_env = *lib.r_globalenv;
+        if !binding_exists(lib, global_env, arf_error_state_sym)
+            || (lib.r_binding_is_active)(arf_error_state_sym, global_env) != 0
+        {
+            return None;
+        }
         let state_env = (lib.rf_findvar_in_frame)(global_env, arf_error_state_sym);
 
         // Check if the environment exists
@@ -207,6 +227,12 @@ fn check_r_error_state() -> Option<bool> {
             (lib.rf_install)(name.as_ptr())
         };
 
+        if !binding_exists(lib, state_env, had_error_sym)
+            || (lib.r_binding_is_active)(had_error_sym, state_env) != 0
+            || (lib.r_binding_is_locked)(had_error_sym, state_env) != 0
+        {
+            return None;
+        }
         let had_error = (lib.rf_findvar_in_frame)(state_env, had_error_sym);
 
         let had_error_value = if had_error.is_null() || had_error == *lib.r_unboundvalue {
@@ -234,6 +260,11 @@ fn check_r_error_state() -> Option<bool> {
             let name = std::ffi::CString::new("handler").unwrap();
             (lib.rf_install)(name.as_ptr())
         };
+        if !binding_exists(lib, state_env, handler_sym)
+            || (lib.r_binding_is_active)(handler_sym, state_env) != 0
+        {
+            return None;
+        }
         let handler = (lib.rf_findvar_in_frame)(state_env, handler_sym);
         if handler.is_null()
             || handler == *lib.r_unboundvalue
@@ -260,6 +291,12 @@ fn check_r_error_state() -> Option<bool> {
     }
 }
 
+/// Check whether a binding exists in this frame without resolving its value.
+/// This avoids evaluating active bindings before inspecting their properties.
+unsafe fn binding_exists(lib: &crate::RLibrary, env: SEXP, symbol: SEXP) -> bool {
+    unsafe { (lib.r_exists_var_in_frame)(env, symbol) != 0 }
+}
+
 fn valid_had_error_value(value: Option<i32>) -> Option<bool> {
     match value {
         Some(0) => Some(false),
@@ -271,7 +308,7 @@ fn valid_had_error_value(value: Option<i32>) -> Option<bool> {
 /// Reset the R error state.
 ///
 /// This should be called before each command to reset the error tracking.
-/// Sets `.arf_error_state$had_error` to FALSE.
+/// Sets `.arf_error_state$had_error` to FALSE when its binding is safe to write.
 ///
 /// # Safety
 /// R must be initialized and the global error handler must be set up
@@ -295,6 +332,11 @@ fn reset_r_error_state() {
         };
 
         let global_env = *lib.r_globalenv;
+        if !binding_exists(lib, global_env, arf_error_state_sym)
+            || (lib.r_binding_is_active)(arf_error_state_sym, global_env) != 0
+        {
+            return;
+        }
         let state_env = (lib.rf_findvar_in_frame)(global_env, arf_error_state_sym);
 
         // If the environment doesn't exist, nothing to reset
@@ -312,6 +354,14 @@ fn reset_r_error_state() {
             (lib.rf_install)(name.as_ptr())
         };
 
+        if !binding_exists(lib, state_env, had_error_sym)
+            || (lib.r_binding_is_active)(had_error_sym, state_env) != 0
+            || (lib.r_binding_is_locked)(had_error_sym, state_env) != 0
+        {
+            log::trace!("reset_r_error_state: had_error binding is unavailable");
+            return;
+        }
+
         // Create FALSE value (0)
         let false_val = (lib.rf_protect)((lib.rf_scalarlogical)(0));
 
@@ -324,7 +374,14 @@ fn reset_r_error_state() {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_had_error_value;
+    use super::{CommandOutcome, outcome_had_error, valid_had_error_value};
+
+    #[test]
+    fn deprecated_boolean_projection_only_reports_known_failure() {
+        assert!(outcome_had_error(CommandOutcome::Failure));
+        assert!(!outcome_had_error(CommandOutcome::Success));
+        assert!(!outcome_had_error(CommandOutcome::Unavailable));
+    }
 
     #[test]
     fn malformed_error_values_are_unavailable() {

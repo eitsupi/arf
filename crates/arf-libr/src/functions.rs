@@ -86,6 +86,10 @@ pub struct RLibrary {
     pub rf_findvar: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     /// Rf_findVarInFrame takes the environment first and looks only in it.
     pub rf_findvar_in_frame: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    pub r_exists_var_in_frame: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
+    /// R_BindingIsActive and R_BindingIsLocked take the symbol before the environment.
+    pub r_binding_is_active: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
+    pub r_binding_is_locked: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
     pub rf_definevar: unsafe extern "C" fn(SEXP, SEXP, SEXP),
     pub rf_scalarlogical: unsafe extern "C" fn(c_int) -> SEXP,
     /// Get an R option directly without evaluating R code.
@@ -353,6 +357,9 @@ impl RLibrary {
             // Rf_findVar takes (symbol, env) and searches through enclosing environments
             load_symbol!(rf_findvar, b"Rf_findVar\0");
             load_symbol!(rf_findvar_in_frame, b"Rf_findVarInFrame\0");
+            load_symbol!(r_exists_var_in_frame, b"R_existsVarInFrame\0");
+            load_symbol!(r_binding_is_active, b"R_BindingIsActive\0");
+            load_symbol!(r_binding_is_locked, b"R_BindingIsLocked\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
             load_symbol!(rf_scalarlogical, b"Rf_ScalarLogical\0");
             load_symbol!(rf_get_option1, b"Rf_GetOption1\0");
@@ -620,6 +627,9 @@ impl RLibrary {
                 r_unboundvalue,
                 rf_findvar,
                 rf_findvar_in_frame,
+                r_exists_var_in_frame,
+                r_binding_is_active,
+                r_binding_is_locked,
                 rf_definevar,
                 rf_scalarlogical,
                 rf_get_option1,
