@@ -24,8 +24,10 @@ mod traps;
 mod test_utils;
 
 use anyhow::Result;
+#[cfg(unix)]
+use app::arguments::absolute_ipc_bind_path;
+use app::arguments::initialize_normalized_args;
 pub(crate) use app::arguments::normalized_args;
-use app::arguments::{absolute_ipc_bind_path, initialize_normalized_args};
 use app::commands::{handle_config_command, handle_history_command, handle_ipc_command};
 use app::config_load::{
     StartupDiagnostic, load_config_with_fallback, report_diagnostics_on_setup_error,
@@ -50,6 +52,7 @@ use pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
 };
 use repl::Repl;
+#[cfg(unix)]
 use std::ffi::OsStr;
 #[cfg(not(unix))]
 use std::ffi::OsString;
