@@ -111,6 +111,10 @@ impl EditorState {
                 //
                 // If cursor is not at end, HistoryHintComplete will fail and
                 // fall through to subsequent events (like Right), which we can track.
+                // A preceding MenuLeft/MenuRight may instead be consumed by an
+                // active menu, so cursor movement after it is ambiguous. Mark the
+                // shadow state uncertain; CombinedHighlighter will resync it from
+                // the actual line and cursor on the next repaint.
                 //
                 // If the user presses Right arrow while a hint is shown, the hint
                 // gets completed and the buffer changes from "pr" to
@@ -140,6 +144,10 @@ impl EditorState {
                 // and affect cursor position.
                 for e in events {
                     match e {
+                        ReedlineEvent::MenuLeft | ReedlineEvent::MenuRight => {
+                            self.uncertain = true;
+                            return;
+                        }
                         // Navigation events that affect cursor position
                         ReedlineEvent::Left | ReedlineEvent::Right => {
                             self.update_from_event(e);

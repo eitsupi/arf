@@ -166,7 +166,7 @@ fn test_buffer_known_empty_condition() {
 }
 
 #[test]
-fn test_until_found_right_tracks_navigation_before_buffer_end() {
+fn test_until_found_right_with_menu_candidate_before_navigation_marks_uncertain() {
     let mut state = EditorState {
         buffer: "hello".to_string(),
         buffer_len: 5,
@@ -180,8 +180,8 @@ fn test_until_found_right_tracks_navigation_before_buffer_end() {
         ReedlineEvent::Right,
     ]));
 
-    assert_eq!(state.cursor_pos, 3);
-    assert!(!state.uncertain);
+    assert_eq!(state.cursor_pos, 2);
+    assert!(state.uncertain);
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn test_until_found_right_at_buffer_end_marks_state_uncertain() {
 }
 
 #[test]
-fn test_until_found_right_with_empty_buffer_stays_certain() {
+fn test_until_found_right_with_empty_buffer_menu_candidate_marks_uncertain() {
     let mut state = EditorState::new();
 
     state.update_from_event(&ReedlineEvent::UntilFound(vec![
@@ -215,11 +215,11 @@ fn test_until_found_right_with_empty_buffer_stays_certain() {
 
     assert_eq!(state.cursor_pos, 0);
     assert_eq!(state.buffer_len, 0);
-    assert!(!state.uncertain);
+    assert!(state.uncertain);
 }
 
 #[test]
-fn test_until_found_left_tracks_navigation() {
+fn test_until_found_left_with_menu_candidate_marks_uncertain() {
     let mut state = EditorState {
         buffer: "hello".to_string(),
         buffer_len: 5,
@@ -231,6 +231,36 @@ fn test_until_found_left_tracks_navigation() {
         ReedlineEvent::MenuLeft,
         ReedlineEvent::Left,
     ]));
+
+    assert_eq!(state.cursor_pos, 2);
+    assert!(state.uncertain);
+}
+
+#[test]
+fn test_until_found_right_without_menu_candidate_tracks_navigation() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![ReedlineEvent::Right]));
+
+    assert_eq!(state.cursor_pos, 3);
+    assert!(!state.uncertain);
+}
+
+#[test]
+fn test_until_found_left_without_menu_candidate_tracks_navigation() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![ReedlineEvent::Left]));
 
     assert_eq!(state.cursor_pos, 1);
     assert!(!state.uncertain);
