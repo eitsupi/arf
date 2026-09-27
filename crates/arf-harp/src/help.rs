@@ -31,6 +31,8 @@ pub struct HelpTopic {
     /// All usable aliases that can be used to find this topic, including the
     /// display alias and any duplicates in the package metadata.
     pub aliases: Vec<String>,
+    /// Compiled-help database key from `Meta/Rd.rds`, when available.
+    pub help_key: Option<String>,
     /// Title/description of the help topic.
     pub title: String,
     /// Type of help entry (e.g., "help", "vignette", "demo").
@@ -103,6 +105,7 @@ fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<Help
                 package: package.to_owned(),
                 topic: vignette_topic(entry),
                 aliases: Vec::new(),
+                help_key: None,
                 title: entry.title.clone(),
                 entry_type: "vignette".to_string(),
             })),
@@ -119,6 +122,7 @@ fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<Help
                 package: package.to_owned(),
                 topic: entry.name.clone(),
                 aliases: Vec::new(),
+                help_key: None,
                 title: entry.title.clone(),
                 entry_type: "demo".to_string(),
             })),
@@ -162,6 +166,10 @@ fn project_help_topic_entry(package: &str, entry: &HelpTopicEntry) -> Option<Hel
         package: package.to_owned(),
         topic: topic.to_owned(),
         aliases,
+        help_key: entry
+            .topic_key()
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned),
         title: entry.title.as_str().unwrap_or("").to_owned(),
         entry_type: "help".to_string(),
     })
@@ -188,7 +196,10 @@ fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
 
 #[cfg(test)]
 mod help_metadata_tests {
-    use super::{project_help_topic_entry, read_package_topics, vignette_topic};
+    use super::{
+        get_package_help_markdown_in_dir, package_help_markdown_by_key_in_dir,
+        project_help_topic_entry, read_package_topics, vignette_topic,
+    };
     use rd_helpdb::VignetteEntry;
 
     fn fixture_path(name: &str) -> std::path::PathBuf {
@@ -259,6 +270,28 @@ mod help_metadata_tests {
         rd_helpdb::HelpTopicIndex::from_object(&object).unwrap()
     }
 
+    fn compiled_help_package(with_aliases: bool) -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let package_dir = temp.path().join("fixturepkg");
+        let help_dir = package_dir.join("help");
+        std::fs::create_dir_all(&help_dir).unwrap();
+        for extension in ["rdx", "rdb"] {
+            std::fs::copy(
+                fixture_path(&format!("help_topics.{extension}")),
+                help_dir.join(format!("fixturepkg.{extension}")),
+            )
+            .unwrap();
+        }
+        if with_aliases {
+            std::fs::copy(
+                fixture_path("aliases_vector_dup_v3.rds"),
+                help_dir.join("aliases.rds"),
+            )
+            .unwrap();
+        }
+        (temp, package_dir)
+    }
+
     #[test]
     fn help_entry_projection_prefers_matching_name_and_keeps_all_aliases() {
         let index = topic_index();
@@ -267,6 +300,7 @@ mod help_metadata_tests {
 
         assert_eq!(topic.topic, "first");
         assert_eq!(topic.aliases, ["shared", "first", "first"]);
+        assert_eq!(topic.help_key.as_deref(), Some("first-topic"));
         assert_eq!(topic.title, "First topic title");
     }
 
@@ -373,6 +407,48 @@ mod help_metadata_tests {
         assert!(!topics.iter().any(|topic| topic.entry_type == "help"));
         assert!(topics.iter().any(|topic| topic.entry_type == "vignette"));
         assert!(topics.iter().any(|topic| topic.entry_type == "demo"));
+    }
+
+    #[test]
+    fn known_help_key_reads_compiled_topic_without_aliases_file() {
+        let (_temp, package_dir) = compiled_help_package(false);
+        assert!(!package_dir.join("help/aliases.rds").exists());
+
+        let markdown = package_help_markdown_by_key_in_dir(
+            "display-only-name",
+            "first-topic",
+            "fixturepkg",
+            &package_dir,
+        )
+        .expect("direct known-key lookup should not need aliases.rds");
+
+        assert!(!markdown.is_empty());
+    }
+
+    #[test]
+    fn generic_lookup_keeps_alias_first_and_exact_key_fallback_semantics() {
+        let (_temp, package_dir) = compiled_help_package(true);
+
+        let alias_error = get_package_help_markdown_in_dir("shared", "fixturepkg", &package_dir)
+            .expect_err("alias lookup should take precedence over treating input as a key");
+        assert!(matches!(
+            alias_error,
+            crate::error::HarpError::HelpDatabase { key, source, .. }
+                if key == "second-topic"
+                    && matches!(*source, rd_helpdb::Error::UnknownTopic { ref topic } if topic == "second-topic")
+        ));
+
+        let exact_result =
+            get_package_help_markdown_in_dir("first-topic", "fixturepkg", &package_dir)
+                .expect("non-alias input should fall back to its exact key");
+        let direct_exact = package_help_markdown_by_key_in_dir(
+            "first-topic",
+            "first-topic",
+            "fixturepkg",
+            &package_dir,
+        )
+        .expect("exact key should load directly");
+        assert_eq!(exact_result, direct_exact);
     }
 
     fn object_names(attributes: &rd_rds::Attributes) -> Vec<rd_rds::RStr> {
@@ -579,21 +655,24 @@ fn rd_convert_options() -> rd2qmd_core::RdConvertOptions {
 /// The package directory is selected from the startup-cached library paths,
 /// refreshed as needed by [`crate::lib_paths::lib_paths`].
 ///
-/// `topic` is treated as an alias-or-exact-key input, with alias resolution
-/// taking priority. This suits callers using display `Topic` values from
-/// `Meta/hsearch.rds`.
+/// `topic` is treated as an alias-or-exact-key input: aliases are resolved
+/// first using the compiled help database's last-wins alias index, then the
+/// input is used as an exact key if it is not an alias.
 pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
     let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
         HarpError::PackageNotFound {
             package: package.to_string(),
         }
     })?;
-    let db = PackageHelpDb::open(&package_dir).map_err(|source| HarpError::HelpDatabase {
-        package: package.to_string(),
-        topic: topic.to_string(),
-        key: topic.to_string(),
-        source: Box::new(source),
-    })?;
+    get_package_help_markdown_in_dir(topic, package, &package_dir)
+}
+
+fn get_package_help_markdown_in_dir(
+    topic: &str,
+    package: &str,
+    package_dir: &std::path::Path,
+) -> HarpResult<String> {
+    let db = open_package_help_db(package_dir, package, topic, topic)?;
     let resolved = db
         .resolve_alias(topic)
         .map_err(|source| HarpError::HelpDatabase {
@@ -603,18 +682,69 @@ pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<Strin
             source: Box::new(source),
         })?;
     let key = resolved.unwrap_or(topic).to_string();
+    package_help_markdown_from_db(&db, topic, &key, package)
+}
+
+/// Get package help as Markdown using a known compiled-help key directly.
+///
+/// Unlike [`get_package_help_markdown`], this path never reads
+/// `help/aliases.rds`. It is intended for indexed help rows carrying a key
+/// from `Meta/Rd.rds`.
+pub fn get_package_help_markdown_by_key(
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+) -> HarpResult<String> {
+    let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
+        HarpError::PackageNotFound {
+            package: package.to_string(),
+        }
+    })?;
+    package_help_markdown_by_key_in_dir(display_topic, help_key, package, &package_dir)
+}
+
+fn package_help_markdown_by_key_in_dir(
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+    package_dir: &std::path::Path,
+) -> HarpResult<String> {
+    let db = open_package_help_db(package_dir, package, display_topic, help_key)?;
+    package_help_markdown_from_db(&db, display_topic, help_key, package)
+}
+
+fn open_package_help_db(
+    package_dir: &std::path::Path,
+    package: &str,
+    display_topic: &str,
+    lookup_key: &str,
+) -> HarpResult<PackageHelpDb> {
+    PackageHelpDb::open(package_dir).map_err(|source| HarpError::HelpDatabase {
+        package: package.to_string(),
+        topic: display_topic.to_string(),
+        key: lookup_key.to_string(),
+        source: Box::new(source),
+    })
+}
+
+fn package_help_markdown_from_db(
+    db: &PackageHelpDb,
+    display_topic: &str,
+    lookup_key: &str,
+    package: &str,
+) -> HarpResult<String> {
     let robj = db
-        .raw_topic(&key)
+        .raw_topic(lookup_key)
         .map_err(|source| HarpError::HelpDatabase {
             package: package.to_string(),
-            topic: topic.to_string(),
-            key: key.clone(),
+            topic: display_topic.to_string(),
+            key: lookup_key.to_string(),
             source: Box::new(source),
         })?;
     let doc = rd_ast::lower_r_object(&robj).map_err(|source| HarpError::HelpLowering {
         package: package.to_string(),
-        topic: topic.to_string(),
-        key: key.clone(),
+        topic: display_topic.to_string(),
+        key: lookup_key.to_string(),
         source: Box::new(source),
     })?;
     let options = rd_convert_options();
@@ -751,6 +881,7 @@ mod tests {
             package: "base".to_string(),
             topic: "print".to_string(),
             aliases: vec![],
+            help_key: None,
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         };

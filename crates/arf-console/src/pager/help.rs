@@ -20,7 +20,10 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match;
-use arf_harp::help::{HelpTopic, get_help_topics, get_package_help_markdown, get_vignette_text};
+use arf_harp::help::{
+    HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key,
+    get_vignette_text,
+};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -246,10 +249,18 @@ demo("{name}", package = "{pkg}")"#,
                                         }
                                         _ => {
                                             // "help" and any other types
-                                            match get_package_help_markdown(
-                                                &topic.topic,
-                                                &topic.package,
-                                            ) {
+                                            let help = match topic.help_key.as_deref() {
+                                                Some(key) => get_package_help_markdown_by_key(
+                                                    &topic.topic,
+                                                    key,
+                                                    &topic.package,
+                                                ),
+                                                None => get_package_help_markdown(
+                                                    &topic.topic,
+                                                    &topic.package,
+                                                ),
+                                            };
+                                            match help {
                                                 Ok(text) => {
                                                     if let Err(e) =
                                                         display_help_pager(&title, &text)
@@ -691,6 +702,7 @@ mod tests {
                 package: "base".to_string(),
                 topic: "print".to_string(),
                 aliases: vec!["print.default".to_string()],
+                help_key: Some("print".to_string()),
                 title: "Print Values".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -698,6 +710,7 @@ mod tests {
                 package: "dplyr".to_string(),
                 topic: "mutate".to_string(),
                 aliases: vec![],
+                help_key: None,
                 title: "Create, modify, and delete columns".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -718,6 +731,7 @@ mod tests {
             package: "base".to_string(),
             topic: "print".to_string(),
             aliases: vec![],
+            help_key: None,
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -733,6 +747,7 @@ mod tests {
             package: "base".to_string(),
             topic: "print".to_string(),
             aliases: vec![],
+            help_key: None,
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -747,6 +762,7 @@ mod tests {
             package: "base".to_string(),
             topic: "print".to_string(),
             aliases: vec!["print.default".to_string(), "print.value".to_string()],
+            help_key: Some("print".to_string()),
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         };

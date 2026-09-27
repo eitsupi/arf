@@ -15,3 +15,8 @@ keep the `arf-harp` tests self-contained.
 - `demo_valid_v3.rds`: a valid two-column demo index.
 - `vignette_reordered_v3.rds`: a valid vignette data frame with reordered
   columns.
+- `help_topics.rdx` and `help_topics.rdb`: a minimal compiled help database
+  containing `first-topic`, used to exercise direct known-key lookup without
+  an `aliases.rds` file.
+- `aliases_vector_dup_v3.rds`: alias mappings with a duplicate alias, used to
+  verify generic last-wins alias resolution and exact-key fallback.
