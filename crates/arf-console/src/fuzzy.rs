@@ -17,6 +17,12 @@ pub struct FuzzyMatch {
     pub indices: Vec<usize>,
 }
 
+/// A match recording whether it also succeeded under smart-case rules.
+pub(crate) struct CasePreferenceMatch {
+    pub fuzzy_match: FuzzyMatch,
+    pub case_preferred: bool,
+}
+
 /// Performs fuzzy matching of a pattern against a target string.
 ///
 /// Returns `Some(FuzzyMatch)` with score and matched character indices,
@@ -27,6 +33,40 @@ pub struct FuzzyMatch {
 /// - `fuzzy_match("sw", "switch")` → matches with indices [0, 1]
 /// - `fuzzy_match("xyz", "restart")` → None
 pub fn fuzzy_match(pattern: &str, target: &str) -> Option<FuzzyMatch> {
+    fuzzy_match_with_case(pattern, target, CaseMatching::Ignore)
+}
+
+/// Performs fuzzy matching with smart case sensitivity.
+///
+/// Lowercase patterns match without regard to case; patterns containing
+/// uppercase characters match case-sensitively.
+pub fn fuzzy_match_smart_case(pattern: &str, target: &str) -> Option<FuzzyMatch> {
+    fuzzy_match_with_case(pattern, target, CaseMatching::Smart)
+}
+
+/// Match without excluding case variants, while reporting whether smart case also matches.
+pub(crate) fn fuzzy_match_with_case_preference(
+    pattern: &str,
+    target: &str,
+) -> Option<CasePreferenceMatch> {
+    if let Some(fuzzy_match) = fuzzy_match_smart_case(pattern, target) {
+        return Some(CasePreferenceMatch {
+            fuzzy_match,
+            case_preferred: true,
+        });
+    }
+
+    fuzzy_match(pattern, target).map(|fuzzy_match| CasePreferenceMatch {
+        fuzzy_match,
+        case_preferred: false,
+    })
+}
+
+fn fuzzy_match_with_case(
+    pattern: &str,
+    target: &str,
+    case_matching: CaseMatching,
+) -> Option<FuzzyMatch> {
     if pattern.is_empty() {
         return Some(FuzzyMatch {
             score: 0,
@@ -37,7 +77,7 @@ pub fn fuzzy_match(pattern: &str, target: &str) -> Option<FuzzyMatch> {
     let mut matcher = Matcher::new(Config::DEFAULT);
     let pat = Pattern::new(
         pattern,
-        CaseMatching::Ignore,
+        case_matching,
         Normalization::Smart,
         AtomKind::Fuzzy,
     );
@@ -110,6 +150,22 @@ mod tests {
         // Case insensitive matching
         assert!(fuzzy_match("REP", "reprex").is_some());
         assert!(fuzzy_match("rEp", "reprex").is_some());
+    }
+
+    #[test]
+    fn test_fuzzy_match_smart_case() {
+        assert!(fuzzy_match_smart_case("foo", "Foo").is_some());
+        assert!(fuzzy_match_smart_case("Foo", "Foo").is_some());
+        assert!(fuzzy_match_smart_case("Foo", "foo").is_none());
+
+        let preferred = fuzzy_match_with_case_preference("Foo", "Foo").unwrap();
+        assert!(preferred.case_preferred);
+
+        let fallback = fuzzy_match_with_case_preference("Foo", "foo").unwrap();
+        assert!(!fallback.case_preferred);
+        assert_eq!(fallback.fuzzy_match, fuzzy_match("Foo", "foo").unwrap());
+
+        assert!(fuzzy_match("Foo", "foo").is_some());
     }
 
     #[test]

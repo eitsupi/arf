@@ -20,7 +20,7 @@ use super::{
     MinimumSize, TextScrollState, check_terminal_too_small, render_size_warning,
     with_alternate_screen,
 };
-use crate::fuzzy::fuzzy_match;
+use crate::fuzzy::fuzzy_match_with_case_preference;
 use arf_harp::help::{
     HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key,
     get_vignette_text,
@@ -506,13 +506,22 @@ demo("{name}", package = "{pkg}")"#,
 
 /// Perform fuzzy search on help topics.
 fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32)> {
-    let mut results: Vec<(HelpTopic, u32)> = topics
+    let mut results: Vec<(HelpTopic, bool, u32)> = topics
         .iter()
         .filter_map(|topic| {
             // Search in qualified name (package::topic) and title
             let name = topic.qualified_name();
-            let name_score = fuzzy_match(query, &name).map(|m| m.score);
-            let topic_score = fuzzy_match(query, &topic.topic).map(|m| m.score);
+            let mut best_rank = None;
+            let mut consider_candidate = |candidate: &str, weight: u32| {
+                if let Some(matched) = fuzzy_match_with_case_preference(query, candidate) {
+                    let score = matched.fuzzy_match.score / weight;
+                    let rank = (matched.case_preferred, score);
+                    best_rank = Some(best_rank.map_or(rank, |best: (bool, u32)| best.max(rank)));
+                }
+            };
+
+            consider_candidate(&name, 1);
+            consider_candidate(&topic.topic, 1);
             let max_candidate_len = topic
                 .aliases
                 .iter()
@@ -522,48 +531,36 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
                 .unwrap_or(0);
             let mut qualified_candidate =
                 String::with_capacity(topic.package.len() + 2 + max_candidate_len);
-            let mut alias_key_score = None;
             for candidate in topic
                 .aliases
                 .iter()
                 .map(String::as_str)
                 .chain(topic.help_key.as_deref())
             {
-                if let Some(score) = fuzzy_match(query, candidate).map(|m| m.score) {
-                    alias_key_score =
-                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
-                }
+                consider_candidate(candidate, 1);
 
                 qualified_candidate.clear();
                 qualified_candidate.push_str(&topic.package);
                 qualified_candidate.push_str("::");
                 qualified_candidate.push_str(candidate);
-                if let Some(score) = fuzzy_match(query, &qualified_candidate).map(|m| m.score) {
-                    alias_key_score =
-                        Some(alias_key_score.map_or(score, |best: u32| best.max(score)));
-                }
+                consider_candidate(&qualified_candidate, 1);
             }
-            let title_score = fuzzy_match(query, &topic.title).map(|m| m.score / 2); // Title matches weighted less
+            consider_candidate(&topic.title, 2); // Title matches weighted less
 
-            // Take the best score
-            let best_score = name_score
-                .into_iter()
-                .chain(topic_score)
-                .chain(alias_key_score)
-                .chain(title_score)
-                .max();
-
-            best_score.map(|score| (topic.clone(), score))
+            best_rank.map(|(case_preferred, score)| (topic.clone(), case_preferred, score))
         })
         .collect();
 
-    // Sort by score (descending)
-    results.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    // Prefer smart-case matches, then sort by the existing fuzzy score.
+    results.sort_by_key(|entry| std::cmp::Reverse((entry.1, entry.2)));
 
     // Limit results
     results.truncate(MAX_FILTERED_RESULTS);
 
     results
+        .into_iter()
+        .map(|(topic, _, score)| (topic, score))
+        .collect()
 }
 
 /// Calculate layout widths for the help browser display.
@@ -749,6 +746,45 @@ mod tests {
         let results = fuzzy_search_topics(&topics, "mut");
         assert!(!results.is_empty());
         assert_eq!(results[0].0.topic, "mutate");
+    }
+
+    #[test]
+    fn fuzzy_search_prefers_matching_case_without_filtering_variants() {
+        let topics = vec![
+            HelpTopic {
+                package: "base".to_string(),
+                topic: "foo_bar".to_string(),
+                aliases: vec![],
+                help_key: None,
+                title: "Lowercase topic".to_string(),
+                entry_type: "help".to_string(),
+            },
+            HelpTopic {
+                package: "base".to_string(),
+                topic: "Foo".to_string(),
+                aliases: vec![],
+                help_key: None,
+                title: "Capitalized topic".to_string(),
+                entry_type: "help".to_string(),
+            },
+        ];
+
+        let lowercase_results = fuzzy_search_topics(&topics, "foo");
+        assert!(
+            lowercase_results
+                .iter()
+                .any(|(topic, _)| topic.topic == "foo_bar")
+        );
+        assert!(
+            lowercase_results
+                .iter()
+                .any(|(topic, _)| topic.topic == "Foo")
+        );
+
+        let uppercase_results = fuzzy_search_topics(&topics, "Foo");
+        assert_eq!(uppercase_results.len(), 2);
+        assert_eq!(uppercase_results[0].0.topic, "Foo");
+        assert_eq!(uppercase_results[1].0.topic, "foo_bar");
     }
 
     #[test]
