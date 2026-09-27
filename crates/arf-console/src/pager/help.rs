@@ -501,12 +501,18 @@ fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32
             let name = topic.qualified_name();
             let name_score = fuzzy_match(query, &name).map(|m| m.score);
             let topic_score = fuzzy_match(query, &topic.topic).map(|m| m.score);
+            let alias_score = topic
+                .aliases
+                .iter()
+                .filter_map(|alias| fuzzy_match(query, alias).map(|m| m.score))
+                .max();
             let title_score = fuzzy_match(query, &topic.title).map(|m| m.score / 2); // Title matches weighted less
 
             // Take the best score
             let best_score = name_score
                 .into_iter()
                 .chain(topic_score)
+                .chain(alias_score)
                 .chain(title_score)
                 .max();
 
@@ -684,12 +690,14 @@ mod tests {
             HelpTopic {
                 package: "base".to_string(),
                 topic: "print".to_string(),
+                aliases: vec!["print.default".to_string()],
                 title: "Print Values".to_string(),
                 entry_type: "help".to_string(),
             },
             HelpTopic {
                 package: "dplyr".to_string(),
                 topic: "mutate".to_string(),
+                aliases: vec![],
                 title: "Create, modify, and delete columns".to_string(),
                 entry_type: "help".to_string(),
             },
@@ -709,6 +717,7 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            aliases: vec![],
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
@@ -723,12 +732,28 @@ mod tests {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            aliases: vec![],
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         }];
 
         let results = fuzzy_search_topics(&topics, "xyz123");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn fuzzy_search_matches_aliases_without_duplicating_topic_results() {
+        let topic = HelpTopic {
+            package: "base".to_string(),
+            topic: "print".to_string(),
+            aliases: vec!["print.default".to_string(), "print.value".to_string()],
+            title: "Print Values".to_string(),
+            entry_type: "help".to_string(),
+        };
+
+        let results = fuzzy_search_topics(&[topic], "print.value");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.topic, "print");
     }
 
     #[test]

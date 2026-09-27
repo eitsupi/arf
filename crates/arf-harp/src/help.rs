@@ -16,8 +16,9 @@ use crate::error::{HarpError, HarpResult};
 use crate::lib_paths::{installed_package_dir, installed_package_dirs, lib_paths};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
-use rd_helpdb::PackageHelpDb;
-use rd_rds::{RObject, RValue, package::PackagesMatrix};
+use rd_helpdb::{
+    DemoIndex, HelpTopicEntry, HelpTopicIndex, PackageHelpDb, VignetteIndex, read_rds_file,
+};
 use std::ffi::CString;
 
 /// A help topic from R's help database.
@@ -27,6 +28,9 @@ pub struct HelpTopic {
     pub package: String,
     /// Topic name (the alias used to access the help).
     pub topic: String,
+    /// All usable aliases that can be used to find this topic, including the
+    /// display alias and any duplicates in the package metadata.
+    pub aliases: Vec<String>,
     /// Title/description of the help topic.
     pub title: String,
     /// Type of help entry (e.g., "help", "vignette", "demo").
@@ -60,46 +64,107 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 
 /// Get help, vignette, and demo topics from installed package metadata.
 ///
-/// This function reads each installed package's help-search, vignette, and
-/// demo indexes.
+/// This function reads each installed package's Rd topic metadata, vignette
+/// index, and demo index independently.
 ///
 /// # Returns
 ///
 /// A vector of `HelpTopic` structs containing package, topic, title, and type.
 ///
-/// # Errors
-///
-/// Returns an error if R evaluation fails or if the help database is unavailable.
-///
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
     let mut topics = Vec::new();
     for (package, package_dir) in installed_package_dirs(&lib_paths()?) {
-        let Ok(db) = PackageHelpDb::open(&package_dir) else {
-            continue;
-        };
-        if let Ok(index) = db.search_index() {
-            topics.extend(extract_help_topics(&index));
-        }
-
-        if let Ok(Some(index)) = db.vignettes() {
-            topics.extend(index.entries().map(|entry| HelpTopic {
-                package: package.clone(),
-                topic: vignette_topic(entry),
-                title: entry.title.clone(),
-                entry_type: "vignette".to_string(),
-            }));
-        }
-
-        if let Ok(Some(index)) = db.demos() {
-            topics.extend(index.entries().map(|entry| HelpTopic {
-                package: package.clone(),
-                topic: entry.name.clone(),
-                title: entry.title.clone(),
-                entry_type: "demo".to_string(),
-            }));
-        }
+        topics.extend(read_package_topics(&package, &package_dir));
     }
     Ok(topics)
+}
+
+fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
+    let mut topics = Vec::new();
+
+    // Each metadata source is independent of compiled help files and of the
+    // other metadata indexes. A malformed source should not hide the rest.
+    match HelpTopicIndex::read_installed(package_dir) {
+        Ok(Some(index)) => topics.extend(
+            index
+                .entries()
+                .filter_map(|entry| project_help_topic_entry(package, entry)),
+        ),
+        Ok(None) => {}
+        Err(error) => log::debug!(
+            "Skipping unreadable Rd help metadata in {}: {error}",
+            package_dir.display()
+        ),
+    }
+
+    if let Some(object) = read_metadata_index(package_dir.join("Meta/vignette.rds")) {
+        match VignetteIndex::from_object(&object) {
+            Ok(index) => topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.to_owned(),
+                topic: vignette_topic(entry),
+                aliases: Vec::new(),
+                title: entry.title.clone(),
+                entry_type: "vignette".to_string(),
+            })),
+            Err(error) => log::debug!(
+                "Skipping malformed vignette metadata in {}: {error}",
+                package_dir.display()
+            ),
+        }
+    }
+
+    if let Some(object) = read_metadata_index(package_dir.join("Meta/demo.rds")) {
+        match DemoIndex::from_object(&object) {
+            Ok(index) => topics.extend(index.entries().map(|entry| HelpTopic {
+                package: package.to_owned(),
+                topic: entry.name.clone(),
+                aliases: Vec::new(),
+                title: entry.title.clone(),
+                entry_type: "demo".to_string(),
+            })),
+            Err(error) => log::debug!(
+                "Skipping malformed demo metadata in {}: {error}",
+                package_dir.display()
+            ),
+        }
+    }
+
+    topics
+}
+
+fn read_metadata_index(path: std::path::PathBuf) -> Option<rd_rds::RObject> {
+    match read_rds_file(&path) {
+        Ok(object) => Some(object),
+        Err(rd_helpdb::Error::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            None
+        }
+        Err(error) => {
+            log::debug!(
+                "Skipping unreadable help metadata {}: {error}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+fn project_help_topic_entry(package: &str, entry: &HelpTopicEntry) -> Option<HelpTopic> {
+    let aliases: Vec<String> = entry.aliases.iter().flatten().cloned().collect();
+    let topic = entry
+        .name
+        .as_str()
+        .filter(|name| aliases.iter().any(|alias| alias == name))
+        .or_else(|| entry.aliases.first().and_then(Option::as_deref))?;
+
+    Some(HelpTopic {
+        package: package.to_owned(),
+        topic: topic.to_owned(),
+        aliases,
+        title: entry.title.as_str().unwrap_or("").to_owned(),
+        entry_type: "help".to_string(),
+    })
 }
 
 // Mirror R's vignette-topic resolution from the index's filename fields.
@@ -122,9 +187,15 @@ fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
 }
 
 #[cfg(test)]
-mod vignette_tests {
-    use super::vignette_topic;
+mod help_metadata_tests {
+    use super::{project_help_topic_entry, read_package_topics, vignette_topic};
     use rd_helpdb::VignetteEntry;
+
+    fn fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/help_metadata")
+            .join(name)
+    }
 
     fn entry(file: &str, pdf: &str, r: &str) -> VignetteEntry {
         VignetteEntry {
@@ -153,33 +224,166 @@ mod vignette_tests {
         );
         assert_eq!(vignette_topic(&entry("guide", "", "")), "guide");
     }
-}
 
-fn extract_help_topics(index: &RObject) -> Vec<HelpTopic> {
-    let RValue::List(items) = index.value() else {
-        return Vec::new();
-    };
-    let Some(base) = items.first() else {
-        return Vec::new();
-    };
-    let Ok(matrix) = PackagesMatrix::from_object(base) else {
-        return Vec::new();
-    };
+    fn topic_index() -> rd_helpdb::HelpTopicIndex {
+        let object = rd_helpdb::read_rds_file(fixture_path("help_topics_metadata_v3.rds"))
+            .expect("metadata fixture should decode");
+        rd_helpdb::HelpTopicIndex::from_object(&object).expect("metadata fixture should validate")
+    }
 
-    matrix
-        .rows()
-        .filter_map(|row| {
-            let package = row.get("Package").and_then(|value| value)?;
-            let topic = row.get("Topic").and_then(|value| value)?;
-            let title = row.get("Title").flatten().unwrap_or("");
-            Some(HelpTopic {
-                package: package.to_owned(),
-                topic: topic.to_owned(),
-                title: title.to_owned(),
-                entry_type: "help".to_string(),
+    fn topic_index_with_aliases(
+        row: usize,
+        aliases: Vec<rd_rds::RStr>,
+    ) -> rd_helpdb::HelpTopicIndex {
+        let object = rd_helpdb::read_rds_file(fixture_path("help_topics_metadata_v3.rds")).unwrap();
+        let (rd_rds::RValue::List(mut columns), attributes) = object.into_parts() else {
+            panic!("metadata fixture root should be a list");
+        };
+        let names = object_names(&attributes);
+        let alias_column = names
+            .iter()
+            .position(|name| name.as_str().unwrap().unwrap() == "Aliases")
+            .unwrap();
+        let rd_rds::RValue::List(mut alias_rows) = columns[alias_column].value().clone() else {
+            panic!("Aliases should be a list column");
+        };
+        alias_rows[row] = rd_rds::RObject::from_parts(
+            rd_rds::RValue::Character(aliases),
+            rd_rds::Attributes::default(),
+        );
+        columns[alias_column] = rd_rds::RObject::from_parts(
+            rd_rds::RValue::List(alias_rows),
+            rd_rds::Attributes::default(),
+        );
+        let object = rd_rds::RObject::from_parts(rd_rds::RValue::List(columns), attributes);
+        rd_helpdb::HelpTopicIndex::from_object(&object).unwrap()
+    }
+
+    #[test]
+    fn help_entry_projection_prefers_matching_name_and_keeps_all_aliases() {
+        let index = topic_index();
+        let topic = project_help_topic_entry("fixture", index.entries().next().unwrap())
+            .expect("first metadata row should be visible");
+
+        assert_eq!(topic.topic, "first");
+        assert_eq!(topic.aliases, ["shared", "first", "first"]);
+        assert_eq!(topic.title, "First topic title");
+    }
+
+    #[test]
+    fn help_entry_projection_uses_only_first_alias_when_name_is_not_an_alias() {
+        let index = topic_index_with_aliases(
+            2,
+            vec![
+                rd_rds::RStr::new(
+                    b"first-alias",
+                    rd_rds::REncoding::Utf8,
+                    rd_rds::NativeEncodingSource::Unknown,
+                ),
+                rd_rds::RStr::new(
+                    b"later-alias",
+                    rd_rds::REncoding::Utf8,
+                    rd_rds::NativeEncodingSource::Unknown,
+                ),
+            ],
+        );
+        let entry = index.entries().nth(2).unwrap();
+        let topic = project_help_topic_entry("fixture", entry).unwrap();
+        assert_eq!(topic.topic, "first-alias");
+        assert_eq!(topic.aliases, ["first-alias", "later-alias"]);
+    }
+
+    #[test]
+    fn help_entry_projection_skips_first_na_even_when_a_later_alias_is_usable() {
+        let index = topic_index_with_aliases(
+            0,
+            vec![
+                rd_rds::RStr::Na,
+                rd_rds::RStr::new(
+                    b"later",
+                    rd_rds::REncoding::Utf8,
+                    rd_rds::NativeEncodingSource::Unknown,
+                ),
+            ],
+        );
+
+        assert!(project_help_topic_entry("fixture", index.entries().next().unwrap()).is_none());
+    }
+
+    #[test]
+    fn help_entry_projection_uses_empty_title_for_missing_or_na_and_skips_empty_alias_groups() {
+        let index = topic_index();
+        let entries: Vec<_> = index.entries().collect();
+        let topic = project_help_topic_entry("fixture", entries[1]).unwrap();
+        assert_eq!(topic.title, "");
+        assert_eq!(project_help_topic_entry("fixture", entries[3]), None);
+
+        let missing_title =
+            rd_helpdb::read_rds_file(fixture_path("help_topics_aliases_only_v3.rds")).unwrap();
+        let missing_index = rd_helpdb::HelpTopicIndex::from_object(&missing_title).unwrap();
+        assert_eq!(
+            project_help_topic_entry("fixture", missing_index.entries().next().unwrap())
+                .unwrap()
+                .title,
+            ""
+        );
+    }
+
+    #[test]
+    fn metadata_sources_are_independent_of_compiled_help_and_each_other() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("Meta");
+        std::fs::create_dir_all(&metadata).unwrap();
+        std::fs::copy(
+            fixture_path("help_topics_metadata_v3.rds"),
+            metadata.join("Rd.rds"),
+        )
+        .unwrap();
+        std::fs::write(metadata.join("vignette.rds"), b"broken RDS").unwrap();
+        std::fs::copy(fixture_path("demo_valid_v3.rds"), metadata.join("demo.rds")).unwrap();
+
+        let topics = read_package_topics("fixture", temp.path());
+        assert!(topics.iter().any(|topic| topic.entry_type == "help"));
+        assert!(topics.iter().any(|topic| topic.entry_type == "demo"));
+        assert!(!topics.iter().any(|topic| topic.entry_type == "vignette"));
+        assert!(!temp.path().join("help").exists());
+
+        std::fs::copy(
+            fixture_path("vignette_reordered_v3.rds"),
+            metadata.join("vignette.rds"),
+        )
+        .unwrap();
+        std::fs::write(metadata.join("demo.rds"), b"broken RDS").unwrap();
+        let topics = read_package_topics("fixture", temp.path());
+        assert!(topics.iter().any(|topic| topic.entry_type == "help"));
+        assert!(topics.iter().any(|topic| topic.entry_type == "vignette"));
+        assert!(!topics.iter().any(|topic| topic.entry_type == "demo"));
+
+        let compiled_help = temp.path().join("help");
+        std::fs::create_dir(&compiled_help).unwrap();
+        std::fs::write(compiled_help.join("aliases.rds"), b"broken RDS").unwrap();
+        std::fs::write(compiled_help.join("fixture.rdx"), b"broken index").unwrap();
+        std::fs::write(compiled_help.join("fixture.rdb"), b"broken database").unwrap();
+        let topics = read_package_topics("fixture", temp.path());
+        assert!(topics.iter().any(|topic| topic.entry_type == "help"));
+
+        std::fs::write(metadata.join("Rd.rds"), b"broken RDS").unwrap();
+        std::fs::copy(fixture_path("demo_valid_v3.rds"), metadata.join("demo.rds")).unwrap();
+        let topics = read_package_topics("fixture", temp.path());
+        assert!(!topics.iter().any(|topic| topic.entry_type == "help"));
+        assert!(topics.iter().any(|topic| topic.entry_type == "vignette"));
+        assert!(topics.iter().any(|topic| topic.entry_type == "demo"));
+    }
+
+    fn object_names(attributes: &rd_rds::Attributes) -> Vec<rd_rds::RStr> {
+        attributes
+            .get("names")
+            .and_then(|names| match names.value() {
+                rd_rds::RValue::Character(names) => Some(names.clone()),
+                _ => None,
             })
-        })
-        .collect()
+            .expect("metadata names")
+    }
 }
 
 /// Evaluate R code and return the result as an optional String.
@@ -541,58 +745,12 @@ fn escape_r_string(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn matrix(values: Vec<rd_rds::RStr>, rows: i32, columns: &[&str]) -> RObject {
-        let dimnames = vec![
-            RObject::from_parts(
-                RValue::Character(vec![rd_rds::RStr::Na; rows as usize]),
-                rd_rds::Attributes::default(),
-            ),
-            RObject::from_parts(
-                RValue::Character(columns.iter().map(|_| rd_rds::RStr::Na).collect()),
-                rd_rds::Attributes::default(),
-            ),
-        ];
-        RObject::from_parts(
-            RValue::Character(values),
-            rd_rds::Attributes::new(vec![
-                rd_rds::Attribute::new(
-                    rd_rds::Symbol::new("dim"),
-                    RObject::from_parts(
-                        RValue::Integer(vec![Some(rows), Some(columns.len() as i32)]),
-                        rd_rds::Attributes::default(),
-                    ),
-                ),
-                rd_rds::Attribute::new(
-                    rd_rds::Symbol::new("dimnames"),
-                    RObject::from_parts(RValue::List(dimnames), rd_rds::Attributes::default()),
-                ),
-            ]),
-        )
-    }
-
-    #[test]
-    fn malformed_and_na_help_indexes_are_skipped() {
-        let columns = [
-            "Package", "LibPath", "ID", "Name", "Title", "Topic", "Encoding",
-        ];
-        let base = matrix(vec![rd_rds::RStr::Na; columns.len()], 1, &columns);
-        let index = RObject::from_parts(RValue::List(vec![base]), rd_rds::Attributes::default());
-
-        assert!(extract_help_topics(&index).is_empty());
-        assert!(
-            extract_help_topics(&RObject::from_parts(
-                RValue::List(Vec::new()),
-                rd_rds::Attributes::default(),
-            ))
-            .is_empty()
-        );
-    }
-
     #[test]
     fn test_help_topic_qualified_name() {
         let topic = HelpTopic {
             package: "base".to_string(),
             topic: "print".to_string(),
+            aliases: vec![],
             title: "Print Values".to_string(),
             entry_type: "help".to_string(),
         };
