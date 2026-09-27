@@ -86,6 +86,8 @@ pub struct ReplState {
     pub shell_history: crate::history::HistoryRuntime,
     /// History context for the command whose evaluation just completed.
     pub pending_history_context: PendingHistoryContext,
+    /// Whether initial R error-handler setup has been attempted after R startup.
+    pub error_handler_setup_attempted: bool,
 }
 
 /// Runtime configuration for prompts that can be modified during the session.
@@ -114,8 +116,9 @@ pub struct PromptRuntimeConfig {
     status_config: StatusConfig,
     /// Colors for command status indicator.
     status_colors: StatusColorConfig,
-    /// Whether the last command failed (for status indicator).
-    last_command_failed: bool,
+    /// Last command outcome: `Some(true)` is failure, `Some(false)` is success,
+    /// and `None` means the outcome could not be observed reliably.
+    last_command_failed: Option<bool>,
     /// Command duration configuration (format and threshold).
     duration_config: PromptDurationConfig,
     /// Color for command duration indicator.
@@ -205,20 +208,20 @@ impl PromptRuntimeConfig {
             return template.to_string();
         }
 
-        let symbol = if self.last_command_failed {
-            &self.status_config.symbol.error
-        } else {
-            &self.status_config.symbol.success
+        let symbol = match self.last_command_failed {
+            Some(true) => &self.status_config.symbol.error,
+            Some(false) => &self.status_config.symbol.success,
+            None => "",
         };
 
         let colored_symbol = if symbol.is_empty() {
             String::new()
         } else {
             // Color the symbol with status color
-            let status_color = if self.last_command_failed {
-                self.status_colors.error
-            } else {
-                self.status_colors.success
+            let status_color = match self.last_command_failed {
+                Some(true) => self.status_colors.error,
+                Some(false) => self.status_colors.success,
+                None => return template.replace("{status}", ""),
             };
             let status_style = match status_color {
                 Color::Default => Style::new(),
@@ -244,10 +247,10 @@ impl PromptRuntimeConfig {
     /// Otherwise, returns the normal main prompt color.
     fn get_status_prompt_color(&self) -> Color {
         if self.status_config.override_prompt_color {
-            if self.last_command_failed {
-                self.status_colors.error
-            } else {
-                self.status_colors.success
+            match self.last_command_failed {
+                Some(true) => self.status_colors.error,
+                Some(false) => self.status_colors.success,
+                None => self.main_color,
             }
         } else {
             self.main_color
@@ -256,7 +259,12 @@ impl PromptRuntimeConfig {
 
     /// Set whether the last command failed.
     pub fn set_last_command_failed(&mut self, failed: bool) {
-        self.last_command_failed = failed;
+        self.last_command_failed = Some(failed);
+    }
+
+    /// Clear the status when the last command outcome could not be observed.
+    pub fn set_last_command_outcome_unknown(&mut self) {
+        self.last_command_failed = None;
     }
 
     /// Record the start time of a command execution.
@@ -538,7 +546,7 @@ impl PromptRuntimeConfigBuilder {
             mode_indicator_color: self.mode_indicator_color,
             status_config: self.status_config,
             status_colors: self.status_colors,
-            last_command_failed: false,
+            last_command_failed: Some(false),
             duration_config: self.duration_config,
             duration_color: self.duration_color,
             last_command_start: None,

@@ -86,6 +86,283 @@ fn history_records_success_and_error_exit_status() -> Result<()> {
 }
 
 #[test]
+fn replacing_error_option_leaves_history_status_unavailable() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("history-error-option-unavailable")
+            .args(["--no-auto-match"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.submit("42", "[1] 42", PROMPT)?;
+            terminal.submit(
+                "stop('known_before_handler_change')",
+                "Error: known_before_handler_change",
+                ERROR_PROMPT,
+            )?;
+            terminal.enter("options(error = function() stop('replacement_handler_error'))")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("stop('unhandled_with_replacement')")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("options(error = NULL)")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("stop('unhandled_after_error_option_removal')")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let initial_success = rows
+        .iter()
+        .find(|(saved, _)| saved == "42")
+        .context("initial successful command missing from history")?;
+    ensure!(
+        initial_success.1 == Some(0),
+        "wrapper should record success before the handler is changed: {initial_success:?}"
+    );
+    let known_error = rows
+        .iter()
+        .find(|(saved, _)| saved == "stop('known_before_handler_change')")
+        .context("known error command missing from history")?;
+    ensure!(
+        known_error.1 == Some(1),
+        "wrapper should record failure before the handler is changed: {known_error:?}"
+    );
+    for command in [
+        "options(error = function() stop('replacement_handler_error'))",
+        "stop('unhandled_with_replacement')",
+        "options(error = NULL)",
+        "stop('unhandled_after_error_option_removal')",
+    ] {
+        let row = rows
+            .iter()
+            .find(|(saved, _)| saved == command)
+            .with_context(|| format!("history entry missing for {command}"))?;
+        ensure!(
+            row.1.is_none(),
+            "{command} should have unknown status: {row:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn locked_error_flag_makes_outcome_unavailable_without_stopping_repl() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("history-locked-error-flag")
+            .args(["--no-auto-match"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter("lockBinding('had_error', get('.arf_error_state', .GlobalEnv)); 42")?;
+            terminal.wait_for_prompt(Some("[1] 42"), PROMPT)?;
+            terminal.enter("43")?;
+            terminal.wait_for_prompt(Some("[1] 43"), PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    for value in ["42", "43"] {
+        let row = rows
+            .iter()
+            .find(|(command, _)| command.contains(value))
+            .with_context(|| format!("command {value} missing from history"))?;
+        ensure!(
+            row.1.is_none(),
+            "locked error state should produce unavailable outcome: {row:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn removed_error_state_chains_captured_handler_and_keeps_outcomes_unknown() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    let profile = tempfile::tempdir()?;
+    let profile_path = profile.path().join(".Rprofile");
+    std::fs::write(
+        &profile_path,
+        "options(error = function() cat('captured_previous_handler_ran\\n'))\n",
+    )?;
+    let config = r#"
+[experimental.history_forget]
+enabled = true
+delay = 0
+on_exit_only = false
+"#
+    .to_owned()
+        + DEFAULT_CONFIG;
+    run_case_with(
+        Terminal::builder("history-error-state-removed")
+            .args(["--no-auto-match"])
+            .vanilla(false)
+            .env(
+                "R_PROFILE_USER",
+                profile_path.to_string_lossy().into_owned(),
+            )
+            .config(config)
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal
+                .enter("rm('.arf_error_state', envir = .GlobalEnv); stop('untracked_error')")?;
+            terminal.wait_for("captured previous error handler", |state, _| {
+                state.text.contains("captured_previous_handler_ran")
+            })?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let untracked_error = rows
+        .iter()
+        .find(|(command, _)| command.contains("untracked_error"))
+        .context("untracked failed command missing from history")?;
+    ensure!(
+        untracked_error.1.is_none(),
+        "error after tracking removal should have unknown status: {untracked_error:?}"
+    );
+    ensure!(
+        rows.iter()
+            .any(|(command, _)| command.contains("untracked_error")),
+        "unavailable command should stay in history instead of being forgotten"
+    );
+    Ok(())
+}
+
+#[test]
+fn active_error_state_binding_is_not_evaluated() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("history-active-error-state")
+            .args(["--no-auto-match"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter(
+                "rm('.arf_error_state', envir = .GlobalEnv); makeActiveBinding('.arf_error_state', function(value) { cat(paste0('ACTIVE', '_STATE_CALLED\\n')); stop('active_state_error') }, .GlobalEnv)",
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("42")?;
+            terminal.wait_for(
+                "REPL continues without invoking active binding",
+                |state, _| {
+                    state.text.contains("[1] 42") && !state.text.contains("ACTIVE_STATE_CALLED")
+                },
+            )?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let active_binding_setup = rows
+        .iter()
+        .find(|(command, _)| command.contains("makeActiveBinding"))
+        .context("active-binding command missing from history")?;
+    ensure!(
+        active_binding_setup.1.is_none(),
+        "active state binding should make the command outcome unavailable: {active_binding_setup:?}"
+    );
+    ensure!(
+        rows.iter()
+            .all(|(command, _)| !command.contains("ACTIVE_STATE_CALLED")),
+        "active binding output must not be saved as user input"
+    );
+    Ok(())
+}
+
+#[test]
+fn active_error_flag_binding_is_not_evaluated_by_tracking_or_handler() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("history-active-error-flag")
+            .args(["--no-auto-match"])
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter(
+                "state <- get('.arf_error_state', .GlobalEnv); rm('had_error', envir = state); makeActiveBinding('had_error', function(value) { cat(paste0('ACTIVE_', 'HAD_ERROR_CALLED\\n')); stop('active_had_error') }, state)",
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.enter("stop('active_binding_trigger')")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.wait_for("active binding was not invoked", |state, _| {
+                state.text.contains("Error: active_binding_trigger")
+                    && !state.text.contains("ACTIVE_HAD_ERROR_CALLED")
+            })?;
+            terminal.enter("42")?;
+            terminal.wait_for(
+                "REPL recovers after unhandled error with active state binding",
+                |state, _| {
+                    state.text.contains("[1] 42") && !state.text.contains("ACTIVE_HAD_ERROR_CALLED")
+                },
+            )?;
+            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    for fragment in [
+        "makeActiveBinding('had_error'",
+        "stop('active_binding_trigger')",
+        "42",
+    ] {
+        let row = rows
+            .iter()
+            .find(|(command, _)| command.contains(fragment))
+            .with_context(|| format!("command containing {fragment:?} missing from history"))?;
+        ensure!(
+            row.1.is_none(),
+            "active had_error binding should make command outcome unavailable: {row:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn chained_user_error_handler_failure_is_still_recorded() -> Result<()> {
+    let history = tempfile::tempdir()?;
+    let profile = tempfile::tempdir()?;
+    let profile_path = profile.path().join(".Rprofile");
+    std::fs::write(
+        &profile_path,
+        "options(error = function() stop('nested_handler_error'))\n",
+    )?;
+    run_case_with(
+        Terminal::builder("history-chained-error-handler")
+            .args(["--no-auto-match"])
+            .vanilla(false)
+            .env(
+                "R_PROFILE_USER",
+                profile_path.to_string_lossy().into_owned(),
+            )
+            .history_dir(history.path()),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter("stop('wrapper_marks_before_chaining')")?;
+            terminal.wait_for_prompt(None, ERROR_PROMPT)?;
+            terminal.quit()
+        },
+    )?;
+
+    let rows = history_rows(history.path())?;
+    let failed = rows
+        .iter()
+        .find(|(command, _)| command.contains("wrapper_marks_before_chaining"))
+        .context("chained-handler command missing from history")?;
+    ensure!(
+        failed.1 == Some(1),
+        "chained handler error should remain a known failure: {failed:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn history_forget_delay_one_removes_old_errors_and_keeps_success() -> Result<()> {
     let history = tempfile::tempdir()?;
     let config = r#"

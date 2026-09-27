@@ -73,22 +73,9 @@ impl Repl {
                 r_history: r_history_handle,
                 shell_history: shell_history_handle,
                 pending_history_context: PendingHistoryContext::None,
+                error_handler_setup_attempted: false,
             });
         });
-
-        // Initialize global error handler for rlang/dplyr error detection
-        // This sets up globalCallingHandlers() to track error conditions
-        // that output to stdout instead of stderr
-        let error_handler_code = arf_libr::global_error_handler_code();
-        match arf_harp::eval_string_with_visibility(error_handler_code) {
-            Ok(_) => {
-                log::info!("Global error handler initialized");
-                arf_libr::mark_global_error_handler_initialized();
-            }
-            Err(e) => {
-                log::warn!("Failed to initialize global error handler: {:?}", e);
-            }
-        }
 
         // Initialize askpass handler (Unix only) to bypass reedline for password input.
         #[cfg(unix)]
