@@ -376,48 +376,12 @@ impl HistoryStore {
         session_id: Option<HistorySessionId>,
         session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Self> {
-        let is_new = !path.try_exists().map_err(|error| {
+        artifact::prepare_history_path(&path, history_kind).map_err(|error| {
             reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
-                format!(
-                    "failed to inspect history database path {}: {error}",
-                    path.display()
-                ),
+                format!("invalid history database artifact: {error:#}"),
             ))
         })?;
-        if !is_new {
-            let artifact = artifact::read_artifact_from_path(&path).map_err(|error| {
-                reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
-                    format!("invalid history database artifact metadata: {error:#}"),
-                ))
-            })?;
-            match artifact {
-                artifact::HistoryArtifact::Legacy => {}
-                artifact::HistoryArtifact::History(actual_kind) if actual_kind == history_kind => {}
-                artifact::HistoryArtifact::History(actual_kind) => {
-                    return Err(reedline::ReedlineError(
-                        reedline::ReedlineErrorVariants::HistoryDatabaseError(format!(
-                            "history database kind mismatch: requested '{}', metadata says '{}'",
-                            history_kind.as_str(),
-                            actual_kind.as_str()
-                        )),
-                    ));
-                }
-                artifact::HistoryArtifact::Export => {
-                    return Err(reedline::ReedlineError(
-                        reedline::ReedlineErrorVariants::HistoryDatabaseError(
-                            "cannot open a unified history export as a single history database"
-                                .to_string(),
-                        ),
-                    ));
-                }
-            }
-        }
         let history = SqliteBackedHistory::with_file(path.clone(), session_id, session_timestamp)?;
-        if is_new {
-            let mut connection = rusqlite::Connection::open(&path).map_err(sqlite_error)?;
-            artifact::write_history_metadata(&mut connection, history_kind)
-                .map_err(sqlite_error)?;
-        }
         Ok(Self {
             inner: Arc::new(Mutex::new(history)),
             path: Some(path),
@@ -799,7 +763,6 @@ mod tests {
         format_version: &str,
         history_kind: Option<&str>,
     ) {
-        drop(SqliteBackedHistory::with_file(path.to_path_buf(), None, None).unwrap());
         let connection = rusqlite::Connection::open(path).unwrap();
         connection
             .execute_batch(
@@ -825,6 +788,18 @@ mod tests {
                 )
                 .unwrap();
         }
+    }
+
+    fn assert_no_history_table(path: &std::path::Path) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "reedline history schema must not be created");
     }
 
     #[test]
@@ -868,6 +843,40 @@ mod tests {
     }
 
     #[test]
+    fn published_metadata_only_database_can_be_opened_by_reedline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata-only.db");
+        artifact::prepare_history_path(&path, HistoryKind::R).unwrap();
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let history_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_table_count, 0);
+        drop(connection);
+
+        drop(HistoryStore::open(path.clone(), HistoryKind::R, None, None).unwrap());
+
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let history_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_table_count, 1);
+        assert_eq!(
+            artifact::read_artifact(&connection).unwrap(),
+            artifact::HistoryArtifact::History(HistoryKind::R)
+        );
+    }
+
+    #[test]
     fn opening_existing_metadata_less_store_does_not_backfill_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("legacy.db");
@@ -893,6 +902,7 @@ mod tests {
             .err()
             .expect("future format should be rejected");
         assert!(format!("{error:?}").contains("unsupported arf artifact format version 2"));
+        assert_no_history_table(&dir.path().join("future.db"));
     }
 
     #[test]
@@ -905,6 +915,7 @@ mod tests {
             .err()
             .expect("mismatched kind should be rejected");
         assert!(format!("{error:?}").contains("history database kind mismatch"));
+        assert_no_history_table(&dir.path().join("shell.db"));
     }
 
     #[test]
@@ -917,6 +928,70 @@ mod tests {
             .err()
             .expect("unified export should be rejected");
         assert!(format!("{error:?}").contains("cannot open a unified history export"));
+        assert_no_history_table(&dir.path().join("r.db"));
+    }
+
+    #[test]
+    fn concurrent_same_kind_first_opens_both_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("concurrent.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let handles = [HistoryKind::R, HistoryKind::R].map(|kind| {
+            let barrier = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                HistoryStore::open(path, kind, None, None)
+            })
+        });
+        let stores: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect();
+
+        assert_eq!(stores.len(), 2);
+        assert_eq!(
+            artifact::read_artifact_from_path(&path).unwrap(),
+            artifact::HistoryArtifact::History(HistoryKind::R)
+        );
+    }
+
+    #[test]
+    fn concurrent_different_kind_first_opens_have_one_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("concurrent.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let handles = [HistoryKind::R, HistoryKind::Shell].map(|kind| {
+            let barrier = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                (kind, HistoryStore::open(path, kind, None, None))
+            })
+        });
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        let successes: Vec<_> = results
+            .iter()
+            .filter_map(|(_, result)| result.as_ref().ok())
+            .collect();
+        let errors: Vec<_> = results
+            .iter()
+            .filter_map(|(_, result)| result.as_ref().err())
+            .collect();
+
+        assert_eq!(successes.len(), 1);
+        assert_eq!(errors.len(), 1);
+        assert!(format!("{:?}", errors[0]).contains("history database kind mismatch"));
+        let (winner_kind, _) = results.iter().find(|(_, result)| result.is_ok()).unwrap();
+        assert_eq!(
+            artifact::read_artifact_from_path(&path).unwrap(),
+            artifact::HistoryArtifact::History(*winner_kind)
+        );
     }
 
     #[test]
