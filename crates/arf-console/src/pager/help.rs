@@ -780,7 +780,7 @@ mod tests {
             entry_type: "help".to_string(),
         };
 
-        let results = fuzzy_search_topics(&[topic.clone()], "print.value");
+        let results = fuzzy_search_topics(std::slice::from_ref(&topic), "print.value");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0.topic, "print");
 
