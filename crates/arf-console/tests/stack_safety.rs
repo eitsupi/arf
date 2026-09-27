@@ -32,15 +32,48 @@ cat("overflow-caught-and-continued\n")
     {
         use std::os::unix::process::CommandExt;
 
+        const STACK_LIMIT_CAP: libc::rlim_t = 8 * 1024 * 1024;
+
+        // Read the inherited limit before spawning so the product process gets
+        // a predictable native stack even when the host limit is unlimited.
+        let mut inherited_stack_limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        let get_stack_limit_result =
+            unsafe { libc::getrlimit(libc::RLIMIT_STACK, &mut inherited_stack_limit) };
+        assert_eq!(
+            get_stack_limit_result,
+            0,
+            "read parent RLIMIT_STACK for product R process: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let capped_stack_soft_limit =
+            (inherited_stack_limit.rlim_cur > STACK_LIMIT_CAP).then(|| {
+                // Preserve the hard limit and never request a soft limit above it.
+                std::cmp::min(STACK_LIMIT_CAP, inherited_stack_limit.rlim_max)
+            });
+
         // Bound runaway recursion and startup failures even if the test's
         // wall-clock watchdog cannot run because the child consumes a core.
         unsafe {
-            command.pre_exec(|| {
-                let limit = libc::rlimit {
+            command.pre_exec(move || {
+                if let Some(soft_limit) = capped_stack_soft_limit {
+                    let stack_limit = libc::rlimit {
+                        rlim_cur: soft_limit,
+                        rlim_max: inherited_stack_limit.rlim_max,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_STACK, &stack_limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+
+                let cpu_limit = libc::rlimit {
                     rlim_cur: 15,
                     rlim_max: 15,
                 };
-                if libc::setrlimit(libc::RLIMIT_CPU, &limit) == 0 {
+                if libc::setrlimit(libc::RLIMIT_CPU, &cpu_limit) == 0 {
                     Ok(())
                 } else {
                     Err(std::io::Error::last_os_error())
