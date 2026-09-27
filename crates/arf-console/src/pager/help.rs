@@ -1,7 +1,8 @@
 //! Interactive fuzzy help search for R documentation.
 //!
 //! This module provides a terminal-based fuzzy search interface for R help topics
-//! loaded from installed packages' `Meta/hsearch.rds` files.
+//! loaded from installed packages' `Meta/Rd.rds`, `Meta/vignette.rds`, and
+//! `Meta/demo.rds` independently.
 //!
 //! # Acknowledgment
 //!
