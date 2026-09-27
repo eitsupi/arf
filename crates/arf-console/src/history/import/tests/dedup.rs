@@ -289,8 +289,20 @@ fn existing_metadata_wins_and_ambiguous_rows_warn() {
 fn malformed_target() -> (tempfile::TempDir, ImportTargets) {
     let dir = tempfile::TempDir::new().unwrap();
     let targets = ImportTargets {
-        r_history: HistoryStore::open(dir.path().join("r.db"), None, None).unwrap(),
-        shell_history: HistoryStore::open(dir.path().join("shell.db"), None, None).unwrap(),
+        r_history: HistoryStore::open(
+            dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap(),
+        shell_history: HistoryStore::open(
+            dir.path().join("shell.db"),
+            crate::history::artifact::HistoryKind::Shell,
+            None,
+            None,
+        )
+        .unwrap(),
     };
     (dir, targets)
 }
@@ -439,8 +451,20 @@ fn dry_run_repair_matches_real_import_and_keeps_source_read_only() {
     let r_path = target_dir.path().join("r.db");
     let shell_path = target_dir.path().join("shell.db");
     let mut targets = ImportTargets {
-        r_history: HistoryStore::open(r_path.clone(), None, None).unwrap(),
-        shell_history: HistoryStore::open(shell_path, None, None).unwrap(),
+        r_history: HistoryStore::open(
+            r_path.clone(),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap(),
+        shell_history: HistoryStore::open(
+            shell_path,
+            crate::history::artifact::HistoryKind::Shell,
+            None,
+            None,
+        )
+        .unwrap(),
     };
     targets
         .r_history

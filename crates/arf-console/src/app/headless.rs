@@ -255,6 +255,7 @@ pub(crate) fn run_headless(
     let history_runtime = HistoryRuntime::initialize(
         &config.history.mode,
         history_path,
+        crate::history::artifact::HistoryKind::R,
         session_id,
         Some(chrono::Utc::now()),
     );
@@ -512,8 +513,13 @@ mod tests {
 
     #[test]
     fn headless_json_includes_r_home_from_session() {
-        let history_runtime =
-            HistoryRuntime::initialize(&crate::config::HistoryMode::Volatile, None, None, None);
+        let history_runtime = HistoryRuntime::initialize(
+            &crate::config::HistoryMode::Volatile,
+            None,
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        );
         let mut session = SessionInfo {
             pid: 12345,
             socket_path: "/tmp/arf.sock".to_string(),
@@ -587,7 +593,13 @@ mod tests {
         let persistent_dir = tempfile::tempdir().unwrap();
         let persistent_path = persistent_dir.path().join("history.db");
         let persistent = HistoryRuntime::Persistent(HistoryHandle {
-            store: HistoryStore::open(persistent_path.clone(), None, None).unwrap(),
+            store: HistoryStore::open(
+                persistent_path.clone(),
+                crate::history::artifact::HistoryKind::R,
+                None,
+                None,
+            )
+            .unwrap(),
             receipt: HistorySaveReceipt::new(),
         });
 

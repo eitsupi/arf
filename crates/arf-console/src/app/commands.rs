@@ -187,15 +187,9 @@ fn handle_history_import(
         ImportSource::Radian => parse_radian_history(&source_path)?,
         ImportSource::R => parse_r_history(&source_path)?,
         ImportSource::Arf => {
-            // Determine if this is a unified export file or a single-database file.
-            // --unified flag forces unified mode; otherwise infer from filename.
-            let is_unified = unified || {
-                let filename = source_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                filename != "r.db" && filename != "shell.db"
-            };
+            // Versioned artifact metadata takes precedence over the legacy filename/flag rules.
+            let artifact = history::artifact::read_artifact_from_path(&source_path)?;
+            let is_unified = should_parse_unified_import(artifact, unified, &source_path);
 
             if is_unified {
                 // Unified export file - use table names to import both r and shell
@@ -332,10 +326,20 @@ fn handle_history_import(
     println!("  Shell: {}", shell_path.display());
 
     let mut targets = history::import::ImportTargets {
-        r_history: history::HistoryStore::open(r_path, None, None)
-            .context("Failed to open R history database")?,
-        shell_history: history::HistoryStore::open(shell_path, None, None)
-            .context("Failed to open shell history database")?,
+        r_history: history::HistoryStore::open(
+            r_path,
+            history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .context("Failed to open R history database")?,
+        shell_history: history::HistoryStore::open(
+            shell_path,
+            history::artifact::HistoryKind::Shell,
+            None,
+            None,
+        )
+        .context("Failed to open shell history database")?,
     };
 
     // Import entries
@@ -412,4 +416,61 @@ fn handle_history_export(
     println!("  Shell commands: {}", result.shell_exported);
 
     Ok(())
+}
+
+fn should_parse_unified_import(
+    artifact: history::artifact::HistoryArtifact,
+    unified_flag: bool,
+    source_path: &std::path::Path,
+) -> bool {
+    match artifact {
+        history::artifact::HistoryArtifact::History(_) => false,
+        history::artifact::HistoryArtifact::Export => true,
+        history::artifact::HistoryArtifact::Legacy => {
+            unified_flag
+                || !matches!(
+                    source_path.file_name().and_then(|name| name.to_str()),
+                    Some("r.db" | "shell.db")
+                )
+        }
+    }
+}
+
+#[cfg(test)]
+mod history_artifact_import_tests {
+    use super::*;
+    use crate::history::artifact::{HistoryArtifact, HistoryKind};
+
+    #[test]
+    fn versioned_artifact_metadata_precedes_filename_and_unified_flag() {
+        assert!(!should_parse_unified_import(
+            HistoryArtifact::History(HistoryKind::Shell),
+            true,
+            std::path::Path::new("renamed.db"),
+        ));
+        assert!(should_parse_unified_import(
+            HistoryArtifact::Export,
+            false,
+            std::path::Path::new("shell.db"),
+        ));
+    }
+
+    #[test]
+    fn legacy_detection_retains_filename_and_unified_flag_behavior() {
+        assert!(!should_parse_unified_import(
+            HistoryArtifact::Legacy,
+            false,
+            std::path::Path::new("r.db"),
+        ));
+        assert!(should_parse_unified_import(
+            HistoryArtifact::Legacy,
+            false,
+            std::path::Path::new("backup.db"),
+        ));
+        assert!(should_parse_unified_import(
+            HistoryArtifact::Legacy,
+            true,
+            std::path::Path::new("r.db"),
+        ));
+    }
 }

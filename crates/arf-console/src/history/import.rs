@@ -264,20 +264,28 @@ pub fn parse_arf_history(path: &Path) -> Result<ParsedImport> {
         bail!("arf history database not found: {}", path.display());
     }
 
-    // Infer mode from filename
-    let is_shell = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n == "shell.db");
-    let mode = if is_shell {
-        ImportMode::Shell
-    } else {
-        ImportMode::R
-    };
-
     let db =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open arf history database: {}", path.display()))?;
+    let mode = match super::artifact::read_artifact(&db)? {
+        super::artifact::HistoryArtifact::History(super::artifact::HistoryKind::R) => ImportMode::R,
+        super::artifact::HistoryArtifact::History(super::artifact::HistoryKind::Shell) => {
+            ImportMode::Shell
+        }
+        super::artifact::HistoryArtifact::Export => {
+            bail!(
+                "File '{}' is a unified history export, not a single history database",
+                path.display()
+            )
+        }
+        super::artifact::HistoryArtifact::Legacy => {
+            if path.file_name().and_then(|name| name.to_str()) == Some("shell.db") {
+                ImportMode::Shell
+            } else {
+                ImportMode::R
+            }
+        }
+    };
     if !table_exists(&db, "history")? {
         bail!(
             "File '{}' does not look like an arf history database: missing history table",
@@ -793,6 +801,15 @@ pub fn parse_unified_arf_history(
 
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("Failed to open arf export file: {}", path.display()))?;
+    match super::artifact::read_artifact(&db)? {
+        super::artifact::HistoryArtifact::Legacy | super::artifact::HistoryArtifact::Export => {}
+        super::artifact::HistoryArtifact::History(_) => {
+            bail!(
+                "File '{}' is a single history database, not a unified history export",
+                path.display()
+            )
+        }
+    }
 
     let has_r_table = table_exists(&db, r_table)?;
     let has_shell_table = table_exists(&db, shell_table)?;

@@ -155,6 +155,8 @@ fn export_to_file(
     // Create output database
     let mut output_db =
         Connection::open(output_path).context("Failed to create output database")?;
+    super::artifact::write_export_metadata(&mut output_db)
+        .context("Failed to write history export metadata")?;
 
     let mut result = ExportResult::default();
 
@@ -331,6 +333,30 @@ mod tests {
 
         // Verify exported content
         let db = rusqlite::Connection::open(&output_path).unwrap();
+        assert_eq!(
+            crate::history::artifact::read_artifact(&db).unwrap(),
+            crate::history::artifact::HistoryArtifact::Export
+        );
+        let metadata: std::collections::HashMap<String, String> = db
+            .prepare("SELECT key, value FROM arf_metadata")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+        assert_eq!(metadata.len(), 3);
+        assert_eq!(
+            metadata.get("artifact").map(String::as_str),
+            Some("history-export")
+        );
+        assert_eq!(
+            metadata.get("format_version").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            metadata.get("created_by_version").map(String::as_str),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
 
         let r_count: i32 = db
             .query_row("SELECT COUNT(*) FROM r", [], |row| row.get(0))
@@ -341,6 +367,12 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM shell", [], |row| row.get(0))
             .unwrap();
         assert_eq!(shell_count, 2);
+        drop(db);
+        let unified =
+            super::super::import::parse_unified_arf_history(&output_path, "r", "shell").unwrap();
+        assert_eq!(unified.entries.len(), 4);
+        let error = crate::history::import::parse_arf_history(&output_path).unwrap_err();
+        assert!(error.to_string().contains("unified history export"));
     }
 
     #[test]
@@ -588,8 +620,20 @@ mod tests {
         let new_r_path = temp_dir.path().join("new_r.db");
         let new_shell_path = temp_dir.path().join("new_shell.db");
         let mut targets = ImportTargets {
-            r_history: HistoryStore::open(new_r_path, None, None).unwrap(),
-            shell_history: HistoryStore::open(new_shell_path, None, None).unwrap(),
+            r_history: HistoryStore::open(
+                new_r_path,
+                crate::history::artifact::HistoryKind::R,
+                None,
+                None,
+            )
+            .unwrap(),
+            shell_history: HistoryStore::open(
+                new_shell_path,
+                crate::history::artifact::HistoryKind::Shell,
+                None,
+                None,
+            )
+            .unwrap(),
         };
 
         let import_result = import_entries(&mut targets, entries.entries, None, false).unwrap();

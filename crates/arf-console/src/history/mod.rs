@@ -3,6 +3,7 @@
 //! This module provides SQLite-backed command history storage
 //! and fuzzy history search.
 
+pub(crate) mod artifact;
 pub mod export;
 pub mod import;
 mod metadata;

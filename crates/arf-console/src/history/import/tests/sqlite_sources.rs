@@ -33,6 +33,31 @@ fn arf_source_infers_filename_mode_and_round_trips_a_rich_item() {
 }
 
 #[test]
+fn versioned_shell_history_keeps_its_kind_after_renaming() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("shell.db");
+    let store = crate::history::HistoryStore::open(
+        original.clone(),
+        crate::history::artifact::HistoryKind::Shell,
+        None,
+        None,
+    )
+    .unwrap();
+    store
+        .save_unknown(HistoryItem::from_command_line("printf shell"))
+        .unwrap();
+    drop(store);
+
+    let renamed = dir.path().join("renamed-history.db");
+    std::fs::rename(original, &renamed).unwrap();
+    let parsed = parse_arf_history(&renamed).unwrap();
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].mode, ImportMode::Shell);
+    assert_eq!(parsed.entries[0].item.command_line, "printf shell");
+    assert!(parse_unified_arf_history(&renamed, "r", "shell").is_err());
+}
+
+#[test]
 fn unified_source_round_trips_r_and_shell_rich_rows() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("export.db");

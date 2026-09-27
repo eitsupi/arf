@@ -82,8 +82,20 @@ impl ImportFixture {
     pub fn new() -> Self {
         let dir = TempDir::new().unwrap();
         let targets = ImportTargets {
-            r_history: HistoryStore::open(dir.path().join("r.db"), None, None).unwrap(),
-            shell_history: HistoryStore::open(dir.path().join("shell.db"), None, None).unwrap(),
+            r_history: HistoryStore::open(
+                dir.path().join("r.db"),
+                crate::history::artifact::HistoryKind::R,
+                None,
+                None,
+            )
+            .unwrap(),
+            shell_history: HistoryStore::open(
+                dir.path().join("shell.db"),
+                crate::history::artifact::HistoryKind::Shell,
+                None,
+                None,
+            )
+            .unwrap(),
         };
         Self { targets, _dir: dir }
     }
