@@ -30,6 +30,19 @@ fn main() {
     // Re-run if manifest files change
     println!("cargo:rerun-if-changed=resources/manifest");
 
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => println!("cargo:rustc-link-arg-bin=arf=/STACK:10485760"),
+            Ok("gnu") => println!("cargo:rustc-link-arg-bin=arf=-Wl,--stack,10485760"),
+            Ok(environment) => println!(
+                "cargo:warning=Windows stack reserve is not configured for target environment {environment}"
+            ),
+            Err(_) => println!("cargo:warning=CARGO_CFG_TARGET_ENV is unset for Windows target"),
+        }
+    }
+
     #[cfg(windows)]
     {
         // Embed an Application Manifest file on Windows.
