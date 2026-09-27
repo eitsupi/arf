@@ -199,7 +199,6 @@ fn multiline_quoted_string_preserves_newline() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires PR #330 reedline auto-pairs"]
 fn raw_string_with_auto_match_is_preserved() -> Result<()> {
     run_case("raw-string-auto-match", &[], |terminal| {
         let source = r#"x <- r"---(hello "world")---"#;

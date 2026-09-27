@@ -32,7 +32,7 @@ use nu_ansi_term::{Color, Style};
 use reedline::{
     AutoPairs, DefaultHinter, Emacs, HistorySessionId, IdeMenu, ListMenu, MenuBuilder, Reedline,
     ReedlineMenu, Signal, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
-    default_vi_normal_keybindings,
+    default_vi_normal_keybindings, default_vi_visual_keybindings,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -464,7 +464,11 @@ impl Repl {
                     add_shell_semicolon_keybinding(&mut insert_keybindings);
                 }
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
-                let vi = Vi::new(insert_keybindings, default_vi_normal_keybindings());
+                let vi = Vi::new(
+                    insert_keybindings,
+                    default_vi_normal_keybindings(),
+                    default_vi_visual_keybindings(),
+                );
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     vi,
                     editor_state.clone(),
@@ -782,7 +786,11 @@ impl Repl {
                     add_shell_semicolon_keybinding(&mut insert_keybindings);
                 }
                 add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
-                let vi = Vi::new(insert_keybindings, default_vi_normal_keybindings());
+                let vi = Vi::new(
+                    insert_keybindings,
+                    default_vi_normal_keybindings(),
+                    default_vi_visual_keybindings(),
+                );
                 line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
                     vi,
                     editor_state.clone(),
@@ -981,6 +989,7 @@ impl Repl {
                 shell_editor.with_edit_mode(Box::new(Vi::new(
                     insert_keybindings,
                     default_vi_normal_keybindings(),
+                    default_vi_visual_keybindings(),
                 )))
             }
             EditorMode::Emacs => {

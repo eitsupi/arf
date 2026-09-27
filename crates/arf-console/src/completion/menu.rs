@@ -15,7 +15,8 @@
 
 use crate::editor::mode::EditorStateRef;
 use reedline::{
-    Completer, Editor, IdeMenu, ListMenu, Menu, MenuEvent, Painter, Suggestion, UndoBehavior,
+    Completer, Editor, IdeMenu, ListMenu, Menu, MenuEvent, MenuSettings, Painter, Suggestion,
+    UndoBehavior,
 };
 
 /// Custom completion menu that adjusts cursor position for function completions.
@@ -62,6 +63,10 @@ impl FunctionAwareMenu {
 }
 
 impl Menu for FunctionAwareMenu {
+    fn settings(&self) -> &MenuSettings {
+        self.inner.settings()
+    }
+
     fn name(&self) -> &str {
         self.inner.name()
     }
@@ -237,6 +242,10 @@ impl StateSyncHistoryMenu {
 }
 
 impl Menu for StateSyncHistoryMenu {
+    fn settings(&self) -> &MenuSettings {
+        self.inner.settings()
+    }
+
     fn name(&self) -> &str {
         self.inner.name()
     }
