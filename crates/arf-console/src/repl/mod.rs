@@ -312,15 +312,19 @@ impl Repl {
     /// one globally. This keeps construction testable and makes global IPC
     /// registration an explicit responsibility of `prepare_history`.
     fn initialize_history_runtimes(&self) -> (HistoryRuntime, HistoryRuntime) {
+        use crate::history::artifact::HistoryKind;
+
         let r_runtime = HistoryRuntime::initialize(
             &self.config.history.mode,
             self.r_history_path(),
+            HistoryKind::R,
             self.session_id,
             Some(chrono::Utc::now()),
         );
         let shell_runtime = HistoryRuntime::initialize(
             &self.config.history.mode,
             self.shell_history_path(),
+            HistoryKind::Shell,
             self.session_id,
             Some(chrono::Utc::now()),
         );

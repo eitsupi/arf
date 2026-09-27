@@ -149,7 +149,13 @@ mod tests {
     #[test]
     fn dispatched_colon_lines_are_flagged_but_known_routing_is_not_lexical() {
         let dir = tempfile::tempdir().unwrap();
-        let store = HistoryStore::open(dir.path().join("history.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            dir.path().join("history.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let receipt = HistorySaveReceipt::new();
         let mut adapter = ReedlineHistoryAdapter::new(store.clone(), receipt);
 
@@ -174,7 +180,13 @@ mod tests {
     #[test]
     fn menu_and_ipc_colon_lines_are_ordinary() {
         let dir = tempfile::tempdir().unwrap();
-        let store = HistoryStore::open(dir.path().join("history.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            dir.path().join("history.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
 
         let menu = store
             .save_unknown(HistoryItem::from_command_line(r#":menu choice"#))
@@ -200,7 +212,13 @@ mod tests {
     fn save_failure_is_reported_without_propagating_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
-        let store = HistoryStore::open(path.clone(), None, None).unwrap();
+        let store = HistoryStore::open(
+            path.clone(),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let receipt = HistorySaveReceipt::new();
         let mut adapter = ReedlineHistoryAdapter::new(store.clone(), receipt.clone());
         store.drop_table_for_test(&path);

@@ -16,8 +16,13 @@ pub(super) fn setup_history(
 
     mode: &HistoryMode,
 ) -> (Reedline, HistoryRuntime) {
-    let runtime =
-        HistoryRuntime::initialize(mode, history_path, session_id, Some(chrono::Utc::now()));
+    let runtime = HistoryRuntime::initialize(
+        mode,
+        history_path,
+        crate::history::artifact::HistoryKind::R,
+        session_id,
+        Some(chrono::Utc::now()),
+    );
     let line_editor = runtime.attach_to_editor(line_editor);
     (line_editor, runtime)
 }
@@ -201,7 +206,13 @@ mod tests {
     #[test]
     fn save_ipc_history_ignores_whitespace_only_code() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
-        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
 
         let mut sink = FileBackedHistory::default();
         assert!(save_ipc_history(&mut sink, Some(store.clone()), r"   ", None).is_none());
@@ -211,7 +222,13 @@ mod tests {
     #[test]
     fn save_ipc_history_writes_empty_metadata_and_returns_id() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
-        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
 
         let mut sink = FileBackedHistory::default();
         let id = save_ipc_history(&mut sink, Some(store), r#":starts as R code"#, None).unwrap();
@@ -229,7 +246,13 @@ mod tests {
     fn whitespace_only_line_is_finalized_and_unsaved_followup_is_ignored() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
         let path = temp_dir.path().join("r.db");
-        let store = HistoryStore::open(path.clone(), None, None).unwrap();
+        let store = HistoryStore::open(
+            path.clone(),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let receipt = HistorySaveReceipt::new();
         let handle = HistoryHandle {
             store: store.clone(),
@@ -269,7 +292,13 @@ mod tests {
     #[test]
     fn taken_outcome_can_finalize_and_update_exit_status() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
-        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let receipt = HistorySaveReceipt::new();
         let handle = HistoryHandle {
             store: store.clone(),
@@ -330,7 +359,13 @@ mod tests {
     #[test]
     fn ipc_history_does_not_also_write_to_the_editor_backend_with_a_store() {
         let temp_dir = tempfile::tempdir().expect("create temporary history directory");
-        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let mut memory = FileBackedHistory::default();
 
         save_ipc_history(&mut memory, Some(store.clone()), r#"print("hi")"#, None).unwrap();
@@ -382,7 +417,13 @@ mod tests {
         }
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = HistoryStore::open(temp_dir.path().join("r.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
 
         for command in [":help", ":user_defined"] {
             let item = store

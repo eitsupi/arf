@@ -150,11 +150,14 @@ fn export_to_file(
     r_table: &str,
     shell_table: &str,
 ) -> Result<ExportResult> {
+    use super::artifact::HistoryKind;
     use rusqlite::{Connection, OpenFlags};
 
     // Create output database
     let mut output_db =
         Connection::open(output_path).context("Failed to create output database")?;
+    super::artifact::write_export_metadata(&mut output_db)
+        .context("Failed to write history export metadata")?;
 
     let mut result = ExportResult::default();
 
@@ -162,6 +165,8 @@ fn export_to_file(
     if r_db_path.exists() {
         let r_db = Connection::open_with_flags(r_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| format!("Failed to open R history: {}", r_db_path.display()))?;
+        super::artifact::validate_history_artifact(&r_db, HistoryKind::R)
+            .with_context(|| format!("Invalid R history artifact: {}", r_db_path.display()))?;
         result.r_exported = copy_history_table(&r_db, &mut output_db, r_table)?;
     }
 
@@ -171,6 +176,14 @@ fn export_to_file(
             .with_context(|| {
                 format!("Failed to open shell history: {}", shell_db_path.display())
             })?;
+        super::artifact::validate_history_artifact(&shell_db, HistoryKind::Shell).with_context(
+            || {
+                format!(
+                    "Invalid shell history artifact: {}",
+                    shell_db_path.display()
+                )
+            },
+        )?;
         result.shell_exported = copy_history_table(&shell_db, &mut output_db, shell_table)?;
     }
 
@@ -311,6 +324,39 @@ mod tests {
         }
     }
 
+    fn write_artifact_metadata(
+        path: &Path,
+        artifact: &str,
+        format_version: &str,
+        history_kind: Option<&str>,
+    ) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection
+            .execute_batch(
+                r#"CREATE TABLE arf_metadata (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                )"#,
+            )
+            .unwrap();
+        let mut entries = vec![
+            ("artifact", artifact),
+            ("format_version", format_version),
+            ("created_by_version", env!("CARGO_PKG_VERSION")),
+        ];
+        if let Some(kind) = history_kind {
+            entries.push(("history_kind", kind));
+        }
+        for (key, value) in entries {
+            connection
+                .execute(
+                    "INSERT INTO arf_metadata (key, value) VALUES (?1, ?2)",
+                    [key, value],
+                )
+                .unwrap();
+        }
+    }
+
     #[test]
     fn test_export_history_basic() {
         let temp_dir = TempDir::new().unwrap();
@@ -331,6 +377,30 @@ mod tests {
 
         // Verify exported content
         let db = rusqlite::Connection::open(&output_path).unwrap();
+        assert_eq!(
+            crate::history::artifact::read_artifact(&db).unwrap(),
+            crate::history::artifact::HistoryArtifact::Export
+        );
+        let metadata: std::collections::HashMap<String, String> = db
+            .prepare("SELECT key, value FROM arf_metadata")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+        assert_eq!(metadata.len(), 3);
+        assert_eq!(
+            metadata.get("artifact").map(String::as_str),
+            Some("history-export")
+        );
+        assert_eq!(
+            metadata.get("format_version").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            metadata.get("created_by_version").map(String::as_str),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
 
         let r_count: i32 = db
             .query_row("SELECT COUNT(*) FROM r", [], |row| row.get(0))
@@ -341,6 +411,12 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM shell", [], |row| row.get(0))
             .unwrap();
         assert_eq!(shell_count, 2);
+        drop(db);
+        let unified =
+            super::super::import::parse_unified_arf_history(&output_path, "r", "shell").unwrap();
+        assert_eq!(unified.entries.len(), 4);
+        let error = crate::history::import::parse_arf_history(&output_path).unwrap_err();
+        assert!(error.to_string().contains("unified history export"));
     }
 
     #[test]
@@ -560,6 +636,51 @@ mod tests {
     }
 
     #[test]
+    fn test_export_rejects_incompatible_r_artifacts_and_cleans_up_temp_files() {
+        for (artifact, format_version, kind, expected_error) in [
+            ("history", "1", Some("shell"), "kind mismatch"),
+            ("history-export", "1", None, "unified history export"),
+            (
+                "history",
+                "2",
+                Some("r"),
+                "unsupported arf artifact format version 2",
+            ),
+        ] {
+            let temp_dir = TempDir::new().unwrap();
+            let r_path = temp_dir.path().join("r.db");
+            write_artifact_metadata(&r_path, artifact, format_version, kind);
+            let output_path = temp_dir.path().join("export.db");
+
+            let error = export_history(
+                &r_path,
+                &temp_dir.path().join("missing-shell.db"),
+                &output_path,
+                "r",
+                "shell",
+            )
+            .unwrap_err();
+
+            assert!(format!("{error:#}").contains(expected_error));
+            assert!(!output_path.exists());
+            let temp_files: Vec<_> = std::fs::read_dir(temp_dir.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("arf-export-tmp")
+                })
+                .collect();
+            assert!(
+                temp_files.is_empty(),
+                "export temp file leaked for {artifact}"
+            );
+        }
+    }
+
+    #[test]
     fn test_export_import_round_trip() {
         use crate::history::HistoryStore;
         use crate::history::import::{ImportTargets, import_entries, parse_unified_arf_history};
@@ -588,8 +709,20 @@ mod tests {
         let new_r_path = temp_dir.path().join("new_r.db");
         let new_shell_path = temp_dir.path().join("new_shell.db");
         let mut targets = ImportTargets {
-            r_history: HistoryStore::open(new_r_path, None, None).unwrap(),
-            shell_history: HistoryStore::open(new_shell_path, None, None).unwrap(),
+            r_history: HistoryStore::open(
+                new_r_path,
+                crate::history::artifact::HistoryKind::R,
+                None,
+                None,
+            )
+            .unwrap(),
+            shell_history: HistoryStore::open(
+                new_shell_path,
+                crate::history::artifact::HistoryKind::Shell,
+                None,
+                None,
+            )
+            .unwrap(),
         };
 
         let import_result = import_entries(&mut targets, entries.entries, None, false).unwrap();

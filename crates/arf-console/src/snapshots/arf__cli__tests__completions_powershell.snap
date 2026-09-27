@@ -153,7 +153,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--shell-table', '--shell-table', [CompletionResultType]::ParameterName, 'Table name for shell history when importing from unified export file')
             [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Perform a dry run without actually importing')
             [CompletionResult]::new('--import-duplicates', '--import-duplicates', [CompletionResultType]::ParameterName, 'Import duplicate entries instead of skipping them. By default, entries that already exist in the target database are skipped (anti-join on command text and timestamp)')
-            [CompletionResult]::new('--unified', '--unified', [CompletionResultType]::ParameterName, 'Force unified export file mode (imports both R and shell history)')
+            [CompletionResult]::new('--unified', '--unified', [CompletionResultType]::ParameterName, 'Force unified mode for metadata-less legacy files (imports both R and shell history)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break

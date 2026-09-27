@@ -103,6 +103,11 @@ fn test_history_schema_subcommand() {
         stdout
     );
     assert!(
+        stdout.contains("## arf Artifact Metadata"),
+        "Should contain arf metadata section: {}",
+        stdout
+    );
+    assert!(
         stdout.contains("## Analyze or Export"),
         "Should contain export section: {}",
         stdout
@@ -119,6 +124,9 @@ fn test_history_schema_subcommand() {
         "Should contain command_line column: {}",
         stdout
     );
+    assert!(stdout.contains("CREATE TABLE arf_metadata"));
+    assert!(stdout.contains("key   TEXT PRIMARY KEY NOT NULL"));
+    assert!(stdout.contains("artifact = history-export"));
 
     // Check for R example
     assert!(

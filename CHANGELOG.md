@@ -5,6 +5,7 @@
 ### Added
 
 - **Experimental:** Opt-in static formal-name completion for qualified calls such as `stats::lm(` uses installed package metadata and stored code; enable it with `[experimental.r_completion.static.formals] mode = "prefer-static"`, with exact package/function exclusions and automatic fallback to R completion.
+- Newly created history databases and unified exports now carry versioned arf artifact metadata, allowing imports to identify database type independently of filenames while retaining legacy filename detection.
 
 ### Fixed
 

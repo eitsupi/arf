@@ -760,7 +760,13 @@ mod tests {
         let persistent_dir = tempfile::tempdir().unwrap();
         let persistent_path = persistent_dir.path().join("history.db");
         let persistent = HistoryRuntime::Persistent(HistoryHandle {
-            store: HistoryStore::open(persistent_path.clone(), None, None).unwrap(),
+            store: HistoryStore::open(
+                persistent_path.clone(),
+                crate::history::artifact::HistoryKind::R,
+                None,
+                None,
+            )
+            .unwrap(),
             receipt: HistorySaveReceipt::new(),
         });
 

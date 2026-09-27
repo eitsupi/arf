@@ -6,6 +6,7 @@
 //! hold a store lock across meta-command dispatch, R evaluation, a pager, a
 //! confirmation prompt, or any other user interaction.
 
+use super::artifact::{self, HistoryKind};
 use super::metadata::HistoryExtraInfo;
 use reedline::{
     History, HistoryItem, HistoryItemExtraInfo, HistoryItemId, HistorySessionId, Reedline, Result,
@@ -106,15 +107,17 @@ impl HistoryRuntime {
     /// Persistent open failures (including an unavailable default path) are
     /// deliberately represented as volatile fallbacks.  Only failure to
     /// create that fallback reaches `Unavailable`.
-    pub fn initialize(
+    pub(crate) fn initialize(
         mode: &crate::config::HistoryMode,
         requested_path: Option<PathBuf>,
+        history_kind: HistoryKind,
         session_id: Option<HistorySessionId>,
         session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Self {
         Self::initialize_with_factories(
             mode,
             requested_path,
+            history_kind,
             session_id,
             session_timestamp,
             HistoryStore::open,
@@ -131,6 +134,7 @@ impl HistoryRuntime {
     fn initialize_with_factories<Open, Memory>(
         mode: &crate::config::HistoryMode,
         requested_path: Option<PathBuf>,
+        history_kind: HistoryKind,
         session_id: Option<HistorySessionId>,
         session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
         mut open: Open,
@@ -139,6 +143,7 @@ impl HistoryRuntime {
     where
         Open: FnMut(
             PathBuf,
+            HistoryKind,
             Option<HistorySessionId>,
             Option<chrono::DateTime<chrono::Utc>>,
         ) -> Result<HistoryStore>,
@@ -166,7 +171,7 @@ impl HistoryRuntime {
         }
 
         let persistent_failure = match requested_path.clone() {
-            Some(path) => match open(path.clone(), session_id, session_timestamp) {
+            Some(path) => match open(path.clone(), history_kind, session_id, session_timestamp) {
                 Ok(store) => return Self::Persistent(make_handle(store)),
                 Err(error) => HistoryFailureDetail::persistent_open(path, error),
             },
@@ -365,17 +370,20 @@ impl HistoryFailureDetail {
 
 impl HistoryStore {
     /// Open or create a history database.
-    pub fn open(
+    pub(crate) fn open(
         path: PathBuf,
+        history_kind: HistoryKind,
         session_id: Option<HistorySessionId>,
         session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Self> {
+        artifact::prepare_history_path(&path, history_kind).map_err(|error| {
+            reedline::ReedlineError(reedline::ReedlineErrorVariants::HistoryDatabaseError(
+                format!("invalid history database artifact: {error:#}"),
+            ))
+        })?;
+        let history = SqliteBackedHistory::with_file(path.clone(), session_id, session_timestamp)?;
         Ok(Self {
-            inner: Arc::new(Mutex::new(SqliteBackedHistory::with_file(
-                path.clone(),
-                session_id,
-                session_timestamp,
-            )?)),
+            inner: Arc::new(Mutex::new(history)),
             path: Some(path),
             session: session_id,
         })
@@ -744,8 +752,246 @@ mod tests {
 
     fn open_store() -> (tempfile::TempDir, HistoryStore) {
         let dir = tempfile::tempdir().unwrap();
-        let store = HistoryStore::open(dir.path().join("history.db"), None, None).unwrap();
+        let store =
+            HistoryStore::open(dir.path().join("history.db"), HistoryKind::R, None, None).unwrap();
         (dir, store)
+    }
+
+    fn existing_database_with_metadata(
+        path: &std::path::Path,
+        artifact_name: &str,
+        format_version: &str,
+        history_kind: Option<&str>,
+    ) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection
+            .execute_batch(
+                r#"CREATE TABLE arf_metadata (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                )"#,
+            )
+            .unwrap();
+        let mut entries = vec![
+            ("artifact", artifact_name),
+            ("format_version", format_version),
+            ("created_by_version", env!("CARGO_PKG_VERSION")),
+        ];
+        if let Some(history_kind) = history_kind {
+            entries.push(("history_kind", history_kind));
+        }
+        for (key, value) in entries {
+            connection
+                .execute(
+                    "INSERT INTO arf_metadata (key, value) VALUES (?1, ?2)",
+                    [key, value],
+                )
+                .unwrap();
+        }
+    }
+
+    fn assert_no_history_table(path: &std::path::Path) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "reedline history schema must not be created");
+    }
+
+    #[test]
+    fn newly_created_persistent_stores_write_kind_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        for (filename, kind) in [("r.db", HistoryKind::R), ("shell.db", HistoryKind::Shell)] {
+            let path = dir.path().join(filename);
+            drop(HistoryStore::open(path.clone(), kind, None, None).unwrap());
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            assert_eq!(
+                artifact::read_artifact(&connection).unwrap(),
+                artifact::HistoryArtifact::History(kind)
+            );
+            let metadata: std::collections::HashMap<String, String> = connection
+                .prepare("SELECT key, value FROM arf_metadata")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .map(|row| row.unwrap())
+                .collect();
+            assert_eq!(metadata.len(), 4);
+            assert_eq!(
+                metadata.get("artifact").map(String::as_str),
+                Some("history")
+            );
+            assert_eq!(
+                metadata.get("format_version").map(String::as_str),
+                Some("1")
+            );
+            assert_eq!(
+                metadata.get("history_kind").map(String::as_str),
+                Some(kind.as_str())
+            );
+            assert_eq!(
+                metadata.get("created_by_version").map(String::as_str),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+            drop(connection);
+            drop(HistoryStore::open(path, kind, None, None).unwrap());
+        }
+    }
+
+    #[test]
+    fn published_metadata_only_database_can_be_opened_by_reedline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata-only.db");
+        artifact::prepare_history_path(&path, HistoryKind::R).unwrap();
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let history_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_table_count, 0);
+        drop(connection);
+
+        drop(HistoryStore::open(path.clone(), HistoryKind::R, None, None).unwrap());
+
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let history_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history_table_count, 1);
+        assert_eq!(
+            artifact::read_artifact(&connection).unwrap(),
+            artifact::HistoryArtifact::History(HistoryKind::R)
+        );
+    }
+
+    #[test]
+    fn opening_existing_metadata_less_store_does_not_backfill_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
+        drop(SqliteBackedHistory::with_file(path.clone(), None, None).unwrap());
+
+        let store = HistoryStore::open(path.clone(), HistoryKind::R, None, None).unwrap();
+        drop(store);
+
+        let connection = rusqlite::Connection::open(path).unwrap();
+        assert_eq!(
+            artifact::read_artifact(&connection).unwrap(),
+            artifact::HistoryArtifact::Legacy
+        );
+    }
+
+    #[test]
+    fn opening_future_format_database_fails_before_reedline_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("future.db");
+        existing_database_with_metadata(&path, "history", "2", Some("r"));
+
+        let error = HistoryStore::open(path, HistoryKind::R, None, None)
+            .err()
+            .expect("future format should be rejected");
+        assert!(format!("{error:?}").contains("unsupported arf artifact format version 2"));
+        assert_no_history_table(&dir.path().join("future.db"));
+    }
+
+    #[test]
+    fn opening_wrong_history_kind_fails_before_reedline_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shell.db");
+        existing_database_with_metadata(&path, "history", "1", Some("shell"));
+
+        let error = HistoryStore::open(path, HistoryKind::R, None, None)
+            .err()
+            .expect("mismatched kind should be rejected");
+        assert!(format!("{error:?}").contains("history database kind mismatch"));
+        assert_no_history_table(&dir.path().join("shell.db"));
+    }
+
+    #[test]
+    fn opening_unified_export_as_history_fails_before_reedline_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("r.db");
+        existing_database_with_metadata(&path, "history-export", "1", None);
+
+        let error = HistoryStore::open(path, HistoryKind::R, None, None)
+            .err()
+            .expect("unified export should be rejected");
+        assert!(format!("{error:?}").contains("cannot open a unified history export"));
+        assert_no_history_table(&dir.path().join("r.db"));
+    }
+
+    #[test]
+    fn concurrent_same_kind_first_opens_both_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("concurrent.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let handles = [HistoryKind::R, HistoryKind::R].map(|kind| {
+            let barrier = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                HistoryStore::open(path, kind, None, None)
+            })
+        });
+        let stores: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect();
+
+        assert_eq!(stores.len(), 2);
+        assert_eq!(
+            artifact::read_artifact_from_path(&path).unwrap(),
+            artifact::HistoryArtifact::History(HistoryKind::R)
+        );
+    }
+
+    #[test]
+    fn concurrent_different_kind_first_opens_have_one_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("concurrent.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let handles = [HistoryKind::R, HistoryKind::Shell].map(|kind| {
+            let barrier = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                (kind, HistoryStore::open(path, kind, None, None))
+            })
+        });
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        let successes: Vec<_> = results
+            .iter()
+            .filter_map(|(_, result)| result.as_ref().ok())
+            .collect();
+        let errors: Vec<_> = results
+            .iter()
+            .filter_map(|(_, result)| result.as_ref().err())
+            .collect();
+
+        assert_eq!(successes.len(), 1);
+        assert_eq!(errors.len(), 1);
+        assert!(format!("{:?}", errors[0]).contains("history database kind mismatch"));
+        let (winner_kind, _) = results.iter().find(|(_, result)| result.is_ok()).unwrap();
+        assert_eq!(
+            artifact::read_artifact_from_path(&path).unwrap(),
+            artifact::HistoryArtifact::History(*winner_kind)
+        );
     }
 
     #[test]
@@ -753,9 +999,10 @@ mod tests {
         let runtime = HistoryRuntime::initialize_with_factories(
             &crate::config::HistoryMode::Volatile,
             None,
+            HistoryKind::R,
             None,
             None,
-            |_path, _session, _timestamp| injected_failure("persistent must not be opened"),
+            |_path, _kind, _session, _timestamp| injected_failure("persistent must not be opened"),
             |_session, _timestamp| injected_failure("configured memory failure"),
         );
 
@@ -778,9 +1025,10 @@ mod tests {
         let runtime = HistoryRuntime::initialize_with_factories(
             &crate::config::HistoryMode::Persistent { dir: None },
             Some(requested_path.clone()),
+            HistoryKind::R,
             None,
             None,
-            |_path, _session, _timestamp| injected_failure("persistent open failure"),
+            |_path, _kind, _session, _timestamp| injected_failure("persistent open failure"),
             |_session, _timestamp| injected_failure("fallback memory failure"),
         );
 
@@ -944,7 +1192,7 @@ mod tests {
     fn failed_finalization_does_not_write_false() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
-        let store = HistoryStore::open(path.clone(), None, None).unwrap();
+        let store = HistoryStore::open(path.clone(), HistoryKind::R, None, None).unwrap();
         let item = store
             .save_unknown(HistoryItem::from_command_line("will be cleared"))
             .unwrap();

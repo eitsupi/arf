@@ -1165,8 +1165,20 @@ mod tests {
     #[test]
     fn history_clear_deduplicates_shared_store_owners() {
         let dir = tempfile::tempdir().unwrap();
-        let store = HistoryStore::open(dir.path().join("history.db"), None, None).unwrap();
-        let unique = HistoryStore::open(dir.path().join("other.db"), None, None).unwrap();
+        let store = HistoryStore::open(
+            dir.path().join("history.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
+        let unique = HistoryStore::open(
+            dir.path().join("other.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .unwrap();
         let stores =
             dedup_history_stores(vec![("R", store.clone()), ("Shell", store), ("R", unique)]);
         assert_eq!(stores.len(), 2);

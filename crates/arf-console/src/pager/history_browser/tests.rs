@@ -170,7 +170,13 @@ fn create_test_db(entries: &[(&str, Option<&str>)]) -> (tempfile::TempDir, Histo
         )
         .unwrap();
     }
-    let store = HistoryStore::open(db_path, None, None).unwrap();
+    let store = HistoryStore::open(
+        db_path,
+        crate::history::artifact::HistoryKind::R,
+        None,
+        None,
+    )
+    .unwrap();
     (dir, store)
 }
 

@@ -40,13 +40,14 @@ pub(crate) enum HistoryAction {
         #[arg(long)]
         import_duplicates: bool,
 
-        /// Force unified export file mode (imports both R and shell history).
+        /// Force unified mode for metadata-less legacy files (imports both R and shell history).
         ///
-        /// By default, the file format is auto-detected by filename:
+        /// Versioned arf metadata always identifies history databases and unified exports first.
+        /// For metadata-less legacy files, the format is inferred by filename:
         ///   - 'r.db' or 'shell.db' → single-database mode (one history type)
         ///   - Other names (e.g., 'backup.db') → unified mode (both history types)
         ///
-        /// Use this flag to force unified mode even for files named r.db/shell.db.
+        /// Use this flag to force unified mode for metadata-less files even when named r.db/shell.db.
         #[arg(long)]
         unified: bool,
 
