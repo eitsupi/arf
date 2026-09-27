@@ -261,3 +261,71 @@ fn history_search_preserves_auto_matched_paren_pair() -> Result<()> {
         },
     )
 }
+
+#[test]
+fn history_recall_keeps_quote_pair_backspace_state_in_sync() -> Result<()> {
+    run_case(
+        "history-recall-quote-pair-backspace",
+        &["--no-completion"],
+        |terminal| {
+            terminal.write(r#"""#)?;
+            terminal.wait_for("empty auto-matched quote pair", |_, line| {
+                line.trim_end() == r#"ARF> """#
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(Some(r#"[1] """#), PROMPT)?;
+            terminal.submit("1", "[1] 1", PROMPT)?;
+
+            terminal.key("Up")?;
+            terminal.key("Up")?;
+            terminal.wait_for("recalled empty quote pair", |_, line| {
+                line.trim_end() == r#"ARF> """#
+            })?;
+            terminal.key("Down")?;
+            terminal.key("Up")?;
+            terminal.wait_for("quote pair survives history navigation", |_, line| {
+                line.trim_end() == r#"ARF> """#
+            })?;
+            terminal.key("Left")?;
+            terminal.key("Backspace")?;
+            terminal.wait_for("recalled quote pair is deleted", |_, line| {
+                line.trim_end() == PROMPT
+            })?;
+            terminal.submit("1+1", "[1] 2", PROMPT)
+        },
+    )
+}
+
+#[test]
+fn history_recall_keeps_bracket_pair_backspace_state_in_sync() -> Result<()> {
+    run_case(
+        "history-recall-bracket-pair-backspace",
+        &["--no-completion"],
+        |terminal| {
+            terminal.write("{")?;
+            terminal.wait_for("empty auto-matched bracket pair", |_, line| {
+                line.trim_end() == "ARF> {}"
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_prompt(Some("NULL"), PROMPT)?;
+            terminal.submit("1", "[1] 1", PROMPT)?;
+
+            terminal.key("Up")?;
+            terminal.key("Up")?;
+            terminal.wait_for("recalled empty bracket pair", |_, line| {
+                line.trim_end() == "ARF> {}"
+            })?;
+            terminal.key("Down")?;
+            terminal.key("Up")?;
+            terminal.wait_for("bracket pair survives history navigation", |_, line| {
+                line.trim_end() == "ARF> {}"
+            })?;
+            terminal.key("Left")?;
+            terminal.key("Backspace")?;
+            terminal.wait_for("recalled bracket pair is deleted", |_, line| {
+                line.trim_end() == PROMPT
+            })?;
+            terminal.submit("1+1", "[1] 2", PROMPT)
+        },
+    )
+}

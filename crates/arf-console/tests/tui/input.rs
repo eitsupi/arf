@@ -199,10 +199,9 @@ fn multiline_quoted_string_preserves_newline() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires PR #330 reedline auto-pairs"]
 fn raw_string_with_auto_match_is_preserved() -> Result<()> {
     run_case("raw-string-auto-match", &[], |terminal| {
-        let source = r#"x <- r"---(hello "world")---"#;
+        let source = r#"x <- r"---(hello "world")---""#;
         terminal.write(source)?;
         terminal.wait_for("raw string source is constructed", |_, line| {
             line.contains(source)
@@ -212,6 +211,22 @@ fn raw_string_with_auto_match_is_preserved() -> Result<()> {
             state.text.contains(source) && line.trim_end() == PROMPT
         })?;
         terminal.submit("nchar(x)", "[1] 13", PROMPT)
+    })
+}
+
+#[test]
+fn backspace_after_newline_inside_auto_matched_pair_keeps_closer() -> Result<()> {
+    run_case("backspace-after-newline-in-auto-pair", &[], |terminal| {
+        terminal.write("(")?;
+        terminal.wait_for("auto-matched parenthesis pair", |_, line| {
+            line.trim_end() == "ARF> ()"
+        })?;
+        // Shift+Enter is Reedline's InsertNewline event.
+        terminal.write("\x1b[13;2u")?;
+        terminal.key("Backspace")?;
+        terminal.write("1+1")?;
+        terminal.key("Enter")?;
+        terminal.wait_for_prompt(Some("[1] 2"), PROMPT)
     })
 }
 
