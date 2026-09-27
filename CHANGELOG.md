@@ -2,14 +2,24 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-27
+
 ### Added
 
-- **Experimental:** Opt-in static formal-name completion for qualified calls such as `stats::lm(` uses installed package metadata and stored code; enable it with `[experimental.r_completion.static.formals] mode = "prefer-static"`, with exact package/function exclusions and automatic fallback to R completion.
-- Newly created history databases and unified exports now carry versioned arf artifact metadata, allowing imports to identify database type independently of filenames while retaining legacy filename detection.
+- **Experimental:** Opt-in static formal-name completion for qualified calls such as `stats::lm(` uses installed package metadata and stored code; enable it with `[experimental.r_completion.static.formals] mode = "prefer-static"`, with exact package/function exclusions and automatic fallback to R completion (#356).
+- Newly created history databases and unified exports now carry versioned arf artifact metadata, so imports can identify artifact types independently of filenames while retaining legacy filename detection (#377).
+
+### Changed
+
+- The `:help` browser now indexes installed help metadata without opening compiled help databases, searches all page aliases, and keeps help topics available when unrelated package metadata is missing or damaged (#375).
 
 ### Fixed
 
-- History schema views (`arf history schema` and `:history schema`) now display the effective persistent directory from `--history-dir`, `ARF_HISTORY_DIR`, or `[history]` configuration instead of always showing the default data directory, and do not display a persistent path in volatile mode.
+- `arf history schema` and `:history schema` now show the effective history directory selected by `--history-dir`, `ARF_HISTORY_DIR`, or configuration, including platform-correct database paths (#376).
+- The Rd help viewer now renders descriptions using headings, so pages with definition lists such as `ggplot2::Coord` display correctly (#374).
+- Configuration warnings are no longer duplicated across startup re-exec, and `arf config check` reports deprecated keys without failing validation (#364).
+- Windows IPC approval prompts now enter raw terminal mode before accepting input, so Ctrl+C reliably rejects the prompt and returns to the REPL (#361).
+- Auto-pairing now uses reedline's live editor buffer, fixing stale state and improving behavior with raw strings, history recall, and pasted input (#330).
 
 ## [0.5.2] - 2026-09-11
 
