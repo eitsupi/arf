@@ -67,10 +67,19 @@ pub(crate) fn handle_history_command(
     config_path: Option<&std::path::PathBuf>,
     cli_history_dir: Option<&std::path::PathBuf>,
 ) -> Result<()> {
+    let config = load_config_or_warn(config_path);
+    // `--no-history` configures the in-memory HistoryRuntime for interactive/headless sessions;
+    // history subcommands create no runtime and reject that session-only option by scope.
+    let mode = config::history_mode_with_overrides(
+        &config.history.mode,
+        cli_history_dir.map(|path| path.as_path()),
+        false,
+    );
+    let history_location = config::resolved_history_location(&mode);
+
     match action {
-        HistoryAction::Schema => {
-            pager::history_schema::print_schema().context("Failed to display history schema")
-        }
+        HistoryAction::Schema => pager::history_schema::print_schema(&history_location)
+            .context("Failed to display history schema"),
         HistoryAction::Import {
             from,
             file,
@@ -89,14 +98,15 @@ pub(crate) fn handle_history_command(
             *unified,
             r_table,
             shell_table,
-            config_path,
-            cli_history_dir,
+            history_location
+                .directory()
+                .map(std::path::Path::to_path_buf),
         ),
         HistoryAction::Export {
             file,
             r_table,
             shell_table,
-        } => handle_history_export(file, r_table, shell_table, config_path, cli_history_dir),
+        } => handle_history_export(file, r_table, shell_table, history_location.directory()),
     }
 }
 
@@ -140,23 +150,13 @@ fn handle_history_import(
     unified: bool,
     r_table: &str,
     shell_table: &str,
-    config_path: Option<&std::path::PathBuf>,
-    cli_history_dir: Option<&std::path::PathBuf>,
+    history_dir: Option<std::path::PathBuf>,
 ) -> Result<()> {
     use history::import::{
         DedupSet, default_r_history_path, default_radian_path, import_entries,
         import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
         parse_unified_arf_history,
     };
-
-    // Load config (respecting --config flag if provided)
-    let config = load_config_or_warn(config_path);
-
-    // Resolve effective history directory (CLI --history-dir takes precedence)
-    // Required for actual imports and for dry-run with dedup (needs DB access)
-    let history_dir = cli_history_dir
-        .cloned()
-        .or_else(|| config::history_dir_for_mode(&config.history.mode));
 
     // Determine source file path
     // Note: --from arf requires --file to avoid self-import (source = target)
@@ -232,7 +232,7 @@ fn handle_history_import(
                 };
                 (r_dedup, shell_dedup)
             } else {
-                // history_dir could not be resolved (no config, no XDG default).
+                // No persistent history directory was resolved (for example, volatile mode).
                 // Dedup is silently skipped; warn the user so they know the
                 // duplicate count is not available.
                 eprintln!(
@@ -376,18 +376,12 @@ fn handle_history_export(
     output_file: &std::path::Path,
     r_table: &str,
     shell_table: &str,
-    config_path: Option<&std::path::PathBuf>,
-    cli_history_dir: Option<&std::path::PathBuf>,
+    history_dir: Option<&std::path::Path>,
 ) -> Result<()> {
     use history::export::export_history;
 
-    // Load config (respecting --config flag if provided)
-    let config = load_config_or_warn(config_path);
-
-    // Resolve effective history directory
-    let history_dir = cli_history_dir
-        .cloned()
-        .or_else(|| config::history_dir_for_mode(&config.history.mode))
+    let history_dir = history_dir
+        .map(std::path::Path::to_path_buf)
         .ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
 
     let r_path = history_dir.join("r.db");

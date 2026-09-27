@@ -2,7 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where command history is kept for the duration of a process.
 ///
@@ -14,13 +14,60 @@ pub enum HistoryMode {
     Volatile,
 }
 
-impl HistoryMode {
-    /// Return the configured directory when persistence is selected.
-    pub fn persistent_dir(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Persistent { dir } => dir.as_ref(),
-            Self::Volatile => None,
-        }
+/// Origin of the effective on-disk history directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoryLocationSource {
+    Default,
+    Explicit,
+    Volatile,
+}
+
+/// One resolved history location shared by all history consumers.
+///
+/// Volatile mode intentionally has no directory. The resolver itself is pure:
+/// callers provide the already-derived default directory, keeping environment
+/// lookup outside the decision and allowing hermetic tests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedHistoryLocation {
+    directory: Option<PathBuf>,
+    source: HistoryLocationSource,
+}
+
+impl ResolvedHistoryLocation {
+    pub(crate) fn directory(&self) -> Option<&Path> {
+        self.directory.as_deref()
+    }
+
+    pub(crate) fn source(&self) -> HistoryLocationSource {
+        self.source
+    }
+
+    pub(crate) fn database_path(&self, filename: &str) -> Option<PathBuf> {
+        self.directory
+            .as_ref()
+            .map(|directory| directory.join(filename))
+    }
+}
+
+pub(crate) fn resolve_history_location(
+    mode: &HistoryMode,
+    default_directory: Option<PathBuf>,
+) -> ResolvedHistoryLocation {
+    match mode {
+        HistoryMode::Persistent {
+            dir: Some(directory),
+        } => ResolvedHistoryLocation {
+            directory: Some(directory.clone()),
+            source: HistoryLocationSource::Explicit,
+        },
+        HistoryMode::Persistent { dir: None } => ResolvedHistoryLocation {
+            directory: default_directory,
+            source: HistoryLocationSource::Default,
+        },
+        HistoryMode::Volatile => ResolvedHistoryLocation {
+            directory: None,
+            source: HistoryLocationSource::Volatile,
+        },
     }
 }
 
@@ -185,5 +232,37 @@ impl Default for HistoryConfig {
             menu_max_height: 15,
             mode: HistoryMode::Persistent { dir: None },
         }
+    }
+}
+
+#[cfg(test)]
+mod location_tests {
+    use super::*;
+
+    #[test]
+    fn resolver_preserves_source_and_never_assigns_volatile_directory() {
+        let default = PathBuf::from("/xdg/arf/history");
+        let resolved = resolve_history_location(
+            &HistoryMode::Persistent { dir: None },
+            Some(default.clone()),
+        );
+        assert_eq!(resolved.directory(), Some(default.as_path()));
+        assert_eq!(resolved.source(), HistoryLocationSource::Default);
+        assert_eq!(resolved.database_path("r.db"), Some(default.join("r.db")));
+
+        let explicit = PathBuf::from("/custom/history");
+        let resolved = resolve_history_location(
+            &HistoryMode::Persistent {
+                dir: Some(explicit.clone()),
+            },
+            Some(default),
+        );
+        assert_eq!(resolved.directory(), Some(explicit.as_path()));
+        assert_eq!(resolved.source(), HistoryLocationSource::Explicit);
+
+        let resolved = resolve_history_location(&HistoryMode::Volatile, None);
+        assert_eq!(resolved.directory(), None);
+        assert_eq!(resolved.database_path("r.db"), None);
+        assert_eq!(resolved.source(), HistoryLocationSource::Volatile);
     }
 }

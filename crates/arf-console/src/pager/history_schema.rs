@@ -4,7 +4,7 @@
 //! and example R code for accessing it, used by both CLI and REPL commands.
 
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
-use crate::config::history_dir;
+use crate::config::{HistoryLocationSource, ResolvedHistoryLocation};
 use crate::highlighter::RTreeSitterHighlighter;
 use crate::pager::style_convert::styled_text_to_line;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -14,6 +14,7 @@ use ratatui::text::{Line, Span};
 use reedline::Highlighter;
 use std::cell::{Cell, RefCell};
 use std::io::{self, IsTerminal};
+use std::path::Path;
 
 /// Error returned when history directory cannot be determined.
 #[derive(Debug)]
@@ -21,7 +22,7 @@ pub struct HistoryDirError;
 
 impl std::fmt::Display for HistoryDirError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Could not determine history directory")
+        write!(f, "No persistent history directory is available")
     }
 }
 
@@ -77,23 +78,27 @@ impl Default for SchemaStyles {
 /// # Errors
 ///
 /// Returns an error if the history directory cannot be determined.
-pub fn print_schema() -> Result<(), HistoryDirError> {
-    let history_path = history_dir().ok_or(HistoryDirError)?;
-    let history_path = history_path.display().to_string();
+pub fn print_schema(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
+    if location.source() == HistoryLocationSource::Volatile {
+        return Err(HistoryDirError);
+    }
+    let history_path = location.directory().ok_or(HistoryDirError)?;
 
     // Check if stdout is a terminal - only use colors if it is
     if io::stdout().is_terminal() {
-        print_schema_colored(&history_path);
+        print_schema_colored(history_path);
     } else {
-        print_schema_plain(&history_path);
+        print_schema_plain(history_path);
     }
 
     Ok(())
 }
 
 /// Print schema with ANSI colors (for terminal output).
-fn print_schema_colored(history_path: &str) {
+fn print_schema_colored(history_path: &Path) {
     let s = SchemaStyles::default();
+    let r_path = history_path.join("r.db");
+    let shell_path = history_path.join("shell.db");
 
     // Title
     println!("{}", s.heading.paint("# History Database"));
@@ -102,13 +107,10 @@ fn print_schema_colored(history_path: &str) {
     // Location section
     println!("{}", s.heading.paint("## Location"));
     println!();
-    println!(
-        "- R mode: {}",
-        s.path.paint(format!("{}/r.db", history_path))
-    );
+    println!("- R mode: {}", s.path.paint(r_path.display().to_string()));
     println!(
         "- Shell mode: {}",
-        s.path.paint(format!("{}/shell.db", history_path))
+        s.path.paint(shell_path.display().to_string())
     );
     println!();
 
@@ -121,11 +123,11 @@ fn print_schema_colored(history_path: &str) {
     println!();
 
     // R example code
-    print_r_example_code(&s, history_path);
+    print_r_example_code(&s, &r_path);
 }
 
 /// Print schema as plain text (for piped output).
-fn print_schema_plain(history_path: &str) {
+fn print_schema_plain(history_path: &Path) {
     // Use the same lines as generate_schema_lines for consistency
     for line in generate_schema_lines(history_path) {
         println!("{}", line);
@@ -140,12 +142,14 @@ fn print_schema_plain(history_path: &str) {
 /// # Errors
 ///
 /// Returns an error if the history directory cannot be determined.
-pub fn show_schema_pager() -> Result<(), HistoryDirError> {
-    let history_path = history_dir().ok_or(HistoryDirError)?;
-    let history_path = history_path.display().to_string();
+pub fn show_schema_pager(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
+    if location.source() == HistoryLocationSource::Volatile {
+        return Err(HistoryDirError);
+    }
+    let history_path = location.directory().ok_or(HistoryDirError)?;
 
     // Generate content lines
-    let lines = generate_schema_lines(&history_path);
+    let lines = generate_schema_lines(history_path);
     let mut content = SchemaContent::new(lines);
 
     // Configure pager
@@ -164,8 +168,10 @@ pub fn show_schema_pager() -> Result<(), HistoryDirError> {
 }
 
 /// Generate the schema documentation as a vector of lines.
-fn generate_schema_lines(history_path: &str) -> Vec<String> {
+fn generate_schema_lines(history_path: &Path) -> Vec<String> {
     let mut lines = Vec::new();
+    let r_path = history_path.join("r.db");
+    let shell_path = history_path.join("shell.db");
 
     // Title
     lines.push("# History Database".to_string());
@@ -174,8 +180,8 @@ fn generate_schema_lines(history_path: &str) -> Vec<String> {
     // Location section
     lines.push("## Location".to_string());
     lines.push(String::new());
-    lines.push(format!("- R mode: {}/r.db", history_path));
-    lines.push(format!("- Shell mode: {}/shell.db", history_path));
+    lines.push(format!("- R mode: {}", r_path.display()));
+    lines.push(format!("- Shell mode: {}", shell_path.display()));
     lines.push(String::new());
 
     // SQLite Schema section
@@ -217,7 +223,7 @@ fn generate_schema_lines(history_path: &str) -> Vec<String> {
     lines.push(String::new());
     lines.push("con <- dbConnect(".to_string());
     lines.push("  RSQLite::SQLite(),".to_string());
-    lines.push(format!(r#"  "{}/r.db""#, history_path));
+    lines.push(format!("  {}", format_r_path(&r_path)));
     lines.push(")".to_string());
     lines.push("history_data <- dbGetQuery(".to_string());
     lines.push("  con,".to_string());
@@ -228,6 +234,27 @@ fn generate_schema_lines(history_path: &str) -> Vec<String> {
     lines.push("```".to_string());
 
     lines
+}
+
+/// Format a filesystem path as a quoted, portable R string literal.
+fn format_r_path(path: &Path) -> String {
+    #[cfg(windows)]
+    let portable_path = path.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let portable_path = path.to_string_lossy().into_owned();
+
+    let mut escaped = String::with_capacity(portable_path.len());
+    for character in portable_path.chars() {
+        match character {
+            '"' => escaped.push_str(r#"\""#),
+            '\\' => escaped.push_str(r#"\\"#),
+            '\n' => escaped.push_str(r#"\n"#),
+            '\r' => escaped.push_str(r#"\r"#),
+            '\t' => escaped.push_str(r#"\t"#),
+            character => escaped.push(character),
+        }
+    }
+    format!(r#""{escaped}""#)
 }
 
 /// Track if we're inside a code block and what type.
@@ -615,7 +642,7 @@ fn print_indexes(s: &SchemaStyles) {
 }
 
 /// Print example R code for accessing the history database.
-fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
+fn print_r_example_code(s: &SchemaStyles, r_path: &Path) {
     println!("{}", s.heading.paint("## Analyze or Export"));
     println!();
     println!("Please read the database directly.");
@@ -644,10 +671,7 @@ fn print_r_example_code(s: &SchemaStyles, history_path: &str) {
         s.r_keyword.paint("dbConnect")
     );
     println!("  RSQLite::{}(),", s.r_keyword.paint("SQLite"));
-    println!(
-        "  {}",
-        s.r_string.paint(format!(r#""{}/r.db""#, history_path))
-    );
+    println!("  {}", s.r_string.paint(format_r_path(r_path)));
     println!(")");
 
     // history_data <- dbGetQuery(...) |> as_tibble()
@@ -700,16 +724,29 @@ mod tests {
 
     #[test]
     fn test_print_schema_runs() {
-        // print_schema reads HOME/XDG variables indirectly through history_dir.
+        // Resolve the default through the same location resolver used by consumers.
         let _guard = crate::test_utils::lock_env();
-        // On systems with XDG support, this should succeed
-        // On other systems (or in restrictive environments), it may fail
-        let _ = print_schema();
+        let location =
+            crate::config::resolved_history_location(&crate::config::HistoryMode::Persistent {
+                dir: None,
+            });
+        let _ = print_schema(&location);
+    }
+
+    #[test]
+    fn volatile_schema_does_not_resolve_or_display_a_persistent_path() {
+        let location =
+            crate::config::resolved_history_location(&crate::config::HistoryMode::Volatile);
+        assert!(location.directory().is_none());
+        assert!(print_schema(&location).is_err());
     }
 
     #[test]
     fn test_generate_schema_lines_contains_expected_content() {
-        let lines = generate_schema_lines("/test/path");
+        let history_path = Path::new("/test/path");
+        let r_path = history_path.join("r.db");
+        let shell_path = history_path.join("shell.db");
+        let lines = generate_schema_lines(history_path);
 
         // Check for expected sections
         assert!(lines.iter().any(|l| l == "# History Database"));
@@ -724,8 +761,16 @@ mod tests {
         assert!(lines.iter().filter(|l| *l == "```").count() == 2);
 
         // Check path is included
-        assert!(lines.iter().any(|l| l.contains("/test/path/r.db")));
-        assert!(lines.iter().any(|l| l.contains("/test/path/shell.db")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(&r_path.display().to_string()))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(&shell_path.display().to_string()))
+        );
 
         // Check SQL schema elements
         assert!(lines.iter().any(|l| l.contains("CREATE TABLE history")));
@@ -740,7 +785,7 @@ mod tests {
 
     #[test]
     fn test_generate_schema_lines_count() {
-        let lines = generate_schema_lines("/test/path");
+        let lines = generate_schema_lines(Path::new("/test/path"));
         // Ensure we have a reasonable number of lines (schema should be ~50 lines)
         assert!(
             lines.len() >= 40,
@@ -917,17 +962,18 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_schema_output_snapshot() {
         // Use a fixed path to ensure consistent output
-        let lines = generate_schema_lines("/test/history");
+        let lines = generate_schema_lines(Path::new("/test/history"));
         let output = lines.join("\n");
         insta::assert_snapshot!("history_schema_output", output);
     }
 
     #[test]
     fn test_extract_r_code_block() {
-        let lines = generate_schema_lines("/test/path");
+        let lines = generate_schema_lines(Path::new("/test/path"));
         let r_code = extract_r_code_block(&lines);
 
         // Should contain library calls
@@ -942,6 +988,26 @@ mod tests {
 
         // Should NOT contain the code fence markers
         assert!(!r_code.contains("```"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn r_path_literal_normalizes_windows_separators_and_escapes_quotes() {
+        let path = Path::new(r#"C:\Program Files\R "test"\history\r.db"#);
+        assert_eq!(
+            format_r_path(path),
+            r#""C:/Program Files/R \"test\"/history/r.db""#
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn r_path_literal_escapes_unix_backslash_and_quotes() {
+        let path = Path::new(r#"/tmp/history\archive/"quoted"/r.db"#);
+        assert_eq!(
+            format_r_path(path),
+            r#""/tmp/history\\archive/\"quoted\"/r.db""#
+        );
     }
 
     #[test]

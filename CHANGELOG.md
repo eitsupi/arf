@@ -6,6 +6,10 @@
 
 - **Experimental:** Opt-in static formal-name completion for qualified calls such as `stats::lm(` uses installed package metadata and stored code; enable it with `[experimental.r_completion.static.formals] mode = "prefer-static"`, with exact package/function exclusions and automatic fallback to R completion.
 
+### Fixed
+
+- History schema views (`arf history schema` and `:history schema`) now display the effective persistent directory from `--history-dir`, `ARF_HISTORY_DIR`, or `[history]` configuration instead of always showing the default data directory, and do not display a persistent path in volatile mode.
+
 ## [0.5.2] - 2026-09-11
 
 ### Fixed

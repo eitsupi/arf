@@ -2,8 +2,8 @@
 
 use crate::config::{
     ConfigStatus, HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig,
-    RSourceStatus, ReprexMode, SpinnerConfig, StatusColorConfig, StatusConfig, ViColorConfig,
-    ViConfig,
+    RSourceStatus, ReprexMode, ResolvedHistoryLocation, SpinnerConfig, StatusColorConfig,
+    StatusConfig, ViColorConfig, ViConfig,
 };
 use crate::editor::prompt::PromptFormatter;
 use nu_ansi_term::Color;
@@ -70,6 +70,8 @@ pub struct ReplState {
     pub r_source_status: RSourceStatus,
     /// R_HOME reported by the running R at startup, if R initialized successfully.
     pub r_home: Option<PathBuf>,
+    /// Effective persistent/volatile history location resolved at REPL startup.
+    pub history_location: ResolvedHistoryLocation,
     /// Configuration for the sponge-like "forget failed commands" feature.
     pub forget_config: HistoryForgetConfig,
     /// Queue for the sponge feature (tracks commands to potentially delete).

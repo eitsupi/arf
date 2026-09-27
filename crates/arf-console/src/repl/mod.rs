@@ -15,7 +15,7 @@ use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
     AutoSuggestions, Config, ConfigStatus, EditorMode, FormatterBackend, ModeIndicatorPosition,
-    RSourceStatus, ReprexMode, history_dir_for_mode,
+    RSourceStatus, ReprexMode, ResolvedHistoryLocation,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;
@@ -223,6 +223,8 @@ pub(crate) use arf_println;
 /// The main REPL structure.
 pub struct Repl {
     config: Config,
+    /// Effective directory resolved once for R, shell, and schema consumers.
+    history_location: ResolvedHistoryLocation,
     /// Formatter backend resolved once from the configured selector at startup.
     formatter_backend: Option<FormatterBackend>,
     /// Path to the config file (if specified via --config, or the default XDG path).
@@ -258,6 +260,7 @@ impl Repl {
         r_home: Option<std::path::PathBuf>,
         session_id: Option<HistorySessionId>,
     ) -> Result<Self> {
+        let history_location = crate::config::resolved_history_location(&config.history.mode);
         let formatter_backend =
             crate::external::formatter::resolve_formatter(config.reprex.formatter);
         // Check if R is initialized
@@ -273,6 +276,7 @@ impl Repl {
 
         Ok(Repl {
             config,
+            history_location,
             formatter_backend,
             config_path,
             config_status,
@@ -356,14 +360,12 @@ impl Repl {
 
     /// Get the R history database path based on configuration.
     fn r_history_path(&self) -> Option<std::path::PathBuf> {
-        let dir = history_dir_for_mode(&self.config.history.mode);
-        dir.map(|d| d.join("r.db"))
+        self.history_location.database_path("r.db")
     }
 
     /// Get the Shell history database path based on configuration.
     fn shell_history_path(&self) -> Option<std::path::PathBuf> {
-        let dir = history_dir_for_mode(&self.config.history.mode);
-        dir.map(|d| d.join("shell.db"))
+        self.history_location.database_path("shell.db")
     }
 
     /// Create an R language hinter based on config settings.
@@ -666,6 +668,7 @@ impl Repl {
                 config_status: self.config_status,
                 r_source_status: self.r_source_status.clone(),
                 r_home: self.r_home.clone(),
+                history_location: self.history_location.clone(),
                 forget_config: self.config.experimental.history_forget.clone(),
                 sponge_queue: state::SpongeQueue::new(),
                 dir_stack: Vec::new(),
@@ -932,6 +935,7 @@ impl Repl {
                             reprex: &standalone_reprex,
                             config_path: &self.config_path,
                             config_status: self.config_status,
+                            history_location: &self.history_location,
                             r_history: &history_handle,
                             shell_history: &shell_history_handle,
                             r_source_status: &self.r_source_status,
@@ -1087,6 +1091,7 @@ struct SessionInfoContext<'a> {
     reprex: &'a ReprexRuntime,
     config_path: &'a Option<std::path::PathBuf>,
     config_status: ConfigStatus,
+    history_location: &'a ResolvedHistoryLocation,
     r_history: &'a HistoryRuntime,
     shell_history: &'a HistoryRuntime,
     r_source_status: &'a RSourceStatus,
@@ -1157,9 +1162,9 @@ fn handle_meta_command_result(
             MetaAction::Continue
         }
         MetaCommandResult::ShowHistorySchema => {
-            if let Err(e) =
-                with_ipc_alternate_guard(crate::pager::history_schema::show_schema_pager)
-            {
+            if let Err(e) = with_ipc_alternate_guard(|| {
+                crate::pager::history_schema::show_schema_pager(ctx.history_location)
+            }) {
                 arf_println!("Error: {}", e);
             }
             MetaAction::Continue
@@ -1192,5 +1197,55 @@ mod history_runtime_tests {
         let shell_store = shell_runtime.store().unwrap();
         assert!(!r_store.same_owner(&shell_store));
         assert!(shell_runtime.store().unwrap().same_owner(&shell_store));
+    }
+
+    #[test]
+    fn history_database_paths_share_the_resolved_location() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.history.mode = crate::config::HistoryMode::Persistent {
+            dir: Some(temp_dir.path().to_path_buf()),
+        };
+        let repl = Repl::new(
+            config,
+            None,
+            ConfigStatus::Ok,
+            RSourceStatus::Path,
+            None,
+            Reedline::create_history_session_id(),
+        )
+        .unwrap();
+
+        assert_eq!(repl.r_history_path(), Some(temp_dir.path().join("r.db")));
+        assert_eq!(
+            repl.shell_history_path(),
+            Some(temp_dir.path().join("shell.db"))
+        );
+        assert_eq!(
+            repl.history_location.source(),
+            crate::config::HistoryLocationSource::Explicit
+        );
+    }
+
+    #[test]
+    fn volatile_repl_has_no_persistent_history_paths() {
+        let mut config = Config::default();
+        config.history.mode = crate::config::HistoryMode::Volatile;
+        let repl = Repl::new(
+            config,
+            None,
+            ConfigStatus::Ok,
+            RSourceStatus::Path,
+            None,
+            Reedline::create_history_session_id(),
+        )
+        .unwrap();
+
+        assert_eq!(repl.r_history_path(), None);
+        assert_eq!(repl.shell_history_path(), None);
+        assert_eq!(
+            repl.history_location.source(),
+            crate::config::HistoryLocationSource::Volatile
+        );
     }
 }

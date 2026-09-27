@@ -240,13 +240,8 @@ pub(crate) fn run_headless(
     ipc::set_headless_shutdown(shutdown.clone());
 
     // Apply CLI history overrides (same logic as the REPL path in main())
-    if no_history {
-        config.history.mode = crate::config::HistoryMode::Volatile;
-    } else if let Some(history_dir) = cli_history_dir {
-        config.history.mode = crate::config::HistoryMode::Persistent {
-            dir: Some(history_dir.to_path_buf()),
-        };
-    }
+    config.history.mode =
+        config::history_mode_with_overrides(&config.history.mode, cli_history_dir, no_history);
 
     let mut eval_allowlist = config.ipc.eval.allowed_functions.clone();
     eval_allowlist.extend(ipc_eval_allow_function.iter().cloned());
@@ -255,8 +250,8 @@ pub(crate) fn run_headless(
     // Initialize the single history owner for headless mode. Volatile history
     // is still queryable through IPC during this process but never touches disk.
     let session_id = create_session_id(&config);
-    let history_path =
-        config::history_dir_for_mode(&config.history.mode).map(|dir| dir.join("r.db"));
+    let history_location = config::resolved_history_location(&config.history.mode);
+    let history_path = history_location.database_path("r.db");
     let history_runtime = HistoryRuntime::initialize(
         &config.history.mode,
         history_path,

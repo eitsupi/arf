@@ -327,6 +327,7 @@ pub(super) fn read_console_callback(
                             reprex: &state.reprex,
                             config_path: &state.config_path,
                             config_status: state.config_status,
+                            history_location: &state.history_location,
                             r_history: &state.r_history,
                             shell_history: &state.shell_history,
                             r_source_status: &state.r_source_status,

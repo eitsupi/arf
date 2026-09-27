@@ -133,6 +133,24 @@ fn test_history_schema_subcommand() {
     );
 }
 
+#[test]
+fn test_history_schema_uses_effective_directory_from_environment() {
+    let history_dir = tempfile::tempdir().expect("Failed to create history directory");
+    let output = sanitized_arf_command()
+        .env("ARF_HISTORY_DIR", history_dir.path())
+        .args(["history", "schema"])
+        .output()
+        .expect("Failed to run arf history schema");
+    assert!(
+        output.status.success(),
+        "history schema with explicit directory failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&history_dir.path().join("r.db").display().to_string()));
+    assert!(stdout.contains(&history_dir.path().join("shell.db").display().to_string()));
+}
+
 /// Test `arf history schema` outputs plain text when piped.
 #[test]
 fn test_history_schema_piped_no_colors() {
@@ -321,25 +339,61 @@ fn test_no_banner_before_completions_rejected() {
 }
 
 #[test]
-fn test_top_level_config_before_history_schema_rejected() {
-    assert_top_level_scope_error(
-        &["--config", "x", "history", "schema"],
-        &[
-            "--config",
-            "not used by the 'history schema' subcommand",
-            "arf --config",
-        ],
+fn test_top_level_config_before_history_schema_uses_configured_directory() {
+    let history_dir = tempfile::tempdir().expect("Failed to create history directory");
+    let mut config = NamedTempFile::new().expect("Failed to create config file");
+    writeln!(
+        config.as_file_mut(),
+        "[history]\nmode = {{ dir = {:?} }}",
+        history_dir.path().display().to_string()
+    )
+    .expect("Failed to write config file");
+
+    let output = sanitized_arf_command()
+        .arg("--config")
+        .arg(config.path())
+        .args(["history", "schema"])
+        .output()
+        .expect("Failed to run arf history schema");
+
+    assert!(
+        output.status.success(),
+        "history schema with explicit config failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&history_dir.path().join("r.db").display().to_string()));
+    assert!(stdout.contains(&history_dir.path().join("shell.db").display().to_string()));
 }
 
 #[test]
-fn test_top_level_history_dir_before_history_schema_rejected() {
+fn test_top_level_history_dir_before_history_schema_uses_explicit_directory() {
+    let history_dir = tempfile::tempdir().expect("Failed to create history directory");
+    let output = sanitized_arf_command()
+        .arg("--history-dir")
+        .arg(history_dir.path())
+        .args(["history", "schema"])
+        .output()
+        .expect("Failed to run arf history schema");
+
+    assert!(
+        output.status.success(),
+        "history schema with explicit directory failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&history_dir.path().join("r.db").display().to_string()));
+    assert!(stdout.contains(&history_dir.path().join("shell.db").display().to_string()));
+}
+
+#[test]
+fn test_no_history_before_history_schema_is_rejected_as_interactive_only() {
     assert_top_level_scope_error(
-        &["--history-dir", "/tmp", "history", "schema"],
+        &["--no-history", "history", "schema"],
         &[
-            "--history-dir",
+            "--no-history",
             "not used by the 'history schema' subcommand",
-            "arf --history-dir",
+            "arf --no-history",
         ],
     );
 }
