@@ -164,3 +164,112 @@ fn test_buffer_known_empty_condition() {
         "non-empty buffer should not match"
     );
 }
+
+#[test]
+fn test_until_found_right_tracks_navigation_before_buffer_end() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::HistoryHintComplete,
+        ReedlineEvent::MenuRight,
+        ReedlineEvent::Right,
+    ]));
+
+    assert_eq!(state.cursor_pos, 3);
+    assert!(!state.uncertain);
+}
+
+#[test]
+fn test_until_found_right_at_buffer_end_marks_state_uncertain() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 5,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::HistoryHintComplete,
+        ReedlineEvent::MenuRight,
+        ReedlineEvent::Right,
+    ]));
+
+    assert_eq!(state.cursor_pos, 5);
+    assert!(state.uncertain);
+}
+
+#[test]
+fn test_until_found_right_with_empty_buffer_stays_certain() {
+    let mut state = EditorState::new();
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::HistoryHintComplete,
+        ReedlineEvent::MenuRight,
+        ReedlineEvent::Right,
+    ]));
+
+    assert_eq!(state.cursor_pos, 0);
+    assert_eq!(state.buffer_len, 0);
+    assert!(!state.uncertain);
+}
+
+#[test]
+fn test_until_found_left_tracks_navigation() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::MenuLeft,
+        ReedlineEvent::Left,
+    ]));
+
+    assert_eq!(state.cursor_pos, 1);
+    assert!(!state.uncertain);
+}
+
+#[test]
+fn test_direct_right_tracks_navigation() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::Right);
+
+    assert_eq!(state.cursor_pos, 3);
+    assert!(!state.uncertain);
+
+    state.cursor_pos = state.buffer_len;
+    state.update_from_event(&ReedlineEvent::Right);
+    assert_eq!(state.cursor_pos, state.buffer_len);
+}
+
+#[test]
+fn test_direct_left_tracks_navigation() {
+    let mut state = EditorState {
+        buffer: "hello".to_string(),
+        buffer_len: 5,
+        cursor_pos: 2,
+        uncertain: false,
+    };
+
+    state.update_from_event(&ReedlineEvent::Left);
+
+    assert_eq!(state.cursor_pos, 1);
+    assert!(!state.uncertain);
+
+    state.cursor_pos = 0;
+    state.update_from_event(&ReedlineEvent::Left);
+    assert_eq!(state.cursor_pos, 0);
+}
