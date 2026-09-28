@@ -99,6 +99,9 @@ mode = "persistent"        # "persistent" or session-only "volatile"
 [r]
 auto_width = true          # Sync R's options(width) with terminal size
 
+[r.help]
+viewer = "auto"            # "auto" (native pager when safe) or "r" (R's viewer)
+
 [reprex]
 comment = "#> "            # Comment prefix for reprex output
 formatter = "auto"         # "auto", "air" (>= 0.9.0), or "arity" (>= 0.18.0)
@@ -190,6 +193,20 @@ auto_width = true  # default
 ```
 
 Set to `false` if you prefer to manage `options(width)` manually (e.g., via `.Rprofile`).
+
+## Interactive R Help
+
+In the interactive REPL, printing an R help result (for example, entering `?mean`) opens arf's native help pager by default. Configure the behavior under `[r.help]`:
+
+```toml
+[r.help]
+viewer = "auto"  # default; use the native pager when safe to install
+# viewer = "r"   # always leave help display to R
+```
+
+With `viewer = "auto"`, arf installs a small `print.help_files_with_topic` wrapper only when the currently registered S3 method is identical to the standard method from `utils`. If another frontend has registered its own method, arf leaves the S3 registry unchanged. There is no force-install mode. The wrapper keeps the standard R method as its fallback: unsupported types such as HTML or PDF, missing topics, and requests that cannot be prepared continue through R's normal printer. If R resolves a request to multiple help pages, arf presents a selector and requires an explicit choice; cancelling the selector displays no page.
+
+The setting is read when the interactive REPL starts; restart arf to change it. This integration is not installed for headless sessions, R scripts, or standalone mode. Assigning a help object alone does not display it; the pager is invoked when R prints the object.
 
 ## Auto Suggestions
 

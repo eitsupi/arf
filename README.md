@@ -136,6 +136,10 @@ Press `:h` or `:help` to open the fuzzy help browser:
   ↑↓ navigate  Tab/Enter select  Esc exit
 ```
 
+R's own help commands (`?mean` or `help("mean")`) also open the native help pager in interactive sessions by default. The `[r.help] viewer` setting controls this behavior: `"auto"` enables the integration when R's standard `utils` printer is still registered, while `"r"` leaves display to R. arf does not replace an S3 printer already registered by another frontend. Unsupported help types, missing topics, or rejected requests fall back to R's normal printer. When R finds multiple help pages, arf asks you to select one explicitly.
+
+The integration is limited to the interactive REPL; headless, script, and standalone sessions keep their existing behavior. Assigning a help object does not open the pager until it is printed.
+
 ## Meta Commands
 
 arf extends R with `:` prefixed meta commands:
@@ -213,6 +217,9 @@ override_prompt_color = false
 # R runtime configuration
 [r]
 auto_width = true       # Sync options(width) with terminal size
+
+[r.help]
+viewer = "auto"         # "auto" (native pager when safe) or "r" (R's viewer)
 
 # Reprex static configuration
 [reprex]
