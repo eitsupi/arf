@@ -260,10 +260,15 @@ demo("{name}", package = "{pkg}")"#,
                                                     key,
                                                     &topic.package,
                                                 ) {
-                                                    log::error!(
-                                                        "help_browser: failed to display help: {}",
-                                                        e
-                                                    );
+                                                    let message = help_page_load_error_message(&e);
+                                                    if let Err(pager_error) =
+                                                        display_help_pager(&title, &message, false)
+                                                    {
+                                                        log::error!(
+                                                            "help_browser: failed to display help error: {}",
+                                                            pager_error
+                                                        );
+                                                    }
                                                 }
                                             } else {
                                                 match get_package_help_markdown(
@@ -711,6 +716,10 @@ fn help_page_title(package: &str, display_topic: &str) -> String {
     format!("{package}::{display_topic}")
 }
 
+fn help_page_load_error_message(error: &io::Error) -> String {
+    format!("Unable to load this help topic.\n\n{error}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,6 +729,15 @@ mod tests {
         assert_eq!(
             help_page_title("base", "[.data.frame"),
             "base::[.data.frame"
+        );
+    }
+
+    #[test]
+    fn help_page_load_error_message_includes_a_concise_context_and_detail() {
+        let error = io::Error::other("compiled topic was not found");
+        assert_eq!(
+            help_page_load_error_message(&error),
+            "Unable to load this help topic.\n\ncompiled topic was not found"
         );
     }
 
