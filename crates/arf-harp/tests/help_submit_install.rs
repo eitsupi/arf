@@ -88,6 +88,29 @@ stopifnot(length(fallback_output) > 0L)
 
         arf_harp::eval_string(
             r#"
+missing_help <- utils::help("arf_no_such_topic_7a81", package = "utils", help_type = "text")
+stopifnot(length(missing_help) == 0L)
+missing_output <- utils::capture.output(print(missing_help))
+stopifnot(length(missing_output) > 0L)
+"#,
+        )
+        .expect("a missing topic should use R's normal no-documentation fallback");
+        assert!(drain_prepared_help_requests().is_empty());
+
+        arf_harp::eval_string(
+            r#"
+pdf_help <- utils::help("mean", help_type = "text")
+attr(pdf_help, "type") <- "pdf"
+attr(pdf_help, "tried_all_packages") <- TRUE
+pdf_fallback_output <- utils::capture.output(print(pdf_help))
+stopifnot(length(pdf_fallback_output) > 0L)
+"#,
+        )
+        .expect("unsupported PDF help should use the safe text fallback");
+        assert!(drain_prepared_help_requests().is_empty());
+
+        arf_harp::eval_string(
+            r#"
 late_custom_called <- FALSE
 late_custom_printer <- function(x, ...) {
   assign("late_custom_called", TRUE, envir = .GlobalEnv)

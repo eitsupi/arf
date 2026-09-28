@@ -65,6 +65,12 @@ fn r_help_opens_native_pager_and_q_returns_to_prompt() -> Result<()> {
             })?;
             terminal.key("q")?;
             wait_for_prompt_after_ui(terminal, "mean help pager exits")?;
+            terminal.enter("?stats::lm")?;
+            terminal.wait_for_screen_line("qualified lm help pager", 0, |state, line| {
+                state.exited.is_none() && line.contains("stats::lm")
+            })?;
+            terminal.key("q")?;
+            wait_for_prompt_after_ui(terminal, "qualified lm help pager exits")?;
             terminal.submit("42", "[1] 42", PROMPT)
         },
     )
