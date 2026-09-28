@@ -42,7 +42,7 @@ pub(super) fn process_pending_help_requests() {
         |request| with_ipc_alternate_guard(|| crate::pager::display_prepared_help_request(request)),
         |request, error| {
             log::error!("Prepared help pager failed: {error}");
-            fallback_prepared_help_request(&request, &error);
+            fallback_prepared_help_request(request, error);
         },
     );
 }
@@ -64,6 +64,34 @@ fn fallback_prepared_help_request(request: &PreparedHelpRequest, error: &io::Err
     for page in &request.pages {
         arf_println!("{}::{}", page.package, page.display_topic);
         println!("{}", page.markdown);
+    }
+}
+
+/// Run the help browser pager, wrapping with IPC alternate mode.
+pub(super) fn run_pager_help_browser(query: &str) {
+    let help_result = with_ipc_alternate_guard(|| crate::pager::run_help_browser(query));
+    if let Err(e) = help_result {
+        arf_println!("Error in help browser: {}", e);
+    }
+}
+
+/// Run the history browser pager, wrapping with IPC alternate mode.
+pub(super) fn run_pager_history_browser(
+    store: &crate::history::HistoryStore,
+    mode: crate::pager::HistoryDbMode,
+) {
+    let browser_result =
+        with_ipc_alternate_guard(|| crate::pager::run_history_browser(store, mode));
+
+    match browser_result {
+        Ok(crate::pager::HistoryBrowserResult::Copied(cmd)) => {
+            let display = crate::pager::text_utils::truncate_to_width(&cmd, 60);
+            arf_println!("Copied: {}", display);
+        }
+        Ok(crate::pager::HistoryBrowserResult::Cancelled) => {}
+        Err(e) => {
+            arf_println!("Error: {}", e);
+        }
     }
 }
 
@@ -112,33 +140,5 @@ mod tests {
             events.into_inner(),
             ["display:mean", "fallback:mean", "display:sum"]
         );
-    }
-}
-
-/// Run the help browser pager, wrapping with IPC alternate mode.
-pub(super) fn run_pager_help_browser(query: &str) {
-    let help_result = with_ipc_alternate_guard(|| crate::pager::run_help_browser(query));
-    if let Err(e) = help_result {
-        arf_println!("Error in help browser: {}", e);
-    }
-}
-
-/// Run the history browser pager, wrapping with IPC alternate mode.
-pub(super) fn run_pager_history_browser(
-    store: &crate::history::HistoryStore,
-    mode: crate::pager::HistoryDbMode,
-) {
-    let browser_result =
-        with_ipc_alternate_guard(|| crate::pager::run_history_browser(store, mode));
-
-    match browser_result {
-        Ok(crate::pager::HistoryBrowserResult::Copied(cmd)) => {
-            let display = crate::pager::text_utils::truncate_to_width(&cmd, 60);
-            arf_println!("Copied: {}", display);
-        }
-        Ok(crate::pager::HistoryBrowserResult::Cancelled) => {}
-        Err(e) => {
-            arf_println!("Error: {}", e);
-        }
     }
 }
