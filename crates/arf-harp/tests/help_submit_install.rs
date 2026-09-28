@@ -101,12 +101,22 @@ stopifnot(length(missing_output) > 0L)
             r#"
 pdf_help <- utils::help("mean", help_type = "text")
 attr(pdf_help, "type") <- "pdf"
-attr(pdf_help, "tried_all_packages") <- TRUE
-pdf_fallback_output <- utils::capture.output(print(pdf_help))
-stopifnot(length(pdf_fallback_output) > 0L)
+stopifnot(identical(attr(pdf_help, "tried_all_packages"), FALSE))
+pdf_wrapper <- getS3method("print", "help_files_with_topic")
+pdf_wrapper_env <- environment(pdf_wrapper)
+stopifnot(exists("fallback", envir = pdf_wrapper_env, inherits = FALSE))
+original_pdf_fallback <- get("fallback", envir = pdf_wrapper_env, inherits = FALSE)
+pdf_fallback_called <- FALSE
+assign("fallback", function(x, ...) {
+  assign("pdf_fallback_called", TRUE, envir = .GlobalEnv)
+  invisible(x)
+}, envir = pdf_wrapper_env)
+print(pdf_help)
+stopifnot(isTRUE(pdf_fallback_called))
+assign("fallback", original_pdf_fallback, envir = pdf_wrapper_env)
 "#,
         )
-        .expect("unsupported PDF help should use the safe text fallback");
+        .expect("PDF alone should reject through the wrapper and use its fallback binding");
         assert!(drain_prepared_help_requests().is_empty());
 
         arf_harp::eval_string(
