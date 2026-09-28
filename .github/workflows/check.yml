@@ -94,6 +94,17 @@ jobs:
         with:
           working-directory: crates/arf-console/tests/r-deps
           dependencies: '"hard"'
+      - name: Configure Linux libR runtime path
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          r_home="$(R RHOME)"
+          r_lib="${r_home}/lib"
+          if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+            printf 'LD_LIBRARY_PATH=%s:%s\n' "$r_lib" "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          else
+            printf 'LD_LIBRARY_PATH=%s\n' "$r_lib" >> "$GITHUB_ENV"
+          fi
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run tests
