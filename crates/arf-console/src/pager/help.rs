@@ -22,7 +22,7 @@ use super::{
 };
 use crate::fuzzy::fuzzy_match_with_case_preference;
 use arf_harp::help::{
-    HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key,
+    HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key_in_dir,
     get_vignette_text,
 };
 use crossterm::{
@@ -33,6 +33,7 @@ use crossterm::{
     terminal::{self, BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
 use std::io::{self, Write};
+use std::path::Path;
 use std::time::Duration;
 
 /// Maximum number of results to keep in filtered list.
@@ -212,7 +213,7 @@ impl HelpBrowser {
                                             match get_vignette_text(&topic.topic, &topic.package) {
                                                 Ok(text) => {
                                                     if let Err(e) =
-                                                        display_help_pager(&title, &text)
+                                                        display_help_pager(&title, &text, false)
                                                     {
                                                         log::error!(
                                                             "help_browser: pager error: {}",
@@ -224,7 +225,8 @@ impl HelpBrowser {
                                                     // Show the error (e.g. PDF vignette message)
                                                     // in the pager for visibility
                                                     let msg = format!("{}", e);
-                                                    if let Err(e) = display_help_pager(&title, &msg)
+                                                    if let Err(e) =
+                                                        display_help_pager(&title, &msg, false)
                                                     {
                                                         log::error!(
                                                             "help_browser: pager error: {}",
@@ -244,39 +246,46 @@ demo("{name}", package = "{pkg}")"#,
                                                 name = topic.topic,
                                                 pkg = topic.package,
                                             );
-                                            if let Err(e) = display_help_pager(&title, &msg) {
+                                            if let Err(e) = display_help_pager(&title, &msg, false)
+                                            {
                                                 log::error!("help_browser: pager error: {}", e);
                                             }
                                         }
                                         _ => {
                                             // "help" and any other types
-                                            let help = match topic.help_key.as_deref() {
-                                                Some(key) => get_package_help_markdown_by_key(
+                                            if let Some(key) = topic.help_key.as_deref() {
+                                                if let Err(e) = display_help_page_by_key_in_browser(
+                                                    &topic.package_dir,
                                                     &topic.topic,
                                                     key,
                                                     &topic.package,
-                                                ),
-                                                None => get_package_help_markdown(
+                                                ) {
+                                                    log::error!(
+                                                        "help_browser: failed to display help: {}",
+                                                        e
+                                                    );
+                                                }
+                                            } else {
+                                                match get_package_help_markdown(
                                                     &topic.topic,
                                                     &topic.package,
-                                                ),
-                                            };
-                                            match help {
-                                                Ok(text) => {
-                                                    if let Err(e) =
-                                                        display_help_pager(&title, &text)
-                                                    {
+                                                ) {
+                                                    Ok(text) => {
+                                                        if let Err(e) =
+                                                            display_help_pager(&title, &text, false)
+                                                        {
+                                                            log::error!(
+                                                                "help_browser: pager error: {}",
+                                                                e
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(e) => {
                                                         log::error!(
-                                                            "help_browser: pager error: {}",
+                                                            "help_browser: failed to get help: {}",
                                                             e
                                                         );
                                                     }
-                                                }
-                                                Err(e) => {
-                                                    log::error!(
-                                                        "help_browser: failed to get help: {}",
-                                                        e
-                                                    );
                                                 }
                                             }
                                         }
@@ -590,7 +599,7 @@ fn visible_result_rows() -> usize {
 ///
 /// Plain text (demo messages, error messages) also renders fine since
 /// it contains no Markdown syntax.
-fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
+fn display_help_pager(title: &str, content: &str, manage_alternate_screen: bool) -> io::Result<()> {
     use super::markdown::render_markdown;
     use super::{PagerAction, PagerConfig, PagerContent, run};
     use ratatui::text::Line;
@@ -649,15 +658,70 @@ fn display_help_pager(title: &str, content: &str) -> io::Result<()> {
     let config = PagerConfig {
         title,
         footer_hint: "↑↓/jk scroll  q/Enter/Esc back",
-        manage_alternate_screen: false,
+        manage_alternate_screen,
     };
 
     run(&mut content, &config)
 }
 
+/// Load a help page by its compiled-help key and display it in the help pager.
+///
+/// The browser's visible topic can differ from the compiled-help key, so both
+/// values and the supplying package directory are passed explicitly. Errors
+/// are returned to let callers choose a fallback when the indexed key cannot
+/// be resolved.
+#[allow(dead_code, reason = "Consumed by the deferred R-help bridge")]
+pub(crate) fn display_help_page_by_key(
+    package_dir: &Path,
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+) -> io::Result<()> {
+    display_help_page_by_key_with_screen(package_dir, display_topic, help_key, package, true)
+}
+
+/// Display a compiled-key help page from inside the help browser's alternate screen.
+fn display_help_page_by_key_in_browser(
+    package_dir: &Path,
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+) -> io::Result<()> {
+    display_help_page_by_key_with_screen(package_dir, display_topic, help_key, package, false)
+}
+
+fn display_help_page_by_key_with_screen(
+    package_dir: &Path,
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+    manage_alternate_screen: bool,
+) -> io::Result<()> {
+    let content =
+        get_package_help_markdown_by_key_in_dir(package_dir, display_topic, help_key, package)
+            .map_err(io::Error::other)?;
+    display_help_pager(
+        &help_page_title(package, display_topic),
+        &content,
+        manage_alternate_screen,
+    )
+}
+
+fn help_page_title(package: &str, display_topic: &str) -> String {
+    format!("{package}::{display_topic}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_page_title_uses_package_and_display_topic() {
+        assert_eq!(
+            help_page_title("base", "[.data.frame"),
+            "base::[.data.frame"
+        );
+    }
 
     #[test]
     fn test_truncate_to_width_no_truncation() {
@@ -723,6 +787,7 @@ mod tests {
         let topics = vec![
             HelpTopic {
                 package: "base".to_string(),
+                package_dir: std::path::PathBuf::from("/base"),
                 topic: "print".to_string(),
                 aliases: vec!["print.default".to_string()],
                 help_key: Some("print".to_string()),
@@ -731,6 +796,7 @@ mod tests {
             },
             HelpTopic {
                 package: "dplyr".to_string(),
+                package_dir: std::path::PathBuf::from("/dplyr"),
                 topic: "mutate".to_string(),
                 aliases: vec![],
                 help_key: None,
@@ -753,6 +819,7 @@ mod tests {
         let topics = vec![
             HelpTopic {
                 package: "base".to_string(),
+                package_dir: std::path::PathBuf::from("/base"),
                 topic: "foo_bar".to_string(),
                 aliases: vec![],
                 help_key: None,
@@ -761,6 +828,7 @@ mod tests {
             },
             HelpTopic {
                 package: "base".to_string(),
+                package_dir: std::path::PathBuf::from("/base"),
                 topic: "Foo".to_string(),
                 aliases: vec![],
                 help_key: None,
@@ -791,6 +859,7 @@ mod tests {
     fn test_fuzzy_search_topics_empty_query() {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
+            package_dir: std::path::PathBuf::from("/base"),
             topic: "print".to_string(),
             aliases: vec![],
             help_key: None,
@@ -807,6 +876,7 @@ mod tests {
     fn test_fuzzy_search_topics_no_match() {
         let topics = vec![HelpTopic {
             package: "base".to_string(),
+            package_dir: std::path::PathBuf::from("/base"),
             topic: "print".to_string(),
             aliases: vec![],
             help_key: None,
@@ -822,6 +892,7 @@ mod tests {
     fn fuzzy_search_matches_aliases_without_duplicating_topic_results() {
         let topic = HelpTopic {
             package: "base".to_string(),
+            package_dir: std::path::PathBuf::from("/base"),
             topic: "print".to_string(),
             aliases: vec!["print.default".to_string(), "print.value".to_string()],
             help_key: Some("print".to_string()),
@@ -842,6 +913,7 @@ mod tests {
     fn fuzzy_search_matches_help_key_bare_and_qualified_without_changing_display_topic() {
         let topic = HelpTopic {
             package: "base".to_string(),
+            package_dir: std::path::PathBuf::from("/base"),
             topic: "[.data.frame".to_string(),
             aliases: vec!["[.data.frame".to_string()],
             help_key: Some("Extract.data.frame".to_string()),
