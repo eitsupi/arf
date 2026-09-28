@@ -25,6 +25,7 @@ use arf_harp::help::{
     HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key_in_dir,
     get_vignette_text,
 };
+use arf_harp::help_bridge::PreparedHelpRequest;
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -669,6 +670,155 @@ fn display_help_pager(title: &str, content: &str, manage_alternate_screen: bool)
     run(&mut content, &config)
 }
 
+/// Display a prepared help request without rereading the compiled help database.
+///
+/// Multiple pages require an explicit selector confirmation. Exiting the
+/// selector without confirming is a normal cancellation and displays nothing.
+pub(crate) fn display_prepared_help_request(request: &PreparedHelpRequest) -> io::Result<()> {
+    let selected = match request.pages.as_slice() {
+        [] => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "prepared help request has no pages",
+            ));
+        }
+        [_] => 0,
+        pages => {
+            let Some(selected) = select_prepared_help_page(pages)? else {
+                return Ok(());
+            };
+            selected
+        }
+    };
+
+    let page = &request.pages[selected];
+    display_help_pager(
+        &help_page_title(&page.package, &page.display_topic),
+        &page.markdown,
+        true,
+    )
+}
+
+fn select_prepared_help_page(
+    pages: &[arf_harp::help_bridge::PreparedHelpPage],
+) -> io::Result<Option<usize>> {
+    use super::{PagerAction, PagerConfig, PagerContent, run};
+    use ratatui::text::Line;
+
+    struct PageSelector {
+        labels: Vec<String>,
+        state: HelpPageSelectorState,
+    }
+
+    impl PagerContent for PageSelector {
+        fn line_count(&self) -> usize {
+            self.labels.len()
+        }
+
+        fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
+            let prefix = if self.state.selected == Some(index) {
+                ">"
+            } else {
+                " "
+            };
+            Line::from(format!("{prefix} {}", self.labels[index]))
+        }
+
+        fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<PagerAction> {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.state.move_up().then_some(PagerAction::Continue)
+                }
+                KeyCode::Down | KeyCode::Char('j') => match self.state.move_down() {
+                    Some(true) => Some(PagerAction::Redraw),
+                    Some(false) => Some(PagerAction::Continue),
+                    None => Some(PagerAction::Redraw),
+                },
+                KeyCode::Enter => self
+                    .state
+                    .confirm()
+                    .map_or(Some(PagerAction::Redraw), |_| Some(PagerAction::Exit)),
+                _ => None,
+            }
+        }
+    }
+
+    if pages.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "page selector requires multiple candidates",
+        ));
+    }
+
+    let labels = pages
+        .iter()
+        .enumerate()
+        .map(|(index, page)| format!("[{}] {}::{}", index + 1, page.package, page.display_topic))
+        .collect();
+    let mut selector = PageSelector {
+        labels,
+        state: HelpPageSelectorState::new(pages.len()),
+    };
+    let config = PagerConfig {
+        title: "Select R help page",
+        footer_hint: "↑↓/jk move  Enter open  q/Esc cancel",
+        manage_alternate_screen: true,
+    };
+    run(&mut selector, &config)?;
+    Ok(selector.state.confirmed)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HelpPageSelectorState {
+    page_count: usize,
+    selected: Option<usize>,
+    confirmed: Option<usize>,
+}
+
+impl HelpPageSelectorState {
+    fn new(page_count: usize) -> Self {
+        Self {
+            page_count,
+            selected: None,
+            confirmed: None,
+        }
+    }
+
+    fn move_up(&mut self) -> bool {
+        let Some(selected) = self.selected else {
+            return false;
+        };
+        if selected == 0 {
+            self.selected = None;
+            return true;
+        }
+        self.selected = Some(selected - 1);
+        true
+    }
+
+    /// Returns `Some(true)` when this selects the first row from the empty
+    /// state; the pager must not scroll its viewport for that movement.
+    fn move_down(&mut self) -> Option<bool> {
+        match self.selected {
+            None if self.page_count > 0 => {
+                self.selected = Some(0);
+                Some(true)
+            }
+            Some(selected) if selected + 1 < self.page_count => {
+                self.selected = Some(selected + 1);
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    fn confirm(&mut self) -> Option<usize> {
+        let selected = self.selected?;
+        self.confirmed = Some(selected);
+        Some(selected)
+    }
+}
+
 /// Load a help page by its compiled-help key and display it in the help pager.
 ///
 /// The browser's visible topic can differ from the compiled-help key, so both
@@ -723,6 +873,34 @@ fn help_page_load_error_message(error: &io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_help_selector_requires_an_explicit_selection_and_confirmation() {
+        let mut selector = HelpPageSelectorState::new(2);
+        assert_eq!(selector.selected, None);
+        assert_eq!(selector.confirm(), None);
+        assert_eq!(selector.confirmed, None);
+
+        assert_eq!(selector.move_down(), Some(true));
+        assert_eq!(selector.selected, Some(0));
+        assert_eq!(selector.move_down(), Some(false));
+        assert_eq!(selector.selected, Some(1));
+        assert_eq!(selector.confirm(), Some(1));
+        assert_eq!(selector.confirmed, Some(1));
+    }
+
+    #[test]
+    fn prepared_help_selector_navigation_stays_within_candidate_bounds() {
+        let mut selector = HelpPageSelectorState::new(2);
+        assert!(!selector.move_up());
+        assert_eq!(selector.move_down(), Some(true));
+        assert!(selector.move_up());
+        assert_eq!(selector.selected, None);
+        assert_eq!(selector.move_down(), Some(true));
+        assert_eq!(selector.move_down(), Some(false));
+        assert_eq!(selector.move_down(), None);
+        assert_eq!(selector.selected, Some(1));
+    }
 
     #[test]
     fn help_page_title_uses_package_and_display_topic() {

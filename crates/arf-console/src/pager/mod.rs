@@ -13,6 +13,7 @@ pub(crate) mod style_convert;
 pub(crate) mod text_utils;
 
 pub use changelog::display_changelog;
+pub(crate) use help::display_prepared_help_request;
 pub use help::run_help_browser;
 pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};
 pub use session_info::display_session_info;
