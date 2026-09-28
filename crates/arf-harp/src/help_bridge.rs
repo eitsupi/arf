@@ -1,6 +1,6 @@
 //! Bridge normalized R `help()` results into prepared help requests.
 
-use crate::error::HarpResult;
+use crate::error::{HarpError, HarpResult};
 use crate::help::get_package_help_markdown_by_key_in_dir;
 use arf_libr::{R_CallMethodDef, R_FALSE, R_TRUE, SEXP, SexpType, r_library};
 use std::collections::VecDeque;
@@ -65,6 +65,15 @@ impl HelpRequestQueue {
 
 static PENDING_HELP_REQUESTS: Mutex<HelpRequestQueue> = Mutex::new(HelpRequestQueue::new());
 
+/// Result of attempting to install the interactive R help wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpSubmitInstallOutcome {
+    /// The standard utils method was active and the wrapper was installed.
+    Installed,
+    /// A custom or already-installed method was active, so the registry was left alone.
+    SkippedExistingMethod,
+}
+
 /// Take the oldest prepared help request, if one is pending.
 pub fn take_prepared_help_request() -> Option<PreparedHelpRequest> {
     PENDING_HELP_REQUESTS
@@ -100,6 +109,110 @@ pub fn register_help_submit_routine() -> HarpResult<()> {
     // the registered embedding runtime.
     unsafe { crate::routines::register_call_methods(&[definition]) }
 }
+
+/// Install the `.Call` routine and, only when utils' registered S3 method is
+/// identical to its standard method, wrap that method to submit prepared help.
+///
+/// This is intended for an initialized interactive embedded-R session. It does
+/// not replace custom S3 methods and is safe to call repeatedly.
+pub fn install_help_submit_wrapper() -> HarpResult<HelpSubmitInstallOutcome> {
+    let eligibility = crate::eval_string_in_base(HELP_SUBMIT_ELIGIBILITY_R)?;
+    match read_scalar_status(&eligibility)? {
+        1 => {}
+        2 => return Ok(HelpSubmitInstallOutcome::SkippedExistingMethod),
+        status => {
+            return Err(HarpError::TypeMismatch {
+                expected: "scalar installer status 1 or 2".to_string(),
+                actual: format!("installer status {status}"),
+            });
+        }
+    }
+
+    // Register before mutating the S3 registry so a missing DllInfo or native
+    // registration failure leaves standard R help behavior untouched.
+    register_help_submit_routine()?;
+
+    let installed = crate::eval_string_in_base(HELP_SUBMIT_INSTALL_R)?;
+    match read_scalar_status(&installed)? {
+        1 => Ok(HelpSubmitInstallOutcome::Installed),
+        2 => Ok(HelpSubmitInstallOutcome::SkippedExistingMethod),
+        status => Err(HarpError::TypeMismatch {
+            expected: "scalar installer status 1 or 2".to_string(),
+            actual: format!("installer status {status}"),
+        }),
+    }
+}
+
+fn read_scalar_status(result: &crate::RObject) -> HarpResult<i32> {
+    if result.sexp_type()? != SexpType::IntSxp {
+        return Err(HarpError::TypeMismatch {
+            expected: "one non-NA integer installer status".to_string(),
+            actual: format!("{:?}", result.sexp_type()?),
+        });
+    }
+    let lib = r_library()?;
+    if unsafe { (lib.rf_length)(result.sexp()) } != 1 {
+        return Err(HarpError::TypeMismatch {
+            expected: "one non-NA integer installer status".to_string(),
+            actual: "integer vector with length other than one".to_string(),
+        });
+    }
+    let value = unsafe { (lib.integer)(result.sexp()) };
+    if value.is_null() {
+        return Err(HarpError::TypeMismatch {
+            expected: "one non-NA integer installer status".to_string(),
+            actual: "null integer storage".to_string(),
+        });
+    }
+    let status = unsafe { *value };
+    if status == i32::MIN {
+        return Err(HarpError::TypeMismatch {
+            expected: "one non-NA integer installer status".to_string(),
+            actual: "NA integer installer status".to_string(),
+        });
+    }
+    Ok(status)
+}
+
+const HELP_SUBMIT_ELIGIBILITY_R: &str = r#"
+invisible((function() {
+  ns <- getNamespace("utils")
+  standard <- get("print.help_files_with_topic", envir = ns, inherits = FALSE)
+  get_method <- get("getS3method", envir = ns, inherits = FALSE)
+  registered <- get_method("print", "help_files_with_topic", optional = TRUE)
+  if (identical(registered, standard)) 1L else 2L
+})())
+"#;
+
+const HELP_SUBMIT_INSTALL_R: &str = r#"
+invisible((function() {
+  ns <- getNamespace("utils")
+  standard <- get("print.help_files_with_topic", envir = ns, inherits = FALSE)
+  get_method <- get("getS3method", envir = ns, inherits = FALSE)
+  registered <- get_method("print", "help_files_with_topic", optional = TRUE)
+  if (!identical(registered, standard)) return(2L)
+
+  fallback <- standard
+  wrapper <- function(x, ...) {
+    accepted <- tryCatch({
+      paths <- enc2utf8(as.character(x))
+      topic <- enc2utf8(attr(x, "topic"))
+      help_type <- enc2utf8(attr(x, "type"))
+      tried_all_packages <- attr(x, "tried_all_packages")
+      isTRUE(.Call(
+        "arf_submit_help_request", paths, topic, help_type,
+        tried_all_packages, PACKAGE = "(embedding)"
+      ))
+    }, error = function(error) FALSE)
+
+    if (isTRUE(accepted)) invisible(x) else fallback(x, ...)
+  }
+  registerS3method(
+    "print", "help_files_with_topic", wrapper, envir = ns
+  )
+  1L
+})())
+"#;
 
 unsafe extern "C" fn arf_submit_help_request(
     paths_utf8: SEXP,

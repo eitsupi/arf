@@ -150,7 +150,10 @@
       "description": "R runtime configuration.",
       "$ref": "#/$defs/RConfig",
       "default": {
-        "auto_width": true
+        "auto_width": true,
+        "help": {
+          "viewer": "auto"
+        }
       }
     },
     "reprex": {
@@ -1658,6 +1661,21 @@
         }
       }
     },
+    "HelpViewer": {
+      "description": "Help viewer behavior for the interactive R REPL.",
+      "oneOf": [
+        {
+          "description": "Use arf's native help pager when safe to install, otherwise R's viewer.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Leave help output entirely to R.",
+          "type": "string",
+          "const": "r"
+        }
+      ]
+    },
     "HistoryConfig": {
       "description": "History configuration.",
       "type": "object",
@@ -1897,6 +1915,24 @@
           "description": "Automatically sync R's `options(width)` with the terminal width.\n\nWhen enabled (default), R's `options(width)` is set to match the terminal\ncolumns at startup and updated dynamically on resize. This ensures output\nfrom functions like `str()`, `print()`, and tibble printing uses the full\navailable terminal width instead of R's default of 80.",
           "type": "boolean",
           "default": true
+        },
+        "help": {
+          "description": "How `help()` results are displayed in the interactive REPL.",
+          "$ref": "#/$defs/RHelpConfig",
+          "default": {
+            "viewer": "auto"
+          }
+        }
+      }
+    },
+    "RHelpConfig": {
+      "description": "R help configuration.",
+      "type": "object",
+      "properties": {
+        "viewer": {
+          "description": "Viewer to use for help requests in interactive sessions.",
+          "$ref": "#/$defs/HelpViewer",
+          "default": "auto"
         }
       }
     },

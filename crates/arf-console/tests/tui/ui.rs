@@ -54,6 +54,23 @@ fn history_schema_pager_exits_with_q_and_returns_to_r() -> Result<()> {
 }
 
 #[test]
+fn r_help_opens_native_pager_and_q_returns_to_prompt() -> Result<()> {
+    run_case(
+        "r-help-pager",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            terminal.enter("?mean")?;
+            terminal.wait_for_screen_line("mean help pager", 0, |state, line| {
+                state.exited.is_none() && line.contains("base::mean")
+            })?;
+            terminal.key("q")?;
+            wait_for_prompt_after_ui(terminal, "mean help pager exits")?;
+            terminal.submit("42", "[1] 42", PROMPT)
+        },
+    )
+}
+
+#[test]
 fn history_schema_copy_uses_clipboard_and_shows_feedback() -> Result<()> {
     run_case(
         "history-schema-copy",
