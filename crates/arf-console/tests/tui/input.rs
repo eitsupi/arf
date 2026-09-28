@@ -221,9 +221,43 @@ fn backspace_after_newline_inside_auto_matched_pair_keeps_closer() -> Result<()>
         terminal.wait_for("auto-matched parenthesis pair", |_, line| {
             line.trim_end() == "ARF> ()"
         })?;
+        let before_newline = terminal.state()?;
+        let pair_row = before_newline.cursor.y;
+        let pair_col = before_newline.cursor.x;
+
         // Shift+Enter is Reedline's InsertNewline event.
         terminal.write("\x1b[13;2u")?;
+        terminal.wait_for("newline splits the auto-matched pair", |state, _| {
+            state.cursor.y > pair_row
+        })?;
+        let after_newline = terminal.state()?;
+        let opening_row = terminal.screen_line(pair_row, after_newline.cols)?;
+        let closing_row = terminal.screen_line(after_newline.cursor.y, after_newline.cols)?;
+        ensure!(
+            opening_row.trim_end() == "ARF> (" && closing_row.contains(')'),
+            "Shift+Enter did not split the edit buffer around a visible newline: opening row {opening_row:?}, closing row {closing_row:?}"
+        );
+
         terminal.key("Backspace")?;
+        terminal.wait_for("backspace removes only the newline", |state, line| {
+            state.cursor.y == pair_row && state.cursor.x == pair_col && line.trim_end() == "ARF> ()"
+        })?;
+        let after_backspace = terminal.state()?;
+        let restored_row = terminal.screen_line(after_backspace.cursor.y, after_backspace.cols)?;
+        ensure!(
+            restored_row.trim_end() == "ARF> ()"
+                && restored_row
+                    .chars()
+                    .nth(usize::from(after_backspace.cursor.x).saturating_sub(1))
+                    == Some('(')
+                && restored_row
+                    .chars()
+                    .nth(usize::from(after_backspace.cursor.x))
+                    == Some(')'),
+            "Backspace did not leave the cursor between the auto-matched delimiters: row {restored_row:?}, cursor {:?}",
+            after_backspace.cursor
+        );
+
         terminal.write("1+1")?;
         terminal.key("Enter")?;
         terminal.wait_for_prompt(Some("[1] 2"), PROMPT)
