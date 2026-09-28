@@ -9,6 +9,7 @@ pub mod help;
 pub mod lib_paths;
 mod object;
 mod protect;
+pub mod routines;
 pub mod startup;
 
 #[cfg(test)]
