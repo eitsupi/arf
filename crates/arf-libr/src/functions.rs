@@ -88,6 +88,7 @@ pub struct RLibrary {
 
     // Global symbols
     pub r_nilvalue: *mut SEXP,
+    pub r_na_string: *mut SEXP,
     pub r_globalenv: *mut SEXP,
     pub r_baseenv: *mut SEXP,
     pub r_basenamespace: *mut SEXP,
@@ -376,6 +377,7 @@ impl RLibrary {
 
             // Load global symbols
             load_ptr!(r_nilvalue, b"R_NilValue\0", SEXP);
+            load_ptr!(r_na_string, b"R_NaString\0", SEXP);
             load_ptr!(r_globalenv, b"R_GlobalEnv\0", SEXP);
             load_ptr!(r_baseenv, b"R_BaseEnv\0", SEXP);
             load_ptr!(r_basenamespace, b"R_BaseNamespace\0", SEXP);
@@ -654,6 +656,7 @@ impl RLibrary {
                 r_toplevelexec,
                 rf_eval,
                 r_nilvalue,
+                r_na_string,
                 r_globalenv,
                 r_baseenv,
                 r_basenamespace,
