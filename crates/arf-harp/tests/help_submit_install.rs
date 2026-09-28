@@ -111,9 +111,12 @@ assign("fallback", function(x, ...) {
   assign("pdf_fallback_called", TRUE, envir = .GlobalEnv)
   invisible(x)
 }, envir = pdf_wrapper_env)
-print(pdf_help)
-stopifnot(isTRUE(pdf_fallback_called))
-assign("fallback", original_pdf_fallback, envir = pdf_wrapper_env)
+tryCatch({
+  print(pdf_help)
+  stopifnot(isTRUE(pdf_fallback_called))
+}, finally = {
+  assign("fallback", original_pdf_fallback, envir = pdf_wrapper_env)
+})
 "#,
         )
         .expect("PDF alone should reject through the wrapper and use its fallback binding");
