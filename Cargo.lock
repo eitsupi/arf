@@ -1355,9 +1355,9 @@ dependencies = [
 
 [[package]]
 name = "lzma-rust2"
-version = "0.20.1"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e2a88783b84d2d67ef2791778a9e76bfb68b8017aaf6c9d7d5f2626a478b16c"
+checksum = "fde178a3caf126c440fa15628147772d8ee590a39477d711353fbe2e58a73a5b"
 dependencies = [
  "sha2 0.11.0",
 ]
@@ -1848,9 +1848,9 @@ dependencies = [
 
 [[package]]
 name = "rd-ast"
-version = "0.5.0-rc.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0131d929d280f631d1710c953a69455748feba04c24bf88d219d089aa5716b7"
+checksum = "dbf9b3d8c86288e343f8640cba93442fae76065e5f93414933dfab513a913417"
 dependencies = [
  "rd-rds",
  "serde",
@@ -1858,9 +1858,9 @@ dependencies = [
 
 [[package]]
 name = "rd-helpdb"
-version = "0.5.0-rc.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28bf1094dccc2c2c31ec19eb3292e19d7ea00256c150c905caac3a80f22a28de"
+checksum = "b27f589a602b24ed58f29c85808bf8973fa5960ba4e733fd6929b2a7ebc84ca3"
 dependencies = [
  "rd-rds",
  "thiserror 2.0.21",
@@ -1868,9 +1868,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.5.0-rc.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f287f25401c983839e6bf24e6427ce3bdb272141b12b1214c35fc02fb9838606"
+checksum = "6fef4b59f26d958474d8e6abb58066372514e30232c7906bfb24997ff722122e"
 dependencies = [
  "bzip2",
  "flate2",
