@@ -20,8 +20,8 @@ use crate::completion::completer::CombinedCompleter;
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
-    AutoSuggestions, Config, ConfigStatus, EditorMode, FormatterBackend, ModeIndicatorPosition,
-    RSourceStatus, ReprexMode, ResolvedHistoryLocation,
+    AutoSuggestions, Config, ConfigStatus, EditorMode, FormatterBackend, HelpViewer,
+    ModeIndicatorPosition, RSourceStatus, ReprexMode, ResolvedHistoryLocation,
 };
 use crate::editor::hinter::RLanguageHinter;
 use crate::editor::mode::new_editor_state_ref;

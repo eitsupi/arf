@@ -26,7 +26,8 @@ pub use ipc::IpcConfig;
 pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
-pub use r::RConfig;
+#[allow(unused_imports)]
+pub use r::{HelpViewer, RConfig, RHelpConfig};
 pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
     RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,

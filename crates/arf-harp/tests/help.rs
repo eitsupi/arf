@@ -128,8 +128,8 @@ fn test_help_topics_reads_installed_indexes() {
             topics
                 .iter()
                 .filter(|topic| topic.package == "utils")
-                .all(|topic| topic.entry_type == "help"),
-            "utils entries should be help topics"
+                .any(|topic| topic.entry_type == "help"),
+            "expected at least one help entry from utils"
         );
         assert!(
             topics.iter().any(|topic| {

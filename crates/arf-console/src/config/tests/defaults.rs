@@ -27,6 +27,22 @@ fn test_default_r_auto_width() {
 }
 
 #[test]
+fn test_default_r_help_viewer_is_auto() {
+    assert_eq!(Config::default().r.help.viewer, HelpViewer::Auto);
+}
+
+#[test]
+fn test_parse_r_help_viewer_values_and_reject_unknown() {
+    for (value, expected) in [("auto", HelpViewer::Auto), ("r", HelpViewer::R)] {
+        let source = format!("[r.help]\nviewer = \"{value}\"\n");
+        let config: Config = toml::from_str(&source).unwrap();
+        assert_eq!(config.r.help.viewer, expected);
+    }
+
+    assert!(toml::from_str::<Config>("[r.help]\nviewer = \"other\"\n").is_err());
+}
+
+#[test]
 fn test_parse_r_auto_width_disabled() {
     let toml_str = r#"
 [r]

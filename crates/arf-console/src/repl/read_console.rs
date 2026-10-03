@@ -188,6 +188,16 @@ pub(super) fn read_console_callback(
             arf_libr::reset_command_error_state();
         }
 
+        // Prepared help is consumed only at a verified command prompt, after
+        // the previous command's lifecycle has been finalized and before IPC
+        // dispatch or reedline starts reading the next command.
+        if should_process_pending_help_requests(
+            prompt_kind,
+            state.prompt_config.is_shell_enabled(),
+        ) {
+            super::pager_ui::process_pending_help_requests();
+        }
+
         // Check for pending IPC operations before entering the reedline input loop.
         // At this point reedline hasn't started, so there's no editor buffer to
         // conflict with — we can always accept.
@@ -615,12 +625,17 @@ pub(super) fn read_console_callback(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptKind {
     Command,
+    UnverifiedCommand,
     Continuation,
     Other,
 }
 
 impl PromptKind {
     fn is_command(self) -> bool {
+        matches!(self, Self::Command | Self::UnverifiedCommand)
+    }
+
+    fn is_verified_command(self) -> bool {
         matches!(self, Self::Command)
     }
 
@@ -647,10 +662,11 @@ fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
         Ok(0) => PromptKind::Command,
         Ok(_) => PromptKind::Other,
         Err(_) => {
-            // If R's stack inspection fails, preserve the historical fallback
-            // for the standard prompt and treat other prompts conservatively.
+            // Preserve the historical command-prompt fallback for lifecycle
+            // and IPC behavior, while marking it unverified for operations
+            // that require a confirmed top-level prompt.
             if prompt.ends_with("> ") {
-                PromptKind::Command
+                PromptKind::UnverifiedCommand
             } else {
                 PromptKind::Other
             }
@@ -662,6 +678,10 @@ fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
 /// Continuation prompts belong to the outer command and retain its context.
 fn formatter_failure_updates_lifecycle(prompt_kind: PromptKind) -> bool {
     prompt_kind.is_command()
+}
+
+fn should_process_pending_help_requests(prompt_kind: PromptKind, shell_enabled: bool) -> bool {
+    prompt_kind.is_verified_command() && !shell_enabled
 }
 
 /// Project a reliable R outcome into the prompt, history, and sponge lifecycle.
@@ -685,7 +705,8 @@ fn should_warn_prompt_ambiguity(was_ambiguous: &mut bool, is_ambiguous: bool) ->
 mod tests {
     use super::{
         PromptKind, classify_prompt, formatter_failure_updates_lifecycle,
-        outcome_failure_projection, should_warn_prompt_ambiguity,
+        outcome_failure_projection, should_process_pending_help_requests,
+        should_warn_prompt_ambiguity,
     };
 
     #[test]
@@ -712,13 +733,40 @@ mod tests {
     }
 
     #[test]
+    fn prepared_help_is_drained_only_at_a_command_prompt_outside_shell_mode() {
+        assert!(should_process_pending_help_requests(
+            PromptKind::Command,
+            false
+        ));
+        assert!(!should_process_pending_help_requests(
+            PromptKind::Command,
+            true
+        ));
+        assert!(!should_process_pending_help_requests(
+            PromptKind::UnverifiedCommand,
+            false
+        ));
+        assert!(!should_process_pending_help_requests(
+            PromptKind::Continuation,
+            false
+        ));
+        assert!(!should_process_pending_help_requests(
+            PromptKind::Other,
+            false
+        ));
+    }
+
+    #[test]
     fn prompt_classification_prioritizes_low_level_continuation_status() {
         assert_eq!(classify_prompt("... ", true), PromptKind::Continuation,);
     }
 
     #[test]
     fn prompt_classification_falls_back_for_uninitialized_r() {
-        assert_eq!(classify_prompt("> ", false), PromptKind::Command,);
+        let prompt_kind = classify_prompt("> ", false);
+        assert_eq!(prompt_kind, PromptKind::UnverifiedCommand);
+        assert!(prompt_kind.is_command());
+        assert!(!prompt_kind.is_verified_command());
         assert_eq!(classify_prompt("Selection: ", false), PromptKind::Other,);
     }
 

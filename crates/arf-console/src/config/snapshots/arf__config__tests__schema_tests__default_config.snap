@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/src/config/mod.rs
+source: crates/arf-console/src/config/tests/schema.rs
 expression: config
 ---
 #:schema https://raw.githubusercontent.com/eitsupi/arf/main/artifacts/arf.schema.json
@@ -60,6 +60,9 @@ allowed_functions = []
 
 [r]
 auto_width = true
+
+[r.help]
+viewer = "auto"
 
 [reprex]
 comment = "#> "
