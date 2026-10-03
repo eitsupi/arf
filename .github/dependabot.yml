@@ -30,7 +30,7 @@ updates:
       default-days: 7
       exclude:
         - "rd-*"
-        - "rd2qmd"
+        - "rd2qmd-*"
     groups:
       reedline-rusqlite:
         patterns:
@@ -39,4 +39,4 @@ updates:
       r-documentation-rs:
         patterns:
           - "rd-*"
-          - rd2qmd
+          - "rd2qmd-*"
