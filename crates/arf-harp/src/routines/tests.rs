@@ -172,8 +172,27 @@ fn embedding_registration_calls_r_only_once_in_r() {
             assert_eq!(REGISTRATION_CALLS.load(Ordering::Relaxed), 0);
             super::register_embedding_routines().expect("initial registration should succeed");
             assert_eq!(REGISTRATION_CALLS.load(Ordering::Relaxed), 1);
+            crate::eval_string(
+                r#"
+registered_before <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
+registered_before[["arf_submit_help_request"]]$address <- NULL
+stopifnot(identical(names(registered_before), "arf_submit_help_request"))
+stopifnot(identical(registered_before[["arf_submit_help_request"]]$numParameters, 4L))
+"#,
+            )
+            .expect("the complete production table should contain the help callback");
             super::register_embedding_routines().expect("repeat registration should succeed");
             assert_eq!(REGISTRATION_CALLS.load(Ordering::Relaxed), 1);
+            crate::eval_string(
+                r#"
+registered_after <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
+registered_after[["arf_submit_help_request"]]$address <- NULL
+stopifnot(identical(registered_before, registered_after))
+stopifnot(identical(.Call("arf_submit_help_request", character(), "mean", "text", FALSE,
+                        PACKAGE = "(embedding)"), FALSE))
+"#,
+            )
+            .expect("registration should retain the routine metadata and callable callback");
 
             crate::help_bridge::install_help_submit_wrapper()
                 .expect("wrapper installation should succeed");

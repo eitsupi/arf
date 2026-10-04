@@ -12,7 +12,7 @@ static EMBEDDING_ROUTINES_REGISTERED: OnceCell<()> = OnceCell::new();
 /// single R runtime; subsequent calls are no-ops. Failed attempts may be retried.
 /// Add future embedding callbacks to this table rather than registering them
 /// separately from their feature modules.
-pub fn register_embedding_routines() -> HarpResult<()> {
+pub(crate) fn register_embedding_routines() -> HarpResult<()> {
     EMBEDDING_ROUTINES_REGISTERED
         .get_or_try_init(|| {
             let definitions = [crate::help_bridge::help_submit_definition()];
