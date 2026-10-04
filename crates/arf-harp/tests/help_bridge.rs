@@ -3,16 +3,15 @@
 #[allow(dead_code)]
 mod common;
 
-use arf_harp::help_bridge::{
-    MAX_PENDING_HELP_REQUESTS, drain_prepared_help_requests, register_help_submit_routine,
-};
+use arf_harp::help_bridge::{MAX_PENDING_HELP_REQUESTS, drain_prepared_help_requests};
+use arf_harp::routines::register_embedding_routines;
 use common::with_r;
 
 #[test]
 fn submit_help_request_prepares_atomically_and_rejects_invalid_inputs() {
     with_r(|| {
         assert!(drain_prepared_help_requests().is_empty());
-        register_help_submit_routine().expect("help routine registration should succeed");
+        register_embedding_routines().expect("embedding routine registration should succeed");
 
         arf_harp::eval_string(
             r#"

@@ -90,9 +90,9 @@ pub fn drain_prepared_help_requests() -> Vec<PreparedHelpRequest> {
         .drain()
 }
 
-/// Register `arf_submit_help_request` with embedded R.
-pub fn register_help_submit_routine() -> HarpResult<()> {
-    let definition = R_CallMethodDef {
+/// Provide the help callback definition to the complete embedding registry.
+pub(crate) fn help_submit_definition() -> R_CallMethodDef {
+    R_CallMethodDef {
         name: c"arf_submit_help_request".as_ptr(),
         // SAFETY: R stores all native entries as the generic DL_FUNC ABI,
         // while `.Call` invokes this callback with the registered arity.
@@ -103,11 +103,7 @@ pub fn register_help_submit_routine() -> HarpResult<()> {
             >(arf_submit_help_request)
         }),
         num_args: 4,
-    };
-    // SAFETY: The C string is static and the callback uses the `.Call` ABI with
-    // four SEXP arguments. Its code is part of this process for the duration of
-    // the registered embedding runtime.
-    unsafe { crate::routines::register_call_methods(&[definition]) }
+    }
 }
 
 /// Install the `.Call` routine and, only when utils' registered S3 method is
@@ -130,7 +126,7 @@ pub fn install_help_submit_wrapper() -> HarpResult<HelpSubmitInstallOutcome> {
 
     // Register before mutating the S3 registry so a missing DllInfo or native
     // registration failure leaves standard R help behavior untouched.
-    register_help_submit_routine()?;
+    crate::routines::register_embedding_routines()?;
 
     let installed = crate::eval_string_in_base(HELP_SUBMIT_INSTALL_R)?;
     match read_scalar_status(&installed)? {
