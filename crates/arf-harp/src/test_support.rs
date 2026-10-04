@@ -1,4 +1,4 @@
-//! Helpers for unit tests that need an isolated embedded R runtime.
+//! Shared helpers for tests that need an isolated embedded R runtime.
 
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -7,7 +7,7 @@ use std::sync::Mutex;
 // environment. Each R test then owns its runtime and counters in a fresh process.
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Run exactly one ignored test in a child process, initializing R only there.
+/// Run exactly one test in a child process, initializing R only there.
 /// `qualified_name` includes the crate prefix from `module_path!()`.
 pub(crate) fn with_r_in_subprocess(qualified_name: &str, test: impl FnOnce()) {
     const CHILD_TEST: &str = "ARF_HARP_R_TEST_CHILD";
@@ -41,19 +41,42 @@ pub(crate) fn with_r_in_subprocess(qualified_name: &str, test: impl FnOnce()) {
 
     let child = {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        Command::new(std::env::current_exe().expect("test executable should be available"))
+        let library = arf_libr::find_r_library().expect("R should be installed");
+        let r_home = arf_libr::r_home_from_library_path(&library)
+            .expect("R library should belong to an R home directory");
+        let mut command =
+            Command::new(std::env::current_exe().expect("test executable should be available"));
+        command
             .args([
                 "--exact",
                 test_name,
-                "--ignored",
+                "--include-ignored",
                 "--nocapture",
                 "--test-threads=1",
             ])
+            .env("R_HOME", r_home)
             .env(CHILD_TEST, test_name)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("R test child should start")
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "linux")]
+        {
+            // Linux's loader reads this path at process startup. Set only the
+            // child's environment, retaining paths needed by other libraries.
+            let directory = library.parent().expect("R library should have a directory");
+            let inherited = std::env::var_os("LD_LIBRARY_PATH");
+            let paths = std::iter::once(directory.to_path_buf()).chain(
+                inherited
+                    .as_deref()
+                    .into_iter()
+                    .flat_map(std::env::split_paths)
+                    .filter(|path| path != directory),
+            );
+            command.env(
+                "LD_LIBRARY_PATH",
+                std::env::join_paths(paths).expect("library search paths should be valid"),
+            );
+        }
+        command.spawn().expect("R test child should start")
     };
     let output = child
         .wait_with_output()

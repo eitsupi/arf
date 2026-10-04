@@ -7,7 +7,7 @@
 mod common;
 
 use arf_harp::{get_help_markdown, get_help_topics, get_package_help_markdown};
-use common::{ld_library_path_is_set, with_r};
+use common::with_r;
 
 /// Regression test for GitHub issue #194:
 /// `base::solve` contains `%*%` in its Rd source. Without `deparse = TRUE`,
@@ -16,15 +16,7 @@ use common::{ld_library_path_is_set, with_r};
 /// the `%` is escaped as `\%` and rd2qmd parses the page correctly.
 #[test]
 fn test_help_base_solve_returns_content() {
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_help_base_solve_returns_content: \
-             LD_LIBRARY_PATH not set."
-        );
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_help_base_solve_returns_content, {
         arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         let result = get_help_markdown("solve", Some("base"));
         match &result {
@@ -49,12 +41,7 @@ fn test_help_base_solve_returns_content() {
 
 #[test]
 fn test_help_package_alias_and_exact_key() {
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test_help_package_alias_and_exact_key: LD_LIBRARY_PATH not set.");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_help_package_alias_and_exact_key, {
         let alias = get_package_help_markdown("[.data.frame", "base")
             .expect("help lookup by alias should succeed");
         let exact_key = get_package_help_markdown("Extract.data.frame", "base")
@@ -68,35 +55,25 @@ fn test_help_package_alias_and_exact_key() {
 
 #[test]
 fn test_help_package_embed_fonts_does_not_have_excessive_prose_spaces() {
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_help_package_embed_fonts_does_not_have_excessive_prose_spaces: \
-             LD_LIBRARY_PATH not set."
-        );
-        return;
-    }
-
-    with_r(|| {
-        let markdown = get_package_help_markdown("embedFonts", "grDevices")
-            .expect("grDevices::embedFonts help should be available");
-        assert!(
-            markdown.contains("and embed all fonts"),
-            "unexpected markdown:\n{markdown}"
-        );
-        assert!(markdown.contains("as the name of a Ghostscript"));
-        assert!(!markdown.contains("and   embed"));
-        assert!(!markdown.contains("as     the"));
-    });
+    with_r!(
+        test_help_package_embed_fonts_does_not_have_excessive_prose_spaces,
+        {
+            let markdown = get_package_help_markdown("embedFonts", "grDevices")
+                .expect("grDevices::embedFonts help should be available");
+            assert!(
+                markdown.contains("and embed all fonts"),
+                "unexpected markdown:\n{markdown}"
+            );
+            assert!(markdown.contains("as the name of a Ghostscript"));
+            assert!(!markdown.contains("and   embed"));
+            assert!(!markdown.contains("as     the"));
+        }
+    );
 }
 
 #[test]
 fn test_help_package_and_topic_not_found() {
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test_help_package_and_topic_not_found: LD_LIBRARY_PATH not set.");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_help_package_and_topic_not_found, {
         arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
         let package_error =
             get_package_help_markdown("solve", "definitely_not_an_installed_package")
@@ -113,12 +90,7 @@ fn test_help_package_and_topic_not_found() {
 
 #[test]
 fn test_help_topics_reads_installed_indexes() {
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test_help_topics_reads_installed_indexes: LD_LIBRARY_PATH not set.");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_help_topics_reads_installed_indexes, {
         let topics = get_help_topics().expect("help indexes should be readable");
         assert!(
             topics.iter().any(|topic| topic.package == "utils"),

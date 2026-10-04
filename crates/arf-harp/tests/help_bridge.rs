@@ -9,11 +9,13 @@ use common::with_r;
 
 #[test]
 fn submit_help_request_prepares_atomically_and_rejects_invalid_inputs() {
-    with_r(|| {
-        assert!(drain_prepared_help_requests().is_empty());
-        register_embedding_routines().expect("embedding routine registration should succeed");
+    with_r!(
+        submit_help_request_prepares_atomically_and_rejects_invalid_inputs,
+        {
+            assert!(drain_prepared_help_requests().is_empty());
+            register_embedding_routines().expect("embedding routine registration should succeed");
 
-        arf_harp::eval_string(
+            arf_harp::eval_string(
             r#"
 mean_help <- utils::help("mean", help_type = "text")
 mean_paths <- enc2utf8(unclass(mean_help))
@@ -52,33 +54,34 @@ stopifnot(identical(submit_help(paths = traversal_path), FALSE))
         )
         .expect("R should accept valid requests and reject invalid requests");
 
-        let requests = drain_prepared_help_requests();
-        assert_eq!(
-            requests.len(),
-            2,
-            "rejections and partial failure must not enqueue"
-        );
+            let requests = drain_prepared_help_requests();
+            assert_eq!(
+                requests.len(),
+                2,
+                "rejections and partial failure must not enqueue"
+            );
 
-        let first = &requests[0];
-        assert_eq!(first.topic, "mean");
-        assert_eq!(first.pages.len(), 1);
-        assert_eq!(first.pages[0].package, "base");
-        assert_eq!(first.pages[0].display_topic, "mean");
-        assert_eq!(first.pages[0].help_key, "mean");
-        assert!(!first.pages[0].markdown.is_empty());
-        assert!(first.pages[0].package_dir.ends_with("base"));
+            let first = &requests[0];
+            assert_eq!(first.topic, "mean");
+            assert_eq!(first.pages.len(), 1);
+            assert_eq!(first.pages[0].package, "base");
+            assert_eq!(first.pages[0].display_topic, "mean");
+            assert_eq!(first.pages[0].help_key, "mean");
+            assert!(!first.pages[0].markdown.is_empty());
+            assert!(first.pages[0].package_dir.ends_with("base"));
 
-        let second = &requests[1];
-        assert_eq!(second.topic, "mean");
-        assert_eq!(
-            second
-                .pages
-                .iter()
-                .map(|page| page.help_key.as_str())
-                .collect::<Vec<_>>(),
-            ["mean", "sum"]
-        );
+            let second = &requests[1];
+            assert_eq!(second.topic, "mean");
+            assert_eq!(
+                second
+                    .pages
+                    .iter()
+                    .map(|page| page.help_key.as_str())
+                    .collect::<Vec<_>>(),
+                ["mean", "sum"]
+            );
 
-        assert_eq!(MAX_PENDING_HELP_REQUESTS, 16);
-    });
+            assert_eq!(MAX_PENDING_HELP_REQUESTS, 16);
+        }
+    );
 }

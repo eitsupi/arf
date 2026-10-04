@@ -10,9 +10,11 @@ use common::with_r;
 
 #[test]
 fn installer_preserves_custom_methods_and_wraps_only_the_standard_method() {
-    with_r(|| {
-        assert!(drain_prepared_help_requests().is_empty());
-        arf_harp::eval_string(
+    with_r!(
+        installer_preserves_custom_methods_and_wraps_only_the_standard_method,
+        {
+            assert!(drain_prepared_help_requests().is_empty());
+            arf_harp::eval_string(
             r#"
 utils_ns <- asNamespace("utils")
 standard_help_printer <- get("print.help_files_with_topic", envir = utils_ns, inherits = FALSE)
@@ -29,97 +31,97 @@ registerS3method("print", "help_files_with_topic", custom_help_printer, envir = 
         )
         .expect("R should install the pre-existing custom printer");
 
-        assert_eq!(
-            install_help_submit_wrapper().expect("custom printer check should succeed"),
-            HelpSubmitInstallOutcome::SkippedExistingMethod
-        );
-        arf_harp::eval_string(
-            r#"
+            assert_eq!(
+                install_help_submit_wrapper().expect("custom printer check should succeed"),
+                HelpSubmitInstallOutcome::SkippedExistingMethod
+            );
+            arf_harp::eval_string(
+                r#"
 print(utils::help("mean", help_type = "text"))
 stopifnot(isTRUE(custom_help_called))
 registerS3method("print", "help_files_with_topic", standard_help_printer, envir = utils_ns)
 "#,
-        )
-        .expect("the pre-existing custom printer should remain active");
-        assert!(drain_prepared_help_requests().is_empty());
+            )
+            .expect("the pre-existing custom printer should remain active");
+            assert!(drain_prepared_help_requests().is_empty());
 
-        assert_eq!(
-            install_help_submit_wrapper().expect("standard printer install should succeed"),
-            HelpSubmitInstallOutcome::Installed
-        );
-        assert_eq!(
-            install_help_submit_wrapper().expect("repeated install should safely skip"),
-            HelpSubmitInstallOutcome::SkippedExistingMethod
-        );
+            assert_eq!(
+                install_help_submit_wrapper().expect("standard printer install should succeed"),
+                HelpSubmitInstallOutcome::Installed
+            );
+            assert_eq!(
+                install_help_submit_wrapper().expect("repeated install should safely skip"),
+                HelpSubmitInstallOutcome::SkippedExistingMethod
+            );
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 embedding_routines_before <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
 embedding_routines_before[["arf_submit_help_request"]]$address <- NULL
 registerS3method("print", "help_files_with_topic", standard_help_printer, envir = utils_ns)
 "#,
-        )
-        .expect("R should restore the standard printer before reinstallation");
-        assert_eq!(
-            install_help_submit_wrapper().expect("wrapper reinstallation should succeed"),
-            HelpSubmitInstallOutcome::Installed
-        );
-        arf_harp::eval_string(
-            r#"
+            )
+            .expect("R should restore the standard printer before reinstallation");
+            assert_eq!(
+                install_help_submit_wrapper().expect("wrapper reinstallation should succeed"),
+                HelpSubmitInstallOutcome::Installed
+            );
+            arf_harp::eval_string(
+                r#"
 embedding_routines_after <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
 embedding_routines_after[["arf_submit_help_request"]]$address <- NULL
 stopifnot(identical(embedding_routines_before, embedding_routines_after))
 "#,
-        )
-        .expect("reinstallation must preserve native routine metadata");
+            )
+            .expect("reinstallation must preserve native routine metadata");
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 assigned_help <- utils::help("mean", help_type = "text")
 "#,
-        )
-        .expect("assigning a help object should succeed");
-        assert!(drain_prepared_help_requests().is_empty());
+            )
+            .expect("assigning a help object should succeed");
+            assert!(drain_prepared_help_requests().is_empty());
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 invisible(print(assigned_help))
 invisible(print(utils::help("lm", package = "stats", help_type = "text")))
 "#,
-        )
-        .expect("standard and package-qualified help should be printable");
-        let requests = drain_prepared_help_requests();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].topic, "mean");
-        assert_eq!(requests[0].pages[0].package, "base");
-        assert_eq!(requests[0].pages[0].help_key, "mean");
-        assert_eq!(requests[1].topic, "lm");
-        assert!(requests[1].pages.iter().any(|page| page.package == "stats"));
+            )
+            .expect("standard and package-qualified help should be printable");
+            let requests = drain_prepared_help_requests();
+            assert_eq!(requests.len(), 2);
+            assert_eq!(requests[0].topic, "mean");
+            assert_eq!(requests[0].pages[0].package, "base");
+            assert_eq!(requests[0].pages[0].help_key, "mean");
+            assert_eq!(requests[1].topic, "lm");
+            assert!(requests[1].pages.iter().any(|page| page.package == "stats"));
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 bad_help <- utils::help("mean", help_type = "text")
 attr(bad_help, "tried_all_packages") <- TRUE
 fallback_output <- utils::capture.output(print(bad_help))
 stopifnot(length(fallback_output) > 0L)
 "#,
-        )
-        .expect("a rejected submit should fall back to the standard R printer");
-        assert!(drain_prepared_help_requests().is_empty());
+            )
+            .expect("a rejected submit should fall back to the standard R printer");
+            assert!(drain_prepared_help_requests().is_empty());
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 missing_help <- utils::help("arf_no_such_topic_7a81", package = "utils", help_type = "text")
 stopifnot(length(missing_help) == 0L)
 missing_output <- utils::capture.output(print(missing_help))
 stopifnot(length(missing_output) > 0L)
 "#,
-        )
-        .expect("a missing topic should use R's normal no-documentation fallback");
-        assert!(drain_prepared_help_requests().is_empty());
+            )
+            .expect("a missing topic should use R's normal no-documentation fallback");
+            assert!(drain_prepared_help_requests().is_empty());
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 pdf_help <- utils::help("mean", help_type = "text")
 attr(pdf_help, "type") <- "pdf"
 stopifnot(identical(attr(pdf_help, "tried_all_packages"), FALSE))
@@ -139,12 +141,12 @@ tryCatch({
   assign("fallback", original_pdf_fallback, envir = pdf_wrapper_env)
 })
 "#,
-        )
-        .expect("PDF alone should reject through the wrapper and use its fallback binding");
-        assert!(drain_prepared_help_requests().is_empty());
+            )
+            .expect("PDF alone should reject through the wrapper and use its fallback binding");
+            assert!(drain_prepared_help_requests().is_empty());
 
-        arf_harp::eval_string(
-            r#"
+            arf_harp::eval_string(
+                r#"
 late_custom_called <- FALSE
 late_custom_printer <- function(x, ...) {
   assign("late_custom_called", TRUE, envir = .GlobalEnv)
@@ -154,8 +156,9 @@ registerS3method("print", "help_files_with_topic", late_custom_printer, envir = 
 print(utils::help("mean", help_type = "text"))
 stopifnot(isTRUE(late_custom_called))
 "#,
-        )
-        .expect("a late custom method should win S3 dispatch");
-        assert!(drain_prepared_help_requests().is_empty());
-    });
+            )
+            .expect("a late custom method should win S3 dispatch");
+            assert!(drain_prepared_help_requests().is_empty());
+        }
+    );
 }
