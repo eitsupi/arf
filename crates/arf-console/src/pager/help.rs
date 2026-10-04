@@ -606,64 +606,15 @@ fn visible_result_rows() -> usize {
 /// Plain text (demo messages, error messages) also renders fine since
 /// it contains no Markdown syntax.
 fn display_help_pager(title: &str, content: &str, manage_alternate_screen: bool) -> io::Result<()> {
-    use super::markdown::render_markdown;
-    use super::{PagerAction, PagerConfig, PagerContent, run};
-    use ratatui::text::Line;
+    use super::help_content::HelpContent;
+    use super::{PagerConfig, run};
 
-    struct HelpContent {
-        lines: Vec<Line<'static>>,
-        /// Raw Markdown source, kept for re-wrapping on resize.
-        source: String,
-        /// Terminal width used for the last render.
-        last_width: usize,
-    }
-
-    impl HelpContent {
-        fn render_with_width(source: &str, width: usize) -> Vec<Line<'static>> {
-            render_markdown(source, Some("r"), Some(width))
-        }
-    }
-
-    impl PagerContent for HelpContent {
-        fn line_count(&self) -> usize {
-            self.lines.len()
-        }
-
-        fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
-            self.lines.get(index).cloned().unwrap_or_default()
-        }
-
-        fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<PagerAction> {
-            if code == KeyCode::Enter {
-                Some(PagerAction::Exit)
-            } else {
-                None
-            }
-        }
-
-        fn on_resize(&mut self, width: usize, _height: usize) -> bool {
-            if width != self.last_width {
-                self.lines = HelpContent::render_with_width(&self.source, width);
-                self.last_width = width;
-                true
-            } else {
-                false
-            }
-        }
-    }
-
-    let (cols, _) = terminal::size().unwrap_or((80, 24));
-    let width = cols as usize;
-
-    let mut content = HelpContent {
-        lines: HelpContent::render_with_width(content, width),
-        source: content.to_string(),
-        last_width: width,
-    };
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    let mut content = HelpContent::new(content, cols as usize, rows as usize);
 
     let config = PagerConfig {
         title,
-        footer_hint: "↑↓/jk scroll  q/Enter/Esc back",
+        footer_hint: "↑↓/jk scroll  / search  q/Esc back",
         manage_alternate_screen,
     };
 

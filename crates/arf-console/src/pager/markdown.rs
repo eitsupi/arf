@@ -1,14 +1,16 @@
 //! Markdown to ratatui `Line` renderer.
 //!
 //! Converts CommonMark text into styled `Vec<Line<'static>>` suitable for
-//! the pager. No width-aware wrapping is performed — each logical line maps
-//! to exactly one `Line`.
+//! the pager, optionally wrapping prose and table cells. Search text retains
+//! its logical boundaries and a mapping to the wrapped lines.
 //!
 //! Reference: `refs/codex/codex-rs/tui2/src/markdown_render.rs`
 
+use super::text_utils::{WrappedLine, wrap_spans_with_ranges};
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use std::ops::Range;
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::RColorConfig;
@@ -22,21 +24,56 @@ use crate::pager::style_convert::nu_ansi_color_to_ratatui;
 /// that untagged code blocks receive R syntax highlighting.
 ///
 /// `wrap_width` enables word-wrapping for prose content (paragraphs,
-/// blockquotes, list items).  Code blocks, tables, and headings are never
-/// wrapped.  Pass `None` to disable wrapping (every logical line maps to
+/// blockquotes, list items) and table cells. Code blocks and headings are never
+/// wrapped. Pass `None` to disable wrapping (every logical line maps to
 /// exactly one `Line`).
 pub fn render_markdown(
     input: &str,
     default_code_lang: Option<&str>,
     wrap_width: Option<usize>,
 ) -> Vec<Line<'static>> {
+    render_markdown_with_text(input, default_code_lang, wrap_width).lines
+}
+
+/// Render Markdown with width-independent text and its visual positions.
+pub(super) fn render_markdown_with_text(
+    input: &str,
+    default_code_lang: Option<&str>,
+    wrap_width: Option<usize>,
+) -> RenderedMarkdown {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
     let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()), wrap_width);
     writer.run();
-    writer.lines
+    RenderedMarkdown {
+        lines: writer.lines,
+        text: writer.text,
+    }
+}
+
+pub(super) struct RenderedMarkdown {
+    pub lines: Vec<Line<'static>>,
+    pub text: Vec<RenderedText>,
+}
+
+/// One logical line, or one table cell line, before terminal wrapping.
+pub(super) struct RenderedText {
+    pub text: String,
+    pub fragments: Vec<TextFragment>,
+}
+
+pub(super) struct TextFragment {
+    pub line: usize,
+    pub source_range: Range<usize>,
+    /// UTF-8 byte offset in the concatenated spans of the visual line.
+    pub visual_start: usize,
+}
+
+struct TableLine {
+    text_index: usize,
+    wrapped: WrappedLine,
 }
 
 // ---------------------------------------------------------------------------
@@ -117,13 +154,14 @@ fn is_r_language(lang: &str) -> bool {
 struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     iter: I,
     lines: Vec<Line<'static>>,
+    text: Vec<RenderedText>,
     styles: Styles,
 
     /// Default language for code blocks without a language tag.
     default_code_lang: Option<String>,
 
-    /// If set, wrap prose lines to this width (code blocks, tables, headings
-    /// are excluded from wrapping).
+    /// If set, wrap prose lines and constrain table cells to this width.
+    /// Code blocks and headings retain their original line boundaries.
     wrap_width: Option<usize>,
 
     /// Stack of inline styles (emphasis, strong, …).
@@ -183,6 +221,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         Self {
             iter,
             lines: Vec::new(),
+            text: Vec::new(),
             styles: Styles::default(),
             default_code_lang,
             wrap_width,
@@ -497,7 +536,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         if self.has_output {
             self.push_blank_line();
         }
-        self.lines.push(Line::from("———"));
+        self.push_unwrapped_line(Line::from("———"));
         self.has_output = true;
         self.needs_newline = true;
     }
@@ -569,15 +608,20 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             && self.in_heading.is_none()
         {
             let indent = self.continuation_indent();
-            let wrapped = super::text_utils::wrap_spans(&spans, width, indent);
-            for line_spans in wrapped {
-                self.lines.push(Line::from(line_spans));
+            let text_index = self.push_search_text(&spans);
+            for wrapped in wrap_spans_with_ranges(&spans, width, indent) {
+                self.text[text_index].fragments.push(TextFragment {
+                    line: self.lines.len(),
+                    source_range: wrapped.source_range,
+                    visual_start: wrapped.indent,
+                });
+                self.lines.push(Line::from(wrapped.spans));
             }
             self.has_output = true;
             return;
         }
 
-        self.lines.push(Line::from(spans));
+        self.push_unwrapped_line(Line::from(spans));
         self.has_output = true;
     }
 
@@ -612,12 +656,32 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     fn flush_code_line(&mut self) {
         let spans = std::mem::take(&mut self.current_spans);
         let line = Line::from(spans).style(Style::new().bg(self.styles.code_block_bg));
-        self.lines.push(line);
+        self.push_unwrapped_line(line);
         self.has_output = true;
     }
 
     fn push_blank_line(&mut self) {
         self.lines.push(Line::from(""));
+    }
+
+    fn push_search_text(&mut self, spans: &[Span<'static>]) -> usize {
+        let index = self.text.len();
+        self.text.push(RenderedText {
+            text: spans.iter().map(|span| span.content.as_ref()).collect(),
+            fragments: Vec::new(),
+        });
+        index
+    }
+
+    fn push_unwrapped_line(&mut self, line: Line<'static>) {
+        let index = self.push_search_text(&line.spans);
+        let len = self.text[index].text.len();
+        self.text[index].fragments.push(TextFragment {
+            line: self.lines.len(),
+            source_range: 0..len,
+            visual_start: 0,
+        });
+        self.lines.push(line);
     }
 
     fn ensure_blank_line_before_block(&mut self) {
@@ -709,22 +773,28 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         }
 
         // Pre-split all cells into sub-lines
-        let mut split_rows: Vec<Vec<Vec<Vec<Span<'static>>>>> = self
-            .table_rows
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|cell| Self::split_cell_lines(cell))
-                    .collect()
-            })
-            .collect();
+        let mut split_rows: Vec<Vec<Vec<TableLine>>> = Vec::new();
+        for row in std::mem::take(&mut self.table_rows) {
+            let mut cells = Vec::new();
+            for cell in row {
+                let mut cell_lines = Vec::new();
+                for spans in Self::split_cell_lines(&cell) {
+                    cell_lines.push(TableLine {
+                        text_index: self.push_search_text(&spans),
+                        wrapped: WrappedLine::unwrapped(spans),
+                    });
+                }
+                cells.push(cell_lines);
+            }
+            split_rows.push(cells);
+        }
 
         // Calculate column widths (max sub-line width across all rows)
         let mut col_widths = vec![0usize; n_cols];
         for row in &split_rows {
             for (col_idx, cell_lines) in row.iter().enumerate() {
                 for sub_line in cell_lines {
-                    let w = Self::spans_width(sub_line);
+                    let w = Self::spans_width(&sub_line.wrapped.spans);
                     col_widths[col_idx] = col_widths[col_idx].max(w);
                 }
             }
@@ -749,10 +819,16 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                         if target == 0 {
                             continue;
                         }
-                        let mut new_lines: Vec<Vec<Span<'static>>> = Vec::new();
+                        let mut new_lines = Vec::new();
                         for sub_line in cell_lines.drain(..) {
-                            let wrapped = super::text_utils::wrap_spans(&sub_line, target, 0);
-                            new_lines.extend(wrapped);
+                            for wrapped in
+                                wrap_spans_with_ranges(&sub_line.wrapped.spans, target, 0)
+                            {
+                                new_lines.push(TableLine {
+                                    text_index: sub_line.text_index,
+                                    wrapped,
+                                });
+                            }
                         }
                         *cell_lines = new_lines;
                     }
@@ -778,8 +854,15 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                     let target = col_widths.get(col_idx).copied().unwrap_or(0);
 
                     if let Some(sub_line) = cell_lines.get(sub_line_idx) {
-                        let w = Self::spans_width(sub_line);
-                        for s in sub_line {
+                        let w = Self::spans_width(&sub_line.wrapped.spans);
+                        let visual_start =
+                            spans.iter().map(|span| span.content.len()).sum::<usize>();
+                        self.text[sub_line.text_index].fragments.push(TextFragment {
+                            line: self.lines.len(),
+                            source_range: sub_line.wrapped.source_range.clone(),
+                            visual_start: visual_start + sub_line.wrapped.indent,
+                        });
+                        for s in &sub_line.wrapped.spans {
                             spans.push(s.clone());
                         }
                         let pad = target.saturating_sub(w);

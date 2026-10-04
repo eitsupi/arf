@@ -138,6 +138,8 @@ Press `:h` or `:help` to open the fuzzy help browser:
 
 R's own help commands (`?mean` or `help("mean")`) use R's viewer by default. To open their results in the native pager, enable the experimental [R Help Viewer](#r-help-viewer) integration.
 
+Native help pages support page-local search with `/`; the footer shows the available controls.
+
 ## Meta Commands
 
 arf extends R with `:` prefixed meta commands:
