@@ -149,16 +149,48 @@ pub fn pad_to_width(s: &str, width: usize) -> String {
 ///   available width.
 /// - Continuation lines are indented by `continuation_indent` spaces.
 /// - Span styles are preserved across split boundaries.
-pub fn wrap_spans(
+#[cfg(test)]
+fn wrap_spans(
     spans: &[Span<'static>],
     max_width: usize,
     continuation_indent: usize,
 ) -> Vec<Vec<Span<'static>>> {
+    wrap_spans_with_ranges(spans, max_width, continuation_indent)
+        .into_iter()
+        .map(|line| line.spans)
+        .collect()
+}
+
+/// A wrapped line's text and its UTF-8 byte range in the original spans.
+pub(super) struct WrappedLine {
+    pub spans: Vec<Span<'static>>,
+    pub source_range: std::ops::Range<usize>,
+    /// Bytes inserted before source text for continuation indentation.
+    pub indent: usize,
+}
+
+impl WrappedLine {
+    pub fn unwrapped(spans: Vec<Span<'static>>) -> Self {
+        let len = spans.iter().map(|span| span.content.len()).sum();
+        Self {
+            spans,
+            source_range: 0..len,
+            indent: 0,
+        }
+    }
+}
+
+/// Wrap spans while retaining the source ranges, excluding trimmed break spaces.
+pub(super) fn wrap_spans_with_ranges(
+    spans: &[Span<'static>],
+    max_width: usize,
+    continuation_indent: usize,
+) -> Vec<WrappedLine> {
     use ratatui::style::Style;
     use unicode_width::UnicodeWidthChar;
 
     if max_width == 0 {
-        return vec![spans.to_vec()];
+        return vec![WrappedLine::unwrapped(spans.to_vec())];
     }
 
     // Fast path: check if wrapping is needed at all.
@@ -167,7 +199,7 @@ pub fn wrap_spans(
         .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
         .sum();
     if total_width <= max_width {
-        return vec![spans.to_vec()];
+        return vec![WrappedLine::unwrapped(spans.to_vec())];
     }
 
     // Per-character metadata for wrapping decisions.
@@ -177,17 +209,27 @@ pub fn wrap_spans(
         style: Style,
         is_space: bool,
         is_cjk: bool,
+        byte_offset: usize,
     }
 
     /// Build a `Vec<Span>` from a slice of CI, coalescing adjacent chars
     /// with the same style.
-    fn build_line(chars: &[CI], is_continuation: bool, indent: usize) -> Vec<Span<'static>> {
+    fn build_line(chars: &[CI], is_continuation: bool, indent: usize) -> WrappedLine {
+        let source_start = chars.first().map_or(0, |ch| ch.byte_offset);
+        let source_end = chars
+            .last()
+            .map_or(source_start, |ch| ch.byte_offset + ch.ch.len_utf8());
+        let indent = if is_continuation { indent } else { 0 };
         let mut spans: Vec<Span<'static>> = Vec::new();
-        if is_continuation && indent > 0 {
+        if indent > 0 {
             spans.push(Span::raw(" ".repeat(indent)));
         }
         if chars.is_empty() {
-            return spans;
+            return WrappedLine {
+                spans,
+                source_range: source_start..source_end,
+                indent,
+            };
         }
         let mut cur_style = chars[0].style;
         let mut cur_text = String::new();
@@ -206,10 +248,15 @@ pub fn wrap_spans(
         if !cur_text.is_empty() {
             spans.push(Span::styled(cur_text, cur_style));
         }
-        spans
+        WrappedLine {
+            spans,
+            source_range: source_start..source_end,
+            indent,
+        }
     }
 
     let mut chars: Vec<CI> = Vec::new();
+    let mut byte_offset = 0;
     for span in spans {
         let style = span.style;
         for ch in span.content.chars() {
@@ -220,11 +267,13 @@ pub fn wrap_spans(
                 style,
                 is_space: ch == ' ',
                 is_cjk: w == 2,
+                byte_offset,
             });
+            byte_offset += ch.len_utf8();
         }
     }
 
-    let mut result: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut result: Vec<WrappedLine> = Vec::new();
     let mut pos = 0;
 
     while pos < chars.len() {
@@ -294,7 +343,7 @@ pub fn wrap_spans(
     }
 
     if result.is_empty() {
-        vec![spans.to_vec()]
+        vec![WrappedLine::unwrapped(spans.to_vec())]
     } else {
         result
     }

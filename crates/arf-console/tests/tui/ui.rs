@@ -110,6 +110,23 @@ viewer = "auto"
             terminal.wait_for("previous page search match", |state, _| {
                 state.text.contains("/mean [1/")
             })?;
+            terminal.write("/arithmetic mean")?;
+            terminal.key("Enter")?;
+            terminal.wait_for("phrase search before resize", |state, _| {
+                state.text.contains("/arithmetic mean [1/")
+            })?;
+            terminal.execute(Operation::Resize { cols: 45, rows: 18 })?;
+            terminal.wait_for(
+                "resize keeps phrase search and clears selection",
+                |state, _| {
+                    state.text.contains("/arithmetic mean [0/")
+                        && !state.text.contains("No matches for:")
+                },
+            )?;
+            terminal.key("n")?;
+            terminal.wait_for("wrapped phrase remains searchable", |state, _| {
+                state.text.contains("/arithmetic mean [1/")
+            })?;
             terminal.key("q")?;
             terminal.wait_for(
                 "q clears search and keeps the help page open",
@@ -117,7 +134,7 @@ viewer = "auto"
                     state.text.contains("base::mean")
                         && state.text.contains("q/Esc back")
                         && !state.text.contains("n/N next/previous")
-                        && !state.text.contains("/mean [")
+                        && !state.text.contains("/arithmetic mean [")
                 },
             )?;
             terminal.key("q")?;

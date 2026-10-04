@@ -1,6 +1,6 @@
 //! Rendered help content and page-local literal search state.
 
-use super::markdown::render_markdown;
+use super::markdown::{RenderedText, render_markdown_with_text};
 use super::{PagerAction, PagerContent};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
@@ -8,14 +8,15 @@ use ratatui::text::{Line, Span};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SearchMatch {
-    line: usize,
-    /// UTF-8 byte offsets in the concatenated rendered spans of this line.
+    logical_line: usize,
+    /// UTF-8 byte offsets in the unwrapped rendered text.
     start: usize,
     end: usize,
 }
 
 pub(super) struct HelpContent {
     lines: Vec<Line<'static>>,
+    text: Vec<RenderedText>,
     source: String,
     width: usize,
     height: usize,
@@ -29,8 +30,10 @@ pub(super) struct HelpContent {
 
 impl HelpContent {
     pub(super) fn new(source: &str, width: usize, height: usize) -> Self {
+        let document = render_markdown_with_text(source, Some("r"), Some(width));
         Self {
-            lines: render_markdown(source, Some("r"), Some(width)),
+            lines: document.lines,
+            text: document.text,
             source: source.to_owned(),
             width,
             height,
@@ -46,10 +49,10 @@ impl HelpContent {
     fn recompute_matches(&mut self) {
         self.matches.clear();
         if !self.query.is_empty() {
-            for (line, text) in self.lines.iter().enumerate() {
-                for (start, _) in text.to_string().match_indices(&self.query) {
+            for (logical_line, text) in self.text.iter().enumerate() {
+                for (start, _) in text.text.match_indices(&self.query) {
                     self.matches.push(SearchMatch {
-                        line,
+                        logical_line,
                         start,
                         end: start + self.query.len(),
                     });
@@ -57,6 +60,38 @@ impl HelpContent {
             }
         }
         self.current = None;
+    }
+
+    fn visual_ranges(&self, m: SearchMatch) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
+        self.text[m.logical_line]
+            .fragments
+            .iter()
+            .filter_map(move |fragment| {
+                let start = m.start.max(fragment.source_range.start);
+                let end = m.end.min(fragment.source_range.end);
+                (start < end).then(|| {
+                    (
+                        fragment.line,
+                        fragment.visual_start + start - fragment.source_range.start,
+                        fragment.visual_start + end - fragment.source_range.start,
+                    )
+                })
+            })
+    }
+
+    fn match_line(&self, m: SearchMatch) -> usize {
+        self.visual_ranges(m).next().map_or_else(
+            || {
+                // Whitespace removed at a wrap boundary still belongs to the logical text.
+                let fragments = &self.text[m.logical_line].fragments;
+                fragments
+                    .iter()
+                    .find(|f| f.source_range.end > m.start)
+                    .or_else(|| fragments.last())
+                    .map_or(0, |f| f.line)
+            },
+            |(line, _, _)| line,
+        )
     }
 
     fn update_status(&mut self) {
@@ -92,18 +127,18 @@ impl HelpContent {
             None if forward => self
                 .matches
                 .iter()
-                .position(|m| m.line >= self.scroll_offset)
+                .position(|m| self.match_line(*m) >= self.scroll_offset)
                 .unwrap_or(0),
             None => self
                 .matches
                 .iter()
-                .rposition(|m| m.line <= self.scroll_offset)
+                .rposition(|m| self.match_line(*m) <= self.scroll_offset)
                 .unwrap_or(count - 1),
         };
         self.current = Some(index);
         self.update_status();
 
-        let line = self.matches[index].line;
+        let line = self.match_line(self.matches[index]);
         let visible_rows = self.height.saturating_sub(2).max(1);
         if line < self.scroll_offset {
             PagerAction::ScrollTo(line)
@@ -123,7 +158,9 @@ impl PagerContent for HelpContent {
     fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
         let mut line = self.lines.get(index).cloned().unwrap_or_default();
         if let Some(m) = self.current.map(|current| self.matches[current])
-            && m.line == index
+            && let Some((start, end)) = self
+                .visual_ranges(m)
+                .find_map(|(line, start, end)| (line == index).then_some((start, end)))
         {
             let highlight = Style::default()
                 .fg(Color::Black)
@@ -133,8 +170,8 @@ impl PagerContent for HelpContent {
             let mut spans = Vec::new();
             for span in line.spans {
                 let text = span.content.as_ref();
-                let start = m.start.saturating_sub(offset).min(text.len());
-                let end = m.end.saturating_sub(offset).min(text.len());
+                let start = start.saturating_sub(offset).min(text.len());
+                let end = end.saturating_sub(offset).min(text.len());
                 if start < end {
                     if start > 0 {
                         spans.push(Span::styled(text[..start].to_owned(), span.style));
@@ -220,19 +257,17 @@ impl PagerContent for HelpContent {
 
     fn on_resize(&mut self, width: usize, height: usize) -> bool {
         self.height = height;
+        // A new viewport invalidates the selected visual match, not the query.
+        let selection_changed = self.current.take().is_some();
         if width == self.width {
-            return false;
+            self.update_status();
+            return selection_changed;
         }
-        let previous = self.current;
-        self.lines = render_markdown(&self.source, Some("r"), Some(width));
+        let document = render_markdown_with_text(&self.source, Some("r"), Some(width));
+        self.lines = document.lines;
+        self.text = document.text;
         self.width = width;
         self.recompute_matches();
-        self.current = previous.and_then(|index| {
-            self.matches
-                .len()
-                .checked_sub(1)
-                .map(|last| index.min(last))
-        });
         self.update_status();
         true
     }
@@ -252,6 +287,14 @@ mod tests {
             key(content, KeyCode::Char(ch));
         }
         key(content, KeyCode::Enter)
+    }
+
+    fn highlighted_text(content: &HelpContent) -> String {
+        (0..content.line_count())
+            .flat_map(|index| content.render_line(index, content.width).spans)
+            .filter(|span| span.style.bg == Some(Color::Yellow))
+            .map(|span| span.content.into_owned())
+            .collect()
     }
 
     #[test]
@@ -350,21 +393,96 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_lines_are_searched_and_positions_recomputed_after_resize() {
+    fn logical_matches_survive_resize_and_map_to_wrapped_lines() {
         let mut content = HelpContent::new("alpha beta needle gamma needle", 80, 24);
         search(&mut content, "needle");
         assert_eq!(content.matches.len(), 2);
-        assert!(content.matches.iter().all(|m| m.line == 0));
+        let matches = content.matches.clone();
+        assert!(content.matches.iter().all(|m| content.match_line(*m) == 0));
         assert!(content.on_resize(12, 24));
-        assert_eq!(content.matches.len(), 2);
-        assert!(content.matches.iter().all(|m| m.line > 0));
+        assert_eq!(content.matches, matches);
+        assert_eq!(content.current, None);
+        assert!(content.matches.iter().all(|m| content.match_line(*m) > 0));
         for m in &content.matches {
-            assert_eq!(&content.lines[m.line].to_string()[m.start..m.end], "needle");
+            for (line, start, end) in content.visual_ranges(*m) {
+                assert_eq!(&content.lines[line].to_string()[start..end], "needle");
+            }
         }
         search(&mut content, "beta needle");
-        assert!(content.matches.is_empty());
-        content.on_resize(80, 24);
         assert_eq!(content.matches.len(), 1);
+        let matches = content.matches.clone();
+        for width in [80, 12, 5, 1, 0] {
+            content.on_resize(width, 24);
+            assert_eq!(content.matches, matches);
+            key(&mut content, KeyCode::Char('n'));
+            assert_eq!(highlighted_text(&content).replace(' ', ""), "betaneedle");
+        }
+    }
+
+    #[test]
+    fn wrapped_unicode_phrases_keep_identity_and_highlight_in_lists_and_quotes() {
+        for source in ["- 前 **日本**語 needle 後", "> 前 **日本**語 needle 後"] {
+            let mut content = HelpContent::new(source, 80, 24);
+            search(&mut content, "日本語 needle");
+            let matches = content.matches.clone();
+            assert_eq!(matches.len(), 1);
+            for width in [8, 6, 2, 80] {
+                content.on_resize(width, 24);
+                assert_eq!(content.matches, matches);
+                key(&mut content, KeyCode::Char('n'));
+                assert_eq!(highlighted_text(&content).replace(' ', ""), "日本語needle");
+            }
+        }
+    }
+
+    #[test]
+    fn table_cell_phrases_survive_wrapping_and_map_past_unicode_columns() {
+        let source = "| Left | Right |\n| --- | --- |\n| 日本 | alpha **beta** needle gamma |";
+        let mut content = HelpContent::new(source, 80, 24);
+        search(&mut content, "beta needle");
+        let matches = content.matches.clone();
+        assert_eq!(matches.len(), 1);
+        for width in [22, 16, 80] {
+            content.on_resize(width, 24);
+            assert_eq!(content.matches, matches);
+            key(&mut content, KeyCode::Char('n'));
+            assert_eq!(highlighted_text(&content).replace(' ', ""), "betaneedle");
+        }
+    }
+
+    #[test]
+    fn search_does_not_cross_hard_breaks_paragraphs_code_lines_or_table_cells() {
+        for source in [
+            "beta  \nneedle",
+            "beta\n\nneedle",
+            "```\nbeta\nneedle\n```",
+            "| Left | Right |\n| --- | --- |\n| beta | needle |",
+            "| Text |\n| --- |\n| beta<br>needle |",
+        ] {
+            let mut content = HelpContent::new(source, 80, 24);
+            search(&mut content, "beta needle");
+            assert!(content.matches.is_empty());
+            content.on_resize(12, 24);
+            assert!(content.matches.is_empty());
+        }
+    }
+
+    #[test]
+    fn resize_clears_selection_and_keeps_query_and_count_for_next_navigation() {
+        let mut content = HelpContent::new("needle needle", 80, 24);
+        search(&mut content, "needle");
+        key(&mut content, KeyCode::Char('n'));
+        assert_eq!(content.current, Some(1));
+        assert!(content.on_resize(80, 4));
+        assert_eq!(content.current, None);
+        assert_eq!(content.query, "needle");
+        assert!(content.feedback_message().unwrap().contains("[0/2]"));
+        assert_eq!(highlighted_text(&content), "");
+        content.on_resize(6, 4);
+        content.prepare_render(1);
+        key(&mut content, KeyCode::Char('n'));
+        assert_eq!(content.current, Some(1));
+        assert_eq!(highlighted_text(&content), "needle");
     }
 
     #[test]
