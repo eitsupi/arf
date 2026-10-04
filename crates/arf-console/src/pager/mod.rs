@@ -5,6 +5,7 @@
 
 mod changelog;
 mod help;
+mod help_content;
 pub mod history_browser;
 pub mod history_schema;
 pub(crate) mod markdown;
@@ -44,12 +45,14 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // Variants are part of public API for custom handlers
 pub enum PagerAction {
-    /// Continue running the pager.
+    /// Continue running the pager, including its standard key handling.
     Continue,
     /// Exit the pager.
     Exit,
-    /// Request a redraw.
+    /// Consume the key and request a redraw without standard key handling.
     Redraw,
+    /// Consume the key and move to a line, clamped to the valid scroll range.
+    ScrollTo(usize),
 }
 
 /// Animation scroll speed in milliseconds per character.
@@ -177,7 +180,8 @@ pub trait PagerContent {
     /// `scroll_offset` is the first visible line index.
     fn prepare_render(&mut self, _scroll_offset: usize) {}
 
-    /// Handle a custom key event. Return `Some(PagerAction)` if handled.
+    /// Handle a custom key event. `None` and `Continue` use standard key handling;
+    /// `Redraw` and `ScrollTo` consume the key.
     fn handle_key(&mut self, _code: KeyCode, _modifiers: KeyModifiers) -> Option<PagerAction> {
         None
     }
@@ -248,6 +252,11 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                         match action {
                             PagerAction::Exit => break,
                             PagerAction::Redraw => continue,
+                            PagerAction::ScrollTo(line) => {
+                                scroll_offset =
+                                    clamp_scroll_offset(line, content.line_count(), term_height);
+                                continue;
+                            }
                             PagerAction::Continue => {}
                         }
                     }
@@ -327,12 +336,10 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
                 },
                 Event::Resize(w, h) => {
                     term_height = h as usize;
-                    if content.on_resize(w as usize, term_height) {
-                        // Content changed (e.g., re-wrapped); clamp scroll.
-                        let max_offset =
-                            max_scroll_offset_with_height(content.line_count(), term_height);
-                        scroll_offset = scroll_offset.min(max_offset);
-                    }
+                    content.on_resize(w as usize, term_height);
+                    // Height changes also change the valid range without re-wrapping.
+                    scroll_offset =
+                        clamp_scroll_offset(scroll_offset, content.line_count(), term_height);
                     needs_redraw = true;
                 }
                 _ => {}
@@ -426,6 +433,10 @@ fn content_rows_with_height(height: usize) -> usize {
 /// Calculate max scroll offset for given line count and terminal height.
 fn max_scroll_offset_with_height(line_count: usize, height: usize) -> usize {
     line_count.saturating_sub(content_rows_with_height(height))
+}
+
+fn clamp_scroll_offset(requested: usize, line_count: usize, height: usize) -> usize {
+    requested.min(max_scroll_offset_with_height(line_count, height))
 }
 
 /// OSC 52 clipboard command for copying text via terminal escape sequence.
@@ -564,6 +575,15 @@ fn is_below_minimum(cols: u16, rows: u16, min: &MinimumSize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_scroll_requests_are_clamped_to_the_viewport_range() {
+        assert_eq!(clamp_scroll_offset(usize::MAX, 100, 24), 78);
+        assert_eq!(clamp_scroll_offset(10, 100, 24), 10);
+        assert_eq!(clamp_scroll_offset(20, 5, 24), 0);
+        assert_eq!(clamp_scroll_offset(1, 0, 24), 0);
+        assert_eq!(clamp_scroll_offset(78, 100, 50), 52);
+    }
 
     #[test]
     fn test_is_below_minimum_both_ok() {

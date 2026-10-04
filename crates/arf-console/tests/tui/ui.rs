@@ -85,6 +85,41 @@ viewer = "auto"
             terminal.wait_for_screen_line("mean help pager", 0, |state, line| {
                 state.exited.is_none() && line.contains("base::mean")
             })?;
+            terminal.key("Enter")?;
+            terminal.key("n")?;
+            terminal.key("Shift+n")?;
+            terminal.write("/qjk/")?;
+            terminal.wait_for("pager keys stay in search input", |state, _| {
+                state.text.contains("/qjk/|  Enter search  Esc cancel")
+            })?;
+            terminal.key("Escape")?;
+            terminal.wait_for("search input cancels without leaving pager", |state, _| {
+                state.text.contains("base::mean") && state.text.contains("q/Esc back")
+            })?;
+            terminal.write("/mean")?;
+            terminal.key("Enter")?;
+            terminal.wait_for("first page search match", |state, _| {
+                state.text.contains("/mean [1/")
+            })?;
+            terminal.key("Enter")?;
+            terminal.key("n")?;
+            terminal.wait_for("next page search match", |state, _| {
+                state.text.contains("/mean [2/")
+            })?;
+            terminal.key("Shift+n")?;
+            terminal.wait_for("previous page search match", |state, _| {
+                state.text.contains("/mean [1/")
+            })?;
+            terminal.key("q")?;
+            terminal.wait_for(
+                "q clears search and keeps the help page open",
+                |state, _| {
+                    state.text.contains("base::mean")
+                        && state.text.contains("q/Esc back")
+                        && !state.text.contains("n/N next/previous")
+                        && !state.text.contains("/mean [")
+                },
+            )?;
             terminal.key("q")?;
             wait_for_prompt_after_ui(terminal, "mean help pager exits")?;
             terminal.enter("?stats::lm")?;
