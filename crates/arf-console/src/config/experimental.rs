@@ -4,6 +4,7 @@ use nu_ansi_term::Color;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 
 /// A provider for resolving an R installation.
@@ -57,6 +58,10 @@ pub struct ExperimentalConfig {
     #[serde(default)]
     pub r_completion: RCompletionConfig,
 
+    /// Experimental R help viewer configuration (native pager opt-in).
+    #[serde(default)]
+    pub r_help: RHelpConfig,
+
     /// Shell mode completion configuration.
     #[serde(default)]
     pub shell_completion: ShellCompletionConfig,
@@ -84,6 +89,34 @@ pub struct ExperimentalConfig {
     /// Ordered providers for experimental R source resolution.
     #[serde(default)]
     pub r_source_overrides: Vec<RSourceOverride>,
+}
+
+/// Help viewer behavior for the interactive R REPL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum HelpViewer {
+    /// Use arf's native help pager when safe to install, otherwise R's viewer.
+    Auto,
+    /// Leave help output entirely to R (default).
+    #[default]
+    R,
+}
+
+impl fmt::Display for HelpViewer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Auto => "auto",
+            Self::R => "r",
+        })
+    }
+}
+
+/// Experimental R help configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub struct RHelpConfig {
+    /// Viewer to use for help requests in interactive sessions.
+    pub viewer: HelpViewer,
 }
 
 /// Configuration for shell mode completion.
@@ -272,6 +305,9 @@ struct ExperimentalConfigSchema {
 
     /// R code completion configuration (fuzzy matching, package functions).
     pub r_completion: RCompletionConfig,
+
+    /// Experimental R help viewer configuration (native pager opt-in).
+    pub r_help: RHelpConfig,
 
     /// Shell mode completion configuration.
     pub shell_completion: ShellCompletionConfig,

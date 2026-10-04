@@ -95,6 +95,9 @@
             }
           }
         },
+        "r_help": {
+          "viewer": "r"
+        },
         "r_source_overrides": [],
         "shell_abbreviations": {},
         "shell_completion": {
@@ -150,10 +153,7 @@
       "description": "R runtime configuration.",
       "$ref": "#/$defs/RConfig",
       "default": {
-        "auto_width": true,
-        "help": {
-          "viewer": "auto"
-        }
+        "auto_width": true
       }
     },
     "reprex": {
@@ -1631,6 +1631,13 @@
             }
           }
         },
+        "r_help": {
+          "description": "Experimental R help viewer configuration (native pager opt-in).",
+          "$ref": "#/$defs/RHelpConfig",
+          "default": {
+            "viewer": "r"
+          }
+        },
         "r_source_overrides": {
           "description": "Ordered providers for experimental R source resolution.",
           "type": "array",
@@ -1670,7 +1677,7 @@
           "const": "auto"
         },
         {
-          "description": "Leave help output entirely to R.",
+          "description": "Leave help output entirely to R (default).",
           "type": "string",
           "const": "r"
         }
@@ -1915,24 +1922,17 @@
           "description": "Automatically sync R's `options(width)` with the terminal width.\n\nWhen enabled (default), R's `options(width)` is set to match the terminal\ncolumns at startup and updated dynamically on resize. This ensures output\nfrom functions like `str()`, `print()`, and tibble printing uses the full\navailable terminal width instead of R's default of 80.",
           "type": "boolean",
           "default": true
-        },
-        "help": {
-          "description": "How `help()` results are displayed in the interactive REPL.",
-          "$ref": "#/$defs/RHelpConfig",
-          "default": {
-            "viewer": "auto"
-          }
         }
       }
     },
     "RHelpConfig": {
-      "description": "R help configuration.",
+      "description": "Experimental R help configuration.",
       "type": "object",
       "properties": {
         "viewer": {
           "description": "Viewer to use for help requests in interactive sessions.",
           "$ref": "#/$defs/HelpViewer",
-          "default": "auto"
+          "default": "r"
         }
       }
     },

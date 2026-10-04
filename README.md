@@ -136,9 +136,7 @@ Press `:h` or `:help` to open the fuzzy help browser:
   ↑↓ navigate  Tab/Enter select  Esc exit
 ```
 
-R's own help commands (`?mean` or `help("mean")`) also open the native help pager in interactive sessions by default. The `[r.help] viewer` setting controls this behavior: `"auto"` enables the integration when R's standard `utils` printer is still registered, while `"r"` leaves display to R. arf does not replace an S3 printer already registered by another frontend. Unsupported help types, missing topics, or rejected requests fall back to R's normal printer. When R finds multiple help pages, arf asks you to select one explicitly.
-
-The integration is limited to the interactive REPL; headless, script, and standalone sessions keep their existing behavior. Assigning a help object does not open the pager until it is printed.
+R's own help commands (`?mean` or `help("mean")`) use R's viewer by default. To open their results in the native pager, enable the experimental [R Help Viewer](#r-help-viewer) integration.
 
 ## Meta Commands
 
@@ -218,9 +216,6 @@ override_prompt_color = false
 [r]
 auto_width = true       # Sync options(width) with terminal size
 
-[r.help]
-viewer = "auto"         # "auto" (native pager when safe) or "r" (R's viewer)
-
 # Reprex static configuration
 [reprex]
 comment = "#> "
@@ -271,6 +266,21 @@ See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 ## Experimental Features
 
 Features in this section are under development and may change or be removed in future versions. Configure them under the `[experimental]` table and its subtables (e.g. `[experimental.prompt_spinner]`).
+
+### R Help Viewer
+
+Open R's own help results (`?mean` or `help("mean")`) in arf's native pager. **Disabled by default.** To enable:
+
+```toml
+[experimental.r_help]
+viewer = "auto"  # "r" (default) leaves help display to R
+```
+
+With `"auto"`, arf enables the integration when R's standard `utils` printer is still registered. It preserves S3 printers registered by other frontends. Unsupported help types, missing topics, or rejected requests fall back to R's normal printer. When R finds multiple help pages, arf asks you to select one explicitly.
+
+The integration is limited to the interactive REPL; headless, script, and standalone sessions keep their existing behavior. Assigning a help object does not open the pager until it is printed. Restart arf after changing this setting. The `:help` browser remains available with either viewer setting.
+
+See [R Help Viewer configuration](docs/configuration.md#experimental-r-help-viewer) for details.
 
 ### R Source Overrides
 

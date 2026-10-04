@@ -20,6 +20,7 @@ fn test_generate_default_config() {
     ));
     assert!(parsed.startup.show_banner);
     assert_eq!(parsed.editor.mode, EditorMode::Emacs);
+    assert_eq!(parsed.experimental.r_help.viewer, HelpViewer::R);
 }
 
 #[test]

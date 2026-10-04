@@ -97,7 +97,7 @@ impl Repl {
             sync_r_width();
         }
 
-        if should_install_help_submit_wrapper(self.config.r.help.viewer) {
+        if should_install_help_submit_wrapper(self.config.experimental.r_help.viewer) {
             match arf_harp::help_bridge::install_help_submit_wrapper() {
                 Ok(arf_harp::help_bridge::HelpSubmitInstallOutcome::Installed) => {
                     log::info!("Native R help pager integration installed");

@@ -4,7 +4,7 @@
 
 ### Added
 
-- Interactive R help results such as `?mean` now open arf's native help pager by default when `utils`' standard S3 printer is still registered. Configure this with `[r.help] viewer = "auto"` or opt out with `"r"`; existing custom printers are preserved, and unsupported or unavailable requests fall back to R's printer.
+- Experimental integration opens interactive R help results such as `?mean` in arf's native help pager when enabled with `[experimental.r_help] viewer = "auto"` and `utils`' standard S3 printer is still registered. The default `"r"` leaves help display to R; existing custom printers are preserved, and unsupported or unavailable requests fall back to R's printer.
 
 ### Changed
 

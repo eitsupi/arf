@@ -18,6 +18,8 @@ pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
     StaticFormalsMode,
 };
+#[allow(unused_imports)]
+pub use experimental::{HelpViewer, RHelpConfig};
 pub use history::{HistoryConfig, HistoryMode};
 pub(crate) use history::{HistoryLocationSource, ResolvedHistoryLocation};
 pub use ipc::IpcConfig;
@@ -26,8 +28,7 @@ pub use ipc::IpcConfig;
 pub use prompt::{
     Indicators, ModeIndicatorPosition, PromptConfig, StatusConfig, StatusSymbol, ViConfig,
 };
-#[allow(unused_imports)]
-pub use r::{HelpViewer, RConfig, RHelpConfig};
+pub use r::RConfig;
 pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
     RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,
