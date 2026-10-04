@@ -17,8 +17,9 @@ pub use functions::{RLibrary, init_r_library, r_global_env, r_library, r_nil_val
 
 // types
 pub use types::{
-    ParseStatus, R_FALSE, R_TRUE, Rboolean, ReadConsoleFunc, SEXP, SEXPREC, SexpType,
-    WriteConsoleExFunc,
+    DL_FUNC, DllInfo, ParseStatus, R_CMethodDef, R_CallMethodDef, R_ExternalMethodDef, R_FALSE,
+    R_FortranMethodDef, R_NativePrimitiveArgType, R_TRUE, Rboolean, ReadConsoleFunc, SEXP, SEXPREC,
+    SexpType, WriteConsoleExFunc,
 };
 #[cfg(windows)]
 pub use types::{Rstart, SaType, UImode};

@@ -21,6 +21,10 @@ pub enum HarpError {
     #[error("Unexpected null pointer")]
     NullPointer,
 
+    /// Embedded R rejected native call-method registration.
+    #[error("R call-method registration failed: {0}")]
+    RoutineRegistration(String),
+
     /// An installed package could not be found in the cached library paths.
     #[error("Package {package:?} not found in the cached library paths")]
     PackageNotFound { package: String },

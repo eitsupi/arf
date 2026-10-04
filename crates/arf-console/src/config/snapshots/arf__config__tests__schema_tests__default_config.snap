@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/src/config/mod.rs
+source: crates/arf-console/src/config/tests/schema.rs
 expression: config
 ---
 #:schema https://raw.githubusercontent.com/eitsupi/arf/main/artifacts/arf.schema.json
@@ -125,6 +125,9 @@ mode = "off"
 [experimental.r_completion.static.formals.exclusions]
 packages = []
 functions = []
+
+[experimental.r_help]
+viewer = "r"
 
 [experimental.shell_completion]
 command_names = false

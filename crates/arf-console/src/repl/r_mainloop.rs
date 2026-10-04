@@ -97,6 +97,26 @@ impl Repl {
             sync_r_width();
         }
 
+        if should_install_help_submit_wrapper(self.config.experimental.r_help.viewer) {
+            match arf_harp::help_bridge::install_help_submit_wrapper() {
+                Ok(arf_harp::help_bridge::HelpSubmitInstallOutcome::Installed) => {
+                    log::info!("Native R help pager integration installed");
+                }
+                Ok(arf_harp::help_bridge::HelpSubmitInstallOutcome::SkippedExistingMethod) => {
+                    log::info!(
+                        "Native R help pager integration skipped: a custom print method is active"
+                    );
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Native R help pager integration unavailable; retaining R help output: {error:?}"
+                    );
+                }
+            }
+        } else {
+            log::debug!("Native R help pager integration disabled by configuration");
+        }
+
         // Set up the ReadConsole callback
         arf_libr::set_read_console_callback(read_console_callback);
 
@@ -135,5 +155,21 @@ impl Repl {
 
         println!("\nGoodbye!");
         Ok(())
+    }
+}
+
+fn should_install_help_submit_wrapper(viewer: super::HelpViewer) -> bool {
+    viewer == super::HelpViewer::Auto
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_install_help_submit_wrapper;
+    use crate::config::HelpViewer;
+
+    #[test]
+    fn r_help_viewer_does_not_install_native_submit_wrapper() {
+        assert!(!should_install_help_submit_wrapper(HelpViewer::R));
+        assert!(should_install_help_submit_wrapper(HelpViewer::Auto));
     }
 }

@@ -1,7 +1,7 @@
 //! R-dependent completion measurements, isolated from other unit tests.
 //!
-//! Run with an installed R package corpus (on Linux, set LD_LIBRARY_PATH to
-//! include R's library directory):
+//! Run with an installed R package corpus. The subprocess helper configures
+//! the selected R library's runtime search path before launching each R test:
 //! `cargo test -p arf-harp --lib completion::r_tests -- --ignored --nocapture`
 //! No Cargo feature is required. Each test runs in a fresh child process.
 

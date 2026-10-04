@@ -1,4 +1,4 @@
-use super::support::{PROMPT, Terminal, run_case, run_case_with};
+use super::support::{DEFAULT_CONFIG, PROMPT, Terminal, run_case, run_case_with};
 use anyhow::{Result, ensure};
 use std::path::Path;
 use tui_test::{MouseAction, Operation, OperationResult};
@@ -49,6 +49,52 @@ fn history_schema_pager_exits_with_q_and_returns_to_r() -> Result<()> {
             terminal.key("q")?;
             wait_for_prompt_after_ui(terminal, "history schema exits")?;
             terminal.submit("42", "[1] 42", PROMPT)
+        },
+    )
+}
+
+#[test]
+fn r_help_keeps_standard_printer_by_default() -> Result<()> {
+    run_case(
+        "r-help-default",
+        &["--no-auto-match", "--no-completion"],
+        |terminal| {
+            terminal.submit(
+                r#"identical(getS3method("print", "help_files_with_topic"), utils:::print.help_files_with_topic)"#,
+                "[1] TRUE",
+                PROMPT,
+            )
+        },
+    )
+}
+
+#[test]
+fn r_help_opens_native_pager_and_q_returns_to_prompt() -> Result<()> {
+    run_case_with(
+        Terminal::builder("r-help-pager")
+            .args(["--no-auto-match", "--no-completion"])
+            .config(format!(
+                r#"{DEFAULT_CONFIG}
+[experimental.r_help]
+viewer = "auto"
+"#
+            )),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter("?mean")?;
+            terminal.wait_for_screen_line("mean help pager", 0, |state, line| {
+                state.exited.is_none() && line.contains("base::mean")
+            })?;
+            terminal.key("q")?;
+            wait_for_prompt_after_ui(terminal, "mean help pager exits")?;
+            terminal.enter("?stats::lm")?;
+            terminal.wait_for_screen_line("qualified lm help pager", 0, |state, line| {
+                state.exited.is_none() && line.contains("stats::lm")
+            })?;
+            terminal.key("q")?;
+            wait_for_prompt_after_ui(terminal, "qualified lm help pager exits")?;
+            terminal.submit("42", "[1] 42", PROMPT)?;
+            terminal.quit()
         },
     )
 }

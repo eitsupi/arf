@@ -5,7 +5,7 @@ mod common;
 use arf_harp::completion::get_completions;
 use arf_harp::completion::get_installed_packages;
 use arf_harp::eval_string_with_visibility;
-use common::{ld_library_path_is_set, with_r};
+use common::with_r;
 
 /// Regression test for GitHub issue #204:
 /// Tab completion should work inside function call arguments.
@@ -16,15 +16,7 @@ use common::{ld_library_path_is_set, with_r};
 /// to time out and return empty.
 #[test]
 fn test_completion_inside_function_call() {
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_completion_inside_function_call: \
-             LD_LIBRARY_PATH not set."
-        );
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_completion_inside_function_call, {
         eval_string_with_visibility("aaa_bbb <- 1").expect("assignment should succeed");
 
         // timeout_ms=1 would cause a timeout at top level, but inside a function call
@@ -43,15 +35,7 @@ fn test_completion_inside_function_call() {
 /// Baseline: top-level completion finishes well within 50ms.
 #[test]
 fn test_completion_at_top_level_within_timeout() {
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_completion_at_top_level_within_timeout: \
-             LD_LIBRARY_PATH not set."
-        );
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_completion_at_top_level_within_timeout, {
         eval_string_with_visibility("aaa_bbb <- 1").expect("assignment should succeed");
 
         let completions = get_completions("aaa_", 4, 50).expect("should not error");
@@ -66,14 +50,7 @@ fn test_completion_at_top_level_within_timeout() {
 
 #[test]
 fn test_installed_packages_include_base_packages() {
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_installed_packages_include_base_packages: LD_LIBRARY_PATH not set."
-        );
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_installed_packages_include_base_packages, {
         let packages = get_installed_packages().expect("package scan should not error");
         assert!(
             packages.iter().any(|package| package == "base"),

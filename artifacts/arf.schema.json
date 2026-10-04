@@ -95,6 +95,9 @@
             }
           }
         },
+        "r_help": {
+          "viewer": "r"
+        },
         "r_source_overrides": [],
         "shell_abbreviations": {},
         "shell_completion": {
@@ -1628,6 +1631,13 @@
             }
           }
         },
+        "r_help": {
+          "description": "Experimental R help viewer configuration (native pager opt-in).",
+          "$ref": "#/$defs/RHelpConfig",
+          "default": {
+            "viewer": "r"
+          }
+        },
         "r_source_overrides": {
           "description": "Ordered providers for experimental R source resolution.",
           "type": "array",
@@ -1657,6 +1667,21 @@
           "default": false
         }
       }
+    },
+    "HelpViewer": {
+      "description": "Help viewer behavior for the interactive R REPL.",
+      "oneOf": [
+        {
+          "description": "Use arf's native help pager when safe to install, otherwise R's viewer.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Leave help output entirely to R (default).",
+          "type": "string",
+          "const": "r"
+        }
+      ]
     },
     "HistoryConfig": {
       "description": "History configuration.",
@@ -1897,6 +1922,17 @@
           "description": "Automatically sync R's `options(width)` with the terminal width.\n\nWhen enabled (default), R's `options(width)` is set to match the terminal\ncolumns at startup and updated dynamically on resize. This ensures output\nfrom functions like `str()`, `print()`, and tibble printing uses the full\navailable terminal width instead of R's default of 80.",
           "type": "boolean",
           "default": true
+        }
+      }
+    },
+    "RHelpConfig": {
+      "description": "Experimental R help configuration.",
+      "type": "object",
+      "properties": {
+        "viewer": {
+          "description": "Viewer to use for help requests in interactive sessions.",
+          "$ref": "#/$defs/HelpViewer",
+          "default": "r"
         }
       }
     },

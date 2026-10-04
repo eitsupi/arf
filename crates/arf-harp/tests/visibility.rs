@@ -9,11 +9,11 @@
 mod common;
 
 use arf_harp::eval_string_with_visibility;
-use common::{ld_library_path_is_set, with_r};
+use common::with_r;
 
 #[test]
 fn test_simple_expression_is_visible() {
-    with_r(|| {
+    with_r!(test_simple_expression_is_visible, {
         let result = eval_string_with_visibility("1 + 1").expect("eval should succeed");
         assert!(
             result.visible,
@@ -24,7 +24,7 @@ fn test_simple_expression_is_visible() {
 
 #[test]
 fn test_assignment_is_invisible() {
-    with_r(|| {
+    with_r!(test_assignment_is_invisible, {
         let result = eval_string_with_visibility("x <- 42").expect("eval should succeed");
         assert!(!result.visible, "Assignment with <- should be invisible");
     });
@@ -32,7 +32,7 @@ fn test_assignment_is_invisible() {
 
 #[test]
 fn test_equals_assignment_is_invisible() {
-    with_r(|| {
+    with_r!(test_equals_assignment_is_invisible, {
         let result = eval_string_with_visibility("y = 100").expect("eval should succeed");
         assert!(!result.visible, "Assignment with = should be invisible");
     });
@@ -40,7 +40,7 @@ fn test_equals_assignment_is_invisible() {
 
 #[test]
 fn test_variable_lookup_is_visible() {
-    with_r(|| {
+    with_r!(test_variable_lookup_is_visible, {
         // First assign a value
         eval_string_with_visibility("test_var <- 123").expect("assignment should succeed");
 
@@ -52,7 +52,7 @@ fn test_variable_lookup_is_visible() {
 
 #[test]
 fn test_invisible_function_makes_result_invisible() {
-    with_r(|| {
+    with_r!(test_invisible_function_makes_result_invisible, {
         let result = eval_string_with_visibility("invisible(42)").expect("eval should succeed");
         assert!(!result.visible, "invisible() should make result invisible");
     });
@@ -60,7 +60,7 @@ fn test_invisible_function_makes_result_invisible() {
 
 #[test]
 fn test_print_function_is_visible() {
-    with_r(|| {
+    with_r!(test_print_function_is_visible, {
         // print() returns its argument invisibly, but we're testing the return
         let result = eval_string_with_visibility("print(1)").expect("eval should succeed");
         // print() returns its argument invisibly
@@ -70,7 +70,7 @@ fn test_print_function_is_visible() {
 
 #[test]
 fn test_function_call_is_visible() {
-    with_r(|| {
+    with_r!(test_function_call_is_visible, {
         let result = eval_string_with_visibility("sum(1, 2, 3)").expect("eval should succeed");
         assert!(
             result.visible,
@@ -81,7 +81,7 @@ fn test_function_call_is_visible() {
 
 #[test]
 fn test_null_result_is_not_visible() {
-    with_r(|| {
+    with_r!(test_null_result_is_not_visible, {
         // NULL is never considered visible for printing purposes
         let result = eval_string_with_visibility("NULL").expect("eval should succeed");
         assert!(
@@ -93,7 +93,7 @@ fn test_null_result_is_not_visible() {
 
 #[test]
 fn test_string_literal_is_visible() {
-    with_r(|| {
+    with_r!(test_string_literal_is_visible, {
         let result = eval_string_with_visibility(r#""hello""#).expect("eval should succeed");
         assert!(result.visible, "String literal should be visible");
     });
@@ -101,7 +101,7 @@ fn test_string_literal_is_visible() {
 
 #[test]
 fn test_vector_creation_is_visible() {
-    with_r(|| {
+    with_r!(test_vector_creation_is_visible, {
         let result = eval_string_with_visibility("c(1, 2, 3)").expect("eval should succeed");
         assert!(result.visible, "Vector creation should be visible");
     });
@@ -109,31 +109,20 @@ fn test_vector_creation_is_visible() {
 
 #[test]
 fn test_package_loading_works() {
-    // Skip this test if LD_LIBRARY_PATH is not set correctly.
-    // The binary handles this via ensure_ld_library_path() which re-execs the process,
-    // but tests cannot re-exec themselves.
-    if !ld_library_path_is_set() {
-        eprintln!(
-            "Skipping test_package_loading_works: LD_LIBRARY_PATH not set.\n\
-             Run tests with: LD_LIBRARY_PATH=/opt/R/4.5.2/lib/R/lib cargo test"
-        );
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_package_loading_works, {
         // Try to load the 'methods' package which is a base package
-        // This tests that LD_LIBRARY_PATH is set correctly
+        // The subprocess helper must support loading package shared libraries.
         let result = eval_string_with_visibility("library(methods)");
         assert!(
             result.is_ok(),
-            "Loading 'methods' package should succeed (LD_LIBRARY_PATH must be set)"
+            "Loading 'methods' package should succeed in the isolated R process"
         );
     });
 }
 
 #[test]
 fn test_base_functions_work() {
-    with_r(|| {
+    with_r!(test_base_functions_work, {
         // Test that base functions that might depend on loaded libraries work
         let result = eval_string_with_visibility("paste('hello', 'world')");
         assert!(result.is_ok(), "paste() should work");
@@ -153,7 +142,7 @@ fn test_reprex_mode_settings() {
 
 #[test]
 fn test_reprex_mode_output() {
-    with_r(|| {
+    with_r!(test_reprex_mode_output, {
         // Enable reprex mode
         arf_libr::set_reprex_mode(true, "#> ");
 
@@ -171,7 +160,7 @@ fn test_reprex_mode_output() {
 
 #[test]
 fn test_complete_expression() {
-    with_r(|| {
+    with_r!(test_complete_expression, {
         let result = arf_harp::is_expression_complete("1 + 1").expect("should not error");
         assert!(result, "Simple expression should be complete");
     });
@@ -179,7 +168,7 @@ fn test_complete_expression() {
 
 #[test]
 fn test_incomplete_expression_open_paren() {
-    with_r(|| {
+    with_r!(test_incomplete_expression_open_paren, {
         let result = arf_harp::is_expression_complete("(1 +").expect("should not error");
         assert!(
             !result,
@@ -190,7 +179,7 @@ fn test_incomplete_expression_open_paren() {
 
 #[test]
 fn test_incomplete_expression_open_brace() {
-    with_r(|| {
+    with_r!(test_incomplete_expression_open_brace, {
         let result = arf_harp::is_expression_complete("function() {").expect("should not error");
         assert!(
             !result,
@@ -201,7 +190,7 @@ fn test_incomplete_expression_open_brace() {
 
 #[test]
 fn test_incomplete_expression_trailing_operator() {
-    with_r(|| {
+    with_r!(test_incomplete_expression_trailing_operator, {
         let result = arf_harp::is_expression_complete("1 +").expect("should not error");
         assert!(
             !result,
@@ -212,7 +201,7 @@ fn test_incomplete_expression_trailing_operator() {
 
 #[test]
 fn test_complete_multiline_expression() {
-    with_r(|| {
+    with_r!(test_complete_multiline_expression, {
         let result =
             arf_harp::is_expression_complete("function() {\n  1 + 1\n}").expect("should not error");
         assert!(result, "Complete multiline expression should be complete");
@@ -221,7 +210,7 @@ fn test_complete_multiline_expression() {
 
 #[test]
 fn test_complete_if_statement() {
-    with_r(|| {
+    with_r!(test_complete_if_statement, {
         let result =
             arf_harp::is_expression_complete("if (TRUE) 1 else 2").expect("should not error");
         assert!(result, "Complete if-else should be complete");
@@ -230,7 +219,7 @@ fn test_complete_if_statement() {
 
 #[test]
 fn test_incomplete_if_statement() {
-    with_r(|| {
+    with_r!(test_incomplete_if_statement, {
         // R's parser considers "if (TRUE) 1 else" as incomplete
         let result =
             arf_harp::is_expression_complete("if (TRUE) 1 else").expect("should not error");
@@ -240,7 +229,7 @@ fn test_incomplete_if_statement() {
 
 #[test]
 fn test_parse_error_is_complete() {
-    with_r(|| {
+    with_r!(test_parse_error_is_complete, {
         // Parse errors are NOT marked as incomplete - they are "complete" in the sense
         // that we should try to evaluate them to show the error
         let result = arf_harp::is_expression_complete("1 + + 2").expect("should not error");
@@ -255,13 +244,7 @@ fn test_parse_error_is_complete() {
 
 #[test]
 fn test_check_if_functions_base_functions() {
-    // Skip if LD_LIBRARY_PATH is not set (packages may not load)
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test: LD_LIBRARY_PATH not set");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_check_if_functions_base_functions, {
         let names = vec!["print", "sum", "mean", "c"];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
         assert_eq!(result.len(), 4);
@@ -274,13 +257,7 @@ fn test_check_if_functions_base_functions() {
 
 #[test]
 fn test_check_if_functions_non_functions() {
-    // Skip if LD_LIBRARY_PATH is not set
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test: LD_LIBRARY_PATH not set");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_check_if_functions_non_functions, {
         let names = vec!["TRUE", "FALSE", "NA", "NULL"];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
         assert_eq!(result.len(), 4);
@@ -293,13 +270,7 @@ fn test_check_if_functions_non_functions() {
 
 #[test]
 fn test_check_if_functions_namespaced() {
-    // Skip if LD_LIBRARY_PATH is not set (packages may not load)
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test: LD_LIBRARY_PATH not set");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_check_if_functions_namespaced, {
         // Test namespace-qualified function names (pkg::func syntax)
         let names = vec!["base::print", "base::sum", "stats::lm"];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
@@ -312,13 +283,7 @@ fn test_check_if_functions_namespaced() {
 
 #[test]
 fn test_check_if_functions_mixed() {
-    // Skip if LD_LIBRARY_PATH is not set
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test: LD_LIBRARY_PATH not set");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_check_if_functions_mixed, {
         // Mix of functions and non-functions
         let names = vec!["print", "TRUE", "base::sum", "nonexistent_xyz"];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
@@ -332,13 +297,7 @@ fn test_check_if_functions_mixed() {
 
 #[test]
 fn test_check_if_functions_empty() {
-    // Skip if LD_LIBRARY_PATH is not set
-    if !ld_library_path_is_set() {
-        eprintln!("Skipping test: LD_LIBRARY_PATH not set");
-        return;
-    }
-
-    with_r(|| {
+    with_r!(test_check_if_functions_empty, {
         let names: Vec<&str> = vec![];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
         assert!(result.is_empty(), "Empty input should return empty result");

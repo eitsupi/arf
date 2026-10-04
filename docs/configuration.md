@@ -136,6 +136,9 @@ non_vi = "Default"         # Color for non-vi modes (Emacs, etc.)
 [experimental]
 shell_semicolon_shortcut = false  # `;` at empty prompt switches to shell mode
 
+[experimental.r_help]
+viewer = "r"               # Default; opt in to the native pager with "auto"
+
 [experimental.shell_abbreviations]
 # Fish-style abbreviations for shell mode (expanded on Space/Enter)
 # "gc" = "git commit"
@@ -190,6 +193,22 @@ auto_width = true  # default
 ```
 
 Set to `false` if you prefer to manage `options(width)` manually (e.g., via `.Rprofile`).
+
+## Experimental R Help Viewer
+
+R's own help commands use R's viewer by default (`viewer = "r"`). To open help results (for example, entering `?mean`) in arf's native pager in the interactive REPL, opt in under `[experimental.r_help]`. This experimental setting may change or be removed in future versions:
+
+```toml
+[experimental.r_help]
+viewer = "auto"  # opt in to the native pager when safe to install
+# viewer = "r"   # default; leave help display to R
+```
+
+With `viewer = "auto"`, arf installs a small `print.help_files_with_topic` wrapper only when the currently registered S3 method is identical to the standard method from `utils`. If another frontend has registered its own method, arf leaves the S3 registry unchanged. There is no force-install mode. The wrapper keeps the standard R method as its fallback: unsupported types such as HTML or PDF, missing topics, and requests that cannot be prepared continue through R's normal printer. If R resolves a request to multiple help pages, arf presents a selector and requires an explicit choice; cancelling the selector displays no page.
+
+The setting is read when the interactive REPL starts; restart arf to change it. This integration is not installed for headless sessions, R scripts, or standalone mode. Assigning a help object alone does not display it; the pager is invoked when R prints the object.
+
+The `:help` browser is available independently of this setting.
 
 ## Auto Suggestions
 

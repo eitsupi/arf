@@ -18,6 +18,8 @@ pub use experimental::{
     ExperimentalConfig, HistoryForgetConfig, PromptDurationConfig, RSourceOverride, SpinnerConfig,
     StaticFormalsMode,
 };
+#[allow(unused_imports)]
+pub use experimental::{HelpViewer, RHelpConfig};
 pub use history::{HistoryConfig, HistoryMode};
 pub(crate) use history::{HistoryLocationSource, ResolvedHistoryLocation};
 pub use ipc::IpcConfig;

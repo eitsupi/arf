@@ -18,6 +18,18 @@ static PRELOADED_DLLS: OnceCell<Vec<Library>> = OnceCell::new();
 /// Container for the loaded R library and function pointers.
 pub struct RLibrary {
     _library: Library,
+    // Embedded R native routine registration. These are optional because R's
+    // embedding-specific DllInfo is not available in every R build/context.
+    pub r_get_embedding_dll_info: Option<unsafe extern "C" fn() -> *mut DllInfo>,
+    pub r_register_routines: Option<
+        unsafe extern "C" fn(
+            *mut DllInfo,
+            *const R_CMethodDef,
+            *const R_CallMethodDef,
+            *const R_FortranMethodDef,
+            *const R_ExternalMethodDef,
+        ) -> c_int,
+    >,
     // Core functions
     pub rf_initialize_r: unsafe extern "C" fn(c_int, *const *const c_char) -> c_int,
     pub setup_rmainloop: unsafe extern "C" fn(),
@@ -76,6 +88,7 @@ pub struct RLibrary {
 
     // Global symbols
     pub r_nilvalue: *mut SEXP,
+    pub r_na_string: *mut SEXP,
     pub r_globalenv: *mut SEXP,
     pub r_baseenv: *mut SEXP,
     pub r_basenamespace: *mut SEXP,
@@ -267,6 +280,21 @@ impl RLibrary {
                 };
             }
 
+            let r_get_embedding_dll_info = library
+                .get::<unsafe extern "C" fn() -> *mut DllInfo>(b"R_getEmbeddingDllInfo\0")
+                .ok()
+                .map(|symbol| *symbol);
+            let r_register_routines = library
+                .get::<unsafe extern "C" fn(
+                    *mut DllInfo,
+                    *const R_CMethodDef,
+                    *const R_CallMethodDef,
+                    *const R_FortranMethodDef,
+                    *const R_ExternalMethodDef,
+                ) -> c_int>(b"R_registerRoutines\0")
+                .ok()
+                .map(|symbol| *symbol);
+
             // Macro for loading global symbol pointers (platform-specific)
             // On Unix: Symbol::into_raw() returns os::unix::Symbol, then .into_raw() returns *mut c_void
             // On Windows: Symbol::into_raw() returns os::windows::Symbol<T>, then .into_raw() returns Option<FARPROC>
@@ -349,6 +377,7 @@ impl RLibrary {
 
             // Load global symbols
             load_ptr!(r_nilvalue, b"R_NilValue\0", SEXP);
+            load_ptr!(r_na_string, b"R_NaString\0", SEXP);
             load_ptr!(r_globalenv, b"R_GlobalEnv\0", SEXP);
             load_ptr!(r_baseenv, b"R_BaseEnv\0", SEXP);
             load_ptr!(r_basenamespace, b"R_BaseNamespace\0", SEXP);
@@ -595,6 +624,8 @@ impl RLibrary {
 
             Ok(RLibrary {
                 _library: library,
+                r_get_embedding_dll_info,
+                r_register_routines,
                 rf_initialize_r,
                 setup_rmainloop,
                 run_rmainloop,
@@ -625,6 +656,7 @@ impl RLibrary {
                 r_toplevelexec,
                 rf_eval,
                 r_nilvalue,
+                r_na_string,
                 r_globalenv,
                 r_baseenv,
                 r_basenamespace,

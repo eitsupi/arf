@@ -3,6 +3,7 @@
 //! These types mirror R's internal C types.
 
 use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_uint, c_void};
 
 /// R's SEXPREC structure (opaque).
 #[repr(C)]
@@ -12,6 +13,44 @@ pub struct SEXPREC {
 
 /// SEXP is a pointer to SEXPREC.
 pub type SEXP = *mut SEXPREC;
+
+/// R's opaque DLL registration information.
+#[repr(C)]
+pub struct DllInfo {
+    _private: [u8; 0],
+}
+
+/// Function pointer accepted by R's native routine registration API.
+#[allow(non_camel_case_types)]
+pub type DL_FUNC = Option<unsafe extern "C" fn() -> *mut c_void>;
+
+#[allow(non_camel_case_types)]
+pub type R_NativePrimitiveArgType = c_uint;
+
+/// C and Fortran routine definition used by R's registration API.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct R_CMethodDef {
+    pub name: *const c_char,
+    pub fun: DL_FUNC,
+    pub num_args: c_int,
+    pub types: *mut R_NativePrimitiveArgType,
+}
+
+#[allow(non_camel_case_types)]
+pub type R_FortranMethodDef = R_CMethodDef;
+
+/// A `.Call` routine definition used by `R_registerRoutines`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct R_CallMethodDef {
+    pub name: *const c_char,
+    pub fun: DL_FUNC,
+    pub num_args: c_int,
+}
+
+#[allow(non_camel_case_types)]
+pub type R_ExternalMethodDef = R_CallMethodDef;
 
 /// R's Rboolean type.
 pub type Rboolean = c_int;

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental integration opens interactive R help results such as `?mean` in arf's native help pager when enabled with `[experimental.r_help] viewer = "auto"` and `utils`' standard S3 printer is still registered. The default `"r"` leaves help display to R; existing custom printers are preserved, and unsupported or unavailable requests fall back to R's printer.
+
 ### Changed
 
 - **Breaking:** Safe command outcome tracking now requires `R_existsVarInFrame`. Without this API, including on R versions older than 4.2, command outcomes remain unavailable, history exit statuses are `NULL`, the prompt shows no status symbol with its normal color, and history-forget does not advance.
