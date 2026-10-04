@@ -55,13 +55,10 @@ impl PagerContent for ChangelogContent {
         self.lines.get(index).cloned().unwrap_or_default()
     }
 
-    fn on_resize(&mut self, width: usize, _height: usize) -> bool {
+    fn on_resize(&mut self, width: usize, _height: usize) {
         if width != self.last_width {
             self.lines = ChangelogContent::render_with_width(width);
             self.last_width = width;
-            true
-        } else {
-            false
         }
     }
 }

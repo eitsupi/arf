@@ -255,13 +255,13 @@ impl PagerContent for HelpContent {
         self.status.as_deref()
     }
 
-    fn on_resize(&mut self, width: usize, height: usize) -> bool {
+    fn on_resize(&mut self, width: usize, height: usize) {
         self.height = height;
         // A new viewport invalidates the selected visual match, not the query.
-        let selection_changed = self.current.take().is_some();
+        self.current = None;
         if width == self.width {
             self.update_status();
-            return selection_changed;
+            return;
         }
         let document = render_markdown_with_text(&self.source, Some("r"), Some(width));
         self.lines = document.lines;
@@ -269,7 +269,6 @@ impl PagerContent for HelpContent {
         self.width = width;
         self.recompute_matches();
         self.update_status();
-        true
     }
 }
 
@@ -399,7 +398,7 @@ mod tests {
         assert_eq!(content.matches.len(), 2);
         let matches = content.matches.clone();
         assert!(content.matches.iter().all(|m| content.match_line(*m) == 0));
-        assert!(content.on_resize(12, 24));
+        content.on_resize(12, 24);
         assert_eq!(content.matches, matches);
         assert_eq!(content.current, None);
         assert!(content.matches.iter().all(|m| content.match_line(*m) > 0));
@@ -473,7 +472,7 @@ mod tests {
         search(&mut content, "needle");
         key(&mut content, KeyCode::Char('n'));
         assert_eq!(content.current, Some(1));
-        assert!(content.on_resize(80, 4));
+        content.on_resize(80, 4);
         assert_eq!(content.current, None);
         assert_eq!(content.query, "needle");
         assert!(content.feedback_message().unwrap().contains("[0/2]"));

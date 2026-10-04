@@ -197,11 +197,9 @@ pub trait PagerContent {
     /// Called when the terminal is resized.
     ///
     /// Implementations can use this to re-render width-dependent content
-    /// (e.g., re-wrap Markdown text).  Returns `true` if the content
-    /// changed and needs a full redraw.
-    fn on_resize(&mut self, _width: usize, _height: usize) -> bool {
-        false
-    }
+    /// (e.g., re-wrap Markdown text). The pager always redraws and clamps
+    /// the scroll position after this notification.
+    fn on_resize(&mut self, _width: usize, _height: usize) {}
 }
 
 /// Run the pager with the given content and configuration.
