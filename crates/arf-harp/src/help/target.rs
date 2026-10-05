@@ -1,5 +1,17 @@
 //! Interpretation of the opaque destinations emitted for Rd cross-references.
 
+const HELP_URI_SCHEME: &str = "x-r-help";
+
+pub(super) fn rd_link_options() -> rd2qmd_core::LinkOptions {
+    rd2qmd_core::LinkOptions {
+        // The empty package slot distinguishes topics containing slashes
+        // (such as %/%) from package-qualified targets.
+        unqualified_link_url: Some(format!("{HELP_URI_SCHEME}:/{{topic}}")),
+        external_link_url: Some(format!("{HELP_URI_SCHEME}:{{package}}/{{topic}}")),
+        ..Default::default()
+    }
+}
+
 /// An R help alias or database key, optionally qualified by package name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HelpTarget {
@@ -17,7 +29,7 @@ impl HelpTarget {
     /// are literal alias characters, not URL components.
     pub fn from_uri(uri: &str) -> Option<Self> {
         let (scheme, target) = uri.split_once(':')?;
-        if !scheme.eq_ignore_ascii_case("x-r-help") || target.chars().any(char::is_control) {
+        if !scheme.eq_ignore_ascii_case(HELP_URI_SCHEME) || target.chars().any(char::is_control) {
             return None;
         }
 

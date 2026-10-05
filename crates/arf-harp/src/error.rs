@@ -29,7 +29,7 @@ pub enum HarpError {
     #[error("Package {package:?} not found in the cached library paths")]
     PackageNotFound { package: String },
 
-    /// An installed package's compiled help database could not be read.
+    /// An installed package's compiled help database or metadata could not be read.
     #[error(
         "Failed to read help for topic {topic:?} in package {package:?} (lookup key {key:?}): {source}"
     )]
