@@ -1,6 +1,6 @@
 //! Rendered help content and page-local literal search state.
 
-use super::markdown::{RenderedText, render_markdown_with_text};
+use super::markdown::{LinkDisplay, RenderedMarkdown, render_markdown_document};
 use super::{PagerAction, PagerContent};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
@@ -15,8 +15,7 @@ struct SearchMatch {
 }
 
 pub(super) struct HelpContent {
-    lines: Vec<Line<'static>>,
-    text: Vec<RenderedText>,
+    document: RenderedMarkdown,
     source: String,
     width: usize,
     height: usize,
@@ -30,10 +29,9 @@ pub(super) struct HelpContent {
 
 impl HelpContent {
     pub(super) fn new(source: &str, width: usize, height: usize) -> Self {
-        let document = render_markdown_with_text(source, Some("r"), Some(width));
+        let document = Self::render_document(source, width);
         Self {
-            lines: document.lines,
-            text: document.text,
+            document,
             source: source.to_owned(),
             width,
             height,
@@ -46,10 +44,23 @@ impl HelpContent {
         }
     }
 
+    fn render_document(source: &str, width: usize) -> RenderedMarkdown {
+        render_markdown_document(source, Some("r"), Some(width), |destination| {
+            if destination
+                .split_once(':')
+                .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("x-r-help"))
+            {
+                LinkDisplay::LabelOnly
+            } else {
+                LinkDisplay::LabelAndDestination
+            }
+        })
+    }
+
     fn recompute_matches(&mut self) {
         self.matches.clear();
         if !self.query.is_empty() {
-            for (logical_line, text) in self.text.iter().enumerate() {
+            for (logical_line, text) in self.document.text.iter().enumerate() {
                 for (start, _) in text.text.match_indices(&self.query) {
                     self.matches.push(SearchMatch {
                         logical_line,
@@ -63,7 +74,7 @@ impl HelpContent {
     }
 
     fn visual_ranges(&self, m: SearchMatch) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
-        self.text[m.logical_line]
+        self.document.text[m.logical_line]
             .fragments
             .iter()
             .filter_map(move |fragment| {
@@ -83,7 +94,7 @@ impl HelpContent {
         self.visual_ranges(m).next().map_or_else(
             || {
                 // Whitespace removed at a wrap boundary still belongs to the logical text.
-                let fragments = &self.text[m.logical_line].fragments;
+                let fragments = &self.document.text[m.logical_line].fragments;
                 fragments
                     .iter()
                     .find(|f| f.source_range.end > m.start)
@@ -152,11 +163,11 @@ impl HelpContent {
 
 impl PagerContent for HelpContent {
     fn line_count(&self) -> usize {
-        self.lines.len()
+        self.document.lines.len()
     }
 
     fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
-        let mut line = self.lines.get(index).cloned().unwrap_or_default();
+        let mut line = self.document.lines.get(index).cloned().unwrap_or_default();
         if let Some(m) = self.current.map(|current| self.matches[current])
             && let Some((start, end)) = self
                 .visual_ranges(m)
@@ -263,9 +274,7 @@ impl PagerContent for HelpContent {
             self.update_status();
             return;
         }
-        let document = render_markdown_with_text(&self.source, Some("r"), Some(width));
-        self.lines = document.lines;
-        self.text = document.text;
+        self.document = Self::render_document(&self.source, width);
         self.width = width;
         self.recompute_matches();
         self.update_status();
@@ -275,6 +284,31 @@ impl PagerContent for HelpContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_links_keep_metadata_without_exposing_internal_uris() {
+        let source = "Read [**mean**](x-r-help:base/mean) and [docs](https://example.com).";
+        let mut content = HelpContent::new(source, 80, 24);
+        assert_eq!(
+            content.document.text[0].text,
+            "Read mean and docs (https://example.com)."
+        );
+        assert_eq!(content.document.links[0].destination, "x-r-help:base/mean");
+        assert_eq!(content.document.links[1].destination, "https://example.com");
+        for width in [12, 40, 80] {
+            content.on_resize(width, 24);
+            assert_eq!(content.document.links.len(), 2);
+            assert_eq!(content.document.links[0].label, "mean");
+            assert!(!content.document.links[0].fragments.is_empty());
+            assert!(
+                !content
+                    .document
+                    .text
+                    .iter()
+                    .any(|t| t.text.contains("x-r-help:"))
+            );
+        }
+    }
 
     fn key(content: &mut HelpContent, code: KeyCode) -> Option<PagerAction> {
         content.handle_key(code, KeyModifiers::NONE)
@@ -404,7 +438,10 @@ mod tests {
         assert!(content.matches.iter().all(|m| content.match_line(*m) > 0));
         for m in &content.matches {
             for (line, start, end) in content.visual_ranges(*m) {
-                assert_eq!(&content.lines[line].to_string()[start..end], "needle");
+                assert_eq!(
+                    &content.document.lines[line].to_string()[start..end],
+                    "needle"
+                );
             }
         }
         search(&mut content, "beta needle");
@@ -545,7 +582,7 @@ mod tests {
         assert!(content.query.is_empty());
         assert!(content.matches.is_empty());
         assert_eq!(content.current, None);
-        assert_eq!(content.render_line(0, 80), content.lines[0]);
+        assert_eq!(content.render_line(0, 80), content.document.lines[0]);
         assert_eq!(key(&mut content, KeyCode::Char('q')), None);
         for ch in ['n', 'N'] {
             assert_eq!(key(&mut content, KeyCode::Char(ch)), None);

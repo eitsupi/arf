@@ -107,6 +107,222 @@ fn link_rendering() {
     assert!(lines[0].contains("https://example.com"));
 }
 
+fn link_document(input: &str, width: usize) -> RenderedMarkdown {
+    render_markdown_document(input, None, Some(width), |_| LinkDisplay::LabelOnly)
+}
+
+fn fragment_text(document: &RenderedMarkdown, fragment: &LinkFragment) -> String {
+    let text: String = document.lines[fragment.line]
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    text[fragment.byte_range.clone()].to_owned()
+}
+
+#[test]
+fn semantic_links_keep_distinct_identities_and_raw_destinations() {
+    let document = link_document(
+        "[one](x-r-help:base/%/%) and [**two**](x-r-help:base/%/%) plus [`code`](https://example.com?q=1#part)",
+        80,
+    );
+    assert_eq!(document.links.len(), 3);
+    assert_eq!(document.links[0].destination, "x-r-help:base/%/%");
+    assert_eq!(document.links[1].destination, document.links[0].destination);
+    assert_eq!(
+        document.links[2].destination,
+        "https://example.com?q=1#part"
+    );
+    for (index, label, range) in [(0, "one", 0..3), (1, "two", 8..11), (2, "code", 17..21)] {
+        let link = &document.links[index];
+        assert_eq!(link.label, label);
+        assert_eq!(link.text_ranges.len(), 1);
+        assert_eq!(link.text_ranges[0].range, range);
+        assert_eq!(link.fragments.len(), 1);
+        assert_eq!(link.fragments[0].columns, range);
+        assert_eq!(fragment_text(&document, &link.fragments[0]), label);
+    }
+    let spans = &document.lines[0].spans;
+    let bold = spans.iter().find(|span| span.content == "two").unwrap();
+    assert!(
+        bold.style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert!(
+        bold.style
+            .add_modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
+    let code = spans.iter().find(|span| span.content == "code").unwrap();
+    assert!(
+        code.style
+            .add_modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
+}
+
+#[test]
+fn link_columns_distinguish_unicode_width_from_bytes() {
+    let document = link_document("前🎉 [日本 **bold** `x` e\u{301}](opaque:target)", 80);
+    let link = &document.links[0];
+    assert_eq!(link.label, "日本 bold x e\u{301}");
+    assert_eq!(
+        link.fragments,
+        vec![LinkFragment {
+            line: 0,
+            byte_range: 8..25,
+            columns: 5..18,
+        }]
+    );
+    assert_eq!(fragment_text(&document, &link.fragments[0]), link.label);
+}
+
+#[test]
+fn wrapped_link_ranges_keep_identity_across_widths() {
+    let input = "lead [alpha beta needle gamma](opaque:first) tail [end](opaque:second)";
+    for width in [0, 1, 6, 12, 80] {
+        let document = link_document(input, width);
+        assert_eq!(document.links.len(), 2);
+        let link = &document.links[0];
+        assert_eq!(link.label, "alpha beta needle gamma");
+        assert_eq!(link.destination, "opaque:first");
+        assert_eq!(link.text_ranges[0].range, 5..28);
+        assert_eq!(document.links[1].label, "end");
+        for fragment in &link.fragments {
+            let text = fragment_text(&document, fragment);
+            assert!(!text.is_empty());
+            assert!(link.label.contains(&text));
+            assert_eq!(fragment.columns.end - fragment.columns.start, text.len());
+        }
+        if width == 12 {
+            assert_eq!(
+                link.fragments,
+                vec![
+                    LinkFragment {
+                        line: 0,
+                        byte_range: 5..10,
+                        columns: 5..10
+                    },
+                    LinkFragment {
+                        line: 1,
+                        byte_range: 0..11,
+                        columns: 0..11
+                    },
+                    LinkFragment {
+                        line: 2,
+                        byte_range: 0..5,
+                        columns: 0..5
+                    },
+                ]
+            );
+        }
+    }
+}
+
+#[test]
+fn link_ranges_exclude_list_and_blockquote_prefixes() {
+    let document = link_document("> - [alpha beta needle gamma](opaque:target)", 14);
+    let link = &document.links[0];
+    assert_eq!(link.label, "alpha beta needle gamma");
+    assert_eq!(link.text_ranges[0].range, 4..27);
+    assert!(link.fragments.len() > 1);
+    for fragment in &link.fragments {
+        assert!(fragment.columns.start >= 4);
+        assert!(link.label.contains(&fragment_text(&document, fragment)));
+    }
+}
+
+#[test]
+fn table_links_keep_ranges_through_cell_breaks_and_wrapping() {
+    let input = "| 前 | Link |\n|---|---|\n| 日本語 | [alpha **beta**<br>needle gamma](opaque:target) |\n| 日本 | [other](opaque:target) |";
+    for width in [18, 26, 80] {
+        let document = link_document(input, width);
+        assert_eq!(document.links.len(), 2);
+        let link = &document.links[0];
+        assert_eq!(link.label, "alpha beta\nneedle gamma");
+        assert_eq!(link.text_ranges.len(), 2);
+        assert!(link.fragments.len() >= 2);
+        for fragment in &link.fragments {
+            let text = fragment_text(&document, fragment);
+            assert!(link.label.contains(&text));
+            assert!(!text.contains('|'));
+        }
+        if width == 80 {
+            assert_eq!(
+                link.fragments[0],
+                LinkFragment {
+                    line: 2,
+                    byte_range: 14..24,
+                    columns: 11..21,
+                }
+            );
+            assert_eq!(
+                link.fragments[1],
+                LinkFragment {
+                    line: 3,
+                    byte_range: 11..23,
+                    columns: 11..23,
+                }
+            );
+        }
+        assert_eq!(document.links[1].label, "other");
+    }
+}
+
+#[test]
+fn link_identity_survives_explicit_line_breaks() {
+    let document = link_document("[alpha  \nbeta<br>gamma](opaque:target)", 80);
+    let link = &document.links[0];
+    assert_eq!(link.label, "alpha\nbeta\ngamma");
+    assert_eq!(link.text_ranges.len(), 3);
+    assert_eq!(link.fragments.len(), 3);
+    let labels = link
+        .fragments
+        .iter()
+        .map(|f| fragment_text(&document, f))
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["alpha", "beta", "gamma"]);
+}
+
+#[test]
+fn link_fallback_deduplicates_urls_and_excludes_destinations_from_ranges() {
+    for source in [
+        "<https://example.com>",
+        "[https://example.com](https://example.com)",
+    ] {
+        assert_eq!(render_plain(source), ["https://example.com"]);
+    }
+    let document = render_markdown_with_text("[label](https://example.com)", None, None);
+    assert_eq!(document.links[0].label, "label");
+    assert_eq!(
+        fragment_text(&document, &document.links[0].fragments[0]),
+        "label"
+    );
+    assert_eq!(document.text[0].text, "label (https://example.com)");
+    // The generic renderer does not interpret help targets.
+    assert_eq!(
+        render_plain("[mean](x-r-help:mean)"),
+        ["mean (x-r-help:mean)"]
+    );
+    assert_eq!(
+        render_markdown("[label](https://example.com)", None, None),
+        document.lines,
+    );
+}
+
+#[test]
+fn heading_links_and_empty_labels_have_valid_metadata() {
+    let document = link_document(
+        "# [Heading](opaque:h)\n\n[](opaque:empty)\n\n```\n[code](opaque:c)\n```",
+        1,
+    );
+    assert_eq!(document.links.len(), 2);
+    assert_eq!(document.links[0].fragments[0].columns, 2..9);
+    assert_eq!(document.links[1].destination, "opaque:empty");
+    assert!(document.links[1].fragments.is_empty());
+}
+
 #[test]
 fn horizontal_rule() {
     let input = "before\n\n---\n\nafter";

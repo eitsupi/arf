@@ -41,21 +41,115 @@ pub(super) fn render_markdown_with_text(
     default_code_lang: Option<&str>,
     wrap_width: Option<usize>,
 ) -> RenderedMarkdown {
+    render_markdown_document(input, default_code_lang, wrap_width, |_| {
+        LinkDisplay::LabelAndDestination
+    })
+}
+
+/// Control destination text independently of semantic link metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LinkDisplay {
+    LabelOnly,
+    LabelAndDestination,
+}
+
+/// Render text and link positions with a consumer-supplied display policy.
+///
+/// Destinations remain opaque to the renderer. A link's index in `links` is its
+/// identity, including when several links share a destination. Re-rendering the
+/// same source preserves these indices; visual positions reflect the new width.
+/// Matching label/destination text is shown once, including for autolinks.
+pub(super) fn render_markdown_document(
+    input: &str,
+    default_code_lang: Option<&str>,
+    wrap_width: Option<usize>,
+    link_display: impl Fn(&str) -> LinkDisplay,
+) -> RenderedMarkdown {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser, default_code_lang.map(|s| s.to_string()), wrap_width);
+    let mut writer = Writer::new(
+        parser,
+        default_code_lang.map(|s| s.to_string()),
+        wrap_width,
+        &link_display,
+    );
     writer.run();
-    RenderedMarkdown {
+    let mut document = RenderedMarkdown {
         lines: writer.lines,
         text: writer.text,
-    }
+        links: writer.links,
+    };
+    document.project_links();
+    document
 }
 
 pub(super) struct RenderedMarkdown {
     pub lines: Vec<Line<'static>>,
     pub text: Vec<RenderedText>,
+    pub links: Vec<RenderedLink>,
+}
+
+pub(super) struct RenderedLink {
+    pub destination: String,
+    pub label: String,
+    pub text_ranges: Vec<LinkTextRange>,
+    pub fragments: Vec<LinkFragment>,
+}
+
+pub(super) struct LinkTextRange {
+    /// Index into the document's unwrapped rendered text.
+    pub text_index: usize,
+    /// UTF-8 bytes in that logical text; excludes added destinations/prefixes.
+    pub range: Range<usize>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct LinkFragment {
+    pub line: usize,
+    /// UTF-8 bytes in the concatenated visual-line spans.
+    pub byte_range: Range<usize>,
+    /// Terminal display columns, independent of UTF-8 byte offsets.
+    pub columns: Range<usize>,
+}
+
+impl RenderedMarkdown {
+    fn project_links(&mut self) {
+        for link in &mut self.links {
+            for label in &link.text_ranges {
+                for fragment in &self.text[label.text_index].fragments {
+                    let start = label.range.start.max(fragment.source_range.start);
+                    let end = label.range.end.min(fragment.source_range.end);
+                    if start >= end {
+                        continue;
+                    }
+                    let start = fragment.visual_start + start - fragment.source_range.start;
+                    let end = fragment.visual_start + end - fragment.source_range.start;
+                    let line = &self.lines[fragment.line];
+                    link.fragments.push(LinkFragment {
+                        line: fragment.line,
+                        byte_range: start..end,
+                        columns: display_column(line, start)..display_column(line, end),
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Count columns span by span, as ratatui does when laying out styled text.
+fn display_column(line: &Line<'_>, mut byte_offset: usize) -> usize {
+    let mut columns = 0;
+    for span in &line.spans {
+        let bytes = byte_offset.min(span.content.len());
+        columns += UnicodeWidthStr::width(&span.content[..bytes]);
+        byte_offset -= bytes;
+        if byte_offset == 0 {
+            break;
+        }
+    }
+    columns
 }
 
 /// One logical line, or one table cell line, before terminal wrapping.
@@ -74,6 +168,13 @@ pub(super) struct TextFragment {
 struct TableLine {
     text_index: usize,
     wrapped: WrappedLine,
+}
+
+/// Inline text carries a link identity until its logical text is recorded.
+#[derive(Clone)]
+struct InlineSpan {
+    span: Span<'static>,
+    link: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +256,8 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     iter: I,
     lines: Vec<Line<'static>>,
     text: Vec<RenderedText>,
+    links: Vec<RenderedLink>,
+    link_display: &'a dyn Fn(&str) -> LinkDisplay,
     styles: Styles,
 
     /// Default language for code blocks without a language tag.
@@ -168,7 +271,7 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     inline_styles: Vec<Style>,
 
     /// Current spans being accumulated for the current line.
-    current_spans: Vec<Span<'static>>,
+    current_spans: Vec<InlineSpan>,
 
     /// Heading level, if currently inside a heading tag.
     in_heading: Option<HeadingLevel>,
@@ -191,8 +294,8 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     /// Blockquote nesting depth.
     blockquote_depth: usize,
 
-    /// Link URL being collected (set on Tag::Link start).
-    link: Option<String>,
+    /// Identity of the link whose label is currently being collected.
+    link: Option<usize>,
 
     /// Whether we need a blank line before the next block element.
     needs_newline: bool,
@@ -207,21 +310,28 @@ struct Writer<'a, I: Iterator<Item = Event<'a>>> {
     in_table: bool,
 
     /// Collecting table rows: each row is a vec of cell-span groups.
-    table_rows: Vec<Vec<Vec<Span<'static>>>>,
+    table_rows: Vec<Vec<Vec<InlineSpan>>>,
 
     /// Current row's cells being accumulated.
-    table_current_row: Vec<Vec<Span<'static>>>,
+    table_current_row: Vec<Vec<InlineSpan>>,
 
     /// Spans for the current table cell.
-    table_cell_spans: Vec<Span<'static>>,
+    table_cell_spans: Vec<InlineSpan>,
 }
 
 impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
-    fn new(iter: I, default_code_lang: Option<String>, wrap_width: Option<usize>) -> Self {
+    fn new(
+        iter: I,
+        default_code_lang: Option<String>,
+        wrap_width: Option<usize>,
+        link_display: &'a dyn Fn(&str) -> LinkDisplay,
+    ) -> Self {
         Self {
             iter,
             lines: Vec::new(),
             text: Vec::new(),
+            links: Vec::new(),
+            link_display,
             styles: Styles::default(),
             default_code_lang,
             wrap_width,
@@ -347,7 +457,13 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 self.inline_styles.push(Style::new().crossed_out());
             }
             Tag::Link { dest_url, .. } => {
-                self.link = Some(dest_url.to_string());
+                self.link = Some(self.links.len());
+                self.links.push(RenderedLink {
+                    destination: dest_url.to_string(),
+                    label: String::new(),
+                    text_ranges: Vec::new(),
+                    fragments: Vec::new(),
+                });
             }
             Tag::Table(_) => {
                 self.ensure_blank_line_before_block();
@@ -422,9 +538,17 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 self.inline_styles.pop();
             }
             TagEnd::Link => {
-                if let Some(url) = self.link.take() {
-                    // Append URL after link text
-                    self.push_span(Span::styled(format!(" ({})", url), self.styles.link));
+                if let Some(index) = self.link.take() {
+                    let link = &self.links[index];
+                    if (self.link_display)(&link.destination) == LinkDisplay::LabelAndDestination
+                        && link.label != link.destination
+                    {
+                        // Added destination text is readable fallback, not part of the label.
+                        self.push_span(Span::styled(
+                            format!(" ({})", link.destination),
+                            self.styles.link,
+                        ));
+                    }
                 }
             }
             TagEnd::Table => {
@@ -461,8 +585,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     fn on_text(&mut self, text: CowStr<'a>) {
         if self.in_table {
             let style = self.current_style();
-            self.table_cell_spans
-                .push(Span::styled(text.to_string(), style));
+            self.push_span(Span::styled(text.to_string(), style));
             return;
         }
 
@@ -478,25 +601,28 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     }
 
     fn on_inline_code(&mut self, code: CowStr<'a>) {
-        if self.in_table {
-            self.table_cell_spans
-                .push(Span::styled(code.to_string(), self.styles.code));
-            return;
+        if !self.in_table {
+            self.emit_prefix_if_needed();
         }
-        self.emit_prefix_if_needed();
-        self.push_span(Span::styled(code.to_string(), self.styles.code));
+        self.push_span(Span::styled(
+            code.to_string(),
+            self.current_style().patch(self.styles.code),
+        ));
     }
 
     fn on_soft_break(&mut self) {
         if self.in_table {
-            self.table_cell_spans.push(Span::raw(" "));
+            self.push_span(Span::styled(" ", self.current_style()));
             return;
         }
         // Treat soft break as a space within the same line
-        self.push_span(Span::raw(" "));
+        self.push_span(Span::styled(" ", self.current_style()));
     }
 
     fn on_hard_break(&mut self) {
+        if let Some(index) = self.link {
+            self.links[index].label.push('\n');
+        }
         self.flush_line();
     }
 
@@ -521,9 +647,9 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             if self.in_table {
                 // In a table cell, <br> separates sub-lines.
                 // We use a newline character that render_table will split on.
-                self.table_cell_spans.push(Span::raw("\n"));
+                self.push_span(Span::raw("\n"));
             } else {
-                self.flush_line();
+                self.on_hard_break();
             }
             return;
         }
@@ -544,7 +670,11 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     // -- helpers ------------------------------------------------------------
 
     fn current_style(&self) -> Style {
-        let mut s = Style::default();
+        let mut s = if self.link.is_some() {
+            self.styles.link
+        } else {
+            Style::default()
+        };
         for sty in &self.inline_styles {
             s = s.patch(*sty);
         }
@@ -552,7 +682,22 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     }
 
     fn push_span(&mut self, span: Span<'static>) {
-        self.current_spans.push(span);
+        if let Some(index) = self.link {
+            self.links[index].label.push_str(&span.content);
+        }
+        let span = InlineSpan {
+            span,
+            link: self.link,
+        };
+        if self.in_table {
+            self.table_cell_spans.push(span);
+        } else {
+            self.current_spans.push(span);
+        }
+    }
+
+    fn push_prefix(&mut self, span: Span<'static>) {
+        self.current_spans.push(InlineSpan { span, link: None });
     }
 
     /// Prepend blockquote / list-marker prefix to the current line, if needed.
@@ -564,7 +709,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
 
         // Blockquote prefix
         for _ in 0..self.blockquote_depth {
-            self.push_span(Span::styled("> ", self.styles.blockquote_prefix));
+            self.push_prefix(Span::styled("> ", self.styles.blockquote_prefix));
         }
 
         // List marker / indentation
@@ -572,7 +717,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             // Indentation for nesting (each level except the innermost)
             let indent_levels = self.list_depth.saturating_sub(1);
             if indent_levels > 0 {
-                self.push_span(Span::raw("  ".repeat(indent_levels)));
+                self.push_prefix(Span::raw("  ".repeat(indent_levels)));
             }
 
             if self.pending_marker {
@@ -580,17 +725,17 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
                 if let Some(maybe_idx) = self.list_indices.last() {
                     match maybe_idx {
                         Some(idx) => {
-                            self.push_span(Span::raw(format!("{}. ", idx)));
+                            self.push_prefix(Span::raw(format!("{}. ", idx)));
                         }
                         None => {
-                            self.push_span(Span::raw("- "));
+                            self.push_prefix(Span::raw("- "));
                         }
                     }
                 }
                 self.pending_marker = false;
             } else {
                 // Continuation indent (align after marker)
-                self.push_span(Span::raw("  "));
+                self.push_prefix(Span::raw("  "));
             }
         }
     }
@@ -600,6 +745,8 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             return;
         }
         let spans = std::mem::take(&mut self.current_spans);
+        let text_index = self.push_search_text(&spans);
+        let spans = spans.into_iter().map(|span| span.span).collect::<Vec<_>>();
 
         // Apply word-wrapping for prose content (not code blocks, tables, or headings).
         if let Some(width) = self.wrap_width
@@ -608,7 +755,6 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             && self.in_heading.is_none()
         {
             let indent = self.continuation_indent();
-            let text_index = self.push_search_text(&spans);
             for wrapped in wrap_spans_with_ranges(&spans, width, indent) {
                 self.text[text_index].fragments.push(TextFragment {
                     line: self.lines.len(),
@@ -621,7 +767,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             return;
         }
 
-        self.push_unwrapped_line(Line::from(spans));
+        self.push_line_with_text(Line::from(spans), text_index);
         self.has_output = true;
     }
 
@@ -655,8 +801,10 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     /// so that blank lines within code blocks retain the background color.
     fn flush_code_line(&mut self) {
         let spans = std::mem::take(&mut self.current_spans);
+        let text_index = self.push_search_text(&spans);
+        let spans = spans.into_iter().map(|span| span.span).collect::<Vec<_>>();
         let line = Line::from(spans).style(Style::new().bg(self.styles.code_block_bg));
-        self.push_unwrapped_line(line);
+        self.push_line_with_text(line, text_index);
         self.has_output = true;
     }
 
@@ -664,17 +812,46 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
         self.lines.push(Line::from(""));
     }
 
-    fn push_search_text(&mut self, spans: &[Span<'static>]) -> usize {
+    fn push_search_text(&mut self, spans: &[InlineSpan]) -> usize {
         let index = self.text.len();
+        let mut text = String::new();
+        for span in spans {
+            let start = text.len();
+            text.push_str(&span.span.content);
+            if let Some(link) = span.link {
+                let ranges = &mut self.links[link].text_ranges;
+                if let Some(last) = ranges.last_mut()
+                    && last.text_index == index
+                    && last.range.end == start
+                {
+                    last.range.end = text.len();
+                } else {
+                    ranges.push(LinkTextRange {
+                        text_index: index,
+                        range: start..text.len(),
+                    });
+                }
+            }
+        }
         self.text.push(RenderedText {
-            text: spans.iter().map(|span| span.content.as_ref()).collect(),
+            text,
             fragments: Vec::new(),
         });
         index
     }
 
     fn push_unwrapped_line(&mut self, line: Line<'static>) {
-        let index = self.push_search_text(&line.spans);
+        let spans = line
+            .spans
+            .iter()
+            .cloned()
+            .map(|span| InlineSpan { span, link: None })
+            .collect::<Vec<_>>();
+        let index = self.push_search_text(&spans);
+        self.push_line_with_text(line, index);
+    }
+
+    fn push_line_with_text(&mut self, line: Line<'static>, index: usize) {
         let len = self.text[index].text.len();
         self.text[index].fragments.push(TextFragment {
             line: self.lines.len(),
@@ -742,10 +919,10 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
     // -- table rendering ----------------------------------------------------
 
     /// Split a cell's spans into sub-lines at `\n` boundaries (from `<br>` tags).
-    fn split_cell_lines(cell: &[Span<'static>]) -> Vec<Vec<Span<'static>>> {
-        let mut lines: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+    fn split_cell_lines(cell: &[InlineSpan]) -> Vec<Vec<InlineSpan>> {
+        let mut lines: Vec<Vec<InlineSpan>> = vec![Vec::new()];
         for span in cell {
-            if span.content.as_ref() == "\n" {
+            if span.span.content.as_ref() == "\n" {
                 lines.push(Vec::new());
             } else {
                 lines.last_mut().unwrap().push(span.clone());
@@ -779,8 +956,10 @@ impl<'a, I: Iterator<Item = Event<'a>>> Writer<'a, I> {
             for cell in row {
                 let mut cell_lines = Vec::new();
                 for spans in Self::split_cell_lines(&cell) {
+                    let text_index = self.push_search_text(&spans);
+                    let spans = spans.into_iter().map(|span| span.span).collect();
                     cell_lines.push(TableLine {
-                        text_index: self.push_search_text(&spans),
+                        text_index,
                         wrapped: WrappedLine::unwrapped(spans),
                     });
                 }
