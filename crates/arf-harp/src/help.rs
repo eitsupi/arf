@@ -21,6 +21,9 @@ use rd_helpdb::{
 };
 use std::ffi::CString;
 
+mod target;
+pub use target::HelpTarget;
+
 /// A help topic from R's help database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelpTopic {
@@ -678,7 +681,28 @@ fn rd_convert_options() -> rd2qmd_core::RdConvertOptions {
     options.code.quarto_code_blocks = false;
     options.arguments_format = rd2qmd_core::ArgumentsFormat::List;
     options.describe_format = rd2qmd_core::DescribeFormat::Headings;
+    // A leading slash distinguishes unqualified topics containing slashes
+    // (such as %/%) from package-qualified targets.
+    options.links.unqualified_link_url = Some("x-r-help:/{topic}".to_owned());
+    options.links.external_link_url = Some("x-r-help:{package}/{topic}".to_owned());
     options
+}
+
+/// Convert Rd source to terminal help Markdown without evaluating R.
+///
+/// Cross-references use arf's internal help URI format, interpreted by
+/// [`HelpTarget::from_uri`].
+pub fn rd_source_to_markdown(rd_content: &str) -> HarpResult<String> {
+    let parsed = rd_source::parse(rd_content.as_bytes()).map_err(|e| {
+        HarpError::RError(arf_libr::RError::EvalError(format!(
+            "Failed to parse Rd for Markdown conversion: {}",
+            e
+        )))
+    })?;
+    Ok(rd2qmd_core::convert_rd_document(
+        parsed.document(),
+        &rd_convert_options(),
+    ))
 }
 
 /// Get package help as Markdown without evaluating R for the help database.
@@ -811,17 +835,7 @@ fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
         })?
     };
 
-    let parsed = rd_source::parse(rd_content.as_bytes()).map_err(|e| {
-        HarpError::RError(arf_libr::RError::EvalError(format!(
-            "Failed to parse Rd for Markdown conversion: {}",
-            e
-        )))
-    })?;
-    let options = rd_convert_options();
-    Ok(rd2qmd_core::convert_rd_document(
-        parsed.document(),
-        &options,
-    ))
+    rd_source_to_markdown(&rd_content)
 }
 
 /// Sentinel value returned by R when a vignette is in PDF format.
