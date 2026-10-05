@@ -105,6 +105,7 @@ impl HelpContent {
                 .unwrap_or(links.len() - 1),
         };
         self.selected_link = Some(links[index]);
+        self.update_status();
         self.reveal_line(self.document.links[links[index]].fragments[0].line)
     }
 
@@ -195,18 +196,24 @@ impl HelpContent {
     }
 
     fn update_status(&mut self) {
+        // Keep the active link action visible even if a long query is clipped.
+        let link_hint = if self.selected_link.is_some() {
+            "Enter open  "
+        } else {
+            ""
+        };
         self.status = if let Some(input) = &self.input {
             Some(format!("/{input}|  Enter search  Esc cancel"))
         } else if self.query.is_empty() {
             None
         } else if self.matches.is_empty() {
             Some(format!(
-                "No matches for: {}  / search  q clear search",
+                "{link_hint}No matches for: {}  / search  q clear search",
                 self.query
             ))
         } else {
             Some(format!(
-                "/{} [{}/{}]  n/N next/previous  / search  q clear search",
+                "{link_hint}/{} [{}/{}]  n/N next/previous  / search  q clear search",
                 self.query,
                 self.current.map_or(0, |index| index + 1),
                 self.matches.len(),

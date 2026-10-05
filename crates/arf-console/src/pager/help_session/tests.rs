@@ -249,6 +249,12 @@ fn follow_and_back_restore_page_provenance_title_scroll_focus_and_search() {
     assert!(viewer.scroll_offset > 0);
     search(&mut viewer, "lm");
     press(&mut viewer, KeyCode::Tab);
+    assert!(
+        viewer
+            .feedback_message()
+            .unwrap()
+            .starts_with("Enter open  /lm [1/1]")
+    );
     let scroll = viewer.scroll_offset;
     let status = viewer.feedback_message().unwrap().to_owned();
     let lines: Vec<_> = (0..viewer.line_count())
@@ -512,6 +518,96 @@ fn footer_only_advertises_available_link_actions_and_keeps_exit_visible_at_narro
     assert!(!plain.feedback_message().unwrap().contains("Tab"));
     assert_eq!(press(&mut plain, KeyCode::Tab), Some(PagerAction::Redraw));
     assert_eq!(press(&mut plain, KeyCode::Enter), Some(PagerAction::Redraw));
+}
+
+#[test]
+fn search_footer_tracks_link_selection_input_cancel_and_match_navigation() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut viewer = viewer(
+        home(temp.path(), "mean mean [link](x-r-help:/mean)"),
+        temp.path(),
+    );
+    search(&mut viewer, "mean");
+    let search_status = viewer.feedback_message().unwrap().to_owned();
+    assert!(search_status.starts_with("/mean [1/2]"));
+    for (code, modifiers) in [
+        (KeyCode::Tab, KeyModifiers::NONE),
+        (KeyCode::BackTab, KeyModifiers::NONE),
+        (KeyCode::Tab, KeyModifiers::SHIFT),
+    ] {
+        key(&mut viewer, code, modifiers);
+        assert_eq!(
+            viewer.feedback_message(),
+            Some(format!("Enter open  {search_status}").as_str())
+        );
+    }
+    let selected_status = viewer.feedback_message().unwrap().to_owned();
+    press(&mut viewer, KeyCode::Char('/'));
+    press(&mut viewer, KeyCode::Char('q'));
+    assert_eq!(
+        viewer.feedback_message(),
+        Some("/q|  Enter search  Esc cancel")
+    );
+    press(&mut viewer, KeyCode::Esc);
+    assert_eq!(viewer.feedback_message(), Some(selected_status.as_str()));
+    press(&mut viewer, KeyCode::Char('n'));
+    assert!(
+        viewer
+            .feedback_message()
+            .unwrap()
+            .starts_with("/mean [2/2]")
+    );
+    assert!(!viewer.feedback_message().unwrap().contains("Enter open"));
+    press(&mut viewer, KeyCode::Tab);
+    assert!(
+        viewer
+            .feedback_message()
+            .unwrap()
+            .starts_with("Enter open  /mean [2/2]")
+    );
+    press(&mut viewer, KeyCode::Char('N'));
+    assert_eq!(viewer.feedback_message(), Some(search_status.as_str()));
+    press(&mut viewer, KeyCode::Tab);
+    press(&mut viewer, KeyCode::Char('q'));
+    assert!(viewer.feedback_message().unwrap().contains("Enter open"));
+    assert!(!viewer.feedback_message().unwrap().contains("/mean ["));
+    assert!(
+        !viewer
+            .feedback_message()
+            .unwrap()
+            .contains("q clear search")
+    );
+}
+
+#[test]
+fn no_match_link_footer_keeps_open_hint_visible_when_query_is_clipped() {
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        widgets::{Paragraph, Widget},
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut viewer = viewer(home(temp.path(), "[link](x-r-help:/mean)"), temp.path());
+    let query = "見つからないとても長い検索語".repeat(4);
+    search(&mut viewer, &query);
+    assert!(!viewer.feedback_message().unwrap().contains("Enter open"));
+    press(&mut viewer, KeyCode::Tab);
+    for width in [30, 16] {
+        viewer.on_resize(width, 8);
+        let status = viewer.feedback_message().unwrap();
+        assert!(status.starts_with("Enter open  No matches for:"));
+        assert!(status.contains(&query));
+        let area = Rect::new(0, 0, width as u16, 1);
+        let mut buffer = Buffer::empty(area);
+        Paragraph::new(format!("─ {status} ─")).render(area, &mut buffer);
+        let visible: String = (0..area.width).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(visible.contains("Enter open"));
+        for code in [KeyCode::Char('n'), KeyCode::Char('N')] {
+            press(&mut viewer, code);
+            assert!(viewer.feedback_message().unwrap().starts_with("Enter open"));
+        }
+    }
 }
 
 #[test]

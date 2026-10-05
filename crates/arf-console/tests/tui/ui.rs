@@ -127,6 +127,18 @@ viewer = "auto"
             terminal.wait_for("wrapped phrase remains searchable", |state, _| {
                 state.text.contains("/arithmetic mean [1/")
             })?;
+            terminal.key("Tab")?;
+            terminal.wait_for(
+                "selected link action replaces search-only footer",
+                |state, _| state.text.contains("Enter open  /arithmetic mean [1/"),
+            )?;
+            terminal.key("n")?;
+            terminal.wait_for(
+                "search navigation restores search-only footer",
+                |state, _| {
+                    state.text.contains("/arithmetic mean [") && !state.text.contains("Enter open")
+                },
+            )?;
             terminal.key("q")?;
             terminal.wait_for(
                 "q clears search and keeps the help page open",
