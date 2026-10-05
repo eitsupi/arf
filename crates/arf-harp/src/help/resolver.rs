@@ -78,15 +78,24 @@ impl HelpTargetResolver {
             let Some(index) = self.indexes[dir].as_ref() else {
                 continue;
             };
-            for entry in index.entries() {
-                let key = entry.topic_key().filter(|key| !key.is_empty());
-                if !entry
+            let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
+                entry
                     .aliases
                     .iter()
                     .flatten()
                     .any(|alias| alias == &target.topic)
-                    && key != Some(target.topic.as_str())
-                {
+            };
+            // Match the direct lookup's alias-first policy within each package.
+            // Multiple alias rows remain candidates for explicit selection.
+            let has_alias = index.entries().any(matches_alias);
+            for entry in index.entries() {
+                let key = entry.topic_key().filter(|key| !key.is_empty());
+                let matches = if has_alias {
+                    matches_alias(entry)
+                } else {
+                    key == Some(target.topic.as_str())
+                };
+                if !matches {
                     continue;
                 }
                 if !seen.insert((dir.clone(), key.map(str::to_owned))) {

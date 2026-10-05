@@ -6,6 +6,9 @@ duplicate alias, and an alias/key collision), and matching Rd metadata with
 and without database keys. Tests copy them into minimal package directories
 under temporary library roots and read them using Rust alone.
 
+The separate `homepkg` database contains only `home`, so alias/key collision
+tests reach external-package discovery rather than matching the current DB.
+
 Regenerate with:
 
 ```sh

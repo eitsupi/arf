@@ -26,3 +26,9 @@ metadata <- data.frame(
 )
 saveRDS(metadata, file.path(args[[1L]], "Rd.rds"), compress = FALSE)
 saveRDS(metadata[, c("Name", "Title", "Aliases")], file.path(args[[1L]], "Rd_without_keys.rds"), compress = FALSE)
+
+# A current page whose database does not contain the external collision key.
+home_db <- new.env(parent = emptyenv())
+home_db$home <- tools::parse_Rd(textConnection("\\name{home}\n\\title{Fixture home}\n\\description{A source page.}\n"))
+tools:::makeLazyLoadDB(home_db, file.path(args[[1L]], "homepkg"), compress = TRUE)
+saveRDS(c(home = "home"), file.path(args[[1L]], "home_aliases.rds"), compress = FALSE)

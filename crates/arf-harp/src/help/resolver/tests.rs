@@ -106,6 +106,40 @@ fn alias_precedence_last_wins_and_exact_key_fallback_are_preserved() {
 }
 
 #[test]
+fn external_package_alias_takes_precedence_over_exact_key() {
+    let temp = tempfile::tempdir().unwrap();
+    let origin = source_package(temp.path());
+    for extension in ["rdx", "rdb"] {
+        std::fs::copy(
+            fixture(&format!("homepkg.{extension}")),
+            origin.join(format!("help/source.{extension}")),
+        )
+        .unwrap();
+    }
+    std::fs::copy(fixture("home_aliases.rds"), origin.join("help/aliases.rds")).unwrap();
+    let current = PreparedHelpPage {
+        help_key: "home".to_owned(),
+        markdown: crate::help::get_package_help_markdown_by_key_in_dir(
+            &origin, "home", "home", "source",
+        )
+        .unwrap(),
+        ..current(&origin)
+    };
+    let other = package(temp.path(), "other");
+    let mut resolver = resolver(&[temp.path()]);
+    for (topic, expected) in [
+        ("first-topic", "second-topic"),
+        ("second-topic", "second-topic"),
+    ] {
+        let result = page(resolve(&mut resolver, &current, &format!("x-r-help:/{topic}")).unwrap());
+        assert_eq!(result.package_dir, other);
+        assert_eq!(result.display_topic, topic);
+        assert_eq!(result.help_key, expected);
+        assert!(result.markdown.contains("Fixture second-topic"));
+    }
+}
+
+#[test]
 fn qualified_links_use_only_the_first_installed_copy() {
     let temp = tempfile::tempdir().unwrap();
     let early = temp.path().join("early");
