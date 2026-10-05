@@ -91,6 +91,21 @@ fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResu
     // from interfering with the terminal display (especially on Windows).
     let _guard = SuppressStderrGuard::new();
 
+    // Apply the same budget to every R completion path, including the one that
+    // merges package namespace suggestions with ordinary R object candidates.
+    // Function calls and namespace access need extra work (~150ms vs ~20ms at
+    // top level). Keep a safety boundary while preserving 0 as unlimited.
+    let before_cursor = &line[..cursor_pos.min(line.len())];
+    let effective_timeout = if timeout_ms == 0 {
+        0
+    } else if context::contains_namespace_operator(before_cursor)
+        || context::has_unmatched_open_paren(before_cursor)
+    {
+        timeout_ms.max(1000)
+    } else {
+        timeout_ms
+    };
+
     // Check for package context first
     match detect_package_context(line, cursor_pos) {
         PackageContext::Library(partial) => {
@@ -104,7 +119,7 @@ fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResu
             // Add R's built-in completions (for variables, functions, etc.)
             // Filter out `pkg::` completions since we already have them from get_namespace_completions
             if let Ok(r_completions) =
-                r_ffi::get_r_builtin_completions(line, cursor_pos, timeout_ms)
+                r_ffi::get_r_builtin_completions(line, cursor_pos, effective_timeout)
             {
                 completions.extend(r_completions.into_iter().filter(|c| !c.ends_with("::")));
             }
@@ -114,23 +129,6 @@ fn get_r_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResu
             // No package context - use R's built-in completions only
         }
     }
-
-    // Raise timeout for contexts where R's completer does extra work:
-    // - `::` completions: enumerate package exports (slow)
-    // - inside an unclosed `(` (function call or grouped expression): R also looks up argument
-    //   names (~150ms vs ~20ms at top level)
-    // Use a generous fixed floor (1000ms) so unusually slow environments still get
-    // a safety boundary. timeout_ms=0 (no limit) is preserved as-is.
-    let before_cursor = &line[..cursor_pos.min(line.len())];
-    let effective_timeout = if timeout_ms == 0 {
-        0
-    } else if context::contains_namespace_operator(before_cursor)
-        || context::has_unmatched_open_paren(before_cursor)
-    {
-        timeout_ms.max(1000)
-    } else {
-        timeout_ms
-    };
 
     r_ffi::get_r_builtin_completions(line, cursor_pos, effective_timeout)
 }

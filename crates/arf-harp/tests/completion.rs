@@ -48,6 +48,56 @@ fn test_completion_at_top_level_within_timeout() {
     });
 }
 
+/// Observe the time limits passed to R without relying on machine speed.
+#[test]
+fn test_completion_timeout_policy_across_contexts() {
+    with_r!(test_completion_timeout_policy_across_contexts, {
+        eval_string_with_visibility(
+            r#"
+            aaa_bbb <- 1
+            trace("setTimeLimit", where = baseenv(), print = FALSE,
+                  tracer = quote({
+                      .GlobalEnv$.completion_limits <- c(
+                          .GlobalEnv$.completion_limits, cpu, elapsed)
+                  }))
+            "#,
+        )
+        .expect("time-limit observation should be installed");
+
+        for (line, cursor, requested, expected) in [
+            ("str(aaa_", 8, 1, 1000),    // Also offers package namespace candidates.
+            ("str(aaa_)", 8, 1, 1000),   // Auto-inserted closing parenthesis.
+            ("str(", 4, 1, 1000),        // No identifier/package candidate context.
+            ("stats::lm", 9, 1, 1000),   // Namespace operator.
+            ("aaa_", 4, 50, 50),         // Top-level budget is unchanged.
+            ("str(aaa_", 8, 2000, 2000), // The floor does not cap larger budgets.
+            ("str(aaa_", 8, 0, 0),       // An explicit unlimited budget stays unlimited.
+            ("str(", 4, 0, 0),
+            ("stats::lm", 9, 0, 0),
+            ("aaa_", 4, 0, 0),
+        ] {
+            eval_string_with_visibility(".completion_limits <- numeric(0)")
+                .expect("observation should reset");
+            get_completions(line, cursor, requested).expect("completion should not error");
+            // A bounded request sets both limits, then clears them after completion.
+            let assertion = if expected == 0 {
+                "stopifnot(length(.completion_limits) == 0L)".to_owned()
+            } else {
+                let seconds = expected as f64 / 1000.0;
+                format!(
+                    "stopifnot(identical(.completion_limits, c({seconds}, {seconds}, Inf, Inf)))"
+                )
+            };
+            eval_string_with_visibility(&assertion).unwrap_or_else(|error| {
+                panic!(
+                    "unexpected R time limits for {line:?} at {cursor}, \
+                     requested={requested}ms, expected={expected}ms: {error}"
+                )
+            });
+        }
+    });
+}
+
 #[test]
 fn test_installed_packages_include_base_packages() {
     with_r!(test_installed_packages_include_base_packages, {
