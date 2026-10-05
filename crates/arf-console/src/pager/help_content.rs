@@ -25,6 +25,7 @@ pub(super) struct HelpContent {
     input: Option<String>,
     matches: Vec<SearchMatch>,
     current: Option<usize>,
+    selected_link: Option<usize>,
     status: Option<String>,
 }
 
@@ -41,6 +42,7 @@ impl HelpContent {
             input: None,
             matches: Vec::new(),
             current: None,
+            selected_link: None,
             status: None,
         }
     }
@@ -53,6 +55,95 @@ impl HelpContent {
                 LinkDisplay::LabelAndDestination
             }
         })
+    }
+
+    pub(super) fn is_search_input(&self) -> bool {
+        self.input.is_some()
+    }
+
+    pub(super) fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    pub(super) fn selected_target(&self) -> Option<HelpTarget> {
+        HelpTarget::from_uri(&self.document.links.get(self.selected_link?)?.destination)
+    }
+
+    pub(super) fn has_help_links(&self) -> bool {
+        self.document.links.iter().any(|link| {
+            !link.fragments.is_empty() && HelpTarget::from_uri(&link.destination).is_some()
+        })
+    }
+
+    pub(super) fn select_link(&mut self, forward: bool) -> PagerAction {
+        let links: Vec<_> = self
+            .document
+            .links
+            .iter()
+            .enumerate()
+            .filter(|(_, link)| {
+                !link.fragments.is_empty() && HelpTarget::from_uri(&link.destination).is_some()
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if links.is_empty() {
+            return PagerAction::Redraw;
+        }
+        let index = match self
+            .selected_link
+            .and_then(|link| links.iter().position(|i| *i == link))
+        {
+            Some(index) if forward => (index + 1) % links.len(),
+            Some(index) => (index + links.len() - 1) % links.len(),
+            None if forward => links
+                .iter()
+                .position(|i| self.document.links[*i].fragments[0].line >= self.scroll_offset)
+                .unwrap_or(0),
+            None => links
+                .iter()
+                .rposition(|i| self.document.links[*i].fragments[0].line <= self.scroll_offset)
+                .unwrap_or(links.len() - 1),
+        };
+        self.selected_link = Some(links[index]);
+        self.reveal_line(self.document.links[links[index]].fragments[0].line)
+    }
+
+    fn reveal_line(&self, line: usize) -> PagerAction {
+        let visible_rows = self.height.saturating_sub(2).max(1);
+        if line < self.scroll_offset {
+            PagerAction::ScrollTo(line)
+        } else if line >= self.scroll_offset.saturating_add(visible_rows) {
+            PagerAction::ScrollTo(line.saturating_sub(visible_rows - 1))
+        } else {
+            PagerAction::Redraw
+        }
+    }
+
+    /// Reflow a saved page around the logical text at its previous viewport.
+    pub(super) fn restore_viewport(&mut self, width: usize, height: usize) -> usize {
+        if (width, height) == (self.width, self.height) {
+            return self.scroll_offset;
+        }
+        let anchor = self
+            .document
+            .text
+            .iter()
+            .enumerate()
+            .find_map(|(index, text)| {
+                text.fragments
+                    .iter()
+                    .find(|f| f.line >= self.scroll_offset)
+                    .map(|f| (index, f.source_range.start))
+            });
+        let changed_width = width != self.width;
+        self.on_resize(width, height);
+        if changed_width && let Some((index, start)) = anchor {
+            let fragments = &self.document.text[index].fragments;
+            if let Some(fragment) = fragments.iter().find(|f| f.source_range.end > start) {
+                self.scroll_offset = fragment.line;
+            }
+        }
+        self.scroll_offset
     }
 
     fn recompute_matches(&mut self) {
@@ -145,17 +236,10 @@ impl HelpContent {
                 .unwrap_or(count - 1),
         };
         self.current = Some(index);
+        self.selected_link = None;
         self.update_status();
 
-        let line = self.match_line(self.matches[index]);
-        let visible_rows = self.height.saturating_sub(2).max(1);
-        if line < self.scroll_offset {
-            PagerAction::ScrollTo(line)
-        } else if line >= self.scroll_offset.saturating_add(visible_rows) {
-            PagerAction::ScrollTo(line.saturating_sub(visible_rows - 1))
-        } else {
-            PagerAction::Redraw
-        }
+        self.reveal_line(self.match_line(self.matches[index]))
     }
 }
 
@@ -175,29 +259,20 @@ impl PagerContent for HelpContent {
                 .fg(Color::Black)
                 .bg(Color::Yellow)
                 .add_modifier(Modifier::BOLD);
-            let mut offset = 0;
-            let mut spans = Vec::new();
-            for span in line.spans {
-                let text = span.content.as_ref();
-                let start = start.saturating_sub(offset).min(text.len());
-                let end = end.saturating_sub(offset).min(text.len());
-                if start < end {
-                    if start > 0 {
-                        spans.push(Span::styled(text[..start].to_owned(), span.style));
-                    }
-                    spans.push(Span::styled(
-                        text[start..end].to_owned(),
-                        span.style.patch(highlight),
-                    ));
-                    if end < text.len() {
-                        spans.push(Span::styled(text[end..].to_owned(), span.style));
-                    }
-                } else {
-                    spans.push(span.clone());
-                }
-                offset += text.len();
+            highlight_range(&mut line, start, end, highlight);
+        }
+        if let Some(link) = self.selected_link.map(|index| &self.document.links[index]) {
+            for fragment in link.fragments.iter().filter(|f| f.line == index) {
+                highlight_range(
+                    &mut line,
+                    fragment.byte_range.start,
+                    fragment.byte_range.end,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
             }
-            line.spans = spans;
         }
         line
     }
@@ -216,6 +291,7 @@ impl PagerContent for HelpContent {
                 KeyCode::Esc => self.input = None,
                 KeyCode::Enter => {
                     let input = self.input.take().expect("search input mode is active");
+                    self.selected_link = None;
                     if !input.is_empty() && input != self.query {
                         self.query = input;
                         self.recompute_matches();
@@ -279,9 +355,92 @@ impl PagerContent for HelpContent {
     }
 }
 
+fn highlight_range(line: &mut Line<'static>, start: usize, end: usize, highlight: Style) {
+    let mut offset = 0;
+    let mut spans = Vec::new();
+    for span in &line.spans {
+        let text = span.content.as_ref();
+        let start = start.saturating_sub(offset).min(text.len());
+        let end = end.saturating_sub(offset).min(text.len());
+        if start < end {
+            if start > 0 {
+                spans.push(Span::styled(text[..start].to_owned(), span.style));
+            }
+            spans.push(Span::styled(
+                text[start..end].to_owned(),
+                span.style.patch(highlight),
+            ));
+            if end < text.len() {
+                spans.push(Span::styled(text[end..].to_owned(), span.style));
+            }
+        } else {
+            spans.push(span.clone());
+        }
+        offset += text.len();
+    }
+    line.spans = spans;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_focus_skips_non_help_targets_wraps_and_scrolls_into_view() {
+        let source = format!(
+            "[site](https://example.com) [broken](x-r-help:base/)\n\n[first](x-r-help:/mean)\n\n{}\n\n[last](x-r-help:stats/lm)",
+            "paragraph\n\n".repeat(12)
+        );
+        let mut content = HelpContent::new(&source, 30, 6);
+        assert_eq!(content.selected_target(), None);
+        assert!(content.has_help_links());
+        content.select_link(true);
+        assert_eq!(content.selected_target().unwrap().topic, "mean");
+        assert!(matches!(
+            content.select_link(true),
+            PagerAction::ScrollTo(_)
+        ));
+        assert_eq!(content.selected_target().unwrap().topic, "lm");
+        content.select_link(true);
+        assert_eq!(content.selected_target().unwrap().topic, "mean");
+        content.select_link(false);
+        assert_eq!(content.selected_target().unwrap().topic, "lm");
+        let mut content = HelpContent::new("[site](https://example.com)", 30, 6);
+        assert!(!content.has_help_links());
+        assert_eq!(content.select_link(true), PagerAction::Redraw);
+        assert_eq!(content.selected_target(), None);
+    }
+
+    #[test]
+    fn wrapped_unicode_link_labels_are_highlighted_and_keep_independent_identities() {
+        let mut content = HelpContent::new(
+            "[**日本語** with long label](x-r-help:/mean) and [日本語](x-r-help:/mean)",
+            12,
+            24,
+        );
+        content.select_link(true);
+        let first = content.selected_link;
+        assert_eq!(first, Some(0));
+        assert!(content.document.links[0].fragments.len() > 1);
+        for fragment in &content.document.links[0].fragments {
+            let line = content.render_line(fragment.line, 12);
+            let highlighted: String = line
+                .spans
+                .iter()
+                .filter(|s| s.style.bg == Some(Color::Cyan))
+                .map(|s| s.content.as_ref())
+                .collect();
+            let plain = content.document.lines[fragment.line].to_string();
+            assert!(highlighted.contains(&plain[fragment.byte_range.clone()]));
+        }
+        content.on_resize(30, 24);
+        assert_eq!(content.selected_link, first);
+        content.select_link(true);
+        assert_eq!(content.selected_link, Some(1));
+        assert_eq!(content.selected_target().unwrap().topic, "mean");
+        content.select_link(false);
+        assert_eq!(content.selected_link, first);
+    }
 
     #[test]
     fn rd_link_targets_survive_rendering_and_resize() {
