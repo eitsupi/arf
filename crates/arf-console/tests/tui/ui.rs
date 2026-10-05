@@ -94,7 +94,7 @@ viewer = "auto"
             })?;
             terminal.key("Escape")?;
             terminal.wait_for("search input cancels without leaving pager", |state, _| {
-                state.text.contains("base::mean") && state.text.contains("q/Esc back")
+                state.text.contains("base::mean") && state.text.contains("q/Esc exit")
             })?;
             terminal.write("/mean")?;
             terminal.key("Enter")?;
@@ -132,7 +132,7 @@ viewer = "auto"
                 "q clears search and keeps the help page open",
                 |state, _| {
                     state.text.contains("base::mean")
-                        && state.text.contains("q/Esc back")
+                        && state.text.contains("q/Esc exit")
                         && !state.text.contains("n/N next/previous")
                         && !state.text.contains("/arithmetic mean [")
                 },
@@ -145,6 +145,119 @@ viewer = "auto"
             })?;
             terminal.key("q")?;
             wait_for_prompt_after_ui(terminal, "qualified lm help pager exits")?;
+            terminal.submit("42", "[1] 42", PROMPT)?;
+            terminal.quit()
+        },
+    )
+}
+
+fn follow_first_help_link_and_return(terminal: &Terminal) -> Result<()> {
+    terminal.key("Enter")?;
+    terminal.key("Tab")?;
+    terminal.wait_for("R help link is selected", |state, _| {
+        state.text.contains("base::mean") && state.text.contains("Enter open")
+    })?;
+    let state = terminal.state()?;
+    let original_header = terminal.screen_line(0, state.cols)?;
+    terminal.key("Enter")?;
+    terminal.wait_for_screen_line("selected R help link opens", 0, |state, line| {
+        state.exited.is_none() && line.contains("::") && !line.contains("base::mean")
+    })?;
+    let response = terminal
+        .start_ipc(&["eval", "1 + 1", "--timeout", "3000"])?
+        .finish_with_status()?;
+    ensure!(
+        response.status.code() == Some(4) && response.json["error"]["code"] == "R_NOT_AT_PROMPT",
+        "IPC must stay guarded during navigation: {}",
+        response.json
+    );
+    terminal.key("Backspace")?;
+    terminal.wait_for_screen_line("back restores mean title and scroll", 0, |_, line| {
+        line == original_header
+    })?;
+    terminal.wait_for("back restores selected link", |state, _| {
+        state.text.contains("Enter open")
+    })?;
+    Ok(())
+}
+
+#[test]
+fn r_help_and_browser_share_keyboard_navigation_and_keep_ipc_guarded() -> Result<()> {
+    run_case_with(
+        Terminal::builder("r-help-navigation")
+            .args([
+                "--no-auto-match",
+                "--no-completion",
+                "--with-ipc",
+                "--ipc-eval-unrestricted",
+            ])
+            .config(format!(
+                r#"{DEFAULT_CONFIG}
+[experimental.r_help]
+viewer = "auto"
+"#
+            )),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter("?mean")?;
+            terminal.wait_for_screen_line("mean native help page", 0, |_, line| {
+                line.contains("base::mean")
+            })?;
+            follow_first_help_link_and_return(terminal)?;
+            terminal.key("q")?;
+            wait_for_prompt_after_ui(terminal, "native help navigation exits")?;
+
+            terminal.enter(":help base::mean")?;
+            terminal.wait_for("browser finds mean", |state, _| {
+                state.text.contains("Filter: base::mean_")
+                    && state.text.contains("Tab/Enter select")
+            })?;
+            // Fuzzy search includes matching aliases such as mean.Date. Select
+            // the actual mean row explicitly instead of assuming it ranks first.
+            let state = terminal.state()?;
+            let mut mean_row = None;
+            let mut selected_row = None;
+            for row in 0..state.rows.saturating_sub(2) {
+                let line = terminal.screen_line(row, state.cols)?;
+                if line.trim_start().starts_with("> ") {
+                    selected_row = Some(row);
+                }
+                if line
+                    .trim_start()
+                    .trim_start_matches("> ")
+                    .starts_with("base::mean ")
+                {
+                    mean_row = Some(row);
+                }
+            }
+            let row = mean_row
+                .ok_or_else(|| anyhow::anyhow!("mean row is missing from browser results"))?;
+            let selected_row = selected_row
+                .ok_or_else(|| anyhow::anyhow!("selected row is missing from browser results"))?;
+            for _ in selected_row..row {
+                terminal.key("Down")?;
+            }
+            terminal.wait_for_screen_line("browser explicitly selects mean", row, |_, line| {
+                line.trim_start().starts_with("> base::mean ")
+            })?;
+            terminal.key("Enter")?;
+            terminal.wait_for_screen_line("browser opens mean page", 0, |_, line| {
+                line.contains("base::mean")
+            })?;
+            follow_first_help_link_and_return(terminal)?;
+            terminal.key("q")?;
+            terminal.wait_for("navigation returns to topic browser", |state, _| {
+                state.text.contains("Filter:") && state.text.contains("Tab/Enter select")
+            })?;
+            terminal.key("Escape")?;
+            wait_for_prompt_after_ui(terminal, "topic browser exits after navigation")?;
+            let response = terminal
+                .start_ipc(&["eval", "1 + 1", "--timeout", "10000"])?
+                .finish()?;
+            ensure!(
+                response["value"] == "[1] 2",
+                "IPC must resume after help exits: {response}"
+            );
             terminal.submit("42", "[1] 42", PROMPT)?;
             terminal.quit()
         },

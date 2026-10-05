@@ -21,11 +21,9 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match_with_case_preference;
-use arf_harp::help::{
-    HelpTopic, get_help_topics, get_package_help_markdown, get_package_help_markdown_by_key_in_dir,
-    get_vignette_text,
-};
-use arf_harp::help_bridge::PreparedHelpRequest;
+use arf_harp::help::{HelpTargetResolver, HelpTopic, get_help_topics, get_vignette_text};
+use arf_harp::help_bridge::{PreparedHelpPage, PreparedHelpRequest};
+use arf_harp::lib_paths::{cached_lib_paths, lib_paths};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -34,7 +32,6 @@ use crossterm::{
     terminal::{self, BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
 use std::io::{self, Write};
-use std::path::Path;
 use std::time::Duration;
 
 /// Maximum number of results to keep in filtered list.
@@ -74,6 +71,7 @@ pub fn run_help_browser(query: &str) -> io::Result<()> {
 
 /// Interactive help browser.
 struct HelpBrowser {
+    library_paths: Vec<String>,
     topics: Vec<HelpTopic>,
     query: String,
     /// Cursor position within the query string (in characters, not bytes).
@@ -88,6 +86,7 @@ struct HelpBrowser {
 impl HelpBrowser {
     fn new(topics: Vec<HelpTopic>, query: &str) -> Self {
         let mut browser = HelpBrowser {
+            library_paths: cached_lib_paths(),
             topics,
             query: query.to_string(),
             cursor_pos: query.chars().count(),
@@ -253,45 +252,25 @@ demo("{name}", package = "{pkg}")"#,
                                             }
                                         }
                                         _ => {
-                                            // "help" and any other types
-                                            if let Some(key) = topic.help_key.as_deref() {
-                                                if let Err(e) = display_help_page_by_key_in_browser(
-                                                    &topic.package_dir,
-                                                    &topic.topic,
-                                                    key,
-                                                    &topic.package,
-                                                ) {
-                                                    let message = help_page_load_error_message(&e);
-                                                    if let Err(pager_error) =
-                                                        display_help_pager(&title, &message, false)
-                                                    {
-                                                        log::error!(
-                                                            "help_browser: failed to display help error: {}",
-                                                            pager_error
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                match get_package_help_markdown(
-                                                    &topic.topic,
-                                                    &topic.package,
-                                                ) {
-                                                    Ok(text) => {
-                                                        if let Err(e) =
-                                                            display_help_pager(&title, &text, false)
-                                                        {
-                                                            log::error!(
-                                                                "help_browser: pager error: {}",
-                                                                e
-                                                            );
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        log::error!(
-                                                            "help_browser: failed to get help: {}",
-                                                            e
-                                                        );
-                                                    }
+                                            // Keep the metadata's exact installed package copy.
+                                            let result =
+                                                HelpTargetResolver::prepare_candidate(topic)
+                                                    .map_err(io::Error::other)
+                                                    .and_then(|page| {
+                                                        display_help_pages(
+                                                            vec![page],
+                                                            self.library_paths.clone(),
+                                                            false,
+                                                        )
+                                                    });
+                                            if let Err(e) = result {
+                                                let message = help_page_load_error_message(&e);
+                                                if let Err(pager_error) =
+                                                    display_help_pager(&title, &message, false)
+                                                {
+                                                    log::error!(
+                                                        "help_browser: failed to display help error: {pager_error}"
+                                                    );
                                                 }
                                             }
                                         }
@@ -626,108 +605,43 @@ fn display_help_pager(title: &str, content: &str, manage_alternate_screen: bool)
 /// Multiple pages require an explicit selector confirmation. Exiting the
 /// selector without confirming is a normal cancellation and displays nothing.
 pub(crate) fn display_prepared_help_request(request: &PreparedHelpRequest) -> io::Result<()> {
-    let selected = match request.pages.as_slice() {
-        [] => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "prepared help request has no pages",
-            ));
-        }
-        [_] => 0,
-        pages => {
-            let Some(selected) = select_prepared_help_page(pages)? else {
-                return Ok(());
-            };
-            selected
-        }
-    };
-
-    let page = &request.pages[selected];
-    display_help_pager(
-        &help_page_title(&page.package, &page.display_topic),
-        &page.markdown,
-        true,
-    )
-}
-
-fn select_prepared_help_page(
-    pages: &[arf_harp::help_bridge::PreparedHelpPage],
-) -> io::Result<Option<usize>> {
-    use super::{PagerAction, PagerConfig, PagerContent, run};
-    use ratatui::text::Line;
-
-    struct PageSelector {
-        labels: Vec<String>,
-        state: HelpPageSelectorState,
-    }
-
-    impl PagerContent for PageSelector {
-        fn line_count(&self) -> usize {
-            self.labels.len()
-        }
-
-        fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
-            let prefix = if self.state.selected == Some(index) {
-                ">"
-            } else {
-                " "
-            };
-            Line::from(format!("{prefix} {}", self.labels[index]))
-        }
-
-        fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<PagerAction> {
-            match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.state.move_up().then_some(PagerAction::Continue)
-                }
-                KeyCode::Down | KeyCode::Char('j') => match self.state.move_down() {
-                    Some(true) => Some(PagerAction::Redraw),
-                    Some(false) => Some(PagerAction::Continue),
-                    None => Some(PagerAction::Redraw),
-                },
-                KeyCode::Enter => self
-                    .state
-                    .confirm()
-                    .map_or(Some(PagerAction::Redraw), |_| Some(PagerAction::Exit)),
-                _ => None,
-            }
-        }
-    }
-
-    if pages.len() < 2 {
+    if request.pages.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "page selector requires multiple candidates",
+            "prepared help request has no pages",
         ));
     }
+    // Refresh once before entering the viewer, never while navigating links.
+    let libraries = lib_paths().map_err(io::Error::other)?;
+    display_help_pages(request.pages.clone(), libraries, true)
+}
 
-    let labels = pages
-        .iter()
-        .enumerate()
-        .map(|(index, page)| format!("[{}] {}::{}", index + 1, page.package, page.display_topic))
-        .collect();
-    let mut selector = PageSelector {
-        labels,
-        state: HelpPageSelectorState::new(pages.len()),
-    };
+fn display_help_pages(
+    pages: Vec<PreparedHelpPage>,
+    libraries: Vec<String>,
+    manage_alternate_screen: bool,
+) -> io::Result<()> {
+    use super::help_session::HelpViewer;
+    use super::{PagerConfig, run};
+
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    let mut viewer = HelpViewer::new(pages, libraries, cols as usize, rows as usize);
     let config = PagerConfig {
-        title: "Select R help page",
-        footer_hint: "↑↓/jk move  Enter open  q/Esc cancel",
-        manage_alternate_screen: true,
+        manage_alternate_screen,
+        ..PagerConfig::default()
     };
-    run(&mut selector, &config)?;
-    Ok(selector.state.confirmed)
+    run(&mut viewer, &config)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct HelpPageSelectorState {
+pub(super) struct HelpPageSelectorState {
     page_count: usize,
-    selected: Option<usize>,
+    pub(super) selected: Option<usize>,
     confirmed: Option<usize>,
 }
 
 impl HelpPageSelectorState {
-    fn new(page_count: usize) -> Self {
+    pub(super) fn new(page_count: usize) -> Self {
         Self {
             page_count,
             selected: None,
@@ -735,7 +649,7 @@ impl HelpPageSelectorState {
         }
     }
 
-    fn move_up(&mut self) -> bool {
+    pub(super) fn move_up(&mut self) -> bool {
         let Some(selected) = self.selected else {
             return false;
         };
@@ -749,7 +663,7 @@ impl HelpPageSelectorState {
 
     /// Returns `Some(true)` when this selects the first row from the empty
     /// state; the pager must not scroll its viewport for that movement.
-    fn move_down(&mut self) -> Option<bool> {
+    pub(super) fn move_down(&mut self) -> Option<bool> {
         match self.selected {
             None if self.page_count > 0 => {
                 self.selected = Some(0);
@@ -763,57 +677,14 @@ impl HelpPageSelectorState {
         }
     }
 
-    fn confirm(&mut self) -> Option<usize> {
+    pub(super) fn confirm(&mut self) -> Option<usize> {
         let selected = self.selected?;
         self.confirmed = Some(selected);
         Some(selected)
     }
 }
 
-/// Load a help page by its compiled-help key and display it in the help pager.
-///
-/// The browser's visible topic can differ from the compiled-help key, so both
-/// values and the supplying package directory are passed explicitly. Errors
-/// are returned to let callers choose a fallback when the indexed key cannot
-/// be resolved.
-#[allow(dead_code, reason = "Consumed by the deferred R-help bridge")]
-pub(crate) fn display_help_page_by_key(
-    package_dir: &Path,
-    display_topic: &str,
-    help_key: &str,
-    package: &str,
-) -> io::Result<()> {
-    display_help_page_by_key_with_screen(package_dir, display_topic, help_key, package, true)
-}
-
-/// Display a compiled-key help page from inside the help browser's alternate screen.
-fn display_help_page_by_key_in_browser(
-    package_dir: &Path,
-    display_topic: &str,
-    help_key: &str,
-    package: &str,
-) -> io::Result<()> {
-    display_help_page_by_key_with_screen(package_dir, display_topic, help_key, package, false)
-}
-
-fn display_help_page_by_key_with_screen(
-    package_dir: &Path,
-    display_topic: &str,
-    help_key: &str,
-    package: &str,
-    manage_alternate_screen: bool,
-) -> io::Result<()> {
-    let content =
-        get_package_help_markdown_by_key_in_dir(package_dir, display_topic, help_key, package)
-            .map_err(io::Error::other)?;
-    display_help_pager(
-        &help_page_title(package, display_topic),
-        &content,
-        manage_alternate_screen,
-    )
-}
-
-fn help_page_title(package: &str, display_topic: &str) -> String {
+pub(super) fn help_page_title(package: &str, display_topic: &str) -> String {
     format!("{package}::{display_topic}")
 }
 

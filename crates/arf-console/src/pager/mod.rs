@@ -6,6 +6,7 @@
 mod changelog;
 mod help;
 mod help_content;
+mod help_session;
 pub mod history_browser;
 pub mod history_schema;
 pub(crate) mod markdown;
@@ -169,6 +170,11 @@ impl<'a> Default for PagerConfig<'a> {
 
 /// Trait for content that can be displayed in the pager.
 pub trait PagerContent {
+    /// Override the configured header for content that changes pages.
+    fn title(&self) -> Option<&str> {
+        None
+    }
+
     /// Get the total number of lines.
     fn line_count(&self) -> usize;
 
@@ -179,6 +185,12 @@ pub trait PagerContent {
     /// Called before rendering to allow content to prepare state.
     /// `scroll_offset` is the first visible line index.
     fn prepare_render(&mut self, _scroll_offset: usize) {}
+
+    /// Request a viewport change after a non-key transition such as resize.
+    /// The pager consumes this request and clamps it before rendering.
+    fn take_scroll_request(&mut self) -> Option<usize> {
+        None
+    }
 
     /// Handle a custom key event. `None` and `Continue` use standard key handling;
     /// `Redraw` and `ScrollTo` consume the key.
@@ -227,6 +239,9 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
 
     loop {
         if needs_redraw {
+            if let Some(line) = content.take_scroll_request() {
+                scroll_offset = clamp_scroll_offset(line, content.line_count(), term_height);
+            }
             content.prepare_render(scroll_offset);
             render(&mut terminal, content, config, scroll_offset)?;
             needs_redraw = false;
@@ -370,7 +385,7 @@ fn render<C: PagerContent>(
         // Header
         let header_text = format!(
             "─ {} [{}/{}] ─",
-            config.title,
+            content.title().unwrap_or(config.title),
             scroll_offset + 1,
             content.line_count().max(1)
         );
