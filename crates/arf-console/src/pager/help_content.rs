@@ -2,6 +2,7 @@
 
 use super::markdown::{LinkDisplay, RenderedMarkdown, render_markdown_document};
 use super::{PagerAction, PagerContent};
+use arf_harp::help::HelpTarget;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -46,10 +47,7 @@ impl HelpContent {
 
     fn render_document(source: &str, width: usize) -> RenderedMarkdown {
         render_markdown_document(source, Some("r"), Some(width), |destination| {
-            if destination
-                .split_once(':')
-                .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("x-r-help"))
-            {
+            if HelpTarget::from_uri(destination).is_some() {
                 LinkDisplay::LabelOnly
             } else {
                 LinkDisplay::LabelAndDestination
@@ -284,6 +282,78 @@ impl PagerContent for HelpContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rd_link_targets_survive_rendering_and_resize() {
+        let rd = include_str!("../../tests/fixtures/help_links.Rd");
+        let source = arf_harp::help::rd_source_to_markdown(rd).unwrap();
+        let expected = [
+            (None, "mean"),
+            (Some("stats"), "lm"),
+            (None, "mean"),
+            (None, "["),
+            (None, "[["),
+            (None, "%/%"),
+            (None, "%in%"),
+            (None, "/"),
+            (Some("base"), "%/%"),
+            (Some("base"), "mean"),
+        ];
+        let mut content = HelpContent::new(&source, 80, 24);
+        for width in [8, 24, 80] {
+            content.on_resize(width, 24);
+            assert_eq!(content.document.links.len(), expected.len() + 1);
+            for (link, (package, topic)) in content.document.links.iter().zip(expected) {
+                assert_eq!(
+                    HelpTarget::from_uri(&link.destination),
+                    Some(HelpTarget {
+                        package: package.map(str::to_owned),
+                        topic: topic.to_owned(),
+                    }),
+                );
+                assert!(!link.text_ranges.is_empty());
+                assert!(!link.fragments.is_empty());
+                for fragment in &link.fragments {
+                    let line = &content.document.lines[fragment.line];
+                    let text: String = line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect();
+                    assert!(!text[fragment.byte_range.clone()].is_empty());
+                    assert!(fragment.columns.start < fragment.columns.end);
+                }
+            }
+            let label = &content.document.links[2];
+            assert_eq!(label.label, "an average with a longer label");
+            if width == 8 {
+                assert!(label.fragments.len() > 1);
+            }
+            let website = content.document.links.last().unwrap();
+            assert_eq!(website.destination, "https://example.com/docs");
+            assert_eq!(HelpTarget::from_uri(&website.destination), None);
+            assert!(
+                content
+                    .document
+                    .text
+                    .iter()
+                    .all(|t| !t.text.contains("x-r-help:"))
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_help_destinations_remain_readable() {
+        let content = HelpContent::new(
+            "[broken](x-r-help:base/) and [mean](x-r-help:/mean)",
+            80,
+            24,
+        );
+        assert_eq!(
+            content.document.text[0].text,
+            "broken (x-r-help:base/) and mean"
+        );
+    }
 
     #[test]
     fn help_links_keep_metadata_without_exposing_internal_uris() {

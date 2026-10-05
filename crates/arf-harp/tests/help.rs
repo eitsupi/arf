@@ -40,6 +40,24 @@ fn test_help_base_solve_returns_content() {
 }
 
 #[test]
+fn test_both_help_conversion_paths_emit_internal_links() {
+    with_r!(test_both_help_conversion_paths_emit_internal_links, {
+        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        for package in [Some("base"), None] {
+            let markdown = get_help_markdown("solve", package).expect("solve help should convert");
+            assert!(
+                markdown.contains("x-r-help:"),
+                "missing help links: {markdown}"
+            );
+            assert!(
+                markdown.contains("x-r-help:/"),
+                "missing unqualified links: {markdown}"
+            );
+        }
+    });
+}
+
+#[test]
 fn test_help_package_alias_and_exact_key() {
     with_r!(test_help_package_alias_and_exact_key, {
         let alias = get_package_help_markdown("[.data.frame", "base")
