@@ -77,6 +77,159 @@ fn search(viewer: &mut HelpViewer, text: &str) {
 }
 
 #[test]
+fn committed_search_and_next_previous_clear_old_link_focus() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = format!(
+        "[old link](x-r-help:/mean)\n\n{}\n\nneedle one\n\n{}\n\nneedle two",
+        "paragraph\n\n".repeat(10),
+        "paragraph\n\n".repeat(10)
+    );
+    let mut viewer = viewer(home(temp.path(), &source), temp.path());
+    press(&mut viewer, KeyCode::Tab);
+    assert!(
+        viewer
+            .current
+            .as_ref()
+            .unwrap()
+            .content
+            .selected_target()
+            .is_some()
+    );
+    search(&mut viewer, "needle");
+    assert!(viewer.scroll_offset > 0);
+    assert!(viewer.feedback_message().unwrap().contains("/needle [1/2]"));
+    for code in [None, Some(KeyCode::Char('n')), Some(KeyCode::Char('N'))] {
+        if let Some(code) = code {
+            press(&mut viewer, KeyCode::Tab);
+            assert!(
+                viewer
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .content
+                    .selected_target()
+                    .is_some()
+            );
+            press(&mut viewer, code);
+        }
+        assert_eq!(
+            viewer.current.as_ref().unwrap().content.selected_target(),
+            None
+        );
+        assert!(!(0..viewer.line_count()).any(|i| {
+            viewer
+                .render_line(i, 40)
+                .spans
+                .iter()
+                .any(|s| s.style.bg == Some(Color::Cyan))
+        }));
+        assert_eq!(
+            press(&mut viewer, KeyCode::Enter),
+            Some(PagerAction::Redraw)
+        );
+        assert_eq!(viewer.title(), Some("source::home"));
+        assert!(viewer.history.is_empty());
+        assert!(viewer.message.is_none());
+    }
+    assert!(viewer.feedback_message().unwrap().contains("/needle [1/2]"));
+}
+
+#[test]
+fn canceled_search_preserves_link_focus_but_committed_no_match_clears_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut viewer = viewer(home(temp.path(), "[mean](x-r-help:/mean)"), temp.path());
+    press(&mut viewer, KeyCode::Tab);
+    let target = viewer.current.as_ref().unwrap().content.selected_target();
+    let line = viewer.render_line(0, 40);
+    press(&mut viewer, KeyCode::Char('/'));
+    press(&mut viewer, KeyCode::Char('z'));
+    assert_eq!(
+        viewer.current.as_ref().unwrap().content.selected_target(),
+        target
+    );
+    press(&mut viewer, KeyCode::Esc);
+    assert_eq!(
+        viewer.current.as_ref().unwrap().content.selected_target(),
+        target
+    );
+    assert_eq!(viewer.render_line(0, 40), line);
+    search(&mut viewer, "absent");
+    assert_eq!(
+        viewer.current.as_ref().unwrap().content.selected_target(),
+        None
+    );
+    assert!(viewer.feedback_message().unwrap().contains("No matches"));
+    assert_eq!(
+        press(&mut viewer, KeyCode::Enter),
+        Some(PagerAction::Redraw)
+    );
+
+    press(&mut viewer, KeyCode::Tab);
+    // With no match to move to, n/N leave explicit link selection alone.
+    press(&mut viewer, KeyCode::Char('n'));
+    press(&mut viewer, KeyCode::Char('N'));
+    assert_eq!(
+        viewer.current.as_ref().unwrap().content.selected_target(),
+        target
+    );
+    search(&mut viewer, "");
+    assert_eq!(
+        viewer.current.as_ref().unwrap().content.selected_target(),
+        None
+    );
+}
+
+#[test]
+fn candidate_selector_preserves_generic_pager_keys_and_reverse_selection() {
+    let temp = tempfile::tempdir().unwrap();
+    let pages = (0..15)
+        .map(|index| PreparedHelpPage {
+            display_topic: format!("topic-{index}"),
+            ..home(temp.path(), "First")
+        })
+        .collect();
+    let mut viewer = HelpViewer::new(pages, vec![], 40, 6);
+    for (code, modifiers) in [
+        (KeyCode::PageUp, KeyModifiers::NONE),
+        (KeyCode::PageDown, KeyModifiers::NONE),
+        (KeyCode::Char(' '), KeyModifiers::NONE),
+        (KeyCode::Home, KeyModifiers::NONE),
+        (KeyCode::End, KeyModifiers::NONE),
+        (KeyCode::Char('f'), KeyModifiers::CONTROL),
+        (KeyCode::Char('b'), KeyModifiers::CONTROL),
+        (KeyCode::Char('g'), KeyModifiers::NONE),
+        (KeyCode::Char('G'), KeyModifiers::SHIFT),
+    ] {
+        assert_eq!(
+            key(&mut viewer, code, modifiers),
+            Some(PagerAction::Continue)
+        );
+        assert_eq!(viewer.candidates.as_ref().unwrap().state.selected, None);
+    }
+    assert_eq!(
+        press(&mut viewer, KeyCode::Enter),
+        Some(PagerAction::Redraw)
+    );
+    // Both terminal representations of Shift-Tab and Up select the last row.
+    for (code, modifiers) in [
+        (KeyCode::BackTab, KeyModifiers::NONE),
+        (KeyCode::Tab, KeyModifiers::SHIFT),
+        (KeyCode::Up, KeyModifiers::NONE),
+    ] {
+        viewer.candidates.as_mut().unwrap().state.selected = None;
+        viewer.prepare_render(0);
+        assert_eq!(
+            key(&mut viewer, code, modifiers),
+            Some(PagerAction::ScrollTo(11))
+        );
+        assert_eq!(viewer.candidates.as_ref().unwrap().state.selected, Some(14));
+        assert_eq!(viewer.scroll_offset, 11);
+    }
+    press(&mut viewer, KeyCode::Enter);
+    assert_eq!(viewer.title(), Some("source::topic-14"));
+}
+
+#[test]
 fn follow_and_back_restore_page_provenance_title_scroll_focus_and_search() {
     let temp = tempfile::tempdir().unwrap();
     let origin = package(temp.path(), "source", true);
@@ -95,6 +248,7 @@ fn follow_and_back_restore_page_provenance_title_scroll_focus_and_search() {
     press(&mut viewer, KeyCode::Tab);
     assert!(viewer.scroll_offset > 0);
     search(&mut viewer, "lm");
+    press(&mut viewer, KeyCode::Tab);
     let scroll = viewer.scroll_offset;
     let status = viewer.feedback_message().unwrap().to_owned();
     let lines: Vec<_> = (0..viewer.line_count())
@@ -365,7 +519,6 @@ fn search_input_consumes_link_and_history_keys_and_emergency_exit_falls_through(
     let temp = tempfile::tempdir().unwrap();
     let mut viewer = viewer(home(temp.path(), "[mean](x-r-help:/mean)"), temp.path());
     press(&mut viewer, KeyCode::Tab);
-    let target = viewer.current.as_ref().unwrap().content.selected_target();
     press(&mut viewer, KeyCode::Char('/'));
     press(&mut viewer, KeyCode::Char('q'));
     for code in [KeyCode::Tab, KeyCode::BackTab, KeyCode::Backspace] {
@@ -381,7 +534,7 @@ fn search_input_consumes_link_and_history_keys_and_emergency_exit_falls_through(
     assert_eq!(viewer.title(), Some("source::home"));
     assert_eq!(
         viewer.current.as_ref().unwrap().content.selected_target(),
-        target
+        None
     );
     assert!(viewer.feedback_message().unwrap().contains("/m [1/"));
     assert_eq!(
@@ -414,6 +567,7 @@ fn back_after_resize_reflows_saved_page_and_preserves_query_and_link_identity() 
     let mut viewer = viewer(home(&origin, &source), temp.path());
     press(&mut viewer, KeyCode::Tab);
     search(&mut viewer, "平均 with");
+    press(&mut viewer, KeyCode::Tab);
     press(&mut viewer, KeyCode::Enter);
     viewer.on_resize(16, 6);
     let offset = viewer.take_scroll_request().unwrap();

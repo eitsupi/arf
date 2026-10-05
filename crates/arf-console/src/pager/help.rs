@@ -651,7 +651,8 @@ impl HelpPageSelectorState {
 
     pub(super) fn move_up(&mut self) -> bool {
         let Some(selected) = self.selected else {
-            return false;
+            self.selected = self.page_count.checked_sub(1);
+            return self.selected.is_some();
         };
         if selected == 0 {
             self.selected = None;
@@ -713,8 +714,16 @@ mod tests {
 
     #[test]
     fn prepared_help_selector_navigation_stays_within_candidate_bounds() {
+        let mut empty = HelpPageSelectorState::new(0);
+        assert!(!empty.move_up());
+        assert_eq!(empty.selected, None);
         let mut selector = HelpPageSelectorState::new(2);
-        assert!(!selector.move_up());
+        assert!(selector.move_up());
+        assert_eq!(selector.selected, Some(1));
+        assert!(selector.move_up());
+        assert_eq!(selector.selected, Some(0));
+        assert!(selector.move_up());
+        assert_eq!(selector.selected, None);
         assert_eq!(selector.move_down(), Some(true));
         assert!(selector.move_up());
         assert_eq!(selector.selected, None);

@@ -213,7 +213,7 @@ impl HelpViewer {
             | (KeyCode::Tab, KeyModifiers::SHIFT) => {
                 candidates.state.move_up();
             }
-            _ => return PagerAction::Redraw,
+            _ => return PagerAction::Continue,
         }
         let line = candidates.state.selected.unwrap_or(0);
         let rows = self.height.saturating_sub(2).max(1);

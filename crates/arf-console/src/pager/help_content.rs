@@ -236,6 +236,7 @@ impl HelpContent {
                 .unwrap_or(count - 1),
         };
         self.current = Some(index);
+        self.selected_link = None;
         self.update_status();
 
         self.reveal_line(self.match_line(self.matches[index]))
@@ -290,6 +291,7 @@ impl PagerContent for HelpContent {
                 KeyCode::Esc => self.input = None,
                 KeyCode::Enter => {
                     let input = self.input.take().expect("search input mode is active");
+                    self.selected_link = None;
                     if !input.is_empty() && input != self.query {
                         self.query = input;
                         self.recompute_matches();
