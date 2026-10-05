@@ -11,7 +11,7 @@ use std::sync::Mutex;
 /// Maximum number of pending help requests awaiting the UI consumer.
 pub const MAX_PENDING_HELP_REQUESTS: usize = 16;
 
-/// One fully rendered candidate help page from R's resolved help paths.
+/// One prepared help page with its exact installed package directory and key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedHelpPage {
     pub package_dir: PathBuf,
