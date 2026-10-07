@@ -51,8 +51,7 @@ pub fn populate_lib_paths() -> HarpResult<()> {
 
 /// Returns the current library paths, refreshing the cache first.
 pub fn lib_paths() -> HarpResult<Vec<String>> {
-    populate_lib_paths()?;
-    Ok(cached_lib_paths())
+    refresh_lib_paths_from_r()
 }
 
 /// Returns the cached library paths without evaluating R.

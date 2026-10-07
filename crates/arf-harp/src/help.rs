@@ -83,20 +83,21 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 /// A vector of `HelpTopic` structs containing package, topic, title, and type.
 ///
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
-    get_help_topics_from_paths(&lib_paths()?)
+    Ok(get_help_topics_from_paths(&lib_paths()?))
 }
 
 /// Get help, vignette, and demo topics from explicit library paths.
 ///
 /// This function only reads the supplied filesystem paths and metadata; it
 /// does not evaluate R. The paths are searched in order, with the first
-/// installed copy of a package taking precedence.
-pub fn get_help_topics_from_paths(paths: &[String]) -> HarpResult<Vec<HelpTopic>> {
+/// installed copy of a package taking precedence. Missing or unreadable
+/// metadata sources are skipped, as in [`get_help_topics`].
+pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
     let mut topics = Vec::new();
     for (package, package_dir) in installed_package_dirs(paths) {
         topics.extend(read_package_topics(&package, &package_dir));
     }
-    Ok(topics)
+    topics
 }
 
 fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
@@ -353,7 +354,7 @@ mod help_metadata_tests {
         .unwrap();
 
         let paths = vec![library.to_string_lossy().into_owned()];
-        let topics = get_help_topics_from_paths(&paths).unwrap();
+        let topics = get_help_topics_from_paths(&paths);
         assert!(topics.iter().any(|topic| {
             topic.package == "fixturepkg"
                 && topic.package_dir == package_dir
@@ -389,7 +390,7 @@ mod help_metadata_tests {
             second_library.to_string_lossy().into_owned(),
         ];
 
-        let topics = get_help_topics_from_paths(&paths).unwrap();
+        let topics = get_help_topics_from_paths(&paths);
         assert!(!topics.is_empty(), "fixture should contain help metadata");
         assert!(
             topics
@@ -398,7 +399,7 @@ mod help_metadata_tests {
         );
 
         let reversed_topics =
-            get_help_topics_from_paths(&paths.into_iter().rev().collect::<Vec<_>>()).unwrap();
+            get_help_topics_from_paths(&paths.into_iter().rev().collect::<Vec<_>>());
         assert!(
             !reversed_topics.is_empty(),
             "fixture should contain help metadata"
@@ -457,7 +458,7 @@ mod help_metadata_tests {
         ));
 
         let reversed_paths = vec![second_path, first_path];
-        let topics = get_help_topics_from_paths(&reversed_paths).unwrap();
+        let topics = get_help_topics_from_paths(&reversed_paths);
         assert!(!topics.is_empty());
         assert!(
             topics
