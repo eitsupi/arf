@@ -13,8 +13,18 @@ fn test_lib_paths_read_is_safe_before_population() {
 #[test]
 fn test_lib_paths_population_returns_existing_paths() {
     with_r!(test_lib_paths_population_returns_existing_paths, {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
+        let refreshed =
+            arf_harp::lib_paths::refresh_lib_paths_from_r().expect(".libPaths() should evaluate");
+        assert_eq!(
+            refreshed,
+            arf_harp::lib_paths::cached_lib_paths(),
+            "refresh should return the snapshot it populated"
+        );
         let paths = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
+        assert_eq!(
+            paths, refreshed,
+            "compatibility getter should preserve paths"
+        );
 
         assert!(
             !paths.is_empty(),
@@ -45,6 +55,13 @@ fn test_lib_paths_re_evaluates_after_r_lib_paths_changes() {
             escape_r_string(&new_path)
         ))
         .expect(".libPaths() should accept the extra directory");
+
+        assert!(
+            !arf_harp::lib_paths::cached_lib_paths()
+                .iter()
+                .any(|path| path == &new_path),
+            "changing R's library paths should not implicitly mutate the Rust snapshot"
+        );
 
         let paths = arf_harp::lib_paths::lib_paths().expect("library paths should be available");
         let expected =

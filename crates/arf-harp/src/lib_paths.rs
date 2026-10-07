@@ -26,15 +26,27 @@ impl LibPathsCache {
 
 static LIB_PATHS_CACHE: Mutex<LibPathsCache> = Mutex::new(LibPathsCache::new());
 
-/// Refreshes the cached library paths.
+/// Evaluates `.libPaths()` in R and refreshes the cached snapshot.
 ///
-/// A failed refresh leaves the previous paths intact.
-pub fn populate_lib_paths() -> HarpResult<()> {
+/// A failed refresh leaves the previous paths intact. The returned value is
+/// the newly cached snapshot, so callers that need to share it can avoid a
+/// separate read.
+pub fn refresh_lib_paths_from_r() -> HarpResult<Vec<String>> {
     let result = eval_string_in_base("invisible(.libPaths())")?;
     let paths = extract_paths(&result)?;
 
     let mut cache = LIB_PATHS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    cache.apply_refresh(Ok(paths))
+    cache.apply_refresh(Ok(paths.clone()))?;
+    Ok(paths)
+}
+
+/// Refreshes the cached library paths from R.
+///
+/// A failed refresh leaves the previous paths intact. Prefer
+/// [`refresh_lib_paths_from_r`] when the refreshed snapshot is also needed by
+/// the caller.
+pub fn populate_lib_paths() -> HarpResult<()> {
+    refresh_lib_paths_from_r().map(|_| ())
 }
 
 /// Returns the current library paths, refreshing the cache first.
