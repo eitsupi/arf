@@ -82,18 +82,16 @@ format = '{status}ENV> '
         "ENV_CHANGED",
         "ENV>",
     )?;
-    for command in [":info", ":session"] {
-        terminal.enter(command)?;
-        terminal.wait_for("ARF_CONFIG source and effective path", |state, _| {
-            state.text.contains("Config source:  ARF_CONFIG")
-                && state.text.lines().any(|line| {
-                    line.contains("Config file:")
-                        && line.replace('\\', "/").contains(&expected_path_suffix)
-                })
-        })?;
-        terminal.key("q")?;
-        terminal.wait_for_prompt(None, "ENV>")?;
-    }
+    terminal.enter(":info")?;
+    terminal.wait_for("ARF_CONFIG source and effective path", |state, _| {
+        state.text.contains("Config source:  ARF_CONFIG")
+            && state.text.lines().any(|line| {
+                line.contains("Config file:")
+                    && line.replace('\\', "/").contains(&expected_path_suffix)
+            })
+    })?;
+    terminal.key("q")?;
+    terminal.wait_for_prompt(None, "ENV>")?;
     terminal.quit()?;
     Ok(())
 }

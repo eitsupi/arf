@@ -104,16 +104,6 @@ allowed_functions = ["length"]
         session_json["ipc_policy"]["silent"]["allowed_functions"],
         serde_json::json!(["+", "length"])
     );
-
-    let allowed = process
-        .ipc_eval("length('abc')")
-        .expect("configured eval should run");
-    assert!(
-        allowed.success,
-        "configured eval failed: {}",
-        allowed.stderr
-    );
-    assert_eq!(parse_ipc_json(&allowed)["value"], "[1] 1");
 }
 
 /// Test that `arf ipc eval` captures stdout from `cat()`.

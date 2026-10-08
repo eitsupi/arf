@@ -16,19 +16,10 @@ fn sanitized_arf_command() -> Command {
 }
 
 fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
-    assert_top_level_scope_error_with_env(args, expected, None);
-}
-
-fn assert_top_level_scope_error_with_env(
-    args: &[&str],
-    expected: &[&str],
-    arf_config: Option<&std::ffi::OsStr>,
-) {
-    let mut command = sanitized_arf_command();
-    if let Some(arf_config) = arf_config {
-        command.env("ARF_CONFIG", arf_config);
-    }
-    let output = command.args(args).output().expect("Failed to run arf");
+    let output = sanitized_arf_command()
+        .args(args)
+        .output()
+        .expect("Failed to run arf");
 
     assert_eq!(
         output.status.code(),

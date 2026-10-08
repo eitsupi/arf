@@ -400,6 +400,31 @@ mod tests {
         assert!(args.r_source.r_version.is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_config_parsers_preserve_non_utf8_environment_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
+        let config_path = std::ffi::OsString::from_vec(b"/tmp/arf-\xff.toml".to_vec());
+        guard.set("ARF_CONFIG", &config_path);
+
+        let cli = Cli::try_parse_from(["arf"]).unwrap();
+        assert_eq!(cli.r_source.config, Some(PathBuf::from(&config_path)));
+
+        let cli = Cli::try_parse_from(["arf", "config", "check"]).unwrap();
+        let Some(Commands::Config(args)) = cli.command else {
+            panic!("expected config command");
+        };
+        let ConfigAction::Check { config } = args.action else {
+            panic!("expected config check action");
+        };
+        assert_eq!(config, Some(PathBuf::from(&config_path)));
+    }
+
     #[test]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
         let mut guard = crate::test_utils::lock_env();

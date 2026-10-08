@@ -155,7 +155,7 @@ impl TerminalBuilder {
             config_from_env: false,
             env: Vec::new(),
             #[cfg(unix)]
-            env_remove: vec!["ARF_CONFIG".to_owned()],
+            env_remove: Vec::new(),
             cwd: None,
             cols: 100,
             rows: 32,
@@ -190,16 +190,11 @@ impl TerminalBuilder {
     /// Select the generated config file through ARF_CONFIG instead of --config.
     pub fn config_from_env(mut self) -> Self {
         self.config_from_env = true;
-        #[cfg(unix)]
-        self.env_remove.retain(|key| key != "ARF_CONFIG");
         self
     }
 
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        let key = key.into();
-        #[cfg(unix)]
-        self.env_remove.retain(|removed| removed != &key);
-        self.env.push((key, value.into()));
+        self.env.push((key.into(), value.into()));
         self
     }
 

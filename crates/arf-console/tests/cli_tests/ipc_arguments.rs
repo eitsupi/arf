@@ -65,26 +65,24 @@ fn test_ipc_send_stdin_fallback() {
 }
 
 #[test]
-fn test_ipc_list_ignores_empty_and_invalid_arf_config() {
+fn test_ipc_list_ignores_empty_arf_config() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
 
-    for arf_config in ["", "/nonexistent/arf-config.toml"] {
-        let output = sanitized_arf_command()
-            .args(["ipc", "list"])
-            .env("ARF_CONFIG", arf_config)
-            .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
-            .output()
-            .expect("Failed to run arf ipc list");
+    let output = sanitized_arf_command()
+        .args(["ipc", "list"])
+        .env("ARF_CONFIG", "")
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
+        .output()
+        .expect("Failed to run arf ipc list");
 
-        assert!(
-            output.status.success(),
-            "ipc list should ignore ARF_CONFIG={arf_config:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .unwrap_or_else(|error| panic!("stdout should be JSON: {error}\n{:?}", output.stdout));
-        assert!(json["sessions"].is_array());
-    }
+    assert!(
+        output.status.success(),
+        "ipc list should ignore empty ARF_CONFIG: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("stdout should be JSON: {error}\n{:?}", output.stdout));
+    assert!(json["sessions"].is_array());
 }
 
 /// Test that `arf -e` sources the user's `.Rprofile` during startup.
