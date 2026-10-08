@@ -9,8 +9,11 @@ fn prepared_r_and_shell_histories_are_distinct_stable_owners() {
     };
     let repl = Repl::new(
         config,
-        None,
-        ConfigStatus::Ok,
+        ConfigFileInfo {
+            path: None,
+            status: crate::config::ConfigStatus::Ok,
+            source: crate::config::ConfigFileSource::Default,
+        },
         RSourceStatus::Path,
         None,
         Reedline::create_history_session_id(),
@@ -32,8 +35,11 @@ fn history_database_paths_share_the_resolved_location() {
     };
     let repl = Repl::new(
         config,
-        None,
-        ConfigStatus::Ok,
+        ConfigFileInfo {
+            path: None,
+            status: crate::config::ConfigStatus::Ok,
+            source: crate::config::ConfigFileSource::Default,
+        },
         RSourceStatus::Path,
         None,
         Reedline::create_history_session_id(),
@@ -57,8 +63,11 @@ fn volatile_repl_has_no_persistent_history_paths() {
     config.history.mode = crate::config::HistoryMode::Volatile;
     let repl = Repl::new(
         config,
-        None,
-        ConfigStatus::Ok,
+        ConfigFileInfo {
+            path: None,
+            status: crate::config::ConfigStatus::Ok,
+            source: crate::config::ConfigFileSource::Default,
+        },
         RSourceStatus::Path,
         None,
         Reedline::create_history_session_id(),

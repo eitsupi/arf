@@ -362,8 +362,7 @@ pub(super) fn read_console_callback(
                         let ctx = SessionInfoContext {
                             prompt_config: &state.prompt_config,
                             reprex: &state.reprex,
-                            config_path: &state.config_path,
-                            config_status: state.config_status,
+                            config_file_info: &state.config_file_info,
                             history_location: &state.history_location,
                             r_history: &state.r_history,
                             shell_history: &state.shell_history,

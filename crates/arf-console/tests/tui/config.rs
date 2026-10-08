@@ -77,13 +77,19 @@ format = '{status}ENV> '
         .spawn()?;
 
     terminal.wait_for_prompt(None, "ENV>")?;
+    terminal.submit(
+        "Sys.unsetenv('ARF_CONFIG'); cat('ENV_CHANGED\\n')",
+        "ENV_CHANGED",
+        "ENV>",
+    )?;
     for command in [":info", ":session"] {
         terminal.enter(command)?;
-        terminal.wait_for("effective ARF_CONFIG path", |state, _| {
-            state.text.lines().any(|line| {
-                line.contains("Config file:")
-                    && line.replace('\\', "/").contains(&expected_path_suffix)
-            })
+        terminal.wait_for("ARF_CONFIG source and effective path", |state, _| {
+            state.text.contains("Config source:  ARF_CONFIG")
+                && state.text.lines().any(|line| {
+                    line.contains("Config file:")
+                        && line.replace('\\', "/").contains(&expected_path_suffix)
+                })
         })?;
         terminal.key("q")?;
         terminal.wait_for_prompt(None, "ENV>")?;

@@ -20,6 +20,7 @@ command-specific and follows that command's option syntax. When selected,
 `ARF_CONFIG` must be non-empty, though explicit `--config` takes precedence
 even over an empty value. `completions` and IPC clients ignore `ARF_CONFIG`,
 and `config init` always writes to the platform default location.
+`:info` shows the selected configuration path and source.
 
 For example, the main command accepts a custom config file with `--config`:
 

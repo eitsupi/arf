@@ -50,6 +50,32 @@ pub enum ConfigStatus {
     ParseError,
 }
 
+/// Where the active configuration file path came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigFileSource {
+    CommandLine,
+    Environment,
+    Default,
+}
+
+impl ConfigFileSource {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::CommandLine => "--config",
+            Self::Environment => "ARF_CONFIG",
+            Self::Default => "default",
+        }
+    }
+}
+
+/// Configuration file details retained for session information display.
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigFileInfo {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) status: ConfigStatus,
+    pub(crate) source: ConfigFileSource,
+}
+
 /// Error type for configuration loading failures.
 #[derive(Debug)]
 pub enum ConfigLoadError {

@@ -34,7 +34,9 @@ use app::config_load::{
     report_startup_diagnostics,
 };
 use app::headless::run_headless;
-use app::option_scope::{effective_config_path, r_source_origin, validate_top_level_scope};
+use app::option_scope::{
+    config_file_source, effective_config_path, r_source_origin, validate_top_level_scope,
+};
 #[cfg(windows)]
 use app::r_profiles::source_r_profiles;
 use app::resolve::{ResolveCommandError, print_error, run_resolve};
@@ -46,7 +48,7 @@ pub(crate) use app::startup_env::{
 };
 use clap::{CommandFactory, FromArgMatches};
 use cli::{Cli, Commands, RArgsBuilder, RCommand};
-use config::{ReprexMode, ensure_directories};
+use config::{ConfigFileInfo, ReprexMode, ensure_directories};
 use logging::init_logger;
 use pid_file::{
     absolute_pid_file_path, cleanup_ipc_pid_file, register_ipc_pid_file_atexit, write_pid_file,
@@ -273,8 +275,11 @@ fn run() -> Result<()> {
     // Track the config path for :info command display
     let config_report = load_config_with_fallback(&cli);
     let mut config = config_report.config;
-    let config_path = config_report.config_path;
-    let config_status = config_report.status;
+    let config_file_info = ConfigFileInfo {
+        path: config_report.config_path,
+        status: config_report.status,
+        source: config_file_source(&matches),
+    };
     let config_diagnostics = config_report.diagnostics;
     log::debug!("Loaded config: {:?}", config);
 
@@ -489,8 +494,7 @@ fn run() -> Result<()> {
     // typed input and the interactive editor.
     let mut repl = Repl::new(
         config,
-        config_path,
-        config_status,
+        config_file_info,
         r_source_status,
         r_home,
         session_id,
