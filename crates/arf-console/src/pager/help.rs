@@ -21,9 +21,12 @@ use super::{
     with_alternate_screen,
 };
 use crate::fuzzy::fuzzy_match_with_case_preference;
-use arf_harp::help::{HelpTargetResolver, HelpTopic, get_help_topics, get_vignette_text};
+use arf_harp::HarpResult;
+use arf_harp::help::{
+    HelpTargetResolver, HelpTopic, get_help_topics_from_paths, get_vignette_text,
+};
 use arf_harp::help_bridge::{PreparedHelpPage, PreparedHelpRequest};
-use arf_harp::lib_paths::{cached_lib_paths, lib_paths};
+use arf_harp::lib_paths::{cached_lib_paths, refresh_lib_paths_from_r};
 use crossterm::{
     ExecutableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
@@ -51,22 +54,44 @@ const MIN_SIZE: MinimumSize = MinimumSize { cols: 30, rows: 8 };
 /// Returns `Ok(())` when the user exits the browser (Esc, Ctrl+C, or Ctrl+D),
 /// or an error if something goes wrong.
 pub fn run_help_browser(query: &str) -> io::Result<()> {
-    // Get help topics from R
-    let topics = match get_help_topics() {
-        Ok(t) => t,
-        Err(e) => {
-            println!("# Error loading help database: {}", e);
-            return Ok(());
-        }
-    };
+    // Refresh once before metadata discovery, then keep this snapshot for the
+    // browser and any viewer opened from it.
+    let libraries =
+        match help_library_paths_after_refresh(refresh_lib_paths_from_r(), cached_lib_paths) {
+            Ok(paths) => paths,
+            Err(error) => {
+                println!("# Error loading help database: {error}");
+                return Ok(());
+            }
+        };
+    let topics = get_help_topics_from_paths(&libraries);
 
     if topics.is_empty() {
         println!("# No help topics found. Make sure R packages are installed.");
         return Ok(());
     }
 
-    let mut browser = HelpBrowser::new(topics, query);
+    let mut browser = HelpBrowser::new(topics, libraries, query);
     browser.run()
+}
+
+fn help_library_paths_after_refresh(
+    refresh: HarpResult<Vec<String>>,
+    cached: impl FnOnce() -> Vec<String>,
+) -> HarpResult<Vec<String>> {
+    match refresh {
+        Ok(paths) => Ok(paths),
+        Err(error) => {
+            let paths = cached();
+            if paths.is_empty() {
+                return Err(error);
+            }
+            log::warn!(
+                "Could not refresh R library paths for help; using the previous snapshot: {error}"
+            );
+            Ok(paths)
+        }
+    }
 }
 
 /// Interactive help browser.
@@ -84,9 +109,9 @@ struct HelpBrowser {
 }
 
 impl HelpBrowser {
-    fn new(topics: Vec<HelpTopic>, query: &str) -> Self {
+    fn new(topics: Vec<HelpTopic>, library_paths: Vec<String>, query: &str) -> Self {
         let mut browser = HelpBrowser {
-            library_paths: cached_lib_paths(),
+            library_paths,
             topics,
             query: query.to_string(),
             cursor_pos: query.chars().count(),
@@ -611,9 +636,9 @@ pub(crate) fn display_prepared_help_request(request: &PreparedHelpRequest) -> io
             "prepared help request has no pages",
         ));
     }
-    // Refresh once before entering the viewer, never while navigating links.
-    let libraries = lib_paths().map_err(io::Error::other)?;
-    display_help_pages(request.pages.clone(), libraries, true)
+    // R selected and prepared these exact pages already. The cached snapshot
+    // only controls additional cross-package navigation and may be empty.
+    display_help_pages(request.pages.clone(), cached_lib_paths(), true)
 }
 
 fn display_help_pages(
@@ -696,6 +721,140 @@ fn help_page_load_error_message(error: &io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_library_snapshot_refresh_and_stale_fallback_policy() {
+        use std::cell::Cell;
+
+        let cached_read = Cell::new(false);
+        let refreshed = help_library_paths_after_refresh(Ok(vec!["library-a".into()]), || {
+            cached_read.set(true);
+            vec!["library-b".into()]
+        })
+        .unwrap();
+        assert_eq!(refreshed, ["library-a"]);
+        assert!(
+            !cached_read.get(),
+            "successful refresh should be authoritative"
+        );
+
+        let previous = help_library_paths_after_refresh(
+            Err(arf_harp::HarpError::TypeMismatch {
+                expected: "library path snapshot".into(),
+                actual: "refresh failed".into(),
+            }),
+            || vec!["library-b".into()],
+        )
+        .unwrap();
+        assert_eq!(previous, ["library-b"]);
+
+        let error = help_library_paths_after_refresh(
+            Err(arf_harp::HarpError::TypeMismatch {
+                expected: "library path snapshot".into(),
+                actual: "refresh failed".into(),
+            }),
+            Vec::new,
+        )
+        .expect_err("an empty cache cannot support :help metadata discovery");
+        match error {
+            arf_harp::HarpError::TypeMismatch { expected, actual } => {
+                assert_eq!(expected, "library path snapshot");
+                assert_eq!(actual, "refresh failed");
+            }
+            other => panic!("refresh error should retain its type: {other}"),
+        }
+    }
+
+    fn navigation_fixture(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/help_navigation")
+            .join(name)
+    }
+
+    fn install_navigation_package(library: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let package_dir = library.join(name);
+        std::fs::create_dir_all(package_dir.join("Meta")).unwrap();
+        std::fs::create_dir_all(package_dir.join("help")).unwrap();
+        for extension in ["rdx", "rdb"] {
+            std::fs::copy(
+                navigation_fixture(&format!("resolverpkg.{extension}")),
+                package_dir.join(format!("help/{name}.{extension}")),
+            )
+            .unwrap();
+        }
+        std::fs::copy(
+            navigation_fixture("aliases.rds"),
+            package_dir.join("help/aliases.rds"),
+        )
+        .unwrap();
+        std::fs::copy(
+            navigation_fixture("Rd.rds"),
+            package_dir.join("Meta/Rd.rds"),
+        )
+        .unwrap();
+        std::fs::write(package_dir.join("Meta/package.rds"), []).unwrap();
+        package_dir
+    }
+
+    #[test]
+    fn help_snapshot_flows_from_metadata_through_browser_page_to_viewer_resolver() {
+        use crate::pager::PagerContent;
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let temp = tempfile::tempdir().unwrap();
+        let library_a = temp.path().join("library-a");
+        let library_b = temp.path().join("library-b");
+        let source_a = install_navigation_package(&library_a, "resolverpkg");
+        install_navigation_package(&library_b, "resolverpkg");
+        let target_a = install_navigation_package(&library_a, "targetpkg");
+        let target_b = install_navigation_package(&library_b, "targetpkg");
+        std::fs::write(target_b.join("help/targetpkg.rdx"), b"broken copy").unwrap();
+        let snapshot = vec![
+            library_a.to_string_lossy().into_owned(),
+            library_b.to_string_lossy().into_owned(),
+        ];
+
+        let topics = get_help_topics_from_paths(&snapshot);
+        let mut browser = HelpBrowser::new(topics, snapshot, "resolverpkg");
+        let selected_index = browser
+            .filtered
+            .iter()
+            .position(|(topic, _)| {
+                topic.package == "resolverpkg"
+                    && topic.package_dir == source_a
+                    && topic.help_key.is_some()
+            })
+            .expect("the first installed package copy should appear in metadata results");
+        browser.selected = selected_index;
+        let topic = &browser.filtered[browser.selected].0;
+        let mut page = HelpTargetResolver::prepare_candidate(topic).unwrap();
+        assert_eq!(page.package_dir, source_a);
+        // Add a deterministic qualified link to the real prepared fixture page.
+        page.markdown = "[target](x-r-help:targetpkg/lm)".to_owned();
+
+        let mut viewer = super::super::help_session::HelpViewer::new(
+            vec![page],
+            browser.library_paths.clone(),
+            40,
+            8,
+        );
+        assert_eq!(viewer.title(), Some("resolverpkg::mean"));
+        assert_eq!(
+            PagerContent::handle_key(&mut viewer, KeyCode::Tab, KeyModifiers::NONE),
+            Some(super::super::PagerAction::Redraw)
+        );
+        assert!(matches!(
+            PagerContent::handle_key(&mut viewer, KeyCode::Enter, KeyModifiers::NONE),
+            Some(super::super::PagerAction::ScrollTo(0))
+        ));
+        assert_eq!(viewer.title(), Some("targetpkg::lm"));
+        assert_ne!(target_a, target_b);
+        assert!(
+            !PagerContent::feedback_message(&viewer)
+                .unwrap_or_default()
+                .contains("Unable to open")
+        );
+    }
 
     #[test]
     fn prepared_help_selector_requires_an_explicit_selection_and_confirmation() {

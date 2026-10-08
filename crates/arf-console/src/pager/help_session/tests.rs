@@ -322,6 +322,55 @@ fn unqualified_operator_link_uses_the_current_installed_copy() {
 }
 
 #[test]
+fn prepared_single_page_and_same_package_link_work_with_empty_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let origin = package(temp.path(), "source", false);
+    let page = home(&origin, "[divide](x-r-help:/%/%)");
+    let mut viewer = HelpViewer::new(vec![page], Vec::new(), 40, 8);
+
+    assert_eq!(viewer.title(), Some("source::home"));
+    assert_eq!(viewer.line_count(), 1);
+    press(&mut viewer, KeyCode::Tab);
+    press(&mut viewer, KeyCode::Enter);
+
+    assert_eq!(viewer.title(), Some("source::%/%"));
+    assert_eq!(viewer.current.as_ref().unwrap().page.package_dir, origin);
+    assert_eq!(
+        viewer.current.as_ref().unwrap().page.help_key,
+        "first-topic"
+    );
+}
+
+#[test]
+fn qualified_link_uses_the_viewers_explicit_library_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot_a = temp.path().join("snapshot-a");
+    let snapshot_b = temp.path().join("snapshot-b");
+    let selected_copy = package(&snapshot_a, "stats", false);
+    let alternate_copy = package(&snapshot_b, "stats", false);
+    let origin = package(temp.path(), "source", true);
+    let mut viewer = HelpViewer::new(
+        vec![home(&origin, "[lm](x-r-help:stats/lm)")],
+        vec![snapshot_a.to_string_lossy().into_owned()],
+        40,
+        8,
+    );
+
+    press(&mut viewer, KeyCode::Tab);
+    press(&mut viewer, KeyCode::Enter);
+
+    assert_eq!(viewer.title(), Some("stats::lm"));
+    assert_eq!(
+        viewer.current.as_ref().unwrap().page.package_dir,
+        selected_copy
+    );
+    assert_ne!(
+        viewer.current.as_ref().unwrap().page.package_dir,
+        alternate_copy
+    );
+}
+
+#[test]
 fn ambiguous_follow_requires_selection_cancel_keeps_page_and_selected_candidate_keeps_identity() {
     let temp = tempfile::tempdir().unwrap();
     let origin = package(temp.path(), "source", true);
