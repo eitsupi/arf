@@ -74,18 +74,30 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
 /// Get help, vignette, and demo topics from installed package metadata.
 ///
 /// This function reads each installed package's Rd topic metadata, vignette
-/// index, and demo index independently.
+/// index, and demo index independently. It refreshes library paths from R
+/// before reading the package metadata. Call [`get_help_topics_from_paths`]
+/// when the caller already has a library-path snapshot.
 ///
 /// # Returns
 ///
 /// A vector of `HelpTopic` structs containing package, topic, title, and type.
 ///
 pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
+    Ok(get_help_topics_from_paths(&lib_paths()?))
+}
+
+/// Get help, vignette, and demo topics from explicit library paths.
+///
+/// This function only reads the supplied filesystem paths and metadata; it
+/// does not evaluate R. The paths are searched in order, with the first
+/// installed copy of a package taking precedence. Missing or unreadable
+/// metadata sources are skipped, as in [`get_help_topics`].
+pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
     let mut topics = Vec::new();
-    for (package, package_dir) in installed_package_dirs(&lib_paths()?) {
+    for (package, package_dir) in installed_package_dirs(paths) {
         topics.extend(read_package_topics(&package, &package_dir));
     }
-    Ok(topics)
+    topics
 }
 
 fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
@@ -211,8 +223,10 @@ fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
 #[cfg(test)]
 mod help_metadata_tests {
     use super::{
-        get_package_help_markdown_by_key_in_dir, get_package_help_markdown_in_dir,
-        project_help_topic_entry, read_package_topics, vignette_topic,
+        get_help_topics_from_paths, get_package_help_markdown_by_key_from_paths,
+        get_package_help_markdown_by_key_in_dir, get_package_help_markdown_from_paths,
+        get_package_help_markdown_in_dir, project_help_topic_entry, read_package_topics,
+        vignette_topic,
     };
     use rd_helpdb::VignetteEntry;
 
@@ -304,6 +318,177 @@ mod help_metadata_tests {
             .unwrap();
         }
         (temp, package_dir)
+    }
+
+    fn install_metadata_fixture(library: &std::path::Path, package: &str) -> std::path::PathBuf {
+        let package_dir = library.join(package);
+        let metadata = package_dir.join("Meta");
+        std::fs::create_dir_all(&metadata).unwrap();
+        std::fs::write(metadata.join("package.rds"), []).unwrap();
+        std::fs::copy(
+            fixture_path("help_topics_metadata_v3.rds"),
+            metadata.join("Rd.rds"),
+        )
+        .unwrap();
+        package_dir
+    }
+
+    #[test]
+    fn explicit_paths_list_topics_and_read_package_help_without_r() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = temp.path().join("library");
+        let package_dir = install_metadata_fixture(&library, "fixturepkg");
+        let help_dir = package_dir.join("help");
+        std::fs::create_dir_all(&help_dir).unwrap();
+        for extension in ["rdx", "rdb"] {
+            std::fs::copy(
+                fixture_path(&format!("help_topics.{extension}")),
+                help_dir.join(format!("fixturepkg.{extension}")),
+            )
+            .unwrap();
+        }
+        std::fs::copy(
+            fixture_path("aliases_vector_dup_v3.rds"),
+            help_dir.join("aliases.rds"),
+        )
+        .unwrap();
+
+        let paths = vec![library.to_string_lossy().into_owned()];
+        let topics = get_help_topics_from_paths(&paths);
+        assert!(topics.iter().any(|topic| {
+            topic.package == "fixturepkg"
+                && topic.package_dir == package_dir
+                && topic.topic == "first"
+        }));
+
+        let by_alias = get_package_help_markdown_from_paths("shared", "fixturepkg", &paths)
+            .expect_err("fixture alias should resolve to its intentionally missing key");
+        assert!(matches!(
+            by_alias,
+            crate::error::HarpError::HelpDatabase { key, .. } if key == "second-topic"
+        ));
+
+        let by_key = get_package_help_markdown_by_key_from_paths(
+            "display-name",
+            "first-topic",
+            "fixturepkg",
+            &paths,
+        )
+        .expect("explicit paths should locate package and read a known key");
+        assert!(!by_key.is_empty());
+    }
+
+    #[test]
+    fn explicit_help_paths_keep_first_installed_copy_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_library = temp.path().join("first");
+        let second_library = temp.path().join("second");
+        let first_package = install_metadata_fixture(&first_library, "fixturepkg");
+        let second_package = install_metadata_fixture(&second_library, "fixturepkg");
+        let paths = vec![
+            first_library.to_string_lossy().into_owned(),
+            second_library.to_string_lossy().into_owned(),
+        ];
+
+        let topics = get_help_topics_from_paths(&paths);
+        assert!(!topics.is_empty(), "fixture should contain help metadata");
+        assert!(
+            topics
+                .iter()
+                .all(|topic| topic.package_dir == first_package)
+        );
+
+        let reversed_topics =
+            get_help_topics_from_paths(&paths.into_iter().rev().collect::<Vec<_>>());
+        assert!(
+            !reversed_topics.is_empty(),
+            "fixture should contain help metadata"
+        );
+        assert!(
+            reversed_topics
+                .iter()
+                .all(|topic| topic.package_dir == second_package)
+        );
+    }
+
+    #[test]
+    fn explicit_package_help_paths_keep_first_copy_without_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_library = temp.path().join("first");
+        let second_library = temp.path().join("second");
+        let first_package = install_metadata_fixture(&first_library, "fixturepkg");
+        let second_package = install_metadata_fixture(&second_library, "fixturepkg");
+        for package_dir in [&first_package, &second_package] {
+            let help_dir = package_dir.join("help");
+            std::fs::create_dir_all(&help_dir).unwrap();
+            std::fs::copy(
+                fixture_path("help_topics.rdx"),
+                help_dir.join("fixturepkg.rdx"),
+            )
+            .unwrap();
+            std::fs::copy(
+                fixture_path("help_topics.rdb"),
+                help_dir.join("fixturepkg.rdb"),
+            )
+            .unwrap();
+            std::fs::copy(
+                fixture_path("aliases_vector_dup_v3.rds"),
+                help_dir.join("aliases.rds"),
+            )
+            .unwrap();
+        }
+
+        // An installed package with unreadable compiled help must remain the
+        // selected copy; lookup must not silently fall through to another library.
+        std::fs::write(
+            first_package.join("help/fixturepkg.rdb"),
+            b"broken database",
+        )
+        .unwrap();
+
+        let first_path = first_library.to_string_lossy().into_owned();
+        let second_path = second_library.to_string_lossy().into_owned();
+        let ordered_paths = vec![first_path.clone(), second_path.clone()];
+        let error =
+            get_package_help_markdown_from_paths("first-topic", "fixturepkg", &ordered_paths)
+                .expect_err("lookup should fail in the selected first copy");
+        assert!(matches!(
+            error,
+            crate::error::HarpError::HelpDatabase { .. }
+        ));
+
+        let reversed_paths = vec![second_path, first_path];
+        let topics = get_help_topics_from_paths(&reversed_paths);
+        assert!(!topics.is_empty());
+        assert!(
+            topics
+                .iter()
+                .all(|topic| topic.package_dir == second_package)
+        );
+
+        let generic =
+            get_package_help_markdown_from_paths("first-topic", "fixturepkg", &reversed_paths)
+                .expect("generic alias-or-key lookup should succeed in the selected copy");
+        let by_key = get_package_help_markdown_by_key_from_paths(
+            "first-topic",
+            "first-topic",
+            "fixturepkg",
+            &reversed_paths,
+        )
+        .expect("known-key lookup should succeed in the selected copy");
+        assert_eq!(generic, by_key);
+
+        let missing = get_package_help_markdown_from_paths(
+            "first-topic",
+            "definitely_missing_package",
+            &reversed_paths,
+        )
+        .expect_err("unknown package should return PackageNotFound");
+        assert!(matches!(
+            missing,
+            crate::error::HarpError::PackageNotFound { package }
+                if package == "definitely_missing_package"
+        ));
     }
 
     #[test]
@@ -660,8 +845,11 @@ pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
 /// Get help content as Markdown for a specific topic.
 ///
 /// When `package` is known, this reads the installed package's compiled help
-/// database directly. Without a package, it retains the R-evaluation-based
-/// resolution needed for attached-package and search-path semantics.
+/// database directly, after refreshing library paths from R. Without a
+/// package, it retains the R-evaluation-based resolution needed for
+/// attached-package and search-path semantics. Call
+/// [`get_package_help_markdown_from_paths`] to use an existing library-path
+/// snapshot without refreshing it from R.
 ///
 /// # Arguments
 ///
@@ -705,20 +893,33 @@ pub fn rd_source_to_markdown(rd_content: &str) -> HarpResult<String> {
     ))
 }
 
-/// Get package help as Markdown without evaluating R for the help database.
-///
-/// The package directory is selected from the startup-cached library paths,
-/// refreshed as needed by [`crate::lib_paths::lib_paths`].
+/// Get package help as Markdown after refreshing R's library paths.
 ///
 /// `topic` is treated as an alias-or-exact-key input: aliases are resolved
 /// first using the compiled help database's last-wins alias index, then the
-/// input is used as an exact key if it is not an alias.
+/// input is used as an exact key if it is not an alias. Call
+/// [`get_package_help_markdown_from_paths`] when the caller already has a
+/// library-path snapshot.
 pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
-    let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
-        HarpError::PackageNotFound {
+    get_package_help_markdown_from_paths(topic, package, &lib_paths()?)
+}
+
+/// Get package help as Markdown using explicit library paths without
+/// evaluating R.
+///
+/// `topic` is treated as an alias-or-exact-key input: aliases are resolved
+/// first using the compiled help database's last-wins alias index, then the
+/// input is used as an exact key if it is not an alias. The first installed
+/// copy of `package` in `paths` is selected.
+pub fn get_package_help_markdown_from_paths(
+    topic: &str,
+    package: &str,
+    paths: &[String],
+) -> HarpResult<String> {
+    let package_dir =
+        installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
             package: package.to_string(),
-        }
-    })?;
+        })?;
     get_package_help_markdown_in_dir(topic, package, &package_dir)
 }
 
@@ -744,17 +945,28 @@ fn get_package_help_markdown_in_dir(
 ///
 /// Unlike [`get_package_help_markdown`], this path never reads
 /// `help/aliases.rds`. It is intended for indexed help rows carrying a key
-/// from `Meta/Rd.rds`.
+/// from `Meta/Rd.rds`. This convenience wrapper refreshes library paths from
+/// R; use [`get_package_help_markdown_by_key_from_paths`] to avoid R evaluation.
 pub fn get_package_help_markdown_by_key(
     display_topic: &str,
     help_key: &str,
     package: &str,
 ) -> HarpResult<String> {
-    let package_dir = installed_package_dir(&lib_paths()?, package).ok_or_else(|| {
-        HarpError::PackageNotFound {
+    get_package_help_markdown_by_key_from_paths(display_topic, help_key, package, &lib_paths()?)
+}
+
+/// Get package help as Markdown with a known help key and explicit library
+/// paths, without evaluating R.
+pub fn get_package_help_markdown_by_key_from_paths(
+    display_topic: &str,
+    help_key: &str,
+    package: &str,
+    paths: &[String],
+) -> HarpResult<String> {
+    let package_dir =
+        installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
             package: package.to_string(),
-        }
-    })?;
+        })?;
     get_package_help_markdown_by_key_in_dir(&package_dir, display_topic, help_key, package)
 }
 
