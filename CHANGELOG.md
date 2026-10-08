@@ -2,22 +2,26 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
 ### Added
 
-- Added `ARF_CONFIG` as a configuration-file fallback between `--config` and the platform default; `:info` shows the selected file and source.
-- Native help pages now support page-local search.
-- Native help pages now support keyboard navigation between R help topics and back history.
-- Experimental integration opens interactive R help results such as `?mean` in arf's native help pager when enabled with `[experimental.r_help] viewer = "auto"` and `utils`' standard S3 printer is still registered. The default `"r"` leaves help display to R; existing custom printers are preserved, and unsupported or unavailable requests fall back to R's printer.
+- `ARF_CONFIG` selects a configuration file when `--config` is omitted, before falling back to the platform default; `:info` shows the selected file and source (#402).
+- The native help viewer, including pages opened from `:help`, now supports:
+  - Page-local search (#391).
+  - Keyboard navigation through R help links and back to previously viewed topics within the same viewer session (#393, #394, #395, #396, #397).
+- **Experimental:** Opt-in integration opens interactive R help results such as `?mean` in arf's native help pager when enabled with `[experimental.r_help] viewer = "auto"` and `utils`' standard S3 printer is still registered. The default `"r"` leaves help display to R; existing custom printers are preserved, and unsupported or unavailable requests fall back to R's printer (#384).
 
 ### Changed
 
-- **Breaking:** Safe command outcome tracking now requires `R_existsVarInFrame`. Without this API, including on R versions older than 4.2, command outcomes remain unavailable, history exit statuses are `NULL`, the prompt shows no status symbol with its normal color, and history-forget does not advance.
+- **Breaking:** Safe command outcome tracking now requires `R_existsVarInFrame`. Without this API, including on R versions older than 4.2, command outcomes remain unavailable, history exit statuses are `NULL`, the prompt shows no status symbol with its normal color, and history-forget does not advance (#381).
 
 ### Fixed
 
-- Normal `arf` startup now preserves R's detected C stack limit, allowing recoverable C stack overflow errors without disabling R's stack checks.
-- Interactive command outcomes are left unavailable when the `options(error)` handler or arf's tracking state changes, preserving `NULL` history statuses, clearing the prompt status symbol, and avoiding incorrect history-forget updates.
-- The `:help` browser prefers fuzzy matches with matching capitalization while retaining case-insensitive alternatives.
+- Normal `arf` startup now preserves R's detected C stack limit, allowing recoverable C stack overflow errors without disabling R's stack checks (#380).
+- Interactive command outcomes are left unavailable when the `options(error)` handler or arf's tracking state changes, preserving `NULL` history statuses, clearing the prompt status symbol, and avoiding incorrect history-forget updates (#381).
+- The `:help` browser prefers fuzzy matches with matching capitalization while retaining case-insensitive alternatives (#382).
+- The existing 1000ms completion timeout floor now applies to all R completion paths in function calls and namespace access, preventing missing candidates when a short timeout is configured (#392).
 
 ## [0.5.3] - 2026-09-27
 
