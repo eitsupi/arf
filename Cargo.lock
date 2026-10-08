@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "arf-console"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arf-harp",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "arf-harp"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "arf-libr",
  "insta",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "arf-libr"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "encoding_rs",
  "exec",
@@ -542,7 +542,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "git+https://github.com/crossterm-rs/crossterm?rev=5c56270f3347f1906e15a383d5342e875f1b3b1d#5c56270f3347f1906e15a383d5342e875f1b3b1d"
+source = "git+https://github.com/crossterm-rs/crossterm?rev=94ed7154e35d24a2f643c61760e1eb05b8ca9e63#94ed7154e35d24a2f643c61760e1eb05b8ca9e63"
 dependencies = [
  "bitflags 2.13.1",
  "crossterm_winapi",
@@ -1775,7 +1775,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r-vignette-to-md"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "htmd",
 ]
