@@ -78,13 +78,13 @@ pub fn run_help_browser(query: &str) -> io::Result<()> {
 fn help_library_paths_after_refresh(
     refresh: HarpResult<Vec<String>>,
     cached: impl FnOnce() -> Vec<String>,
-) -> Result<Vec<String>, String> {
+) -> HarpResult<Vec<String>> {
     match refresh {
         Ok(paths) => Ok(paths),
         Err(error) => {
             let paths = cached();
             if paths.is_empty() {
-                return Err(error.to_string());
+                return Err(error);
             }
             log::warn!(
                 "Could not refresh R library paths for help; using the previous snapshot: {error}"
@@ -756,7 +756,13 @@ mod tests {
             Vec::new,
         )
         .expect_err("an empty cache cannot support :help metadata discovery");
-        assert!(error.contains("refresh failed"));
+        match error {
+            arf_harp::HarpError::TypeMismatch { expected, actual } => {
+                assert_eq!(expected, "library path snapshot");
+                assert_eq!(actual, "refresh failed");
+            }
+            other => panic!("refresh error should retain its type: {other}"),
+        }
     }
 
     fn navigation_fixture(name: &str) -> std::path::PathBuf {
