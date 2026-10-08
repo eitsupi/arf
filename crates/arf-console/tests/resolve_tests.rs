@@ -271,7 +271,10 @@ r_version = "3.99.99"
 fn resolve_uses_arf_config_without_adding_stdout() {
     let temp = write_uninstalled_project_override_fixture();
     let environment = FakeRigEnvironment::new();
-    let config_path = temp.path().join("arf.toml");
+    let alias_root = tempfile::tempdir().unwrap();
+    let alias_dir = alias_root.path().join("fixture-alias");
+    std::os::unix::fs::symlink(temp.path(), &alias_dir).unwrap();
+    let config_path = alias_dir.join("arf.toml");
 
     let output = environment
         .command()
@@ -284,7 +287,11 @@ fn resolve_uses_arf_config_without_adding_stdout() {
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
-    assert_descriptor_path(&value, &value["selected_by"]["source"]["path"], "arf.toml");
+    assert_descriptor_path(
+        &value,
+        &value["selected_by"]["source"]["path"],
+        &config_path,
+    );
 }
 
 #[test]
