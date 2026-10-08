@@ -1,7 +1,7 @@
 //! REPL state management.
 
 use crate::config::{
-    ConfigStatus, HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig,
+    ConfigFileInfo, HistoryForgetConfig, Indicators, ModeIndicatorPosition, PromptDurationConfig,
     RSourceStatus, ReprexMode, ResolvedHistoryLocation, SpinnerConfig, StatusColorConfig,
     StatusConfig, ViColorConfig, ViConfig,
 };
@@ -62,10 +62,8 @@ pub struct ReplState {
     pub should_exit: bool,
     /// Whether the previous ReadConsole invocation had identical R prompt options.
     pub r_prompt_options_ambiguous: bool,
-    /// Path to the config file (for :info command).
-    pub config_path: Option<PathBuf>,
-    /// Status of config file loading (for :info display).
-    pub config_status: ConfigStatus,
+    /// Config file path, load status, and source (for :info command).
+    pub config_file_info: ConfigFileInfo,
     /// How R was resolved at startup (for :info display and :switch gating).
     pub r_source_status: RSourceStatus,
     /// R_HOME reported by the running R at startup, if R initialized successfully.

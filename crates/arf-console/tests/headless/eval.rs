@@ -81,6 +81,31 @@ fn test_headless_eval_allowlist() {
     assert_eq!(error["error"]["code"], "R_EVAL_NOT_ALLOWED");
 }
 
+#[test]
+fn headless_uses_arf_config_for_ipc_eval_policy() {
+    let config = tempfile::NamedTempFile::new().expect("create config file");
+    std::fs::write(
+        config.path(),
+        r#"[ipc.eval]
+allowed_functions = ["length"]
+"#,
+    )
+    .expect("write config file");
+    let config_path = config.path().to_string_lossy().into_owned();
+    let process = HeadlessProcess::spawn_with_args_and_env(
+        &["--ipc-eval-allow-function", "+"],
+        &[("ARF_CONFIG", &config_path)],
+    )
+    .expect("headless should accept ARF_CONFIG");
+
+    let session = process.ipc_session().expect("session should run");
+    let session_json = parse_ipc_json(&session);
+    assert_eq!(
+        session_json["ipc_policy"]["silent"]["allowed_functions"],
+        serde_json::json!(["+", "length"])
+    );
+}
+
 /// Test that `arf ipc eval` captures stdout from `cat()`.
 #[test]
 fn test_headless_eval_stdout() {

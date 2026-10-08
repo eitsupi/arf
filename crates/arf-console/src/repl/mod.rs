@@ -20,7 +20,7 @@ use crate::completion::completer::CombinedCompleter;
 use crate::completion::menu::{FunctionAwareMenu, StateSyncHistoryMenu};
 use crate::completion::shell::ShellCompleter;
 use crate::config::{
-    AutoSuggestions, Config, ConfigStatus, EditorMode, FormatterBackend, HelpViewer,
+    AutoSuggestions, Config, ConfigFileInfo, EditorMode, FormatterBackend, HelpViewer,
     ModeIndicatorPosition, RSourceStatus, ReprexMode, ResolvedHistoryLocation,
 };
 use crate::editor::hinter::RLanguageHinter;
@@ -233,10 +233,8 @@ pub struct Repl {
     history_location: ResolvedHistoryLocation,
     /// Formatter backend resolved once from the configured selector at startup.
     formatter_backend: Option<FormatterBackend>,
-    /// Path to the config file (if specified via --config, or the default XDG path).
-    config_path: Option<std::path::PathBuf>,
-    /// Status of config file loading (for :info display).
-    config_status: ConfigStatus,
+    /// Config file path, load status, and selection source (for :info display).
+    config_file_info: ConfigFileInfo,
     /// How R was resolved at startup (determines if :switch is available).
     r_source_status: RSourceStatus,
     /// R_HOME reported by the running R at startup, if R initialized successfully.
@@ -253,15 +251,13 @@ pub struct Repl {
 impl Repl {
     /// Create a new REPL with the given configuration.
     ///
-    /// The `config_path` should be the path to the config file that was used,
-    /// or `None` if using defaults (no config file found).
+    /// The config file metadata records the path, load status, and source used.
     ///
     /// The `r_source_status` describes how R was resolved at startup,
     /// which determines if features like `:switch` are available.
     pub fn new(
         config: Config,
-        config_path: Option<std::path::PathBuf>,
-        config_status: ConfigStatus,
+        config_file_info: ConfigFileInfo,
         r_source_status: RSourceStatus,
         r_home: Option<std::path::PathBuf>,
         session_id: Option<HistorySessionId>,
@@ -284,8 +280,7 @@ impl Repl {
             config,
             history_location,
             formatter_backend,
-            config_path,
-            config_status,
+            config_file_info,
             r_source_status,
             r_home,
             r_initialized,
@@ -358,8 +353,7 @@ enum MetaAction {
 struct SessionInfoContext<'a> {
     prompt_config: &'a PromptRuntimeConfig,
     reprex: &'a ReprexRuntime,
-    config_path: &'a Option<std::path::PathBuf>,
-    config_status: ConfigStatus,
+    config_file_info: &'a ConfigFileInfo,
     history_location: &'a ResolvedHistoryLocation,
     r_history: &'a HistoryRuntime,
     shell_history: &'a HistoryRuntime,
@@ -398,8 +392,7 @@ fn handle_meta_command_result(
                 crate::pager::display_session_info(
                     ctx.prompt_config,
                     ctx.reprex,
-                    ctx.config_path,
-                    ctx.config_status,
+                    ctx.config_file_info,
                     ctx.r_history,
                     ctx.shell_history,
                     ctx.r_source_status,

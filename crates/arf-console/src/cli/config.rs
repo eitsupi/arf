@@ -1,3 +1,4 @@
+use clap::builder::TypedValueParser;
 use clap::{Args, Subcommand, ValueHint};
 use std::path::PathBuf;
 
@@ -21,7 +22,13 @@ pub(crate) enum ConfigAction {
     /// Exit code 0 means valid, non-zero means file not found or has errors.
     Check {
         /// Path to configuration file to check (defaults to XDG config location)
-        #[arg(short, long, value_hint = ValueHint::FilePath)]
+        #[arg(
+            short,
+            long,
+            env = "ARF_CONFIG",
+            value_hint = ValueHint::FilePath,
+            value_parser = clap::builder::OsStringValueParser::new().map(PathBuf::from)
+        )]
         config: Option<PathBuf>,
     },
 }

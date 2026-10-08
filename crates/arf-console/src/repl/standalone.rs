@@ -175,8 +175,7 @@ impl Repl {
                         let ctx = SessionInfoContext {
                             prompt_config: &prompt_config,
                             reprex: &standalone_reprex,
-                            config_path: &self.config_path,
-                            config_status: self.config_status,
+                            config_file_info: &self.config_file_info,
                             history_location: &self.history_location,
                             r_history: &history_handle,
                             shell_history: &shell_history_handle,

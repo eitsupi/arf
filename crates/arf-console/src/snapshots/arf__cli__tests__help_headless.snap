@@ -11,6 +11,8 @@ Usage: headless [OPTIONS]
 Options:
   -c, --config <CONFIG>
           Path to configuration file
+          
+          [env: ARF_CONFIG=]
 
       --r-home <R_HOME>
           Highest-priority R source: use this explicit R_HOME path

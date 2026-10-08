@@ -15,7 +15,7 @@ To ask arf which R installation it would use without starting R, run:
 arf r resolve
 ```
 
-`arf r resolve` accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path. On success it always emits JSON; there is no `--json` flag. Output is pretty-printed when stdout is a terminal and compact when piped, so consumers do not need a format flag. For example:
+`arf r resolve` accepts the same `--r-home`, `--with-r-version`, and `--no-r-source-overrides` options as the startup path, plus `--config`; it also honors `ARF_CONFIG` (see [Configuration File Location](configuration.md#configuration-file-location)). On success the command always emits JSON; there is no `--json` flag. Output is pretty-printed when stdout is a terminal and compact when piped, so consumers do not need a format flag. For example:
 
 ```json
 {

@@ -1,7 +1,7 @@
 //! Session information display.
 
 use super::{PagerAction, PagerConfig, PagerContent, copy_to_clipboard, run};
-use crate::config::{ConfigStatus, RSourceStatus, mask_home_path};
+use crate::config::{ConfigFileInfo, ConfigStatus, RSourceStatus, mask_home_path};
 use crate::editor::prompt::get_r_version;
 use crate::external::rig;
 use crate::history::HistoryRuntime;
@@ -13,14 +13,12 @@ use crate::repl::state::PromptRuntimeConfig;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::path::PathBuf;
 
 /// Display session information for the :info command in a pager.
 pub fn display_session_info(
     prompt_config: &PromptRuntimeConfig,
     reprex: &ReprexRuntime,
-    config_path: &Option<PathBuf>,
-    config_status: ConfigStatus,
+    config_file_info: &ConfigFileInfo,
     r_history: &HistoryRuntime,
     shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
@@ -28,8 +26,7 @@ pub fn display_session_info(
     let lines = generate_info_lines(
         prompt_config,
         reprex,
-        config_path,
-        config_status,
+        config_file_info,
         r_history,
         shell_history,
         r_source_status,
@@ -52,8 +49,7 @@ pub fn display_session_info(
 fn generate_info_lines(
     prompt_config: &PromptRuntimeConfig,
     reprex: &ReprexRuntime,
-    config_path: &Option<PathBuf>,
-    config_status: ConfigStatus,
+    config_file_info: &ConfigFileInfo,
     r_history: &HistoryRuntime,
     shell_history: &HistoryRuntime,
     r_source_status: &RSourceStatus,
@@ -74,9 +70,9 @@ fn generate_info_lines(
     ));
 
     // Config file path
-    if let Some(path) = config_path {
+    if let Some(path) = &config_file_info.path {
         if path.exists() {
-            match config_status {
+            match config_file_info.status {
                 ConfigStatus::Ok => {
                     lines.push(format!("Config file:    {}", mask_home_path(path)));
                 }
@@ -102,6 +98,10 @@ fn generate_info_lines(
     } else {
         lines.push("Config file:    (using defaults)".to_string());
     }
+    lines.push(format!(
+        "Config source:  {}",
+        config_file_info.source.label()
+    ));
 
     // R version
     let r_version = get_r_version();
@@ -579,8 +579,11 @@ mod tests {
         let lines = generate_info_lines(
             &config,
             &default_reprex_runtime(),
-            &None,
-            ConfigStatus::Ok,
+            &ConfigFileInfo {
+                path: None,
+                status: ConfigStatus::Ok,
+                source: crate::config::ConfigFileSource::Default,
+            },
             &unavailable_history(),
             &unavailable_history(),
             &RSourceStatus::Path,
@@ -602,6 +605,7 @@ mod tests {
             "None path should show defaults: {}",
             config_line
         );
+        assert!(lines.iter().any(|line| line == "Config source:  default"));
     }
 
     #[test]
@@ -615,8 +619,11 @@ mod tests {
         let lines = generate_info_lines(
             &config,
             &default_reprex_runtime(),
-            &Some(path),
-            ConfigStatus::Ok,
+            &ConfigFileInfo {
+                path: Some(path),
+                status: ConfigStatus::Ok,
+                source: crate::config::ConfigFileSource::CommandLine,
+            },
             &unavailable_history(),
             &unavailable_history(),
             &RSourceStatus::Path,
@@ -640,6 +647,7 @@ mod tests {
             "Existing path should not say 'using defaults': {}",
             config_line
         );
+        assert!(lines.iter().any(|line| line == "Config source:  --config"));
     }
 
     #[test]
@@ -652,8 +660,11 @@ mod tests {
         let lines = generate_info_lines(
             &config,
             &default_reprex_runtime(),
-            &Some(path),
-            ConfigStatus::Ok,
+            &ConfigFileInfo {
+                path: Some(path),
+                status: ConfigStatus::Ok,
+                source: crate::config::ConfigFileSource::Default,
+            },
             &unavailable_history(),
             &unavailable_history(),
             &RSourceStatus::Path,
@@ -679,8 +690,11 @@ mod tests {
         let lines = generate_info_lines(
             &config,
             &default_reprex_runtime(),
-            &Some(path),
-            ConfigStatus::ParseError,
+            &ConfigFileInfo {
+                path: Some(path),
+                status: ConfigStatus::ParseError,
+                source: crate::config::ConfigFileSource::Default,
+            },
             &unavailable_history(),
             &unavailable_history(),
             &RSourceStatus::Path,
@@ -706,8 +720,11 @@ mod tests {
         let lines = generate_info_lines(
             &config,
             &default_reprex_runtime(),
-            &Some(path),
-            ConfigStatus::ReadError,
+            &ConfigFileInfo {
+                path: Some(path),
+                status: ConfigStatus::ReadError,
+                source: crate::config::ConfigFileSource::Default,
+            },
             &unavailable_history(),
             &unavailable_history(),
             &RSourceStatus::Path,

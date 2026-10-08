@@ -304,6 +304,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.unset("ARF_HISTORY_DIR");
         let help = Cli::generate_help_string(&["headless"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {
@@ -328,6 +329,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.unset("ARF_HISTORY_DIR");
 
         let help = Cli::generate_help_string(&[]);
@@ -341,6 +343,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let result = Cli::try_parse_from(["arf", "--history-dir", ""]);
         assert!(result.is_err(), "empty --history-dir should be rejected");
     }
@@ -350,6 +353,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let cli = Cli::try_parse_from(["arf", "--no-r-source-overrides"]).unwrap();
         assert!(cli.r_source.no_r_source_overrides);
     }
@@ -359,6 +363,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let cli = Cli::try_parse_from(["arf", "headless", "--no-r-source-overrides"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
@@ -371,6 +376,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let cli = Cli::try_parse_from([
             "arf",
             "r",
@@ -394,11 +400,37 @@ mod tests {
         assert!(args.r_source.r_version.is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_config_parsers_preserve_non_utf8_environment_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
+        let config_path = std::ffi::OsString::from_vec(b"/tmp/arf-\xff.toml".to_vec());
+        guard.set("ARF_CONFIG", &config_path);
+
+        let cli = Cli::try_parse_from(["arf"]).unwrap();
+        assert_eq!(cli.r_source.config, Some(PathBuf::from(&config_path)));
+
+        let cli = Cli::try_parse_from(["arf", "config", "check"]).unwrap();
+        let Some(Commands::Config(args)) = cli.command else {
+            panic!("expected config command");
+        };
+        let ConfigAction::Check { config } = args.action else {
+            panic!("expected config check action");
+        };
+        assert_eq!(config, Some(PathBuf::from(&config_path)));
+    }
+
     #[test]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let cli =
             Cli::try_parse_from(["arf", "--no-r-source-overrides", "--r-home", "/tmp/r-home"]);
         assert!(cli.is_ok());
@@ -409,6 +441,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
@@ -423,6 +456,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.set("ARF_R_VERSION", "4.5");
         let cli = Cli::try_parse_from(["arf"]).unwrap();
 
@@ -434,6 +468,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
         let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
         assert_eq!(
@@ -452,6 +487,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
         let result = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]);
 
@@ -463,6 +499,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.set("ARF_R_HOME", "/env/r-home");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {
             panic!("expected headless command");
@@ -484,6 +521,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.set("ARF_R_HOME", "/env/r-home");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         assert!(Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).is_err());
 
         guard.unset("ARF_R_HOME");
@@ -496,6 +534,7 @@ mod tests {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
         guard.set("ARF_HISTORY_DIR", "/env/history");
         let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
         let Some(Commands::Headless(args)) = cli.command else {

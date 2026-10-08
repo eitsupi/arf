@@ -5,7 +5,13 @@ use std::path::PathBuf;
 #[derive(Args, Debug)]
 pub struct RSourceArgs {
     /// Path to configuration file
-    #[arg(short, long, value_hint = ValueHint::FilePath)]
+    #[arg(
+        short,
+        long,
+        env = "ARF_CONFIG",
+        value_hint = ValueHint::FilePath,
+        value_parser = clap::builder::OsStringValueParser::new().map(PathBuf::from)
+    )]
     pub config: Option<PathBuf>,
 
     /// Highest-priority R source: use this explicit R_HOME path

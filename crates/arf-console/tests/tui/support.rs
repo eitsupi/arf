@@ -128,6 +128,7 @@ pub struct TerminalBuilder {
     name: String,
     args: Vec<String>,
     config: Option<ConfigSource>,
+    config_from_env: bool,
     env: Vec<(String, String)>,
     #[cfg(unix)]
     env_remove: Vec<String>,
@@ -151,6 +152,7 @@ impl TerminalBuilder {
             name: name.into(),
             args: Vec::new(),
             config: None,
+            config_from_env: false,
             env: Vec::new(),
             #[cfg(unix)]
             env_remove: Vec::new(),
@@ -182,6 +184,12 @@ impl TerminalBuilder {
     /// Use an existing config file without copying it into the session workdir.
     pub fn config_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.config = Some(ConfigSource::Path(path.into()));
+        self
+    }
+
+    /// Select the generated config file through ARF_CONFIG instead of --config.
+    pub fn config_from_env(mut self) -> Self {
+        self.config_from_env = true;
         self
     }
 
@@ -290,9 +298,17 @@ impl TerminalBuilder {
         if self.vanilla {
             args.insert(0, "--vanilla".to_owned());
         }
+        if self.config_from_env {
+            if !self.env.iter().any(|(key, _)| key == "ARF_CONFIG") {
+                self.env.push((
+                    "ARF_CONFIG".to_owned(),
+                    config.to_string_lossy().into_owned(),
+                ));
+            }
+        } else {
+            args.extend(["--config".to_owned(), config.to_string_lossy().into_owned()]);
+        }
         args.extend([
-            "--config".to_owned(),
-            config.to_string_lossy().into_owned(),
             "--history-dir".to_owned(),
             history_dir.to_string_lossy().into_owned(),
         ]);

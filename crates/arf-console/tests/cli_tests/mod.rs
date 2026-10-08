@@ -4,7 +4,12 @@ use tempfile::NamedTempFile;
 
 fn sanitized_arf_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
-    for variable in ["ARF_R_HOME", "ARF_R_VERSION", "ARF_HISTORY_DIR"] {
+    for variable in [
+        "ARF_R_HOME",
+        "ARF_R_VERSION",
+        "ARF_HISTORY_DIR",
+        "ARF_CONFIG",
+    ] {
         command.env_remove(variable);
     }
     command

@@ -1,8 +1,35 @@
 //! Top-level CLI option scope and R source origin validation.
 
 use crate::app::resolve::RSourceOrigin;
+use crate::cli::{Cli, Commands, ConfigAction, RCommand};
+use crate::config::ConfigFileSource;
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Command};
+use std::path::Path;
+
+pub(crate) fn effective_config_path(cli: &Cli) -> Option<&Path> {
+    match &cli.command {
+        None => cli.r_source.config.as_deref(),
+        Some(Commands::History(_)) => cli.r_source.config.as_deref(),
+        Some(Commands::Headless(args)) => args.r_source.config.as_deref(),
+        Some(Commands::R(args)) => match &args.command {
+            RCommand::Resolve(args) => args.r_source.config.as_deref(),
+        },
+        Some(Commands::Config(args)) => match &args.action {
+            ConfigAction::Check { config } => config.as_deref(),
+            ConfigAction::Init { .. } => None,
+        },
+        Some(Commands::Completions(_) | Commands::Ipc(_)) => None,
+    }
+}
+
+pub(crate) fn config_file_source(matches: &ArgMatches) -> ConfigFileSource {
+    match matches.value_source("config") {
+        Some(ValueSource::CommandLine) => ConfigFileSource::CommandLine,
+        Some(ValueSource::EnvVariable) => ConfigFileSource::Environment,
+        _ => ConfigFileSource::Default,
+    }
+}
 
 pub(crate) fn r_source_origin(matches: &ArgMatches) -> Option<RSourceOrigin> {
     let resolve_matches = matches
@@ -124,4 +151,40 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
         && path.len() == 2
         && path[0] == "history"
         && matches!(path[1].as_str(), "import" | "export" | "schema")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::Cli;
+    use clap::CommandFactory;
+
+    #[test]
+    fn config_file_source_uses_clap_value_source() {
+        let mut env = crate::test_utils::lock_env();
+        env.unset("ARF_CONFIG");
+        env.unset("ARF_R_HOME");
+        env.unset("ARF_R_VERSION");
+
+        let default_matches = Cli::command().try_get_matches_from(["arf"]).unwrap();
+        assert_eq!(
+            config_file_source(&default_matches),
+            ConfigFileSource::Default
+        );
+
+        env.set("ARF_CONFIG", "/same/config.toml");
+        let environment_matches = Cli::command().try_get_matches_from(["arf"]).unwrap();
+        assert_eq!(
+            config_file_source(&environment_matches),
+            ConfigFileSource::Environment
+        );
+
+        let cli_matches = Cli::command()
+            .try_get_matches_from(["arf", "--config", "/same/config.toml"])
+            .unwrap();
+        assert_eq!(
+            config_file_source(&cli_matches),
+            ConfigFileSource::CommandLine
+        );
+    }
 }
