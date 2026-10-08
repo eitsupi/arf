@@ -347,7 +347,7 @@ fn test_config_check_preserves_environment_path_errors() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_config_check_accepts_non_utf8_arf_config_path() {
     use std::os::unix::ffi::OsStringExt;
