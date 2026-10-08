@@ -86,7 +86,8 @@ fn isolated_command(temp_path: &std::path::Path) -> Command {
         .env("HOME", home_dir)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_CACHE_HOME");
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("ARF_CONFIG");
     command
 }
 
@@ -163,6 +164,7 @@ exit 1
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_DATA_HOME")
             .env_remove("XDG_CACHE_HOME")
+            .env_remove("ARF_CONFIG")
             .env("HOME", &self.home_dir)
             .env("PATH", std::env::join_paths(path_entries).unwrap());
         command
@@ -262,6 +264,27 @@ r_version = "3.99.99"
     )
     .unwrap();
     temp
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_uses_arf_config_without_adding_stdout() {
+    let temp = write_uninstalled_project_override_fixture();
+    let environment = FakeRigEnvironment::new();
+    let config_path = temp.path().join("arf.toml");
+
+    let output = environment
+        .command()
+        .env("ARF_CONFIG", &config_path)
+        .args(["r", "resolve", "--no-r-source-overrides"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
+    assert_descriptor_path(&value, &value["selected_by"]["source"]["path"], "arf.toml");
 }
 
 #[test]

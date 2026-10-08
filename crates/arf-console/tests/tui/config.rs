@@ -53,3 +53,41 @@ error = 'ERR '
     terminal.quit()?;
     Ok(())
 }
+
+#[test]
+fn interactive_startup_uses_arf_config_and_reports_its_path() -> Result<()> {
+    let config_dir = tempfile::tempdir()?;
+    let config_path = config_dir.path().join("interactive.toml");
+    std::fs::write(
+        &config_path,
+        r#"[prompt]
+format = '{status}ENV> '
+"#,
+    )?;
+    let directory_name = config_dir
+        .path()
+        .file_name()
+        .expect("temporary config directory name")
+        .to_string_lossy();
+    let expected_path_suffix = format!("{directory_name}/interactive.toml");
+    let terminal = Terminal::builder("config-env")
+        .config_path(&config_path)
+        .config_from_env()
+        .args(["--no-banner", "--no-auto-match", "--no-completion"])
+        .spawn()?;
+
+    terminal.wait_for_prompt(None, "ENV>")?;
+    for command in [":info", ":session"] {
+        terminal.enter(command)?;
+        terminal.wait_for("effective ARF_CONFIG path", |state, _| {
+            state.text.lines().any(|line| {
+                line.contains("Config file:")
+                    && line.replace('\\', "/").contains(&expected_path_suffix)
+            })
+        })?;
+        terminal.key("q")?;
+        terminal.wait_for_prompt(None, "ENV>")?;
+    }
+    terminal.quit()?;
+    Ok(())
+}

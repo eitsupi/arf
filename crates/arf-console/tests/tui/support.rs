@@ -128,6 +128,7 @@ pub struct TerminalBuilder {
     name: String,
     args: Vec<String>,
     config: Option<ConfigSource>,
+    config_from_env: bool,
     env: Vec<(String, String)>,
     #[cfg(unix)]
     env_remove: Vec<String>,
@@ -151,9 +152,10 @@ impl TerminalBuilder {
             name: name.into(),
             args: Vec::new(),
             config: None,
+            config_from_env: false,
             env: Vec::new(),
             #[cfg(unix)]
-            env_remove: Vec::new(),
+            env_remove: vec!["ARF_CONFIG".to_owned()],
             cwd: None,
             cols: 100,
             rows: 32,
@@ -185,8 +187,19 @@ impl TerminalBuilder {
         self
     }
 
+    /// Select the generated config file through ARF_CONFIG instead of --config.
+    pub fn config_from_env(mut self) -> Self {
+        self.config_from_env = true;
+        #[cfg(unix)]
+        self.env_remove.retain(|key| key != "ARF_CONFIG");
+        self
+    }
+
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.env.push((key.into(), value.into()));
+        let key = key.into();
+        #[cfg(unix)]
+        self.env_remove.retain(|removed| removed != &key);
+        self.env.push((key, value.into()));
         self
     }
 
@@ -290,9 +303,17 @@ impl TerminalBuilder {
         if self.vanilla {
             args.insert(0, "--vanilla".to_owned());
         }
+        if self.config_from_env {
+            if !self.env.iter().any(|(key, _)| key == "ARF_CONFIG") {
+                self.env.push((
+                    "ARF_CONFIG".to_owned(),
+                    config.to_string_lossy().into_owned(),
+                ));
+            }
+        } else {
+            args.extend(["--config".to_owned(), config.to_string_lossy().into_owned()]);
+        }
         args.extend([
-            "--config".to_owned(),
-            config.to_string_lossy().into_owned(),
             "--history-dir".to_owned(),
             history_dir.to_string_lossy().into_owned(),
         ]);

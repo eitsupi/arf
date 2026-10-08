@@ -73,6 +73,17 @@ fn restart_preserves_environment_and_reconnects_ipc() -> Result<()> {
     let initial_dir = tempfile::tempdir_in(&test_cwd)?;
     let changed_dir = tempfile::tempdir_in(&test_cwd)?;
     let pid_path = initial_dir.path().join("arf-restart.pid");
+    let config_path = initial_dir.path().join("arf-config.toml");
+    fs::write(
+        &config_path,
+        "[startup]\nshow_banner = true\n".to_owned() + DEFAULT_CONFIG,
+    )?;
+    let config_dir_name = initial_dir
+        .path()
+        .file_name()
+        .context("temporary config directory name")?
+        .to_string_lossy();
+    let config_path_suffix = format!("{config_dir_name}/arf-config.toml");
     let bind_path = custom_bind_path(initial_dir.path());
     #[cfg(unix)]
     let bind_arg = "arf-restart.sock".to_owned();
@@ -91,7 +102,8 @@ fn restart_preserves_environment_and_reconnects_ipc() -> Result<()> {
     run_case_with(
         Terminal::builder("restart-ipc")
             .cwd(initial_dir.path())
-            .config("[startup]\nshow_banner = true\n".to_owned() + DEFAULT_CONFIG)
+            .config_path(&config_path)
+            .config_from_env()
             .args([
                 "--with-ipc",
                 "--ipc-eval-unrestricted",
@@ -184,6 +196,15 @@ fn restart_preserves_environment_and_reconnects_ipc() -> Result<()> {
                 environment["value"] == r#"[1] "restart_environment_sentinel""#,
                 "environment sentinel was not preserved: {environment}"
             );
+            terminal.enter(":info")?;
+            terminal.wait_for("ARF_CONFIG survives restart", |state, _| {
+                state.text.lines().any(|line| {
+                    line.contains("Config file:")
+                        && line.replace('\\', "/").contains(&config_path_suffix)
+                })
+            })?;
+            terminal.key("q")?;
+            terminal.wait_for_prompt(None, PROMPT)?;
             terminal.submit("42", "[1] 42", PROMPT)?;
             terminal.quit()
         },

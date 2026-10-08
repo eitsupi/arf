@@ -4,17 +4,31 @@ use tempfile::NamedTempFile;
 
 fn sanitized_arf_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
-    for variable in ["ARF_R_HOME", "ARF_R_VERSION", "ARF_HISTORY_DIR"] {
+    for variable in [
+        "ARF_R_HOME",
+        "ARF_R_VERSION",
+        "ARF_HISTORY_DIR",
+        "ARF_CONFIG",
+    ] {
         command.env_remove(variable);
     }
     command
 }
 
 fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
-    let output = sanitized_arf_command()
-        .args(args)
-        .output()
-        .expect("Failed to run arf");
+    assert_top_level_scope_error_with_env(args, expected, None);
+}
+
+fn assert_top_level_scope_error_with_env(
+    args: &[&str],
+    expected: &[&str],
+    arf_config: Option<&std::ffi::OsStr>,
+) {
+    let mut command = sanitized_arf_command();
+    if let Some(arf_config) = arf_config {
+        command.env("ARF_CONFIG", arf_config);
+    }
+    let output = command.args(args).output().expect("Failed to run arf");
 
     assert_eq!(
         output.status.code(),

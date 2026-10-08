@@ -13,7 +13,15 @@ The configuration file is located at:
 - **macOS**: `~/Library/Application Support/arf/arf.toml`
 - **Windows**: `C:\Users\<user>\AppData\Roaming\arf\arf.toml`
 
-You can also specify a custom config file with the `--config` flag:
+Configuration selection follows `--config` > `ARF_CONFIG` > the platform
+default. For example, `ARF_CONFIG=/path/to/arf.toml arf` selects one file for
+commands that load configuration; files are not merged. `--config` remains
+command-specific and follows that command's option syntax. When selected,
+`ARF_CONFIG` must be non-empty, though explicit `--config` takes precedence
+even over an empty value. `completions` and IPC clients ignore `ARF_CONFIG`,
+and `config init` always writes to the platform default location.
+
+For example, the main command accepts a custom config file with `--config`:
 
 ```bash
 arf --config /path/to/arf.toml
@@ -693,6 +701,10 @@ Rig selectors are separate from version specifications:
 
 ## History Configuration
 
+History schema, export, and import commands also honor `ARF_CONFIG`; for
+example, `arf --config /path/to/arf.toml history schema` selects a file for the
+schema command.
+
 ### Configuration
 
 ```toml
@@ -1006,7 +1018,7 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 ## R Source Precedence
 
-The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single `arf.toml` configuration file that arf loaded, either from `--config` or from the XDG global config path: `r_source_overrides` is the ordered provider list, and `startup.r_source` is its configuration-level fallback. The providers may consult project-local files such as `rproject.toml` and `.r-version`; those files are not separate arf configuration files. Tiers 6 and 7 are a separate discovery layer: they describe how arf searches for R only after the selected configuration resolves to PATH mode.
+The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single loaded `arf.toml` (`r_source_overrides` and `startup.r_source`), selected by `--config`, `ARF_CONFIG`, or the platform default (see [Configuration File Location](configuration.md#configuration-file-location)). Project-local files such as `rproject.toml` and `.r-version` are inputs to override providers, not separate arf configuration files. Tiers 6 and 7 describe how arf discovers R after the selected configuration resolves to PATH mode.
 
 For `headless` and `r resolve`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R` or `arf r resolve --r-home /opt/R`, not `arf --r-home /opt/R headless` or `arf --r-home /opt/R r resolve`. Placing them before the subcommand is an error that names the corrected form; placing `--r-home` between `r` and `resolve` is an unexpected argument. `ARF_R_HOME` and `ARF_R_VERSION` need no placement — the subcommands read them directly.
 

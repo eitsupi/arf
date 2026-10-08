@@ -185,6 +185,7 @@ impl HeadlessProcess {
 
         let mut cmd = Command::new(bin_path);
         cmd.arg("headless");
+        cmd.env_remove("ARF_CONFIG");
         // Most tests in this module exercise headless execution rather than
         // the eval policy itself. Preserve their pre-policy behavior unless a
         // test explicitly supplies a policy option.

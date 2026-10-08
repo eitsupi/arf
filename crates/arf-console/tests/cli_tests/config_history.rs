@@ -150,6 +150,314 @@ Error: Config file has errors:
 }
 
 #[test]
+fn test_config_check_uses_arf_config_and_cli_takes_precedence() {
+    let env_config = NamedTempFile::new().expect("Failed to create env config file");
+    let cli_config = NamedTempFile::new().expect("Failed to create CLI config file");
+
+    let env_output = sanitized_arf_command()
+        .env("ARF_CONFIG", env_config.path())
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to run arf config check with ARF_CONFIG");
+
+    assert!(
+        env_output.status.success(),
+        "config check with ARF_CONFIG failed: {}",
+        String::from_utf8_lossy(&env_output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&env_output.stdout)
+            .contains(env_config.path().file_name().unwrap().to_str().unwrap())
+    );
+
+    let cli_with_valid_env_output = sanitized_arf_command()
+        .env("ARF_CONFIG", env_config.path())
+        .args(["config", "check", "--config"])
+        .arg(cli_config.path())
+        .output()
+        .expect("Failed to run arf config check with CLI and environment paths");
+
+    assert!(
+        cli_with_valid_env_output.status.success(),
+        "CLI config check should override ARF_CONFIG: {}",
+        String::from_utf8_lossy(&cli_with_valid_env_output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&cli_with_valid_env_output.stdout);
+    assert!(stdout.contains(cli_config.path().file_name().unwrap().to_str().unwrap()));
+    assert!(!stdout.contains(env_config.path().file_name().unwrap().to_str().unwrap()));
+
+    let cli_output = sanitized_arf_command()
+        .env("ARF_CONFIG", "")
+        .args(["config", "check", "--config"])
+        .arg(cli_config.path())
+        .output()
+        .expect("Failed to run arf config check with --config");
+
+    assert!(
+        cli_output.status.success(),
+        "config check with --config failed: {}",
+        String::from_utf8_lossy(&cli_output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&cli_output.stdout);
+    assert!(stdout.contains(cli_config.path().file_name().unwrap().to_str().unwrap()));
+    assert!(!stdout.contains(env_config.path().file_name().unwrap().to_str().unwrap()));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_arf_config_replaces_instead_of_merging_default_config() {
+    let env_config = NamedTempFile::new().expect("Failed to create env config file");
+    let config_home = tempfile::tempdir().expect("Failed to create temporary config home");
+    let default_config = isolated_default_config_path(config_home.path());
+    std::fs::create_dir_all(default_config.parent().unwrap()).unwrap();
+    std::fs::write(&default_config, "not = [valid").unwrap();
+
+    let output = sanitized_arf_command()
+        .env("ARF_CONFIG", env_config.path())
+        .env("HOME", config_home.path())
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to check ARF_CONFIG alongside an invalid default config");
+
+    assert!(
+        output.status.success(),
+        "ARF_CONFIG should replace the default file: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_config_check_rejects_empty_arf_config() {
+    let output = sanitized_arf_command()
+        .env("ARF_CONFIG", "")
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to run arf config check with empty ARF_CONFIG");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("configuration file path must not be empty")
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_empty_arf_config_fails_only_for_commands_that_consume_config() {
+    let consumers: &[&[&str]] = &[
+        &[],
+        &["-e", "1"],
+        &["headless"],
+        &["r", "resolve"],
+        &["history", "schema"],
+        &["config", "check"],
+    ];
+
+    for args in consumers {
+        let output = sanitized_arf_command()
+            .env("ARF_CONFIG", "")
+            .args(*args)
+            .output()
+            .unwrap_or_else(|error| panic!("Failed to run arf {args:?}: {error}"));
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "empty ARF_CONFIG should fail before startup for {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("configuration file path must not be empty"),
+            "expected empty-path clap error for {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty(), "unexpected stdout for {args:?}");
+    }
+}
+
+#[test]
+fn test_arf_config_does_not_mask_top_level_cli_scope_errors() {
+    let config_path = std::ffi::OsStr::new("/tmp/config.toml");
+    let cases: &[(&[&str], &[&str])] = &[
+        (
+            &["--config", "/tmp/cli.toml", "headless"],
+            &["before the 'headless' subcommand", "arf headless --config"],
+        ),
+        (
+            &["--config", "/tmp/cli.toml", "r", "resolve"],
+            &[
+                "before the 'r resolve' subcommand",
+                "arf r resolve --config",
+            ],
+        ),
+        (
+            &["--config", "/tmp/cli.toml", "config", "check"],
+            &[
+                "before the 'config check' subcommand",
+                "arf config check --config",
+            ],
+        ),
+        (
+            &["--config", "/tmp/cli.toml", "completions", "zsh"],
+            &["not used by the 'completions' subcommand", "arf --config"],
+        ),
+    ];
+
+    for (args, expected) in cases {
+        assert_top_level_scope_error_with_env(args, expected, Some(config_path));
+    }
+}
+
+#[test]
+fn test_config_check_preserves_environment_path_errors() {
+    let mut malformed_config = NamedTempFile::new().expect("Failed to create malformed config");
+    write!(malformed_config, "not = [valid").unwrap();
+
+    let malformed_output = sanitized_arf_command()
+        .env("ARF_CONFIG", malformed_config.path())
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to check malformed ARF_CONFIG");
+    assert_eq!(malformed_output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&malformed_output.stdout).contains(
+            malformed_config
+                .path()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+        )
+    );
+    assert!(String::from_utf8_lossy(&malformed_output.stderr).contains("Config file has errors"));
+
+    let missing_path = malformed_config.path().with_extension("missing.toml");
+    let missing_output = sanitized_arf_command()
+        .env("ARF_CONFIG", &missing_path)
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to check missing ARF_CONFIG");
+    assert_eq!(missing_output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&missing_output.stderr).contains("Config file not found"));
+    assert!(
+        String::from_utf8_lossy(&missing_output.stderr)
+            .contains(missing_path.file_name().unwrap().to_str().unwrap())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_config_check_accepts_non_utf8_arf_config_path() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let directory = tempfile::tempdir().expect("Failed to create config directory");
+    let file_name = std::ffi::OsString::from_vec(b"config-\xff.toml".to_vec());
+    let path = directory.path().join(file_name);
+    std::fs::write(&path, "").expect("Failed to write non-UTF-8 config path");
+
+    let output = sanitized_arf_command()
+        .env("ARF_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to run config check with a non-UTF-8 path");
+
+    assert!(
+        output.status.success(),
+        "config check should preserve non-UTF-8 paths: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Config file is valid."));
+}
+
+#[test]
+#[cfg(unix)]
+fn test_config_check_uses_existing_default_path_without_arf_config() {
+    let config_home = tempfile::tempdir().expect("Failed to create temporary config home");
+    let expected_config = isolated_default_config_path(config_home.path());
+    std::fs::create_dir_all(expected_config.parent().unwrap()).unwrap();
+    std::fs::write(&expected_config, "").unwrap();
+
+    let output = sanitized_arf_command()
+        .env("HOME", config_home.path())
+        .env("USERPROFILE", config_home.path())
+        .env("APPDATA", config_home.path())
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .args(["config", "check"])
+        .output()
+        .expect("Failed to run arf config check with the default path");
+
+    assert!(
+        output.status.success(),
+        "config check with default path failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("arf.toml"));
+}
+
+#[test]
+#[cfg(unix)]
+fn test_config_init_ignores_arf_config() {
+    let config_home = tempfile::tempdir().expect("Failed to create temporary config home");
+    let expected_config = isolated_default_config_path(config_home.path());
+
+    let output = sanitized_arf_command()
+        .env("ARF_CONFIG", "")
+        .env("HOME", config_home.path())
+        .env("USERPROFILE", config_home.path())
+        .env("APPDATA", config_home.path())
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .args(["config", "init"])
+        .output()
+        .expect("Failed to run arf config init with empty ARF_CONFIG");
+
+    assert!(
+        output.status.success(),
+        "config init should ignore ARF_CONFIG: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(expected_config.is_file());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(&expected_config.display().to_string())
+    );
+}
+
+#[cfg(unix)]
+fn isolated_default_config_path(home: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    let config_dir = home.join("Library").join("Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let config_dir = home.to_path_buf();
+    config_dir.join("arf").join("arf.toml")
+}
+
+#[test]
+fn test_completions_ignores_arf_config_and_still_rejects_cli_config() {
+    let output = sanitized_arf_command()
+        .env("ARF_CONFIG", "")
+        .args(["completions", "zsh"])
+        .output()
+        .expect("Failed to run arf completions with empty ARF_CONFIG");
+
+    assert!(
+        output.status.success(),
+        "completions should ignore ARF_CONFIG: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("#compdef arf"));
+
+    assert_top_level_scope_error(
+        &["--config", "/tmp/config.toml", "completions", "zsh"],
+        &[
+            "--config",
+            "not used by the 'completions' subcommand",
+            "arf --config",
+        ],
+    );
+}
+
+#[test]
 fn test_config_check_reports_deprecated_history_keys_as_warnings() {
     let mut config_file = NamedTempFile::new().expect("Failed to create temp config file");
     write!(config_file, "[history]\ndisabled = true\n").unwrap();

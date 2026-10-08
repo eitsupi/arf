@@ -1,8 +1,26 @@
 //! Top-level CLI option scope and R source origin validation.
 
 use crate::app::resolve::RSourceOrigin;
+use crate::cli::{Cli, Commands, ConfigAction, RCommand};
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Command};
+use std::path::Path;
+
+pub(crate) fn effective_config_path(cli: &Cli) -> Option<&Path> {
+    match &cli.command {
+        None => cli.r_source.config.as_deref(),
+        Some(Commands::History(_)) => cli.r_source.config.as_deref(),
+        Some(Commands::Headless(args)) => args.r_source.config.as_deref(),
+        Some(Commands::R(args)) => match &args.command {
+            RCommand::Resolve(args) => args.r_source.config.as_deref(),
+        },
+        Some(Commands::Config(args)) => match &args.action {
+            ConfigAction::Check { config } => config.as_deref(),
+            ConfigAction::Init { .. } => None,
+        },
+        Some(Commands::Completions(_) | Commands::Ipc(_)) => None,
+    }
+}
 
 pub(crate) fn r_source_origin(matches: &ArgMatches) -> Option<RSourceOrigin> {
     let resolve_matches = matches
