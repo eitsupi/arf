@@ -301,7 +301,7 @@ fn help_snapshot_flows_from_metadata_through_browser_page_to_viewer_resolver() {
     ];
     let topics: Arc<[HelpTopic]> = get_help_topics_from_paths(&snapshot).into();
     let mut browser = HelpBrowser::new(Arc::clone(&topics), snapshot, "resolverpkg");
-    browser.filtered = search::search_topics_sync(&topics, "resolverpkg");
+    browser.filtered = crate::help_search::search_topics_sync(&topics, "resolverpkg");
     let selected_index = browser
         .filtered
         .iter()
