@@ -23,7 +23,6 @@ pub(super) use pages::{HelpPageSelectorState, help_page_title};
 
 use arf_harp::HarpResult;
 
-const MAX_FILTERED_RESULTS: usize = 500;
 const MIN_SIZE: super::MinimumSize = super::MinimumSize { cols: 30, rows: 8 };
 
 fn help_library_paths_after_refresh(

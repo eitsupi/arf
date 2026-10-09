@@ -1,7 +1,8 @@
 //! Interactive help browser state and search lifecycle.
 
 use super::search::{self, SearchWorker};
-use super::{MAX_FILTERED_RESULTS, MIN_SIZE, help_library_paths_after_refresh, pages};
+use super::{MIN_SIZE, help_library_paths_after_refresh, pages};
+use crate::help_search::MAX_RESULTS;
 use crate::pager::{TextScrollState, check_terminal_too_small, with_alternate_screen};
 use arf_harp::help::{
     HelpTargetResolver, HelpTopic, get_help_topics_from_paths, get_vignette_text,
@@ -48,7 +49,7 @@ impl Drop for WorkerShutdownRequest<'_> {
 impl HelpBrowser {
     fn new(topics: Arc<[HelpTopic]>, library_paths: Vec<String>, query: &str) -> Self {
         let initial_results = if query.is_empty() {
-            (0..topics.len().min(MAX_FILTERED_RESULTS))
+            (0..topics.len().min(MAX_RESULTS))
                 .map(|index| (index, 0))
                 .collect()
         } else {
@@ -185,7 +186,7 @@ impl HelpBrowser {
         self.search_dirty = true;
         if self.query.is_empty() {
             self.reset_results();
-            self.filtered = (0..self.topics.len().min(MAX_FILTERED_RESULTS))
+            self.filtered = (0..self.topics.len().min(MAX_RESULTS))
                 .map(|index| (index, 0))
                 .collect();
         }

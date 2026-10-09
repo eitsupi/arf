@@ -8,7 +8,7 @@ use arf_harp::help::HelpTopic;
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use std::collections::HashSet;
 
-const MAX_RESULTS: usize = 500;
+pub(crate) const MAX_RESULTS: usize = 500;
 const CANCEL_CHECK_INTERVAL: usize = 32;
 
 struct TopicNames<'a> {
