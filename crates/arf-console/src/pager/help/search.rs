@@ -1,5 +1,8 @@
 //! Background fuzzy search for the help browser.
 
+#[cfg(test)]
+mod tests;
+
 use crate::fuzzy::FuzzyScoreMatcher;
 use arf_harp::help::HelpTopic;
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
@@ -83,26 +86,6 @@ impl SearchScratch {
             qualified: String::new(),
             ranked: Vec::new(),
         }
-    }
-}
-
-#[cfg(test)]
-pub(super) struct SearchBench<'a> {
-    index: SearchIndex<'a>,
-    scratch: SearchScratch,
-}
-
-#[cfg(test)]
-impl<'a> SearchBench<'a> {
-    pub(super) fn new(topics: &'a [HelpTopic]) -> Self {
-        Self {
-            index: SearchIndex::new_cancellable(topics, || false).unwrap(),
-            scratch: SearchScratch::new(),
-        }
-    }
-
-    pub(super) fn search(&mut self, query: &str) -> Vec<(usize, u32)> {
-        search_topics(&self.index, query, &mut self.scratch, || false).unwrap()
     }
 }
 
@@ -444,143 +427,4 @@ pub(super) fn search_topics_sync(topics: &[HelpTopic], query: &str) -> Vec<(usiz
     let index = SearchIndex::new_cancellable(topics, || false).unwrap();
     let mut scratch = SearchScratch::new();
     search_topics(&index, query, &mut scratch, || false).unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Barrier, mpsc};
-
-    #[test]
-    fn cancelled_generation_is_not_published_and_shutdown_joins_worker() {
-        let (started_tx, started_rx) = mpsc::channel();
-        let gate = Arc::new(Barrier::new(2));
-        let hook_gate = Arc::clone(&gate);
-        let hook = Arc::new(move |generation| {
-            let _ = started_tx.send(generation);
-            hook_gate.wait();
-        });
-        let topics: Arc<[HelpTopic]> = vec![HelpTopic {
-            package: "base".to_string(),
-            package_dir: Default::default(),
-            topic: "mean".to_string(),
-            aliases: vec!["average".to_string()],
-            help_key: None,
-            title: "Arithmetic Mean".to_string(),
-            entry_type: "help".to_string(),
-        }]
-        .into();
-        let mut worker = SearchWorker::spawn_with_hook(topics, hook).unwrap();
-        let old_generation = worker.submit("mean".to_string()).unwrap();
-        assert_eq!(started_rx.recv().unwrap(), old_generation);
-
-        let current_generation = worker.cancel().unwrap();
-        assert_ne!(current_generation, old_generation);
-        gate.wait();
-        worker.shutdown_and_join().unwrap();
-
-        assert!(worker.take_result(old_generation).unwrap().is_none());
-        assert!(worker.take_result(current_generation).unwrap().is_none());
-    }
-
-    #[test]
-    fn newer_request_replaces_queued_request() {
-        let (seen_tx, seen_rx) = mpsc::channel();
-        let gate = Arc::new(Barrier::new(2));
-        let hook_gate = Arc::clone(&gate);
-        let first_call = Arc::new(AtomicBool::new(true));
-        let hook_first_call = Arc::clone(&first_call);
-        let hook = Arc::new(move |generation| {
-            let _ = seen_tx.send(generation);
-            if hook_first_call.swap(false, Ordering::SeqCst) {
-                hook_gate.wait();
-            }
-        });
-        let topics: Arc<[HelpTopic]> = Vec::<HelpTopic>::new().into();
-        let mut worker = SearchWorker::spawn_with_hook(topics, hook).unwrap();
-        let active = worker.submit("first".to_string()).unwrap();
-        assert_eq!(seen_rx.recv().unwrap(), active);
-        let superseded = worker.submit("second".to_string()).unwrap();
-        let latest = worker.submit("third".to_string()).unwrap();
-        gate.wait();
-        assert_eq!(seen_rx.recv().unwrap(), latest);
-        assert_ne!(superseded, latest);
-        let mut state = worker.shared.state.lock().unwrap();
-        while state.result.is_none() && state.failure.is_none() {
-            state = worker.shared.changed.wait(state).unwrap();
-        }
-        assert_eq!(state.result.as_ref().unwrap().generation, latest);
-        drop(state);
-        worker.shutdown_and_join().unwrap();
-        assert!(worker.take_result(active).unwrap().is_none());
-        assert!(worker.take_result(latest).unwrap().is_some());
-    }
-
-    #[test]
-    fn recoverable_worker_panic_is_reported_as_an_io_error() {
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let gate = Arc::new(Barrier::new(2));
-        let hook_gate = Arc::clone(&gate);
-        let hook = Arc::new(move |_generation| {
-            let _ = entered_tx.send(());
-            hook_gate.wait();
-            panic!("injected search panic");
-        });
-        let topics: Arc<[HelpTopic]> = Vec::<HelpTopic>::new().into();
-        let mut worker = SearchWorker::spawn_with_hook(topics, hook).unwrap();
-        let generation = worker.submit("term".to_string()).unwrap();
-        entered_rx.recv().unwrap();
-        gate.wait();
-
-        let mut state = worker.shared.state.lock().unwrap();
-        while state.failure.is_none() {
-            state = worker.shared.changed.wait(state).unwrap();
-        }
-        drop(state);
-        assert!(worker.take_result(generation).is_err());
-        worker.shutdown_and_join().unwrap();
-    }
-
-    #[test]
-    fn cancellation_is_checked_during_large_alias_lists() {
-        let topics = vec![HelpTopic {
-            package: "pkg".to_string(),
-            package_dir: Default::default(),
-            topic: "unrelated".to_string(),
-            aliases: (0..100).map(|index| format!("alias_{index}")).collect(),
-            help_key: None,
-            title: String::new(),
-            entry_type: "help".to_string(),
-        }];
-        let index = SearchIndex::new_cancellable(&topics, || false).unwrap();
-        let mut scratch = SearchScratch::new();
-        let mut checks = 0;
-        let result = search_topics(&index, "no-match", &mut scratch, || {
-            checks += 1;
-            checks == 3
-        });
-        assert!(result.is_none());
-        assert_eq!(checks, 3, "cancellation should be observed within 32 names");
-    }
-
-    #[test]
-    fn shutdown_is_checked_during_initial_alias_preparation() {
-        let topics = vec![HelpTopic {
-            package: "pkg".to_string(),
-            package_dir: Default::default(),
-            topic: "topic".to_string(),
-            aliases: (0..100).map(|index| format!("alias_{index}")).collect(),
-            help_key: None,
-            title: String::new(),
-            entry_type: "help".to_string(),
-        }];
-        let mut checks = 0;
-        let index = SearchIndex::new_cancellable(&topics, || {
-            checks += 1;
-            checks == 2
-        });
-        assert!(index.is_none());
-        assert_eq!(checks, 2, "preparation should stop within 32 names");
-    }
 }
