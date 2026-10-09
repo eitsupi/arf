@@ -8,6 +8,7 @@ mod console_mode;
 mod editor;
 mod external;
 mod fuzzy;
+mod help_search;
 mod highlighter;
 mod history;
 mod ipc;
