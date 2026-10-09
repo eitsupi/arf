@@ -9,6 +9,16 @@ fn wait_for_prompt_after_ui(terminal: &Terminal, description: &str) -> Result<()
     })
 }
 
+fn wait_for_help_browser_row(terminal: &Terminal, topic: &str) -> Result<()> {
+    terminal.wait_for("help browser result row", |state, _| {
+        state.text.lines().any(|line| {
+            line.trim_start()
+                .trim_start_matches("> ")
+                .starts_with(&format!("{topic} "))
+        })
+    })
+}
+
 fn open_history_schema(terminal: &Terminal) -> Result<()> {
     terminal.enter(":history schema")?;
     terminal.wait_for_screen_line("history schema pager", 0, |state, line| {
@@ -220,10 +230,9 @@ viewer = "auto"
             wait_for_prompt_after_ui(terminal, "native help navigation exits")?;
 
             terminal.enter(":help base::mean")?;
-            terminal.wait_for("browser finds mean", |state, _| {
-                state.text.contains("Filter: base::mean_")
-                    && state.text.contains("Tab/Enter select")
-            })?;
+            // Wait for a selectable result row, not just the immediately
+            // rendered filter text while the asynchronous search is pending.
+            wait_for_help_browser_row(terminal, "base::mean")?;
             // Fuzzy search includes matching aliases such as mean.Date. Select
             // the actual mean row explicitly instead of assuming it ranks first.
             let state = terminal.state()?;
@@ -263,6 +272,37 @@ viewer = "auto"
             })?;
             terminal.key("Escape")?;
             wait_for_prompt_after_ui(terminal, "topic browser exits after navigation")?;
+
+            terminal.enter(":help")?;
+            terminal.wait_for("empty help browser filter", |state, _| {
+                state.text.contains("Filter: _") && state.text.contains("Tab/Enter select")
+            })?;
+            terminal.write("base::identical")?;
+            for _ in 0..3 {
+                terminal.key("Backspace")?;
+            }
+            terminal.wait_for("broadened help browser filter", |state, _| {
+                state.text.contains("Filter: base::identi")
+            })?;
+            terminal.key("Ctrl+u")?;
+            terminal.wait_for("cleared help browser filter", |state, _| {
+                state.text.contains("Filter: _")
+            })?;
+            // Enter immediately after the new query to exercise selection while
+            // its asynchronous search result is still being produced.
+            terminal.write("base::identity")?;
+            terminal.key("Enter")?;
+            terminal.wait_for_screen_line("identity help page opens", 0, |state, line| {
+                state.exited.is_none() && line.contains("base::identity")
+            })?;
+            terminal.key("q")?;
+            terminal.wait_for("identity page returns to browser", |state, _| {
+                state.text.contains("Filter: base::identity")
+                    && state.text.contains("Tab/Enter select")
+            })?;
+            terminal.key("Escape")?;
+            wait_for_prompt_after_ui(terminal, "help browser regression exits")?;
+
             let response = terminal
                 .start_ipc(&["eval", "1 + 1", "--timeout", "10000"])?
                 .finish()?;

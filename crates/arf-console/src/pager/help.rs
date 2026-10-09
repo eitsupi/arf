@@ -20,7 +20,6 @@ use super::{
     MinimumSize, TextScrollState, check_terminal_too_small, render_size_warning,
     with_alternate_screen,
 };
-use crate::fuzzy::FuzzyScoreMatcher;
 #[cfg(test)]
 use crate::fuzzy::fuzzy_match_with_case_preference;
 use arf_harp::HarpResult;
@@ -36,9 +35,16 @@ use crossterm::{
     style::Stylize,
     terminal::{self, BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
-use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::time::Duration;
+
+mod search;
+#[cfg(test)]
+use search::SearchBench;
+use search::SearchWorker;
+#[cfg(test)]
+use search::search_topics_sync;
 
 /// Maximum number of results to keep in filtered list.
 const MAX_FILTERED_RESULTS: usize = 500;
@@ -74,7 +80,7 @@ pub fn run_help_browser(query: &str) -> io::Result<()> {
         return Ok(());
     }
 
-    let mut browser = HelpBrowser::new(topics, libraries, query);
+    let mut browser = HelpBrowser::new(topics.into(), libraries, query);
     browser.run()
 }
 
@@ -100,37 +106,106 @@ fn help_library_paths_after_refresh(
 /// Interactive help browser.
 struct HelpBrowser {
     library_paths: Vec<String>,
-    topics: Vec<HelpTopic>,
+    topics: Arc<[HelpTopic]>,
     query: String,
     /// Cursor position within the query string (in characters, not bytes).
     cursor_pos: usize,
-    filtered: Vec<(HelpTopic, u32)>,
+    filtered: Vec<(usize, u32)>,
+    pending_generation: Option<u64>,
+    pending_open: Option<u64>,
+    query_generation: u64,
+    search_dirty: bool,
     selected: usize,
     scroll_offset: usize,
     /// Scroll animation state for the selected item's long text.
     text_scroll: TextScrollState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserAction {
+    Continue,
+    Open(usize),
+    Exit,
+}
+
+struct EventHandling {
+    action: BrowserAction,
+    redraw: bool,
+}
+
+struct EventDrain {
+    action: BrowserAction,
+    events_read: usize,
+    redraw: bool,
+}
+
+fn drain_help_events(
+    mut next_event: impl FnMut() -> io::Result<Option<Event>>,
+    mut handle_event: impl FnMut(Event) -> io::Result<EventHandling>,
+) -> io::Result<EventDrain> {
+    let mut drained = EventDrain {
+        action: BrowserAction::Continue,
+        events_read: 0,
+        redraw: false,
+    };
+    while drained.events_read < 32 {
+        let Some(event) = next_event()? else {
+            break;
+        };
+        drained.events_read += 1;
+        let handling = handle_event(event)?;
+        drained.redraw |= handling.redraw;
+        drained.action = handling.action;
+        if handling.action != BrowserAction::Continue {
+            break;
+        }
+    }
+    Ok(drained)
+}
+
+fn poll_backlog_before_results(
+    action: BrowserAction,
+    poll_input: impl FnOnce() -> io::Result<bool>,
+    apply_results: impl FnOnce() -> io::Result<()>,
+) -> io::Result<bool> {
+    if poll_input()? {
+        return Ok(true);
+    }
+    if action == BrowserAction::Continue {
+        apply_results()?;
+    }
+    Ok(false)
+}
+
 impl HelpBrowser {
-    fn new(topics: Vec<HelpTopic>, library_paths: Vec<String>, query: &str) -> Self {
-        let mut browser = HelpBrowser {
+    fn new(topics: Arc<[HelpTopic]>, library_paths: Vec<String>, query: &str) -> Self {
+        let initial_results = if query.is_empty() {
+            (0..topics.len().min(MAX_FILTERED_RESULTS))
+                .map(|index| (index, 0))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        HelpBrowser {
             library_paths,
             topics,
             query: query.to_string(),
             cursor_pos: query.chars().count(),
-            filtered: Vec::new(),
+            filtered: initial_results,
+            pending_generation: None,
+            pending_open: None,
+            query_generation: 0,
+            search_dirty: false,
             selected: 0,
             scroll_offset: 0,
             text_scroll: TextScrollState::new(),
-        };
-        browser.update_filter();
-        browser
+        }
     }
 
-    fn update_filter(&mut self) {
-        self.filtered = fuzzy_search_topics(&self.topics, &self.query);
+    fn reset_results(&mut self) {
         self.selected = 0;
         self.scroll_offset = 0;
+        self.text_scroll = TextScrollState::new();
         // Ensure cursor_pos stays within bounds
         let query_len = self.query.chars().count();
         if self.cursor_pos > query_len {
@@ -139,274 +214,383 @@ impl HelpBrowser {
     }
 
     fn run(&mut self) -> io::Result<()> {
-        with_alternate_screen(|| self.run_inner())
+        let mut worker = SearchWorker::spawn(Arc::clone(&self.topics))?;
+        if !self.query.is_empty() {
+            self.query_generation = self.query_generation.wrapping_add(1);
+            self.pending_generation = Some(worker.submit(self.query.clone())?);
+        }
+        let result = with_alternate_screen(|| {
+            let _shutdown = WorkerShutdownRequest(&worker);
+            self.run_inner(&worker)
+        });
+        worker.request_shutdown();
+        let shutdown = worker.shutdown_and_join();
+        result.and(shutdown)
     }
 
-    fn run_inner(&mut self) -> io::Result<()> {
+    fn run_inner(&mut self, worker: &SearchWorker) -> io::Result<()> {
         let mut stdout = io::stdout();
-        let poll_timeout = Duration::from_millis(50); // ~20fps for smooth animation
+        let poll_timeout = Duration::from_millis(16);
         let mut needs_redraw = true;
-        let mut too_small;
-
         loop {
-            // Update animation state
             if self.update_text_scroll() {
                 needs_redraw = true;
             }
-
-            too_small = check_terminal_too_small(&MIN_SIZE).is_some();
             if needs_redraw {
                 self.render(&mut stdout)?;
                 needs_redraw = false;
             }
-
-            // Poll for events with timeout to allow animation updates
-            if event::poll(poll_timeout)? {
-                let ev = event::read()?;
-                log::debug!("help_browser: received event: {:?}", ev);
-                match ev {
-                    Event::Key(key) => {
-                        // Only handle key press events, ignore release and repeat
-                        // This is important on Windows where release events are sent
-                        // (e.g., Enter release from the command that launched the browser)
-                        if key.kind != KeyEventKind::Press {
-                            log::debug!(
-                                "help_browser: ignoring non-press key event: {:?}",
-                                key.kind
-                            );
-                            continue;
-                        }
+            let timeout = if self.search_pending() {
+                poll_timeout
+            } else {
+                Duration::from_millis(50)
+            };
+            let mut first_poll = true;
+            let drained = drain_help_events(
+                || {
+                    let event_timeout = if first_poll {
+                        first_poll = false;
+                        timeout
+                    } else {
+                        Duration::ZERO
+                    };
+                    if !event::poll(event_timeout)? {
+                        return Ok(None);
+                    }
+                    let event = event::read()?;
+                    log::debug!("help_browser: received event: {:?}", event);
+                    Ok(Some(event))
+                },
+                |event| {
+                    let too_small = check_terminal_too_small(&MIN_SIZE).is_some();
+                    self.handle_event(event, too_small, worker)
+                },
+            )?;
+            needs_redraw |= drained.redraw;
+            match drained.action {
+                BrowserAction::Exit => break,
+                BrowserAction::Open(index) => {
+                    if self.search_dirty {
+                        self.dispatch_search(worker)?;
+                    }
+                    self.open_topic(index);
+                    needs_redraw = true;
+                }
+                BrowserAction::Continue => {
+                    if self.search_dirty {
+                        self.dispatch_search(worker)?;
+                    }
+                }
+            }
+            if needs_redraw {
+                self.render(&mut stdout)?;
+                needs_redraw = false;
+            }
+            let backlog = poll_backlog_before_results(
+                drained.action,
+                || event::poll(Duration::ZERO),
+                || {
+                    if let Some(generation) = self.pending_generation
+                        && let Some(result) = worker.take_result(generation)?
+                        && self.pending_generation == Some(result.generation)
+                    {
+                        let open_index = self.accept_search_result(result);
                         needs_redraw = true;
-                        log::debug!(
-                            "help_browser: key event: code={:?}, modifiers={:?}",
-                            key.code,
-                            key.modifiers
-                        );
-
-                        // When the terminal is too small, only accept exit keys
-                        // to prevent character input from leaking into the filter.
-                        if too_small {
-                            match (key.code, key.modifiers) {
-                                (KeyCode::Esc, _)
-                                | (KeyCode::Char('q'), KeyModifiers::NONE)
-                                | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                                | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                                    break;
-                                }
-                                _ => continue,
-                            }
+                        if let Some(index) = open_index {
+                            self.open_topic(index);
                         }
+                    }
+                    Ok(())
+                },
+            )?;
+            if backlog || matches!(drained.action, BrowserAction::Open(_)) {
+                continue;
+            }
+        }
+        Ok(())
+    }
 
-                        match (key.code, key.modifiers) {
-                            // Exit
-                            (KeyCode::Esc, _)
-                            | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                                break;
-                            }
+    fn handle_event(
+        &mut self,
+        event: Event,
+        too_small: bool,
+        worker: &SearchWorker,
+    ) -> io::Result<EventHandling> {
+        let continue_with = |redraw| EventHandling {
+            action: BrowserAction::Continue,
+            redraw,
+        };
+        match event {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    return Ok(continue_with(false));
+                }
+                if too_small {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Esc, _)
+                        | (KeyCode::Char('q'), KeyModifiers::NONE)
+                        | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                        | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                            self.cancel_search(worker)?;
+                            return Ok(EventHandling {
+                                action: BrowserAction::Exit,
+                                redraw: true,
+                            });
+                        }
+                        _ => return Ok(continue_with(true)),
+                    }
+                }
 
-                            // Navigation
-                            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
-                                if self.selected > 0 =>
-                            {
-                                self.selected -= 1;
-                                if self.selected < self.scroll_offset {
-                                    self.scroll_offset = self.selected;
-                                }
-                            }
-                            (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                let visible_rows = visible_result_rows();
-                                if self.selected + 1 < self.filtered.len() {
-                                    self.selected += 1;
-                                    if self.selected >= self.scroll_offset + visible_rows {
-                                        self.scroll_offset = self.selected - visible_rows + 1;
-                                    }
-                                }
-                            }
+                match (key.code, key.modifiers) {
+                    // Exit
+                    (KeyCode::Esc, _)
+                    | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                        self.cancel_search(worker)?;
+                        return Ok(EventHandling {
+                            action: BrowserAction::Exit,
+                            redraw: true,
+                        });
+                    }
 
-                            // Select
-                            (KeyCode::Enter, _) | (KeyCode::Tab, _) => {
-                                if let Some((topic, _)) = self.filtered.get(self.selected) {
-                                    let title = topic.qualified_name();
+                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                        self.move_selection(-1, visible_result_rows());
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                        self.move_selection(1, visible_result_rows());
+                    }
 
-                                    match topic.entry_type.as_str() {
-                                        "vignette" => {
-                                            match get_vignette_text(&topic.topic, &topic.package) {
-                                                Ok(text) => {
-                                                    if let Err(e) =
-                                                        display_help_pager(&title, &text, false)
-                                                    {
-                                                        log::error!(
-                                                            "help_browser: pager error: {}",
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    // Show the error (e.g. PDF vignette message)
-                                                    // in the pager for visibility
-                                                    let msg = format!("{}", e);
-                                                    if let Err(e) =
-                                                        display_help_pager(&title, &msg, false)
-                                                    {
-                                                        log::error!(
-                                                            "help_browser: pager error: {}",
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        "demo" => {
-                                            let msg = format!(
-                                                r#"This is a demo entry.
+                    (KeyCode::Enter, _) | (KeyCode::Tab, _) => {
+                        if self.search_pending() {
+                            self.remember_pending_open();
+                        } else if let Some(&(index, _)) = self.filtered.get(self.selected) {
+                            return Ok(EventHandling {
+                                action: BrowserAction::Open(index),
+                                redraw: true,
+                            });
+                        }
+                    }
+
+                    (KeyCode::Backspace, _) => {
+                        self.backspace_query();
+                    }
+                    (KeyCode::Delete, _) => {
+                        self.delete_query_char();
+                    }
+                    (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                        self.clear_query();
+                    }
+                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                        self.insert_query_char(c);
+                    }
+                    (KeyCode::Left, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
+                        self.move_cursor(self.cursor_pos.saturating_sub(1));
+                    }
+                    (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                        self.move_cursor((self.cursor_pos + 1).min(self.query.chars().count()));
+                    }
+                    (KeyCode::Home, _) | (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                        self.move_cursor(0);
+                    }
+                    (KeyCode::End, _) | (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
+                        self.move_cursor(self.query.chars().count());
+                    }
+
+                    _ => {}
+                }
+                Ok(continue_with(true))
+            }
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.move_selection(-1, visible_result_rows());
+                    Ok(continue_with(true))
+                }
+                MouseEventKind::ScrollDown => {
+                    self.move_selection(1, visible_result_rows());
+                    Ok(continue_with(true))
+                }
+                _ => Ok(continue_with(false)),
+            },
+            Event::Resize(_, _) => Ok(continue_with(true)),
+            _ => Ok(continue_with(false)),
+        }
+    }
+
+    fn start_search(&mut self) {
+        self.pending_open = None;
+        self.query_generation = self.query_generation.wrapping_add(1);
+        self.pending_generation = None;
+        self.search_dirty = true;
+        self.reset_results();
+        if self.query.is_empty() {
+            self.filtered = (0..self.topics.len().min(MAX_FILTERED_RESULTS))
+                .map(|index| (index, 0))
+                .collect();
+        } else {
+            self.filtered.clear();
+        }
+    }
+
+    fn dispatch_search(&mut self, worker: &SearchWorker) -> io::Result<()> {
+        self.search_dirty = false;
+        if self.query.is_empty() {
+            self.pending_generation = None;
+            worker.cancel()?;
+        } else {
+            self.pending_generation = Some(worker.submit(self.query.clone())?);
+        }
+        Ok(())
+    }
+
+    fn search_pending(&self) -> bool {
+        !self.query.is_empty() && (self.search_dirty || self.pending_generation.is_some())
+    }
+
+    fn insert_query_char(&mut self, character: char) {
+        let byte_pos = self
+            .query
+            .char_indices()
+            .nth(self.cursor_pos)
+            .map(|(index, _)| index)
+            .unwrap_or(self.query.len());
+        self.query.insert(byte_pos, character);
+        self.cursor_pos += 1;
+        self.start_search();
+    }
+
+    fn backspace_query(&mut self) {
+        self.pending_open = None;
+        if self.cursor_pos > 0 {
+            let byte_pos = self
+                .query
+                .char_indices()
+                .nth(self.cursor_pos - 1)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            self.query.remove(byte_pos);
+            self.cursor_pos -= 1;
+            self.start_search();
+        }
+    }
+
+    fn delete_query_char(&mut self) {
+        self.pending_open = None;
+        if self.cursor_pos < self.query.chars().count() {
+            let byte_pos = self
+                .query
+                .char_indices()
+                .nth(self.cursor_pos)
+                .map(|(index, _)| index)
+                .unwrap_or(self.query.len());
+            self.query.remove(byte_pos);
+            self.start_search();
+        }
+    }
+
+    fn clear_query(&mut self) {
+        self.query.clear();
+        self.cursor_pos = 0;
+        self.start_search();
+    }
+
+    fn move_cursor(&mut self, cursor_pos: usize) {
+        self.pending_open = None;
+        self.cursor_pos = cursor_pos.min(self.query.chars().count());
+    }
+
+    fn move_selection(&mut self, direction: isize, visible_rows: usize) {
+        self.pending_open = None;
+        if self.search_pending() {
+            return;
+        }
+        if direction < 0 && self.selected > 0 {
+            self.selected -= 1;
+            if self.selected < self.scroll_offset {
+                self.scroll_offset = self.selected;
+            }
+        } else if direction > 0 && self.selected + 1 < self.filtered.len() {
+            self.selected += 1;
+            if self.selected >= self.scroll_offset + visible_rows {
+                self.scroll_offset = self.selected - visible_rows + 1;
+            }
+        }
+    }
+
+    fn cancel_search(&mut self, worker: &SearchWorker) -> io::Result<()> {
+        self.clear_pending_search();
+        worker.cancel()?;
+        Ok(())
+    }
+
+    fn remember_pending_open(&mut self) {
+        self.pending_open = self.search_pending().then_some(self.query_generation);
+    }
+
+    fn clear_pending_search(&mut self) {
+        if self.pending_generation.take().is_some() {
+            self.filtered.clear();
+            self.reset_results();
+        }
+        self.pending_open = None;
+        self.search_dirty = false;
+    }
+
+    fn accept_search_result(&mut self, result: search::SearchResult) -> Option<usize> {
+        if self.pending_generation != Some(result.generation) {
+            return None;
+        }
+        self.filtered = result.matches;
+        self.pending_generation = None;
+        self.reset_results();
+        if self.pending_open.take() == Some(self.query_generation) {
+            self.filtered.first().map(|(index, _)| *index)
+        } else {
+            self.pending_open = None;
+            None
+        }
+    }
+
+    fn open_topic(&mut self, index: usize) {
+        let Some(topic) = self.topics.get(index) else {
+            return;
+        };
+        let title = topic.qualified_name();
+        match topic.entry_type.as_str() {
+            "vignette" => {
+                let content = get_vignette_text(&topic.topic, &topic.package)
+                    .unwrap_or_else(|error| format!("{error}"));
+                if let Err(error) = display_help_pager(&title, &content, false) {
+                    log::error!("help_browser: pager error: {error}");
+                }
+            }
+            "demo" => {
+                let content = format!(
+                    r#"This is a demo entry.
 
 To run the demo, execute in R:
 
 demo("{name}", package = "{pkg}")"#,
-                                                name = topic.topic,
-                                                pkg = topic.package,
-                                            );
-                                            if let Err(e) = display_help_pager(&title, &msg, false)
-                                            {
-                                                log::error!("help_browser: pager error: {}", e);
-                                            }
-                                        }
-                                        _ => {
-                                            // Keep the metadata's exact installed package copy.
-                                            let result =
-                                                HelpTargetResolver::prepare_candidate(topic)
-                                                    .map_err(io::Error::other)
-                                                    .and_then(|page| {
-                                                        display_help_pages(
-                                                            vec![page],
-                                                            self.library_paths.clone(),
-                                                            false,
-                                                        )
-                                                    });
-                                            if let Err(e) = result {
-                                                let message = help_page_load_error_message(&e);
-                                                if let Err(pager_error) =
-                                                    display_help_pager(&title, &message, false)
-                                                {
-                                                    log::error!(
-                                                        "help_browser: failed to display help error: {pager_error}"
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Force a full redraw after returning from pager
-                                    needs_redraw = true;
-                                }
-                            }
-
-                            // Backspace - delete character before cursor
-                            (KeyCode::Backspace, _) if self.cursor_pos > 0 => {
-                                // Find byte position of character before cursor
-                                let byte_pos = self
-                                    .query
-                                    .char_indices()
-                                    .nth(self.cursor_pos - 1)
-                                    .map(|(i, _)| i)
-                                    .unwrap_or(0);
-                                self.query.remove(byte_pos);
-                                self.cursor_pos -= 1;
-                                self.update_filter();
-                            }
-
-                            // Delete - delete character at cursor
-                            (KeyCode::Delete, _)
-                                if self.cursor_pos < self.query.chars().count() =>
-                            {
-                                let byte_pos = self
-                                    .query
-                                    .char_indices()
-                                    .nth(self.cursor_pos)
-                                    .map(|(i, _)| i)
-                                    .unwrap_or(self.query.len());
-                                self.query.remove(byte_pos);
-                                self.update_filter();
-                            }
-
-                            // Clear query
-                            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                                self.query.clear();
-                                self.cursor_pos = 0;
-                                self.update_filter();
-                            }
-
-                            // Character input
-                            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                // Insert at cursor position
-                                let byte_pos = self
-                                    .query
-                                    .char_indices()
-                                    .nth(self.cursor_pos)
-                                    .map(|(i, _)| i)
-                                    .unwrap_or(self.query.len());
-                                self.query.insert(byte_pos, c);
-                                self.cursor_pos += 1;
-                                self.update_filter();
-                            }
-
-                            // Cursor movement
-                            (KeyCode::Left, _) | (KeyCode::Char('b'), KeyModifiers::CONTROL)
-                                if self.cursor_pos > 0 =>
-                            {
-                                self.cursor_pos -= 1;
-                            }
-                            (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL)
-                                if self.cursor_pos < self.query.chars().count() =>
-                            {
-                                self.cursor_pos += 1;
-                            }
-                            (KeyCode::Home, _) | (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
-                                self.cursor_pos = 0;
-                            }
-                            (KeyCode::End, _) | (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
-                                self.cursor_pos = self.query.chars().count();
-                            }
-
-                            _ => {}
-                        }
+                    name = topic.topic,
+                    pkg = topic.package,
+                );
+                if let Err(error) = display_help_pager(&title, &content, false) {
+                    log::error!("help_browser: pager error: {error}");
+                }
+            }
+            _ => {
+                let result = HelpTargetResolver::prepare_candidate(topic)
+                    .map_err(io::Error::other)
+                    .and_then(|page| {
+                        display_help_pages(vec![page], self.library_paths.clone(), false)
+                    });
+                if let Err(error) = result {
+                    let message = help_page_load_error_message(&error);
+                    if let Err(pager_error) = display_help_pager(&title, &message, false) {
+                        log::error!("help_browser: failed to display help error: {pager_error}");
                     }
-                    // Handle mouse scroll events
-                    Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            needs_redraw = true;
-                            if self.selected > 0 {
-                                self.selected -= 1;
-                                if self.selected < self.scroll_offset {
-                                    self.scroll_offset = self.selected;
-                                }
-                            }
-                        }
-                        MouseEventKind::ScrollDown => {
-                            needs_redraw = true;
-                            let visible_rows = visible_result_rows();
-                            if self.selected + 1 < self.filtered.len() {
-                                self.selected += 1;
-                                if self.selected >= self.scroll_offset + visible_rows {
-                                    self.scroll_offset = self.selected - visible_rows + 1;
-                                }
-                            }
-                        }
-                        // Ignore other mouse events (move, drag, click) - no redraw needed
-                        _ => {}
-                    },
-                    // Handle resize events
-                    Event::Resize(_, _) => {
-                        needs_redraw = true;
-                    }
-                    // Ignore other events (focus, paste)
-                    _ => {}
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Update the text scroll animation state.
@@ -418,7 +602,11 @@ demo("{name}", package = "{pkg}")"#,
         if let Some((cols, rows)) = check_terminal_too_small(&MIN_SIZE) {
             return render_size_warning(stdout, cols, rows, &MIN_SIZE);
         }
+        let (cols, rows) = terminal::size().unwrap_or((80, 24));
+        self.render_to(stdout, cols as usize, rows as usize)
+    }
 
+    fn render_to<W: Write>(&self, stdout: &mut W, width: usize, rows: usize) -> io::Result<()> {
         // Begin synchronized update to prevent flickering
         queue!(stdout, BeginSynchronizedUpdate)?;
 
@@ -426,32 +614,37 @@ demo("{name}", package = "{pkg}")"#,
         stdout.execute(cursor::MoveTo(0, 0))?;
         stdout.execute(cursor::Hide)?;
 
-        // Get terminal size
-        let (cols, _rows) = terminal::size().unwrap_or((80, 24));
-        let width = cols as usize;
-
         // Header
-        let header = format!("─ Help Search [{} topics] ─", self.filtered.len());
+        let status = if self.search_pending() {
+            "Searching…".to_string()
+        } else {
+            format!("{} topics", self.filtered.len())
+        };
+        let header = format!("─ Help Search [{status}] ─");
         let padded_header = format!("{:─<width$}", header, width = width);
-        println!("\r{}", padded_header.dark_grey());
+        writeln!(stdout, "\r{}", padded_header.dark_grey())?;
 
         // Query input with cursor at correct position
         let before_cursor: String = self.query.chars().take(self.cursor_pos).collect();
         let after_cursor: String = self.query.chars().skip(self.cursor_pos).collect();
         let query_line = format!("  Filter: {}_{}", before_cursor, after_cursor);
-        println!("\r{}", pad_to_width(&query_line, width));
+        writeln!(stdout, "\r{}", pad_to_width(&query_line, width))?;
 
         // Separator
-        println!("\r{}", "─".repeat(width).dark_grey());
+        writeln!(stdout, "\r{}", "─".repeat(width).dark_grey())?;
 
         // Results
         let (name_width, title_width) = calculate_layout(width);
-        let visible_rows = visible_result_rows();
+        let visible_rows = visible_result_rows_for(rows);
 
         for i in 0..visible_rows {
             let idx = self.scroll_offset + i;
-            if idx < self.filtered.len() {
-                let (topic, _score) = &self.filtered[idx];
+            if self.search_pending() {
+                let line = if i == 0 { "  Searching…" } else { "" };
+                writeln!(stdout, "\r{}", pad_to_width(line, width).dark_grey())?;
+            } else if idx < self.filtered.len() {
+                let (topic_index, _score) = self.filtered[idx];
+                let topic = &self.topics[topic_index];
                 let prefix = if idx == self.selected { " > " } else { "   " };
                 let name = topic.qualified_name();
 
@@ -482,7 +675,7 @@ demo("{name}", package = "{pkg}")"#,
                 let line = pad_to_width(&content, width);
 
                 if idx == self.selected {
-                    println!("\r{}", line.reverse());
+                    writeln!(stdout, "\r{}", line.reverse())?;
                 } else {
                     // Apply dark_grey only to the title portion for non-selected items
                     let name_part = format!("{}{} ", prefix, padded_name);
@@ -492,25 +685,30 @@ demo("{name}", package = "{pkg}")"#,
                     );
                     let padding_len = width
                         .saturating_sub(display_width(&name_part) + display_width(&title_part));
-                    print!(
-                        "\r{}{}{}\n",
+                    writeln!(
+                        stdout,
+                        "\r{}{}{}",
                         name_part,
                         title_part.dark_grey(),
                         " ".repeat(padding_len)
-                    );
+                    )?;
                 }
             } else {
-                println!("\r{}", " ".repeat(width));
+                writeln!(stdout, "\r{}", " ".repeat(width))?;
             }
         }
 
         // Footer
-        println!("\r{}", "─".repeat(width).dark_grey());
+        writeln!(stdout, "\r{}", "─".repeat(width).dark_grey())?;
 
         // Build plain text first, pad it, then apply style.
         // pad_to_width is not ANSI-aware, so styling must come after padding.
         let footer_plain = "  ↑↓ navigate Tab/Enter select Esc exit";
-        println!("\r{}", pad_to_width(footer_plain, width).dark_grey());
+        writeln!(
+            stdout,
+            "\r{}",
+            pad_to_width(footer_plain, width).dark_grey()
+        )?;
 
         // End synchronized update
         queue!(stdout, EndSynchronizedUpdate)?;
@@ -519,73 +717,19 @@ demo("{name}", package = "{pkg}")"#,
     }
 }
 
-/// Perform fuzzy search on help topics.
+struct WorkerShutdownRequest<'a>(&'a SearchWorker);
+
+impl Drop for WorkerShutdownRequest<'_> {
+    fn drop(&mut self) {
+        self.0.request_shutdown();
+    }
+}
+
+#[cfg(test)]
 fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32)> {
-    if query.is_empty() {
-        return topics
-            .iter()
-            .take(MAX_FILTERED_RESULTS)
-            .map(|topic| (topic.clone(), 0))
-            .collect();
-    }
-
-    let smart_pattern = Pattern::new(
-        query,
-        CaseMatching::Smart,
-        Normalization::Smart,
-        AtomKind::Fuzzy,
-    );
-    let ignore_pattern = Pattern::new(
-        query,
-        CaseMatching::Ignore,
-        Normalization::Smart,
-        AtomKind::Fuzzy,
-    );
-    let same_atoms = smart_pattern.atoms == ignore_pattern.atoms;
-    let mut matcher = FuzzyScoreMatcher::new();
-    let mut qualified_candidate = String::new();
-    let mut ranked = Vec::new();
-
-    for (index, topic) in topics.iter().enumerate() {
-        let mut best_rank: Option<(bool, u32)> = None;
-        let mut consider_candidate = |candidate: &str, weight: u32| {
-            let smart_score = matcher.score(&smart_pattern, candidate);
-            let (case_preferred, score) = match smart_score {
-                Some(score) => (true, score),
-                None if !same_atoms => match matcher.score(&ignore_pattern, candidate) {
-                    Some(score) => (false, score),
-                    None => return,
-                },
-                None => return,
-            };
-            let rank = (case_preferred, score / weight);
-            best_rank = Some(best_rank.map_or(rank, |best| best.max(rank)));
-        };
-
-        for candidate in std::iter::once(topic.topic.as_str())
-            .chain(topic.aliases.iter().map(String::as_str))
-            .chain(topic.help_key.as_deref())
-        {
-            consider_candidate(candidate, 1);
-            qualified_candidate.clear();
-            qualified_candidate.push_str(&topic.package);
-            qualified_candidate.push_str("::");
-            qualified_candidate.push_str(candidate);
-            consider_candidate(&qualified_candidate, 1);
-        }
-        consider_candidate(&topic.title, 2);
-
-        if let Some(rank) = best_rank {
-            ranked.push((index, rank));
-        }
-    }
-
-    // Stable sorting preserves source order when both ranking fields tie.
-    ranked.sort_by_key(|(_, rank)| std::cmp::Reverse(*rank));
-    ranked
+    search_topics_sync(topics, query)
         .into_iter()
-        .take(MAX_FILTERED_RESULTS)
-        .map(|(index, (_, score))| (topics[index].clone(), score))
+        .map(|(index, score)| (topics[index].clone(), score))
         .collect()
 }
 
@@ -603,8 +747,12 @@ fn calculate_layout(cols: usize) -> (usize, usize) {
 /// Layout: header(1) + filter(1) + separator(1) + results(N) + separator(1) + footer(1)
 fn visible_result_rows() -> usize {
     let (_, rows) = terminal::size().unwrap_or((80, 24));
+    visible_result_rows_for(rows as usize)
+}
+
+fn visible_result_rows_for(rows: usize) -> usize {
     // Reserve 5 lines for UI chrome (header, filter, 2 separators, footer)
-    (rows as usize).saturating_sub(5).max(3)
+    rows.saturating_sub(5).max(3)
 }
 
 /// Display help content (Markdown) in an interactive pager.
@@ -742,6 +890,279 @@ mod tests {
     }
 
     #[test]
+    fn pending_enter_opens_only_the_first_match_from_its_generation() {
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "mea");
+        browser.query_generation = 7;
+        browser.pending_generation = Some(7);
+        browser.remember_pending_open();
+
+        assert_eq!(browser.pending_open, Some(7));
+        assert_eq!(
+            browser.accept_search_result(search::SearchResult {
+                generation: 7,
+                matches: vec![(0, 12)],
+            }),
+            Some(0)
+        );
+        assert_eq!(browser.pending_generation, None);
+        assert_eq!(browser.filtered, [(0, 12)]);
+    }
+
+    #[test]
+    fn boundary_edits_clear_pending_open_without_cancelling_search() {
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "mean");
+        browser.query_generation = 17;
+        browser.pending_generation = Some(41);
+        browser.remember_pending_open();
+        browser.cursor_pos = 0;
+        browser.backspace_query();
+        assert_eq!(browser.query, "mean");
+        assert_eq!(browser.pending_generation, Some(41));
+        assert_eq!(browser.pending_open, None);
+
+        browser.remember_pending_open();
+        browser.cursor_pos = browser.query.chars().count();
+        browser.delete_query_char();
+        assert_eq!(browser.query, "mean");
+        assert_eq!(browser.pending_generation, Some(41));
+        assert_eq!(browser.pending_open, None);
+    }
+
+    #[test]
+    fn candidate_movement_keeps_pending_search_and_only_moves_ready_candidates() {
+        let topics: Arc<[HelpTopic]> = vec![
+            topic("base", "mean", &[], "Mean"),
+            topic("stats", "median", &[], "Median"),
+        ]
+        .into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "m");
+        browser.query_generation = 3;
+        browser.pending_generation = Some(12);
+        browser.remember_pending_open();
+        browser.move_selection(1, 5);
+        assert_eq!(browser.pending_generation, Some(12));
+        assert_eq!(browser.pending_open, None);
+        assert_eq!(browser.selected, 0);
+
+        browser.accept_search_result(search::SearchResult {
+            generation: 12,
+            matches: vec![(0, 8), (1, 4)],
+        });
+        browser.move_selection(1, 5);
+        assert_eq!(browser.selected, 1);
+    }
+
+    #[test]
+    fn ready_enter_stops_event_drain_before_later_browser_keys() {
+        use crossterm::event::KeyEvent;
+        use std::collections::VecDeque;
+
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "");
+        let mut worker = SearchWorker::spawn(topics).unwrap();
+        let mut events = VecDeque::from([
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+        ]);
+
+        let drained = drain_help_events(
+            || Ok(events.pop_front()),
+            |event| browser.handle_event(event, false, &worker),
+        )
+        .unwrap();
+        assert_eq!(drained.action, BrowserAction::Open(0));
+        assert_eq!(drained.events_read, 1);
+        assert_eq!(events.len(), 1, "the pager must receive the unread q key");
+        worker.shutdown_and_join().unwrap();
+    }
+
+    #[test]
+    fn thirty_third_exit_cancels_pending_open_before_results_apply() {
+        use crossterm::event::KeyEvent;
+        use std::collections::VecDeque;
+
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "mean");
+        browser.query_generation = 5;
+        browser.pending_generation = Some(11);
+        let mut worker = SearchWorker::spawn(topics).unwrap();
+        let mut events = VecDeque::new();
+        events.push_back(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        events.extend((0..31).map(|_| Event::Resize(80, 24)));
+        events.push_back(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+
+        let first = drain_help_events(
+            || Ok(events.pop_front()),
+            |event| browser.handle_event(event, false, &worker),
+        )
+        .unwrap();
+        assert_eq!(first.action, BrowserAction::Continue);
+        assert_eq!(first.events_read, 32);
+        assert_eq!(browser.pending_open, Some(5));
+
+        let mut applied = false;
+        let backlog = poll_backlog_before_results(
+            first.action,
+            || Ok(!events.is_empty()),
+            || {
+                applied = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(backlog);
+        assert!(!applied, "queued input takes priority over pending open");
+
+        let second = drain_help_events(
+            || Ok(events.pop_front()),
+            |event| browser.handle_event(event, false, &worker),
+        )
+        .unwrap();
+        assert_eq!(second.action, BrowserAction::Exit);
+        assert_eq!(browser.pending_open, None);
+        worker.shutdown_and_join().unwrap();
+    }
+
+    #[test]
+    fn input_arriving_at_end_of_redraw_prevents_result_application() {
+        use crossterm::event::KeyEvent;
+        use std::collections::VecDeque;
+
+        let mut events = VecDeque::new();
+        let mut applied = false;
+        let backlog = poll_backlog_before_results(
+            BrowserAction::Continue,
+            || {
+                events.push_back(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+                Ok(!events.is_empty())
+            },
+            || {
+                applied = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(backlog);
+        assert!(!applied);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn batched_edits_submit_only_final_query_for_deferred_enter() {
+        use crossterm::event::KeyEvent;
+        use std::collections::VecDeque;
+
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "");
+        let mut worker = SearchWorker::spawn(topics).unwrap();
+        let mut events = VecDeque::from([
+            Event::Key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ]);
+
+        let drained = drain_help_events(
+            || Ok(events.pop_front()),
+            |event| browser.handle_event(event, false, &worker),
+        )
+        .unwrap();
+        assert_eq!(drained.action, BrowserAction::Continue);
+        assert_eq!(browser.query, "me");
+        assert_eq!(browser.pending_open, Some(browser.query_generation));
+        browser.dispatch_search(&worker).unwrap();
+        let generation = browser.pending_generation.unwrap();
+        assert_eq!(generation, 1, "one batch submits one final query");
+        let result = worker.wait_for_result(generation).unwrap();
+        assert_eq!(result.matches.first().map(|(index, _)| *index), Some(0));
+        assert_eq!(browser.accept_search_result(result), Some(0));
+        worker.shutdown_and_join().unwrap();
+    }
+
+    #[test]
+    fn stale_empty_result_cannot_open_and_query_edit_clears_pending_enter() {
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "missing");
+        browser.query_generation = 9;
+        browser.pending_generation = Some(9);
+        browser.remember_pending_open();
+
+        assert_eq!(
+            browser.accept_search_result(search::SearchResult {
+                generation: 8,
+                matches: vec![(0, 1)],
+            }),
+            None
+        );
+        browser.clear_pending_search();
+        assert_eq!(browser.pending_open, None);
+        assert_eq!(browser.pending_generation, None);
+
+        browser.query_generation = 10;
+        browser.pending_generation = Some(10);
+        browser.remember_pending_open();
+        assert_eq!(
+            browser.accept_search_result(search::SearchResult {
+                generation: 10,
+                matches: Vec::new(),
+            }),
+            None
+        );
+        assert!(browser.filtered.is_empty());
+    }
+
+    #[test]
+    fn query_edits_and_escape_cancel_without_waiting_for_search() {
+        use std::sync::{Barrier, mpsc};
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let gate = Arc::new(Barrier::new(2));
+        let hook_gate = Arc::clone(&gate);
+        let hook = Arc::new(move |generation| {
+            let _ = started_tx.send(generation);
+            hook_gate.wait();
+        });
+        let topics: Arc<[HelpTopic]> = vec![topic("base", "mean", &[], "Mean")].into();
+        let mut worker = SearchWorker::spawn_with_hook(Arc::clone(&topics), hook).unwrap();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "x");
+        let first_generation = worker.submit(browser.query.clone()).unwrap();
+        browser.pending_generation = Some(first_generation);
+        browser.remember_pending_open();
+        assert_eq!(started_rx.recv().unwrap(), first_generation);
+
+        browser.insert_query_char('y');
+        assert_eq!(browser.query, "xy");
+        assert_eq!(browser.pending_open, None);
+        browser.backspace_query();
+        assert_eq!(browser.query, "x");
+        browser.dispatch_search(&worker).unwrap();
+        let latest_generation = browser.pending_generation.unwrap();
+        browser.remember_pending_open();
+        browser.move_cursor(0);
+        assert_eq!(browser.pending_generation, Some(latest_generation));
+        assert!(browser.search_pending());
+        browser.remember_pending_open();
+        assert_eq!(browser.pending_open, Some(browser.query_generation));
+        browser.move_cursor(browser.query.chars().count());
+        assert_eq!(browser.pending_open, None);
+        assert_eq!(browser.pending_generation, Some(latest_generation));
+        browser.clear_query();
+        assert_eq!(browser.query, "");
+        assert_eq!(browser.filtered, [(0, 0)]);
+        browser.dispatch_search(&worker).unwrap();
+
+        browser.cancel_search(&worker).unwrap();
+        gate.wait();
+        worker.shutdown_and_join().unwrap();
+        assert!(worker.take_result(first_generation).unwrap().is_none());
+        assert!(worker.take_result(latest_generation).unwrap().is_none());
+    }
+
+    #[test]
     fn help_library_snapshot_refresh_and_stale_fallback_policy() {
         use std::cell::Cell;
 
@@ -834,18 +1255,21 @@ mod tests {
         ];
 
         let topics = get_help_topics_from_paths(&snapshot);
-        let mut browser = HelpBrowser::new(topics, snapshot, "resolverpkg");
+        let topics: Arc<[HelpTopic]> = topics.into();
+        let mut browser = HelpBrowser::new(Arc::clone(&topics), snapshot, "resolverpkg");
+        browser.filtered = search_topics_sync(&topics, "resolverpkg");
         let selected_index = browser
             .filtered
             .iter()
-            .position(|(topic, _)| {
+            .position(|(index, _)| {
+                let topic = &topics[*index];
                 topic.package == "resolverpkg"
                     && topic.package_dir == source_a
                     && topic.help_key.is_some()
             })
             .expect("the first installed package copy should appear in metadata results");
         browser.selected = selected_index;
-        let topic = &browser.filtered[browser.selected].0;
+        let topic = &topics[browser.filtered[browser.selected].0];
         let mut page = HelpTargetResolver::prepare_candidate(topic).unwrap();
         assert_eq!(page.package_dir, source_a);
         // Add a deterministic qualified link to the real prepared fixture page.
@@ -1210,9 +1634,9 @@ mod tests {
         assert_eq!(empty[0].0.topic, "same0");
         assert_eq!(empty[MAX_FILTERED_RESULTS - 1].0.topic, "same499");
 
-        let browser = HelpBrowser::new(topics.clone(), Vec::new(), "");
+        let browser = HelpBrowser::new(topics.clone().into(), Vec::new(), "");
         assert_eq!(browser.filtered.len(), MAX_FILTERED_RESULTS);
-        assert_eq!(browser.filtered[0].0.topic, "same0");
+        assert_eq!(browser.filtered[0].0, 0);
 
         let matches = fuzzy_search_topics(&topics, "same");
         assert_eq!(matches.len(), MAX_FILTERED_RESULTS);
@@ -1349,6 +1773,157 @@ mod tests {
         {
             eprintln!("query {query:?}: legacy={legacy:?}, optimized={optimized:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "manual optimized-profile help browser phase benchmark; requires an installed R executable"]
+    fn measure_help_browser_pipeline_phases() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const FIXTURE_QUERIES: [&str; 10] = [
+            "topic",
+            "topi",
+            "top",
+            "to",
+            "t",
+            "a",
+            "ToPi",
+            "Topic",
+            "package_1::topic_1",
+            "xyz",
+        ];
+        const INSTALLED_QUERIES: [&str; 8] =
+            ["print", "prin", "pri", "pr", "p", "mean", "Mean", "xyz123"];
+        const FIXTURE_REPEATS: usize = 5;
+
+        let fixture_start = Instant::now();
+        let fixture: Vec<_> = (0..3_000)
+            .map(|index| {
+                let aliases = (0..3)
+                    .map(|alias| format!("topic_{index}_alias_{alias}"))
+                    .collect();
+                HelpTopic {
+                    package: format!("package_{}", index % 60),
+                    package_dir: std::path::PathBuf::new(),
+                    topic: format!("topic_{index}"),
+                    aliases,
+                    help_key: Some(format!("help_key_{index}")),
+                    title: format!("Topic {index} documentation and examples"),
+                    entry_type: "help".to_string(),
+                }
+            })
+            .collect();
+        let fixture_preparation = fixture_start.elapsed();
+
+        let fixture_index_start = Instant::now();
+        let mut fixture_search = SearchBench::new(&fixture);
+        let fixture_index_preparation = fixture_index_start.elapsed();
+        for query in FIXTURE_QUERIES {
+            let legacy = legacy_fuzzy_search_topics(&fixture, query);
+            let indexed = fixture_search
+                .search(query)
+                .into_iter()
+                .map(|(index, score)| (fixture[index].clone(), score))
+                .collect::<Vec<_>>();
+            assert_eq!(legacy, indexed, "search mismatch for {query:?}");
+        }
+        let fixture_search_times = FIXTURE_QUERIES.map(|query| {
+            let start = Instant::now();
+            for _ in 0..FIXTURE_REPEATS {
+                black_box(fixture_search.search(black_box(query)));
+            }
+            start.elapsed()
+        });
+
+        // Read library paths from a child process; metadata loading and matching stay outside R.
+        let library_start = Instant::now();
+        let output = std::process::Command::new("R")
+            .args(["--vanilla", "--slave", "-e", "writeLines(.libPaths())"])
+            .output()
+            .expect("run R to read .libPaths()");
+        assert!(
+            output.status.success(),
+            "R .libPaths() failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let libraries = String::from_utf8(output.stdout)
+            .expect("R .libPaths() output is UTF-8")
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let library_path_time = library_start.elapsed();
+        let metadata_start = Instant::now();
+        let installed_topics = get_help_topics_from_paths(&libraries);
+        let metadata_time = metadata_start.elapsed();
+        let installed_index_start = Instant::now();
+        let mut installed_search = SearchBench::new(&installed_topics);
+        let installed_index_preparation = installed_index_start.elapsed();
+        let installed_alias_count = installed_topics
+            .iter()
+            .map(|topic| topic.aliases.len())
+            .sum::<usize>();
+        let installed_search_results = INSTALLED_QUERIES.map(|query| {
+            let legacy = legacy_fuzzy_search_topics(&installed_topics, query);
+            let indexed = installed_search
+                .search(query)
+                .into_iter()
+                .map(|(index, score)| (installed_topics[index].clone(), score))
+                .collect::<Vec<_>>();
+            assert_eq!(legacy, indexed, "installed search mismatch for {query:?}");
+            let start = Instant::now();
+            let matches = black_box(installed_search.search(black_box(query)));
+            (start.elapsed(), matches.len())
+        });
+
+        let worker_start =
+            SearchWorker::spawn(installed_topics.clone().into()).expect("spawn help search worker");
+        let mut worker = worker_start;
+        let worker_wait_times = INSTALLED_QUERIES.map(|query| {
+            let start = Instant::now();
+            let generation = worker.submit(query.to_string()).unwrap();
+            black_box(worker.wait_for_result(generation).unwrap());
+            start.elapsed()
+        });
+        worker.shutdown_and_join().unwrap();
+
+        let render_results = installed_search.search("print");
+        drop(installed_search);
+        let installed_topics: Arc<[HelpTopic]> = installed_topics.into();
+        let mut browser = HelpBrowser::new(Arc::clone(&installed_topics), libraries, "print");
+        browser.filtered = render_results;
+        let mut render_buffer = Vec::new();
+        let render_start = Instant::now();
+        for _ in 0..FIXTURE_REPEATS {
+            render_buffer.clear();
+            browser.render_to(&mut render_buffer, 100, 30).unwrap();
+            black_box(render_buffer.len());
+        }
+        let render_time = render_start.elapsed();
+
+        eprintln!(
+            "fixture: prepare={fixture_preparation:?}, borrowed names+matcher={fixture_index_preparation:?}, {FIXTURE_REPEATS} searches/query"
+        );
+        for (query, elapsed) in FIXTURE_QUERIES.into_iter().zip(fixture_search_times) {
+            eprintln!("fixture search {query:?}: {elapsed:?}");
+        }
+        eprintln!(
+            "installed metadata: child R .libPaths()={library_path_time:?}, get_help_topics={metadata_time:?}; topics={}, aliases={installed_alias_count}",
+            installed_topics.len(),
+        );
+        eprintln!("installed borrowed names+matcher: {installed_index_preparation:?}");
+        for ((query, (search, returned)), worker_wait) in INSTALLED_QUERIES
+            .into_iter()
+            .zip(installed_search_results)
+            .zip(worker_wait_times)
+        {
+            eprintln!(
+                "installed search {query:?}: direct={search:?}, returned={returned} (capped at 500), worker submit-to-result={worker_wait:?}"
+            );
+        }
+        eprintln!(
+            "render_to buffer: {render_time:?} for {FIXTURE_REPEATS} frames at 100x30; terminal repaint latency is excluded"
+        );
     }
 
     #[test]

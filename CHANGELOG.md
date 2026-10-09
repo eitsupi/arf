@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The interactive help browser now searches package help metadata in a background worker, keeping query editing responsive while results are ranked.
+
 ## [0.6.0] - 2026-10-08
 
 ### Added
