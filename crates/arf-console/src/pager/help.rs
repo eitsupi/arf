@@ -20,6 +20,8 @@ use super::{
     MinimumSize, TextScrollState, check_terminal_too_small, render_size_warning,
     with_alternate_screen,
 };
+use crate::fuzzy::FuzzyScoreMatcher;
+#[cfg(test)]
 use crate::fuzzy::fuzzy_match_with_case_preference;
 use arf_harp::HarpResult;
 use arf_harp::help::{
@@ -34,6 +36,7 @@ use crossterm::{
     style::Stylize,
     terminal::{self, BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
+use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use std::io::{self, Write};
 use std::time::Duration;
 
@@ -125,14 +128,7 @@ impl HelpBrowser {
     }
 
     fn update_filter(&mut self) {
-        if self.query.is_empty() {
-            // Show all topics sorted by package then topic
-            self.filtered = self.topics.iter().map(|t| (t.clone(), 0)).collect();
-            // Limit to avoid memory issues
-            self.filtered.truncate(MAX_FILTERED_RESULTS);
-        } else {
-            self.filtered = fuzzy_search_topics(&self.topics, &self.query);
-        }
+        self.filtered = fuzzy_search_topics(&self.topics, &self.query);
         self.selected = 0;
         self.scroll_offset = 0;
         // Ensure cursor_pos stays within bounds
@@ -525,60 +521,71 @@ demo("{name}", package = "{pkg}")"#,
 
 /// Perform fuzzy search on help topics.
 fn fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32)> {
-    let mut results: Vec<(HelpTopic, bool, u32)> = topics
-        .iter()
-        .filter_map(|topic| {
-            // Search in qualified name (package::topic) and title
-            let name = topic.qualified_name();
-            let mut best_rank = None;
-            let mut consider_candidate = |candidate: &str, weight: u32| {
-                if let Some(matched) = fuzzy_match_with_case_preference(query, candidate) {
-                    let score = matched.fuzzy_match.score / weight;
-                    let rank = (matched.case_preferred, score);
-                    best_rank = Some(best_rank.map_or(rank, |best: (bool, u32)| best.max(rank)));
-                }
+    if query.is_empty() {
+        return topics
+            .iter()
+            .take(MAX_FILTERED_RESULTS)
+            .map(|topic| (topic.clone(), 0))
+            .collect();
+    }
+
+    let smart_pattern = Pattern::new(
+        query,
+        CaseMatching::Smart,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+    let ignore_pattern = Pattern::new(
+        query,
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+    let same_atoms = smart_pattern.atoms == ignore_pattern.atoms;
+    let mut matcher = FuzzyScoreMatcher::new();
+    let mut qualified_candidate = String::new();
+    let mut ranked = Vec::new();
+
+    for (index, topic) in topics.iter().enumerate() {
+        let mut best_rank: Option<(bool, u32)> = None;
+        let mut consider_candidate = |candidate: &str, weight: u32| {
+            let smart_score = matcher.score(&smart_pattern, candidate);
+            let (case_preferred, score) = match smart_score {
+                Some(score) => (true, score),
+                None if !same_atoms => match matcher.score(&ignore_pattern, candidate) {
+                    Some(score) => (false, score),
+                    None => return,
+                },
+                None => return,
             };
+            let rank = (case_preferred, score / weight);
+            best_rank = Some(best_rank.map_or(rank, |best| best.max(rank)));
+        };
 
-            consider_candidate(&name, 1);
-            consider_candidate(&topic.topic, 1);
-            let max_candidate_len = topic
-                .aliases
-                .iter()
-                .map(String::len)
-                .chain(topic.help_key.iter().map(String::len))
-                .max()
-                .unwrap_or(0);
-            let mut qualified_candidate =
-                String::with_capacity(topic.package.len() + 2 + max_candidate_len);
-            for candidate in topic
-                .aliases
-                .iter()
-                .map(String::as_str)
-                .chain(topic.help_key.as_deref())
-            {
-                consider_candidate(candidate, 1);
+        for candidate in std::iter::once(topic.topic.as_str())
+            .chain(topic.aliases.iter().map(String::as_str))
+            .chain(topic.help_key.as_deref())
+        {
+            consider_candidate(candidate, 1);
+            qualified_candidate.clear();
+            qualified_candidate.push_str(&topic.package);
+            qualified_candidate.push_str("::");
+            qualified_candidate.push_str(candidate);
+            consider_candidate(&qualified_candidate, 1);
+        }
+        consider_candidate(&topic.title, 2);
 
-                qualified_candidate.clear();
-                qualified_candidate.push_str(&topic.package);
-                qualified_candidate.push_str("::");
-                qualified_candidate.push_str(candidate);
-                consider_candidate(&qualified_candidate, 1);
-            }
-            consider_candidate(&topic.title, 2); // Title matches weighted less
+        if let Some(rank) = best_rank {
+            ranked.push((index, rank));
+        }
+    }
 
-            best_rank.map(|(case_preferred, score)| (topic.clone(), case_preferred, score))
-        })
-        .collect();
-
-    // Prefer smart-case matches, then sort by the existing fuzzy score.
-    results.sort_by_key(|entry| std::cmp::Reverse((entry.1, entry.2)));
-
-    // Limit results
-    results.truncate(MAX_FILTERED_RESULTS);
-
-    results
+    // Stable sorting preserves source order when both ranking fields tie.
+    ranked.sort_by_key(|(_, rank)| std::cmp::Reverse(*rank));
+    ranked
         .into_iter()
-        .map(|(topic, _, score)| (topic, score))
+        .take(MAX_FILTERED_RESULTS)
+        .map(|(index, (_, score))| (topics[index].clone(), score))
         .collect()
 }
 
@@ -721,6 +728,18 @@ fn help_page_load_error_message(error: &io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn topic(package: &str, name: &str, aliases: &[&str], title: &str) -> HelpTopic {
+        HelpTopic {
+            package: package.to_string(),
+            package_dir: std::path::PathBuf::from(format!("/{package}")),
+            topic: name.to_string(),
+            aliases: aliases.iter().map(|alias| (*alias).to_string()).collect(),
+            help_key: None,
+            title: title.to_string(),
+            entry_type: "help".to_string(),
+        }
+    }
 
     #[test]
     fn help_library_snapshot_refresh_and_stale_fallback_policy() {
@@ -1111,6 +1130,224 @@ mod tests {
             let results = fuzzy_search_topics(std::slice::from_ref(&topic), query);
             assert_eq!(results.len(), 1, "query {query:?}");
             assert_eq!(results[0].0.topic, "[.data.frame");
+        }
+    }
+
+    #[test]
+    fn fuzzy_search_keeps_source_order_for_equal_ranks() {
+        let topics = [
+            topic("first", "needle", &[], ""),
+            topic("second", "needle", &[], ""),
+        ];
+        let results = fuzzy_search_topics(&topics, "needle");
+        assert_eq!(
+            results
+                .iter()
+                .map(|(topic, _)| topic.package.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
+    fn fuzzy_search_weights_titles_by_half() {
+        let title_only = topic("pkg", "other", &[], "Needle");
+        let results = fuzzy_search_topics(std::slice::from_ref(&title_only), "Needle");
+        assert_eq!(results.len(), 1);
+        let raw_score = crate::fuzzy::fuzzy_match_smart_case("Needle", "Needle")
+            .unwrap()
+            .score;
+        assert_eq!(results[0].1, raw_score / 2);
+    }
+
+    #[test]
+    fn fuzzy_search_prefers_smart_title_over_ignore_case_bare_name() {
+        let topics = [
+            topic("pkg", "unrelated", &[], "Foo"),
+            topic("pkg", "foo", &[], ""),
+        ];
+        let results = fuzzy_search_topics(&topics, "Foo");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0.topic, "unrelated");
+        assert_eq!(results[1].0.topic, "foo");
+    }
+
+    #[test]
+    fn fuzzy_search_keeps_dollar_literal_and_matches_unicode() {
+        let topics = [
+            topic("base", "Extract$", &[], ""),
+            topic("base", "Extract", &[], ""),
+            topic("unicode", "café_日本語", &[], ""),
+        ];
+        let literal_dollar_matches = fuzzy_search_topics(&topics, "Extract$");
+        assert_eq!(literal_dollar_matches.len(), 1);
+        assert_eq!(literal_dollar_matches[0].0.topic, "Extract$");
+        assert_eq!(
+            fuzzy_search_topics(&topics, "cafe\u{301}日本語")[0].0.topic,
+            "café_日本語"
+        );
+    }
+
+    #[test]
+    fn fuzzy_search_does_not_join_separate_aliases() {
+        let item = topic("pkg", "other", &["foo", "bar"], "");
+        for query in ["fb", "f b"] {
+            assert!(
+                fuzzy_search_topics(std::slice::from_ref(&item), query).is_empty(),
+                "query {query:?} must not span aliases"
+            );
+        }
+    }
+
+    #[test]
+    fn fuzzy_search_limits_before_cloning_and_empty_search_keeps_first_topics() {
+        let topics: Vec<_> = (0..MAX_FILTERED_RESULTS + 25)
+            .map(|index| topic("pkg", &format!("same{index}"), &[], ""))
+            .collect();
+
+        let empty = fuzzy_search_topics(&topics, "");
+        assert_eq!(empty.len(), MAX_FILTERED_RESULTS);
+        assert_eq!(empty[0].0.topic, "same0");
+        assert_eq!(empty[MAX_FILTERED_RESULTS - 1].0.topic, "same499");
+
+        let browser = HelpBrowser::new(topics.clone(), Vec::new(), "");
+        assert_eq!(browser.filtered.len(), MAX_FILTERED_RESULTS);
+        assert_eq!(browser.filtered[0].0.topic, "same0");
+
+        let matches = fuzzy_search_topics(&topics, "same");
+        assert_eq!(matches.len(), MAX_FILTERED_RESULTS);
+        assert_eq!(matches[0].0.topic, "same0");
+    }
+
+    fn legacy_fuzzy_search_topics(topics: &[HelpTopic], query: &str) -> Vec<(HelpTopic, u32)> {
+        let mut results: Vec<(HelpTopic, bool, u32)> = topics
+            .iter()
+            .filter_map(|topic| {
+                let name = topic.qualified_name();
+                let mut best_rank = None;
+                let mut consider = |candidate: &str, weight: u32| {
+                    if let Some(matched) = fuzzy_match_with_case_preference(query, candidate) {
+                        let rank = (matched.case_preferred, matched.fuzzy_match.score / weight);
+                        best_rank =
+                            Some(best_rank.map_or(rank, |best: (bool, u32)| best.max(rank)));
+                    }
+                };
+                consider(&name, 1);
+                consider(&topic.topic, 1);
+                let max_candidate_len = topic
+                    .aliases
+                    .iter()
+                    .map(String::len)
+                    .chain(topic.help_key.iter().map(String::len))
+                    .max()
+                    .unwrap_or(0);
+                let mut qualified_candidate =
+                    String::with_capacity(topic.package.len() + 2 + max_candidate_len);
+                for alias in topic
+                    .aliases
+                    .iter()
+                    .map(String::as_str)
+                    .chain(topic.help_key.as_deref())
+                {
+                    consider(alias, 1);
+                    qualified_candidate.clear();
+                    qualified_candidate.push_str(&topic.package);
+                    qualified_candidate.push_str("::");
+                    qualified_candidate.push_str(alias);
+                    consider(&qualified_candidate, 1);
+                }
+                consider(&topic.title, 2);
+                best_rank.map(|(case_preferred, score)| (topic.clone(), case_preferred, score))
+            })
+            .collect();
+        results.sort_by_key(|entry| std::cmp::Reverse((entry.1, entry.2)));
+        results.truncate(MAX_FILTERED_RESULTS);
+        results
+            .into_iter()
+            .map(|(topic, _, score)| (topic, score))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "manual optimized-profile search benchmark"]
+    fn measure_help_search_before_after_release() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const TOPICS: usize = 3_000;
+        const ALIASES_PER_TOPIC: usize = 3;
+        // This prefix series models repeated Backspace edits from "topic" to "t".
+        const QUERIES: [&str; 10] = [
+            "topic",
+            "topi",
+            "top",
+            "to",
+            "t",
+            "a",
+            "ToPi",
+            "Topic",
+            "package_1::topic_1",
+            "xyz",
+        ];
+        const REPEATS: usize = 5;
+        let fixture_start = Instant::now();
+        let topics: Vec<_> = (0..TOPICS)
+            .map(|index| {
+                let aliases = (0..ALIASES_PER_TOPIC)
+                    .map(|alias| format!("topic_{index}_alias_{alias}"))
+                    .collect();
+                HelpTopic {
+                    package: format!("package_{}", index % 60),
+                    package_dir: std::path::PathBuf::new(),
+                    topic: format!("topic_{index}"),
+                    aliases,
+                    help_key: Some(format!("help_key_{index}")),
+                    title: format!("Topic {index} documentation and examples"),
+                    entry_type: "help".to_string(),
+                }
+            })
+            .collect();
+        let fixture_preparation = fixture_start.elapsed();
+
+        for query in QUERIES {
+            assert_eq!(
+                legacy_fuzzy_search_topics(&topics, query),
+                fuzzy_search_topics(&topics, query),
+                "benchmark implementations differ for {query:?}"
+            );
+        }
+
+        let mut legacy_timings = Vec::with_capacity(QUERIES.len());
+        for query in QUERIES {
+            let start = Instant::now();
+            for _ in 0..REPEATS {
+                black_box(legacy_fuzzy_search_topics(
+                    black_box(&topics),
+                    black_box(query),
+                ));
+            }
+            legacy_timings.push(start.elapsed());
+        }
+
+        let mut optimized_timings = Vec::with_capacity(QUERIES.len());
+        for query in QUERIES {
+            let start = Instant::now();
+            for _ in 0..REPEATS {
+                black_box(fuzzy_search_topics(black_box(&topics), black_box(query)));
+            }
+            optimized_timings.push(start.elapsed());
+        }
+
+        eprintln!(
+            "fixture preparation: {fixture_preparation:?}; fixture: {TOPICS} topics, {ALIASES_PER_TOPIC} aliases/topic, {} queries, {REPEATS} repeats/query",
+            QUERIES.len(),
+        );
+        for ((query, legacy), optimized) in QUERIES
+            .into_iter()
+            .zip(legacy_timings)
+            .zip(optimized_timings)
+        {
+            eprintln!("query {query:?}: legacy={legacy:?}, optimized={optimized:?}");
         }
     }
 

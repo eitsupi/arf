@@ -8,6 +8,28 @@ use nucleo_matcher::{
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 
+/// Reusable score-only matcher for searches that compare many strings.
+pub(crate) struct FuzzyScoreMatcher {
+    matcher: Matcher,
+    utf32_buffer: Vec<char>,
+}
+
+impl FuzzyScoreMatcher {
+    pub(crate) fn new() -> Self {
+        Self {
+            matcher: Matcher::new(Config::DEFAULT),
+            utf32_buffer: Vec::new(),
+        }
+    }
+
+    pub(crate) fn score(&mut self, pattern: &Pattern, target: &str) -> Option<u32> {
+        pattern.score(
+            Utf32Str::new(target, &mut self.utf32_buffer),
+            &mut self.matcher,
+        )
+    }
+}
+
 /// Result of a fuzzy match including score and matched indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuzzyMatch {
@@ -18,6 +40,7 @@ pub struct FuzzyMatch {
 }
 
 /// A match recording whether it also succeeded under smart-case rules.
+#[cfg(test)]
 pub(crate) struct CasePreferenceMatch {
     pub fuzzy_match: FuzzyMatch,
     pub case_preferred: bool,
@@ -40,11 +63,13 @@ pub fn fuzzy_match(pattern: &str, target: &str) -> Option<FuzzyMatch> {
 ///
 /// Lowercase patterns match without regard to case; patterns containing
 /// uppercase characters match case-sensitively.
+#[allow(dead_code)]
 pub fn fuzzy_match_smart_case(pattern: &str, target: &str) -> Option<FuzzyMatch> {
     fuzzy_match_with_case(pattern, target, CaseMatching::Smart)
 }
 
 /// Match without excluding case variants, while reporting whether smart case also matches.
+#[cfg(test)]
 pub(crate) fn fuzzy_match_with_case_preference(
     pattern: &str,
     target: &str,
