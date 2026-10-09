@@ -183,13 +183,11 @@ impl HelpBrowser {
         self.query_generation = self.query_generation.wrapping_add(1);
         self.pending_generation = None;
         self.search_dirty = true;
-        self.reset_results();
         if self.query.is_empty() {
+            self.reset_results();
             self.filtered = (0..self.topics.len().min(MAX_FILTERED_RESULTS))
                 .map(|index| (index, 0))
                 .collect();
-        } else {
-            self.filtered.clear();
         }
     }
 

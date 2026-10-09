@@ -66,7 +66,8 @@ impl HelpBrowser {
         stdout.execute(cursor::Hide)?;
 
         // Header
-        let status = if self.search_pending() {
+        let show_searching = self.search_pending() && self.filtered.is_empty();
+        let status = if show_searching {
             "Searching…".to_string()
         } else {
             format!("{} topics", self.filtered.len())
@@ -90,7 +91,7 @@ impl HelpBrowser {
 
         for i in 0..visible_rows {
             let idx = self.scroll_offset + i;
-            if self.search_pending() {
+            if show_searching {
                 let line = if i == 0 { "  Searching…" } else { "" };
                 writeln!(stdout, "\r{}", pad_to_width(line, width).dark_grey())?;
             } else if idx < self.filtered.len() {

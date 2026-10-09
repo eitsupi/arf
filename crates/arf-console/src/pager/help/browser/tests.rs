@@ -92,6 +92,88 @@ fn stale_empty_result_cannot_open_and_query_edit_clears_pending_enter() {
 }
 
 #[test]
+fn non_empty_search_keeps_old_view_until_latest_result_replaces_it() {
+    let topics: Arc<[HelpTopic]> = (0..4)
+        .map(|index| topic("pkg", &format!("topic{index}"), &[], "title"))
+        .collect::<Vec<_>>()
+        .into();
+    let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "old");
+    browser.filtered = vec![(0, 10), (1, 9), (2, 8)];
+    browser.selected = 2;
+    browser.scroll_offset = 1;
+    browser.text_scroll.scroll_pos = 6;
+    browser.query = "new".to_owned();
+    browser.cursor_pos = 3;
+
+    browser.start_search();
+
+    assert_eq!(browser.filtered, [(0, 10), (1, 9), (2, 8)]);
+    assert_eq!(browser.selected, 2);
+    assert_eq!(browser.scroll_offset, 1);
+    assert_eq!(browser.text_scroll.scroll_pos, 6);
+    assert!(browser.search_pending());
+
+    browser.pending_generation = Some(23);
+    assert_eq!(
+        browser.accept_search_result(SearchResult {
+            generation: 23,
+            matches: vec![(3, 15)],
+        }),
+        None
+    );
+    assert_eq!(browser.filtered, [(3, 15)]);
+    assert_eq!(browser.selected, 0);
+    assert_eq!(browser.scroll_offset, 0);
+    assert_eq!(browser.text_scroll.scroll_pos, 0);
+}
+
+#[test]
+fn clearing_query_restores_initial_results_and_resets_view() {
+    let topics: Arc<[HelpTopic]> = (0..3)
+        .map(|index| topic("pkg", &format!("topic{index}"), &[], "title"))
+        .collect::<Vec<_>>()
+        .into();
+    let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "x");
+    browser.filtered = vec![(2, 10)];
+    browser.selected = 4;
+    browser.scroll_offset = 2;
+    browser.text_scroll.scroll_pos = 5;
+
+    browser.clear_query();
+
+    assert_eq!(browser.filtered, [(0, 0), (1, 0), (2, 0)]);
+    assert_eq!(browser.selected, 0);
+    assert_eq!(browser.scroll_offset, 0);
+    assert_eq!(browser.text_scroll.scroll_pos, 0);
+}
+
+#[test]
+fn pending_selection_keys_do_not_open_or_move_old_results() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    let topics: Arc<[HelpTopic]> = vec![topic("pkg", "old", &[], "Old")].into();
+    let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "new");
+    browser.filtered = vec![(0, 10)];
+    browser.pending_generation = Some(4);
+    browser.query_generation = 8;
+    let mut worker = SearchWorker::spawn(topics).unwrap();
+
+    for key in [KeyCode::Down, KeyCode::Enter, KeyCode::Tab] {
+        let handled = browser
+            .handle_event(
+                Event::Key(KeyEvent::new(key, KeyModifiers::NONE)),
+                false,
+                &worker,
+            )
+            .unwrap();
+        assert_eq!(handled.action, BrowserAction::Continue);
+        assert_eq!(browser.selected, 0);
+    }
+    assert_eq!(browser.pending_open, Some(8));
+    worker.shutdown_and_join().unwrap();
+}
+
+#[test]
 fn query_edits_and_escape_cancel_without_waiting_for_search() {
     use std::sync::{Barrier, mpsc};
 

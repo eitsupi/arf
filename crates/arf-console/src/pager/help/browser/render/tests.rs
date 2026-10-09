@@ -1,5 +1,8 @@
 use super::*;
+use crate::pager::help::browser::tests::topic;
 use crate::pager::text_utils::{exceeds_width, scroll_display, truncate_to_width};
+use arf_harp::help::HelpTopic;
+use std::sync::Arc;
 
 #[test]
 fn test_truncate_to_width_no_truncation() {
@@ -84,4 +87,32 @@ fn test_scroll_display_unicode() {
         ("日本語…".to_owned(), 6)
     );
     assert_eq!(scroll_display("日本語テスト", 7, 100).0, "…テスト");
+}
+
+#[test]
+fn pending_search_renders_old_candidates_and_only_shows_placeholder_when_empty() {
+    let topics: Arc<[HelpTopic]> = vec![
+        topic("pkg", "old_first", &[], "First old title"),
+        topic("pkg", "old_selected", &[], "Selected old title"),
+    ]
+    .into();
+    let mut browser = HelpBrowser::new(Arc::clone(&topics), Vec::new(), "new");
+    browser.filtered = vec![(0, 12), (1, 10)];
+    browser.selected = 1;
+    browser.text_scroll.scroll_pos = 4;
+    browser.start_search();
+
+    let mut frame = Vec::new();
+    browser.render_to(&mut frame, 80, 12).unwrap();
+    let rendered = String::from_utf8(frame).unwrap();
+    assert!(rendered.contains("2 topics"));
+    assert!(rendered.contains("old_first"));
+    assert!(rendered.contains("old_selected"));
+    assert!(!rendered.contains("Searching"));
+
+    browser.filtered.clear();
+    let mut empty_frame = Vec::new();
+    browser.render_to(&mut empty_frame, 80, 12).unwrap();
+    let rendered = String::from_utf8(empty_frame).unwrap();
+    assert!(rendered.contains("Searching"));
 }
