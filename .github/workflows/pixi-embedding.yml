@@ -1,0 +1,64 @@
+name: Pixi embedding experiment
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pixi-embedding.yml
+      - .github/pixi-embedding/**
+      - crates/**
+      - Cargo.*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  embedding:
+    name: ${{ matrix.os }} / ${{ matrix.policy }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            policy: restricted
+          - os: windows-2022
+            policy: standard
+          - os: windows-2022
+            policy: prefix
+          - os: ubuntu-24.04
+            policy: restricted
+          - os: macos-15
+            policy: restricted
+    runs-on: ${{ matrix.os }}
+    env:
+      ARF_SPIKE_DLL_SEARCH: ${{ matrix.policy }}
+      ARF_SPIKE_RESULTS: ${{ runner.temp }}/pixi-spike
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up fixed Pixi environment without caches
+        uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
+        with:
+          pixi-version: v0.81.0
+          manifest-path: .github/pixi-embedding/pixi.toml
+          cache: false
+          locked: true
+      - name: Build spike binary, native probe and terminal tests
+        run: cargo build --locked --features pixi-embedding-spike --bin arf --example pixi_rhome_probe --tests
+      - name: Record tool versions
+        shell: bash
+        run: |
+          rustc --version
+          pixi --version
+      - name: Exercise real Pixi R and bounded probes
+        run: pixi run --manifest-path .github/pixi-embedding/pixi.toml --locked experiment
+      - name: Upload experiment observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pixi-${{ matrix.os }}-${{ matrix.policy }}
+          path: ${{ runner.temp }}/pixi-spike
+          if-no-files-found: warn

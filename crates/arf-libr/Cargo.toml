@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "Low-level R FFI bindings using dynamic loading"
 
+[features]
+# Temporary, opt-in instrumentation for the unmerged Pixi embedding experiment.
+pixi-embedding-spike = []
+
 [dependencies]
 libloading.workspace = true
 once_cell.workspace = true
@@ -19,6 +23,7 @@ rpassword.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 encoding_rs.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -7,6 +7,9 @@ mod error;
 mod functions;
 mod types;
 
+#[cfg(windows)]
+mod windows_loader;
+
 mod sys;
 
 // error

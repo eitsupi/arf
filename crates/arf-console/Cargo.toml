@@ -7,6 +7,9 @@ repository.workspace = true
 description = "A cross-platform R console written in Rust"
 readme = "../../README.md"
 
+[features]
+pixi-embedding-spike = ["arf-libr/pixi-embedding-spike"]
+
 [[bin]]
 name = "arf"
 path = "src/main.rs"
@@ -62,3 +65,8 @@ regex.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
 tui-test-rs.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+[[example]]
+name = "pixi_rhome_probe"
+required-features = ["pixi-embedding-spike"]
