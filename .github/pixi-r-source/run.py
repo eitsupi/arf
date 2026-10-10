@@ -137,8 +137,17 @@ stopifnot(nchar(curl::curl_version()$version) > 0);
 cat('PIXI_COMPILED_OK\n')"""
     clean = ENV.copy()
     clean.pop("R_HOME")
-    require(run("native-compiled", [binary, "--vanilla", "--slave", "-e", expression], clean), "native R baseline")
+    # Conda's Windows launcher does not forward captured output reliably.
+    # Use Rterm directly for the baseline; resolve must still report the launcher.
+    native_binary = home / "bin/x64/Rterm.exe" if os.name == "nt" else binary
+    baseline = run("native-compiled", [native_binary, "--vanilla", "--slave", "-e", expression], clean)
+    require(baseline, "native R baseline")
+    assert b"PIXI_COMPILED_OK" in baseline.stdout, baseline.stdout
     result = run("eval", [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-e", expression])
+    if result.returncode:
+        run("eval-initialization-debug",
+            [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-e", expression],
+            ENV | {"RUST_LOG": "arf_libr=info"})
     require(result, "embedded eval")
     assert b"PIXI_COMPILED_OK" in result.stdout, result.stdout
     assert result.stderr.count(b"Warning:") == 1, result.stderr
