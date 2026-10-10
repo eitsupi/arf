@@ -227,27 +227,23 @@ impl RLibrary {
 
             #[cfg(windows)]
             let library = {
-                use libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
-                use libloading::os::windows::LOAD_LIBRARY_SEARCH_SYSTEM32;
-                use libloading::os::windows::Library as WinLibrary;
-
                 // Preload supporting DLLs before loading R.dll.
                 // These must be loaded first so they're in the "Loaded-module list"
                 // when R packages (like stats) try to resolve their dependencies.
                 // See: https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
+                crate::windows_loader::configure(library_path)?;
                 let dll_dir = library_path.parent().ok_or_else(|| {
                     RError::LibraryNotFound("Cannot determine R DLL directory".to_string())
                 })?;
 
                 let _ = PRELOADED_DLLS.get_or_init(|| {
-                    let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32;
                     let support_dlls = ["Rblas.dll", "Riconv.dll", "Rlapack.dll", "Rgraphapp.dll"];
                     let mut loaded = Vec::new();
 
                     for dll_name in &support_dlls {
                         let dll_path = dll_dir.join(dll_name);
                         if dll_path.exists() {
-                            match WinLibrary::load_with_flags(&dll_path, flags) {
+                            match crate::windows_loader::open(&dll_path) {
                                 Ok(lib) => {
                                     log::info!("[WINDOWS] Preloaded {}", dll_name);
                                     loaded.push(Library::from(lib));
@@ -265,8 +261,7 @@ impl RLibrary {
                 });
 
                 // Now load R.dll with the same flags
-                let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32;
-                let win_lib = WinLibrary::load_with_flags(library_path, flags)
+                let win_lib = crate::windows_loader::open(library_path)
                     .map_err(|e| RError::LibraryNotFound(e.to_string()))?;
                 Library::from(win_lib)
             };
@@ -460,12 +455,8 @@ impl RLibrary {
                 if let Some(ref path) = rgraphapp_path {
                     if path.exists() {
                         log::info!("[WINDOWS] Rgraphapp.dll exists, loading...");
-                        use libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
-                        use libloading::os::windows::LOAD_LIBRARY_SEARCH_SYSTEM32;
-                        use libloading::os::windows::Library as WinLibrary;
-                        let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32;
 
-                        match WinLibrary::load_with_flags(path, flags) {
+                        match crate::windows_loader::open(path) {
                             Ok(graphapp_lib) => {
                                 log::info!("[WINDOWS] Rgraphapp.dll loaded successfully");
                                 let graphapp_lib = Library::from(graphapp_lib);

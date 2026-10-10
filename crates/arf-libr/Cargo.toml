@@ -19,6 +19,7 @@ rpassword.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 encoding_rs.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 tempfile.workspace = true

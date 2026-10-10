@@ -72,6 +72,9 @@ pub(crate) struct HeadlessRSourceOverride {
     key: Option<String>,
     requested_version: Option<String>,
     resolved_version: Option<String>,
+    environment: Option<String>,
+    prefix: Option<String>,
+    r_binary: Option<String>,
 }
 
 impl HeadlessRSourceOverride {
@@ -86,6 +89,18 @@ impl HeadlessRSourceOverride {
             key: applied.then(|| report.key.clone()).flatten(),
             requested_version: applied.then(|| report.requested_version.clone()).flatten(),
             resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
+            environment: match &report.status {
+                config::RSourceStatus::Pixi { info } => Some(info.environment.clone()),
+                _ => None,
+            },
+            prefix: match &report.status {
+                config::RSourceStatus::Pixi { info } => Some(info.prefix.display().to_string()),
+                _ => None,
+            },
+            r_binary: match &report.status {
+                config::RSourceStatus::Pixi { info } => Some(info.binary.display().to_string()),
+                _ => None,
+            },
         }
     }
 }
@@ -198,9 +213,17 @@ pub(crate) fn run_headless(
     }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
-    if let Err(e) = arf_libr::ensure_ld_library_path() {
+    #[cfg(unix)]
+    let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
+        crate::app::setup::forward_loader_target(&resolution)
+    });
+    #[cfg(not(unix))]
+    let loader_result = arf_libr::ensure_ld_library_path();
+    if let Err(e) = loader_result {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
+    #[cfg(unix)]
+    crate::app::setup::clear_loader_target();
 
     if !json {
         report_startup_diagnostics(config_diagnostics);

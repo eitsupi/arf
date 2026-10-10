@@ -79,6 +79,9 @@ fn r_lib_folder() -> &'static str {
 
 /// Find the R shared library path.
 pub fn find_r_library() -> RResult<PathBuf> {
+    if let Some(selected) = crate::library_selection::selected_library() {
+        return selected;
+    }
     // First, check R_HOME environment variable
     if let Ok(r_home) = env::var("R_HOME") {
         let lib_path = r_library_path(Path::new(&r_home));

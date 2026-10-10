@@ -50,7 +50,7 @@ impl RSourceOverrideState {
 /// A warning produced while resolving an R source.
 #[derive(Debug, Clone)]
 pub(crate) struct RSourceDiagnostic {
-    pub(crate) code: &'static str,
+    pub(crate) code: String,
     pub(crate) severity: &'static str,
     pub(crate) message: String,
     pub(crate) path: Option<PathBuf>,
@@ -62,7 +62,7 @@ pub(super) fn warning(
     path: Option<PathBuf>,
 ) -> RSourceDiagnostic {
     RSourceDiagnostic {
-        code,
+        code: code.to_owned(),
         severity: "warning",
         message: message.into(),
         path,
@@ -84,6 +84,21 @@ pub(crate) struct RSourceResolutionReport {
 }
 
 impl RSourceResolutionReport {
+    pub(super) fn from_pixi(
+        info: crate::config::PixiRSourceInfo,
+        diagnostics: Vec<RSourceDiagnostic>,
+    ) -> Self {
+        let mut report = Self::from_status(
+            RSourceStatus::Pixi { info: info.clone() },
+            Some(info.home),
+            RSourceOverrideState::Applied,
+        );
+        report.provider = Some("pixi".to_owned());
+        report.file = Some(info.manifest);
+        report.resolved_version = info.version;
+        report.diagnostics = diagnostics;
+        report
+    }
     pub(super) fn from_status(
         status: RSourceStatus,
         r_home: Option<PathBuf>,
@@ -212,6 +227,12 @@ pub(crate) fn resolve_r_source(
 
     if let Some(result) = setup_r_via_overrides(r_source_overrides, base_dir) {
         match result {
+            OverrideResolution::PixiApplied {
+                target,
+                diagnostics,
+            } => {
+                return Ok(RSourceResolutionReport::from_pixi(*target, diagnostics));
+            }
             OverrideResolution::Applied {
                 status,
                 r_home,
@@ -228,6 +249,14 @@ pub(crate) fn resolve_r_source(
             OverrideResolution::Fallback { diagnostics } => {
                 let mut report = setup_r_fallback(r_source, RSourceOverrideState::Failed)?;
                 report.diagnostics = diagnostics;
+                if let Some(diagnostic) = report.diagnostics.last_mut()
+                    && diagnostic.code == "r_source_override.fallback"
+                {
+                    diagnostic.message = format!(
+                        "Warning: All R source overrides failed.\n         Using startup.r_source: {}.",
+                        report.status.display()
+                    );
+                }
                 return Ok(report);
             }
         }
@@ -253,6 +282,9 @@ pub(crate) fn apply_r_source(resolution: &RSourceResolutionReport) -> Result<()>
         .context("Resolved R source has no R_HOME")?;
     // SAFETY: This is called single-threaded during startup, before R is initialized.
     unsafe { std::env::set_var("R_HOME", r_home) };
+    if let RSourceStatus::Pixi { info } = &resolution.status {
+        arf_libr::select_r_library(info.library.clone(), Some(info.prefix.clone()))?;
+    }
     Ok(())
 }
 
@@ -265,14 +297,27 @@ pub(crate) fn setup_r(
     cli_version: Option<&str>,
     no_r_source_overrides: bool,
 ) -> Result<RSourceResolutionReport> {
-    let resolution = resolve_r_source(
-        r_source,
-        r_source_overrides,
-        base_dir,
-        cli_r_home,
-        cli_version,
-        no_r_source_overrides,
-    )?;
+    let resolution = if let Some(carrier) = super::pixi::reexec::restored_target() {
+        anyhow::ensure!(
+            cli_r_home.is_none()
+                && cli_version.is_none()
+                && !no_r_source_overrides
+                && r_source_overrides
+                    .iter()
+                    .any(|source| matches!(source, RSourceOverride::Pixi)),
+            "The selected Pixi R source was changed during loader re-exec"
+        );
+        carrier?
+    } else {
+        resolve_r_source(
+            r_source,
+            r_source_overrides,
+            base_dir,
+            cli_r_home,
+            cli_version,
+            no_r_source_overrides,
+        )?
+    };
     apply_r_source(&resolution)?;
     Ok(resolution)
 }
@@ -464,7 +509,7 @@ mod tests {
         let home = dirs::home_dir().expect("test requires a home directory");
         let path = home.join("arf").join("broken.toml");
         let diagnostic = RSourceDiagnostic {
-            code: "config.parse_failed",
+            code: "config.parse_failed".to_owned(),
             severity: "warning",
             message: format!(
                 r#"Failed to load config from {}: TOML parse error"#,
@@ -473,7 +518,7 @@ mod tests {
             path: Some(path.clone()),
         };
         let pathless = RSourceDiagnostic {
-            code: "r_discovery.failed",
+            code: "r_discovery.failed".to_owned(),
             severity: "warning",
             message: r#"R automatic discovery failed."#.to_owned(),
             path: None,
