@@ -36,7 +36,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       ARF_SPIKE_DLL_SEARCH: ${{ matrix.policy }}
-      ARF_SPIKE_RESULTS: ${{ runner.temp }}/pixi-spike
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up fixed Pixi environment without caches
@@ -54,6 +53,8 @@ jobs:
           rustc --version
           pixi --version
       - name: Exercise real Pixi R and bounded probes
+        env:
+          ARF_SPIKE_RESULTS: ${{ runner.temp }}/pixi-spike
         run: pixi run --manifest-path .github/pixi-embedding/pixi.toml --locked experiment
       - name: Upload experiment observations
         if: always()
