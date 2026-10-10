@@ -1019,7 +1019,7 @@ Unavailable or invalid Pixi environments produce a warning and allow later provi
 
 REPL, script and plain headless startup warnings go to stderr once. JSON headless startup includes them in `warnings`; `arf r resolve` includes them in `diagnostics` without extra human-readable stderr. An unknown Pixi R version is reported as `null`, and resolve reports the verified PATH executable, which can live outside `R_HOME` on Windows.
 
-The dedicated integration workflow is configured for Linux x64, macOS ARM64 and Windows x64, using Pixi 0.81.0 with conda-forge R 4.5.3, compiled `stats`, `jsonlite` and `curl`, and restart. The production provider has been validated locally on Linux x64 with default and named detached environments. Earlier embedding experiments passed on all three platforms; the production-provider workflow results on macOS and Windows are pending. Windows ARM64, `pixi exec`, global environments and standalone Pixi scripts are outside the initial verified scope.
+The production provider has been validated on Linux x64, macOS ARM64 and Windows x64 using Pixi 0.81.0 with conda-forge R 4.5.3. The dedicated integration workflow covers `pixi run` in default and named detached environments, compiled `stats`, `jsonlite` and `curl`, eval/script/headless startup, and restart from a different workspace. Windows initialization converts canonical drive/UNC paths to the native spelling R accepts while preserving the validated target. Windows ARM64, `pixi exec`, global environments and standalone Pixi scripts are outside the initial verified scope.
 
 When resolving file providers, a missing file is silently skipped. An unreadable or invalid value produces a warning and arf moves to the next entry.
 
