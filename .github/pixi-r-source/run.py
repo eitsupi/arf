@@ -82,13 +82,13 @@ def headless(expression, home, binary, json_mode):
             assert process.returncode == 0
             if json_mode:
                 info = json.loads(stdout)
-                assert Path(info["r_home"]).resolve() == home, info
+                assert Path(info["r_home"]).samefile(home), info
                 source = info["r_source_override"]
                 assert source["state"] == "applied" and source["provider"] == "pixi", source
                 metadata = source["metadata"]
                 assert metadata["kind"] == "pixi", metadata
                 assert metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
-                assert Path(metadata["r_binary"]).resolve() == binary, source
+                assert Path(metadata["r_binary"]).samefile(binary), source
                 assert source["requested_version"] is None, source
                 assert len(info["warnings"]) == 1, info
                 assert not stderr, stderr
@@ -123,9 +123,11 @@ def main():
     source = descriptor["selected_by"]["source"]
     assert source["kind"] == "pixi" and source["name"] == os.environ["PIXI_ENVIRONMENT_NAME"], source
     manifest = os.environ.get("PIXI_WORKSPACE_MANIFEST", os.environ.get("PIXI_PROJECT_MANIFEST"))
-    assert Path(source["path"]).resolve() == Path(manifest).resolve(), source
-    assert Path(descriptor["target"]["r_binary"]).resolve() == binary, descriptor
-    assert Path(descriptor["target"]["r_home"]).resolve() == home, descriptor
+    # Rust canonical paths use Windows extended-length prefixes. Compare file
+    # identity so equivalent native and extended-length spellings both work.
+    assert Path(source["path"]).samefile(manifest), source
+    assert Path(descriptor["target"]["r_binary"]).samefile(binary), descriptor
+    assert Path(descriptor["target"]["r_home"]).samefile(home), descriptor
     assert len(descriptor["diagnostics"]) == 1, descriptor
     assert descriptor["diagnostics"][0]["code"] != "r_source_override.fallback", descriptor
     expression = r"""stopifnot(normalizePath(R.home()) == normalizePath(Sys.getenv('ARF_TEST_PIXI_R_HOME')));
