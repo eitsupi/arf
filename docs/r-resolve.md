@@ -49,7 +49,7 @@ arf r resolve
 
 Every key is always present. A value is `null` when it does not apply, so consumers can rely on the key set being stable. `resolved` is `false`, and `target` and `provider` are `null`, exactly when no R installation could be found. That is not an error: the command still exits 0, because normal arf startup also continues in that state with R evaluation unavailable.
 
-`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation and is `null` when nothing was located; current values are `rig`, `path`, and `explicit_path`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
+`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation and is `null` when nothing was located; current values are `rig`, `path`, `explicit_path`, and `pixi`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
 
 ### `selected_by` and `source`
 
@@ -59,6 +59,7 @@ Every key is always present. A value is `null` when it does not apply, so consum
 |-------|---------|
 | `r_home` | An explicit R_HOME path was selected. |
 | `version_request` | A requested R version was selected, from the command line, environment, or a project file. |
+| `active_environment` | An externally activated environment supplied R; Pixi does not fabricate a version request. |
 | `default` | No explicit request selected the R source; configuration or the built-in default was used. |
 
 The `source.kind` values identify the origin of that condition:
@@ -69,9 +70,12 @@ The `source.kind` values identify the origin of that condition:
 | `environment_variable` | `ARF_R_HOME` or `ARF_R_VERSION`. |
 | `project_file` | A project file, with its path, format, and optional key. |
 | `configuration_file` | The loaded `arf.toml`, with its path, format, and key. |
+| `pixi` | The active Pixi environment, with its dynamic environment name and manifest path. |
 | `built_in_default` | arf's built-in default when no configuration file setting applies. |
 
 Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `name`, `path`, `format`, and `key` fields remain present in every descriptor.
+
+For a selected Pixi environment, `target.r_binary` is the verified PATH executable rather than a path inferred from `R_HOME`. `target.resolved_version` comes from available package metadata and can be `null` even when `resolved` is `true`.
 
 ## Diagnostics
 
@@ -87,6 +91,9 @@ Both enum sets may grow, so clients must accept unknown values. The source field
 | `r_source_override.fallback` | R source overrides fell back to the configured startup source. |
 | `r_source_override.resolution_failed` | An R source override could not be resolved. |
 | `r_source_override.rig_unavailable` | rig was unavailable while evaluating an override. |
+| `r_source_override.pixi_not_active` | A CWD Pixi workspace was found without activation; start arf with `pixi run arf`. |
+| `r_source_override.pixi_environment_invalid` | Pixi activation is incomplete or does not match its environment marker. |
+| `r_source_override.pixi_r_unavailable` | The active environment has no usable prefix-contained R target, or its RHOME probe failed. |
 | `r_source_override.version_not_installed` | A requested override version is not installed. |
 
 ## Resolution Behavior

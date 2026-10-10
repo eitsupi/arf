@@ -139,6 +139,7 @@ pub struct TerminalBuilder {
     artifacts: Option<PathBuf>,
     resources: Option<SharedResources>,
     vanilla: bool,
+    r_source_overrides: bool,
 }
 
 enum ConfigSource {
@@ -163,6 +164,7 @@ impl TerminalBuilder {
             artifacts: None,
             resources: None,
             vanilla: true,
+            r_source_overrides: false,
         }
     }
 
@@ -172,6 +174,12 @@ impl TerminalBuilder {
         S: Into<String>,
     {
         self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    /// Evaluate configured R source providers in cases that test selection.
+    pub fn with_r_source_overrides(mut self) -> Self {
+        self.r_source_overrides = true;
         self
     }
 
@@ -294,7 +302,10 @@ impl TerminalBuilder {
             .history_dir
             .unwrap_or_else(|| work.path().join("history"));
         let defaults = OpenOptions::default();
-        let mut args = vec!["--no-r-source-overrides".to_owned()];
+        let mut args = Vec::new();
+        if !self.r_source_overrides {
+            args.push("--no-r-source-overrides".to_owned());
+        }
         if self.vanilla {
             args.insert(0, "--vanilla".to_owned());
         }

@@ -1,0 +1,160 @@
+"""Exercise the production Pixi provider inside an externally activated environment."""
+
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
+RESULTS = Path(os.environ.get("ARF_PIXI_RESULTS", ROOT / "target/pixi-r-source"))
+RESULTS.mkdir(parents=True, exist_ok=True)
+WORK = RESULTS / "workspace"
+WORK.mkdir(exist_ok=True)
+(WORK / "pixi.toml").write_text("[workspace]\nname='different-cwd-workspace'\n")
+(WORK / ".r-version").write_text("99.99.99\n")
+CONFIG = RESULTS / "arf.toml"
+CONFIG.write_text(r"""[history]
+mode='volatile'
+[experimental]
+r_source_overrides=[{type='version-file',file='.r-version'},{type='pixi'}]
+""")
+ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
+ENV = os.environ.copy()
+for key in ("R_HOME", "ARF_R_HOME", "ARF_R_VERSION", "ARF_CONFIG", "R_LIBS",
+            "R_LIBS_SITE", "R_LIBS_USER", "R_PROFILE_USER", "R_ENVIRON_USER",
+            "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR", "RUST_LOG"):
+    ENV.pop(key, None)
+ENV["NO_COLOR"] = "1"
+ENV["ARF_TUI_TEST_ARTIFACTS"] = str(RESULTS / "terminal")
+
+
+def run(name, argv, env=None, cwd=WORK, timeout=120):
+    start = time.monotonic()
+    result = subprocess.run([str(arg) for arg in argv], cwd=cwd, env=ENV if env is None else env,
+                            capture_output=True, timeout=timeout)
+    (RESULTS / f"{name}.stdout").write_bytes(result.stdout)
+    (RESULTS / f"{name}.stderr").write_bytes(result.stderr)
+    print(f"{name}: exit={result.returncode}, seconds={time.monotonic() - start:.3f}")
+    return result
+
+
+def require(result, name):
+    if result.returncode:
+        raise RuntimeError(f"{name} failed: {result.stderr.decode(errors='replace')[-4000:]}")
+
+
+def headless(expression, home, binary, json_mode):
+    name = "headless-json" if json_mode else "headless-text"
+    with tempfile.TemporaryDirectory() as temporary:
+        env = ENV | {"ARF_IPC_SESSIONS_DIR": str(Path(temporary) / "sessions")}
+        args = [ARF, "headless", "--config", CONFIG, "--no-r-auto-discovery", "--vanilla",
+                "--ipc-eval-unrestricted"] + (["--json"] if json_mode else [])
+        process = subprocess.Popen([str(arg) for arg in args], cwd=WORK, env=env,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 30
+            while True:
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate()
+                    raise RuntimeError(f"{name} exited before readiness: {stderr.decode(errors='replace')}")
+                ready = run(f"{name}-session", [ARF, "ipc", "session", "--pid", process.pid], env)
+                if not ready.returncode:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"{name} readiness timeout")
+                time.sleep(0.1)
+            result = run(f"{name}-eval", [ARF, "ipc", "eval", expression, "--pid", process.pid,
+                                        "--timeout", "10000"], env)
+            require(result, f"{name} compiled package eval")
+            value = json.loads(result.stdout)
+            assert value.get("error") is None and "PIXI_COMPILED_OK" in value.get("stdout", ""), value
+            require(run(f"{name}-shutdown", [ARF, "ipc", "shutdown", "--pid", process.pid], env), "shutdown")
+            stdout, stderr = process.communicate(timeout=15)
+            (RESULTS / f"{name}.stdout").write_bytes(stdout)
+            (RESULTS / f"{name}.stderr").write_bytes(stderr)
+            assert process.returncode == 0
+            if json_mode:
+                info = json.loads(stdout)
+                assert Path(info["r_home"]).resolve() == home, info
+                source = info["r_source_override"]
+                assert source["state"] == "applied" and source["provider"] == "pixi", source
+                metadata = source["metadata"]
+                assert metadata["kind"] == "pixi", metadata
+                assert metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
+                assert Path(metadata["r_binary"]).resolve() == binary, source
+                assert source["requested_version"] is None, source
+                assert len(info["warnings"]) == 1, info
+                assert not stderr, stderr
+            else:
+                assert stderr.count(b"Warning:") == 1, stderr
+            assert b"All R source overrides failed" not in stderr, stderr
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+
+def main():
+    prefix = Path(os.environ["CONDA_PREFIX"]).resolve(strict=True)
+    binary = Path(shutil.which("R.exe" if os.name == "nt" else "R")).resolve(strict=True)
+    assert binary.is_relative_to(prefix), binary
+    if os.environ["PIXI_ENVIRONMENT_NAME"] == "analysis":
+        assert not prefix.is_relative_to(HERE.resolve()), prefix
+    native = run("native-rhome", [binary, "RHOME"])
+    require(native, "native RHOME")
+    home = Path(native.stdout.decode().strip().splitlines()[-1]).resolve(strict=True)
+    assert home.is_relative_to(prefix), home
+    ENV["ARF_TEST_PIXI_R_HOME"] = str(home)
+    # Only arf's child probe should remove this poisoned inherited value.
+    ENV["R_HOME"] = str(RESULTS / "unrelated-r-home")
+    resolved = run("resolve", [ARF, "r", "resolve", "--config", CONFIG])
+    require(resolved, "resolve")
+    assert not resolved.stderr, resolved.stderr
+    descriptor = json.loads(resolved.stdout)
+    assert descriptor["provider"] == "pixi", descriptor
+    assert descriptor["selected_by"]["kind"] == "active_environment", descriptor
+    source = descriptor["selected_by"]["source"]
+    assert source["kind"] == "pixi" and source["name"] == os.environ["PIXI_ENVIRONMENT_NAME"], source
+    manifest = os.environ.get("PIXI_WORKSPACE_MANIFEST", os.environ.get("PIXI_PROJECT_MANIFEST"))
+    assert Path(source["path"]).resolve() == Path(manifest).resolve(), source
+    assert Path(descriptor["target"]["r_binary"]).resolve() == binary, descriptor
+    assert Path(descriptor["target"]["r_home"]).resolve() == home, descriptor
+    assert len(descriptor["diagnostics"]) == 1, descriptor
+    assert descriptor["diagnostics"][0]["code"] != "r_source_override.fallback", descriptor
+    expression = r"""stopifnot(normalizePath(R.home()) == normalizePath(Sys.getenv('ARF_TEST_PIXI_R_HOME')));
+stopifnot(abs(stats::sd(1:3) - 1) < 1e-10);
+stopifnot(jsonlite::fromJSON('{"answer":42}')$answer == 42);
+stopifnot(nchar(curl::curl_version()$version) > 0);
+cat('PIXI_COMPILED_OK\n')"""
+    clean = ENV.copy()
+    clean.pop("R_HOME")
+    require(run("native-compiled", [binary, "--vanilla", "--slave", "-e", expression], clean), "native R baseline")
+    result = run("eval", [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-e", expression])
+    require(result, "embedded eval")
+    assert b"PIXI_COMPILED_OK" in result.stdout, result.stdout
+    assert result.stderr.count(b"Warning:") == 1, result.stderr
+    assert b"All R source overrides failed" not in result.stderr, result.stderr
+    script = RESULTS / "compiled.R"
+    script.write_text(expression)
+    require(run("script", [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-f", script]), "script")
+    headless(expression, home, binary, True)
+    headless(expression, home, binary, False)
+    require(run("restart", ["cargo", "test", "--locked", "--test", "pixi_environment_tests",
+                            "--", "--ignored", "--nocapture"], cwd=ROOT, timeout=180), "compiled packages and restart")
+    summary = {"result": "passed", "platform": platform.platform(), "machine": platform.machine(),
+               "environment": os.environ["PIXI_ENVIRONMENT_NAME"], "prefix": str(prefix),
+               "manifest": manifest, "r_binary": str(binary), "r_home": str(home),
+               "resolved_version": descriptor["target"]["resolved_version"]}
+    (RESULTS / "summary.json").write_text(json.dumps(summary, indent=2))
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == "__main__":
+    main()

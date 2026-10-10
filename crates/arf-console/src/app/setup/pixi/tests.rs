@@ -25,7 +25,13 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let manifest = root.path().join("active/pixi.toml");
         std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
-        std::fs::write(&manifest, "[workspace]\nname = 'active'\n").unwrap();
+        std::fs::write(
+            &manifest,
+            r"[workspace]
+name = 'active'
+",
+        )
+        .unwrap();
         // Deliberately detached from the workspace, with a named environment.
         let prefix = root.path().join("detached-prefix");
         let home = prefix.join("lib/R");
@@ -101,7 +107,8 @@ fn active_named_detached_environment_preserves_verified_target_and_marker() {
     // CWD points at a different workspace. Active identity must still win.
     std::fs::write(
         fixture.root.path().join("pixi.toml"),
-        "[workspace]\nname='other'",
+        r"[workspace]
+name='other'",
     )
     .unwrap();
     let PixiResolution::Applied(target) = fixture.resolve() else {
@@ -192,7 +199,12 @@ fn guidance_detects_only_exact_cwd_workspace_manifests() {
         ("pixi.toml", "[project]", true),
         ("pixi.toml", "[package]", false),
         ("pixi.toml", "invalid [", false),
-        ("pyproject.toml", "[project]\nname='python'", false),
+        (
+            "pyproject.toml",
+            r"[project]
+name='python'",
+            false,
+        ),
         ("pyproject.toml", "[tool.pixi.package]", false),
         ("pyproject.toml", "[tool.pixi.project]", true),
         ("pyproject.toml", "[tool.pixi.workspace]", true),

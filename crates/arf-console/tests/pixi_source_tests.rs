@@ -58,7 +58,12 @@ impl Fixture {
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let manifest = root.path().join("active-pixi.toml");
-        std::fs::write(&manifest, "[workspace]\nname='active'").unwrap();
+        std::fs::write(
+            &manifest,
+            r"[workspace]
+name='active'",
+        )
+        .unwrap();
         let marker = prefix.join("conda-meta/pixi");
         std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
         std::fs::write(
@@ -70,11 +75,17 @@ impl Fixture {
         )
         .unwrap();
         // Different CWD workspace must not supersede activation.
-        std::fs::write(root.path().join("pixi.toml"), "[workspace]\nname='other'").unwrap();
+        std::fs::write(
+            root.path().join("pixi.toml"),
+            r"[workspace]
+name='other'",
+        )
+        .unwrap();
         let config = root.path().join("arf.toml");
         std::fs::write(
             &config,
-            "[experimental]\nr_source_overrides=[{type='pixi'}]",
+            r"[experimental]
+r_source_overrides=[{type='pixi'}]",
         )
         .unwrap();
         Self {
@@ -192,7 +203,17 @@ fn explicit_source_and_disable_skip_invalid_pixi_identity() {
 #[test]
 fn unapplied_pixi_diagnostic_is_json_only_and_fallback_is_reported_once() {
     let fixture = Fixture::new();
-    std::fs::write(&fixture.config, format!("[startup]\nr_source={{path={:?}}}\n[experimental]\nr_source_overrides=[{{type='pixi'}}]", fixture.home.display().to_string())).unwrap();
+    std::fs::write(
+        &fixture.config,
+        format!(
+            r"[startup]
+r_source={{path={:?}}}
+[experimental]
+r_source_overrides=[{{type='pixi'}}]",
+            fixture.home.display().to_string()
+        ),
+    )
+    .unwrap();
     let output = fixture
         .command(true)
         .env("PIXI_WORKSPACE_MANIFEST", "")
