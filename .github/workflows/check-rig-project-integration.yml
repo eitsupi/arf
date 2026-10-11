@@ -8,9 +8,7 @@ on:
       - "**/Cargo.toml"
       - Cargo.lock
       - "**/*rig*"
-      - crates/arf-libr/**
-      - crates/arf-console/src/app/**
-      - crates/arf-console/src/repl/**
+      - "**/*rig*/**"
       - "!**/*.md"
   push:
     branches:
@@ -21,9 +19,7 @@ on:
       - "**/Cargo.toml"
       - Cargo.lock
       - "**/*rig*"
-      - crates/arf-libr/**
-      - crates/arf-console/src/app/**
-      - crates/arf-console/src/repl/**
+      - "**/*rig*/**"
       - "!**/*.md"
   workflow_dispatch:
 
@@ -62,24 +58,27 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: rig-project-integration
+          key: rig-project-integration-tests
       - name: Install pinned mise tools
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           working_directory: .github/rig-project-integration
           version: 2026.4.22
           install_args: --locked
-      - name: Install isolated R 4.6.1 with rig 0.11.0
-        run: rig add --user --without-fonts 4.6.1
-      - name: Build arf
-        run: cargo build --locked --bin arf
-      - name: Compare the minimal DYLD environment
+      - name: Install isolated R versions with rig 0.11.0
+        run: |
+          for version in 4.6.1 4.6.0 4.5.3; do
+            rig add --user --without-fonts "${version}"
+          done
+      - name: Build arf and rig project switch test
+        run: cargo build --locked --bin arf --test rig_project_switch_tests
+      - name: Compare startup and rig project version switching
         run: python3 .github/rig-project-integration/run.py
-      - name: Upload rig project startup evidence
+      - name: Upload rig project startup and version switch evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rig-project-startup-macos-latest
+          name: rig-project-startup-and-switch-macos-latest
           path: ${{ runner.temp }}/arf-rig-project-integration/evidence
           include-hidden-files: true
           if-no-files-found: warn
