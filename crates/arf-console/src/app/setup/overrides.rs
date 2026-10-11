@@ -6,6 +6,7 @@ use super::rig::{ResolvedRSource, setup_r_via_selected_rig_version};
 use super::rig_project::{
     RigProjectFailure, RigProjectTarget, resolve_strict as resolve_rig_project,
 };
+use crate::app::explicit_r_source::RProvider;
 use crate::config::{RSourceOverride, RSourceOverrideInfo, RSourceStatus};
 use crate::external;
 use crate::rversion;
@@ -86,11 +87,11 @@ impl<'a> From<&'a RSourceOverride> for ProviderSpec<'a> {
     fn from(source: &'a RSourceOverride) -> Self {
         match source {
             RSourceOverride::Pixi => Self {
-                name: "pixi",
+                name: RProvider::Pixi.as_str(),
                 kind: ProviderKind::Pixi,
             },
             RSourceOverride::RigProject => Self {
-                name: "rig-project",
+                name: RProvider::RigProject.as_str(),
                 kind: ProviderKind::RigProject,
             },
             RSourceOverride::VersionFile { file } => Self {
@@ -706,6 +707,16 @@ mod r_source_override_tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn configured_provider_names_match_explicit_provider_names() {
+        for provider in <RProvider as clap::ValueEnum>::value_variants() {
+            let configured: RSourceOverride =
+                serde_json::from_value(serde_json::json!({ "provider": provider.as_str() }))
+                    .unwrap();
+            assert_eq!(ProviderSpec::from(&configured).name, provider.as_str());
+        }
+    }
 
     fn pixi_target() -> crate::config::PixiRSourceInfo {
         crate::config::PixiRSourceInfo {

@@ -1,6 +1,6 @@
 //! Shared machine-readable provenance for the selected R source.
 
-use crate::app::explicit_r_source::{ExplicitRSource, RSourceOrigin};
+use crate::app::explicit_r_source::{ExplicitRSource, RProvider, RSourceOrigin};
 use crate::app::setup::{RSourceResolutionReport, RSourceSelectionRoute};
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use serde::Serialize;
@@ -213,8 +213,8 @@ fn provider(status: &RSourceStatus) -> String {
         RSourceStatus::Rig { .. } => "rig".to_owned(),
         RSourceStatus::Path => "path".to_owned(),
         RSourceStatus::ExplicitPath { .. } => "explicit_path".to_owned(),
-        RSourceStatus::Pixi { .. } => "pixi".to_owned(),
-        RSourceStatus::RigProject { .. } => "rig-project".to_owned(),
+        RSourceStatus::Pixi { .. } => RProvider::Pixi.as_str().to_owned(),
+        RSourceStatus::RigProject { .. } => RProvider::RigProject.as_str().to_owned(),
     }
 }
 

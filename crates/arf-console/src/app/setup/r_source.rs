@@ -105,7 +105,7 @@ impl RSourceResolutionReport {
             override_state,
             selection_route,
         );
-        report.override_provider = is_override.then(|| "pixi".to_owned());
+        report.override_provider = is_override.then(|| RProvider::Pixi.as_str().to_owned());
         report.resolved_version = info.version;
         report.diagnostics = diagnostics;
         report
@@ -125,7 +125,7 @@ impl RSourceResolutionReport {
             override_state,
             selection_route,
         );
-        report.override_provider = is_override.then(|| "rig-project".to_owned());
+        report.override_provider = is_override.then(|| RProvider::RigProject.as_str().to_owned());
         report.diagnostics = diagnostics;
         report
     }
