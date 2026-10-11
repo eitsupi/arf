@@ -389,6 +389,50 @@ def switch_native_baselines(switch_env):
     return homes, baselines
 
 
+def explicit_rig_project_resolution(source, home, installation_name):
+    child_env = r_process_env(ENV)
+    args = [ARF, "r", "resolve", "--no-r-source-overrides", "--config", CONFIG]
+    if source == "cli":
+        args.extend(["--r-provider", "rig-project"])
+    elif source == "environment":
+        child_env["ARF_R_PROVIDER"] = "rig-project"
+    else:
+        raise ValueError(f"unknown rig-project selection source: {source}")
+    result, record = run(f"resolve-rig-project-{source}", args, env=child_env)
+    require(result, f"rig-project resolve from {source}")
+    descriptor = json.loads(result.stdout)
+    selected_by = descriptor.get("selected_by", {})
+    expected_source = {
+        "kind": "command_line_argument" if source == "cli" else "environment_variable",
+        "name": "--r-provider" if source == "cli" else "ARF_R_PROVIDER",
+    }
+    metadata = descriptor.get("metadata", {})
+    target = descriptor.get("target", {})
+    if descriptor.get("provider") != "rig-project":
+        raise RuntimeError(f"{source} request selected an unexpected provider: {descriptor}")
+    if (
+        selected_by.get("kind") != "provider_request"
+        or selected_by.get("requested_provider") != "rig-project"
+        or selected_by.get("source", {}).get("kind") != expected_source["kind"]
+        or selected_by.get("source", {}).get("name") != expected_source["name"]
+    ):
+        raise RuntimeError(f"{source} provider provenance is incorrect: {selected_by}")
+    if metadata.get("kind") != "rig_project" or metadata.get("r_installation") != installation_name:
+        raise RuntimeError(f"{source} provider metadata is incorrect: {metadata}")
+    for label, actual, expected in (
+        ("metadata root", metadata.get("root"), PROJECT),
+        ("metadata manifest", metadata.get("manifest"), PROJECT / "rproj.toml"),
+        ("metadata wrapper", metadata.get("r_binary"), wrapper_path()),
+        ("target R_HOME", target.get("r_home"), home),
+        ("target wrapper", target.get("r_binary"), wrapper_path()),
+    ):
+        if not isinstance(actual, str) or not Path(actual).samefile(expected):
+            raise RuntimeError(f"{source} {label} is {actual!r}, expected {expected}")
+    if target.get("resolved_version") is not None:
+        raise RuntimeError(f"{source} reported an exact R version for an installation name: {target}")
+    return record, descriptor
+
+
 def compare_switch_proofs(homes, baselines):
     proof_dir = EVIDENCE / "switch-proofs"
     stages = {
@@ -547,11 +591,19 @@ jsonlite = "*"
     if not ARF.is_file():
         raise RuntimeError(f"arf binary does not exist: {ARF}")
 
+    resolution_records = {}
+    for source in ("cli", "environment"):
+        record, _ = explicit_rig_project_resolution(
+            source, home, status_data["sync"]["r_version"]
+        )
+        resolution_records[source] = record
+
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
         "version_context": "released rig 0.11.0 user-mode fixture",
-        "arf_startup": "explicit R_HOME startup proof plus a rig-version TUI switch case",
+        "arf_startup": "explicit rig-project provider startup, compiled package loading, and a rig-version TUI switch case",
         "comparison": "startup compares the native rig wrapper with arf; switch baselines use arf-resolved native R binaries; raw loader paths are diagnostic except for selected-lib precedence",
+        "rig_project_resolution": resolution_records,
         "setup": {"init": init_record, "lock": lock_record, "sync": sync_record,
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
@@ -577,7 +629,7 @@ jsonlite = "*"
         )
         arf, arf_record = run(
             f"arf-{name}",
-            [ARF, "--config", CONFIG, "--r-home", home,
+            [ARF, "--r-provider", "rig-project", "--config", CONFIG,
              "--no-r-auto-discovery", "--no-r-source-overrides", *flags,
              "-e", EXPRESSION],
             env=r_env,

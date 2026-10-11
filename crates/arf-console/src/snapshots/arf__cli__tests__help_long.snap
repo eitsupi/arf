@@ -60,11 +60,11 @@ Options:
       --r-provider <R_PROVIDER>
           Use R from an externally activated provider environment
           
-          Currently supported: pixi. This does not activate or install an environment.
+          Currently supported: pixi, rig-project. This does not activate, synchronize, or install an environment.
           
           Takes precedence over ARF_R_HOME, ARF_R_VERSION, ARF_R_PROVIDER, r_source_overrides and startup.r_source.
           
-          [possible values: pixi]
+          [possible values: pixi, rig-project]
 
       --no-r-source-overrides
           Disable experimental directory-level R source overrides

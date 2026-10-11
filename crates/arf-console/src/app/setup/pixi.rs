@@ -1,7 +1,6 @@
 //! Identify an externally activated Pixi environment without running Pixi.
 
 mod probe;
-pub(super) mod reexec;
 
 use crate::config::PixiRSourceInfo as PixiRTarget;
 use serde::Deserialize;

@@ -7,20 +7,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RigProjectTarget {
-    pub(super) root: PathBuf,
-    pub(super) manifest: PathBuf,
-    /// Preserve the rig wrapper path; it carries project activation behavior.
-    pub(super) binary: PathBuf,
-    pub(super) home: PathBuf,
-    pub(super) library: PathBuf,
-    /// This is rig's installation name, not necessarily an R release version.
-    pub(super) installation_name: String,
-}
+pub(super) type RigProjectTarget = crate::config::RigProjectRSourceInfo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum RigProjectFailure {
+pub(crate) enum RigProjectFailure {
     ProjectNotFound {
         path: PathBuf,
     },
@@ -66,7 +56,7 @@ impl fmt::Display for RigProjectFailure {
 
 impl std::error::Error for RigProjectFailure {}
 
-pub(super) fn resolve_strict() -> Result<RigProjectTarget, RigProjectFailure> {
+pub(crate) fn resolve_strict() -> Result<RigProjectTarget, RigProjectFailure> {
     let cwd = std::env::current_dir().map_err(|_| RigProjectFailure::ProjectNotFound {
         path: PathBuf::from("."),
     })?;

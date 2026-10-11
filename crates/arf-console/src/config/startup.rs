@@ -123,6 +123,8 @@ impl RSourceOverrideInfo {
 pub enum RSourceStatus {
     /// R belongs to an externally activated Pixi environment.
     Pixi { info: PixiRSourceInfo },
+    /// R belongs to a synchronized rig project.
+    RigProject { info: RigProjectRSourceInfo },
     /// R was resolved via rig.
     Rig {
         /// The R version being used.
@@ -145,7 +147,10 @@ impl RSourceStatus {
     ///
     /// This determines if features like `:switch` are available.
     pub fn rig_enabled(&self) -> bool {
-        matches!(self, RSourceStatus::Rig { .. })
+        matches!(
+            self,
+            RSourceStatus::Rig { .. } | RSourceStatus::RigProject { .. }
+        )
     }
 
     /// Returns a human-readable description for display.
@@ -164,6 +169,11 @@ impl RSourceStatus {
                 Some(version) => format!("pixi (environment {}; R {})", info.environment, version),
                 None => format!("pixi (environment {})", info.environment),
             },
+            RSourceStatus::RigProject { info } => format!(
+                "rig project ({}; R installation {})",
+                info.root.display(),
+                info.installation_name
+            ),
         }
     }
 
@@ -171,7 +181,10 @@ impl RSourceStatus {
     pub fn override_info(&self) -> Option<&RSourceOverrideInfo> {
         match self {
             Self::Rig { override_info, .. } => override_info.as_ref(),
-            Self::Path | Self::ExplicitPath { .. } | Self::Pixi { .. } => None,
+            Self::Path
+            | Self::ExplicitPath { .. }
+            | Self::Pixi { .. }
+            | Self::RigProject { .. } => None,
         }
     }
 }
@@ -186,4 +199,16 @@ pub struct PixiRSourceInfo {
     pub home: PathBuf,
     pub library: PathBuf,
     pub version: Option<String>,
+}
+
+/// Identity and verified R target of a synchronized rig project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RigProjectRSourceInfo {
+    pub root: PathBuf,
+    pub manifest: PathBuf,
+    pub binary: PathBuf,
+    pub home: PathBuf,
+    pub library: PathBuf,
+    /// rig's installation name, which is not necessarily an R release version.
+    pub installation_name: String,
 }

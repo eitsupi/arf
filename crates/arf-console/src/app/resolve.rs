@@ -4,8 +4,8 @@ use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnost
 use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest};
 use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection};
 use crate::app::setup::{
-    PixiFailure, RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report,
-    resolve_r_source,
+    PixiFailure, RSourceDiagnostic, RSourceResolutionReport, RigProjectFailure,
+    resolve_path_r_home_for_report, resolve_r_source,
 };
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use crate::external::rig::RigError;
@@ -210,6 +210,19 @@ fn classify_resolution_error(
             serde_json::json!({ "reason_code": reason_code }),
         );
     }
+    if let Some(failure) = error.downcast_ref::<RigProjectFailure>() {
+        let reason_code = match failure {
+            RigProjectFailure::ProjectNotFound { .. } => "r_provider.rig_project_not_found",
+            RigProjectFailure::StatusUnavailable { .. } => "r_provider.rig_project_unavailable",
+            RigProjectFailure::StatusInvalid { .. } => "r_provider.rig_project_status_invalid",
+            RigProjectFailure::NotSynced { .. } => "r_provider.rig_project_not_synced",
+            RigProjectFailure::RUnavailable { .. } => "r_provider.rig_project_r_unavailable",
+        };
+        return ResolveCommandError::invalid_invocation_with_data(
+            format!("{error:#}"),
+            serde_json::json!({ "reason_code": reason_code }),
+        );
+    }
     let invalid_invocation = match error.downcast_ref::<RigError>() {
         Some(
             RigError::NotInstalled
@@ -243,6 +256,7 @@ fn descriptor(
             r_home: r_home.display().to_string(),
             r_binary: match &resolution.status {
                 RSourceStatus::Pixi { info } => Some(info.binary.display().to_string()),
+                RSourceStatus::RigProject { info } => Some(info.binary.display().to_string()),
                 _ => find_r_binary(&r_home),
             },
             resolved_version: resolved_version(resolution),
@@ -282,6 +296,9 @@ fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
 }
 
 fn resolved_version(resolution: &RSourceResolutionReport) -> Option<String> {
+    if matches!(resolution.status, RSourceStatus::RigProject { .. }) {
+        return None;
+    }
     resolution
         .resolved_version
         .clone()
@@ -289,6 +306,7 @@ fn resolved_version(resolution: &RSourceResolutionReport) -> Option<String> {
             RSourceStatus::Rig { version, .. } => Some(version.clone()),
             RSourceStatus::Path | RSourceStatus::ExplicitPath { .. } => None,
             RSourceStatus::Pixi { info } => info.version.clone(),
+            RSourceStatus::RigProject { .. } => None,
         })
 }
 

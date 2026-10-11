@@ -3,6 +3,7 @@
 use super::overrides::{OverrideResolution, setup_r_via_overrides};
 use super::pixi::resolve_strict;
 use super::rig::{ResolvedRSource, resolve_r_home_from_path, setup_r_via_rig};
+use super::rig_project::resolve_strict as resolve_rig_project;
 use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RProvider};
 use crate::config::{
     RSource, RSourceMode, RSourceOverride, RSourceOverrideInfo, RSourceStatus, mask_home_path,
@@ -107,6 +108,26 @@ impl RSourceResolutionReport {
         report.override_provider = is_override.then(|| "pixi".to_owned());
         report.file = is_override.then_some(info.manifest);
         report.resolved_version = info.version;
+        report.diagnostics = diagnostics;
+        report
+    }
+
+    pub(super) fn from_rig_project(
+        info: crate::config::RigProjectRSourceInfo,
+        diagnostics: Vec<RSourceDiagnostic>,
+        selection_route: RSourceSelectionRoute,
+        override_state: RSourceOverrideState,
+    ) -> Self {
+        let is_override = selection_route == RSourceSelectionRoute::Override;
+        debug_assert_eq!(is_override, override_state == RSourceOverrideState::Applied);
+        let mut report = Self::from_status_with_route(
+            RSourceStatus::RigProject { info: info.clone() },
+            Some(info.home),
+            override_state,
+            selection_route,
+        );
+        report.override_provider = is_override.then(|| "rig-project".to_owned());
+        report.file = is_override.then_some(info.manifest);
         report.diagnostics = diagnostics;
         report
     }
@@ -265,6 +286,20 @@ pub(crate) fn resolve_r_source(
                 )
                 .with_explicit_request(request));
             }
+            ExplicitRSource::Provider(RProvider::RigProject) => {
+                let target = resolve_rig_project().map_err(|failure| {
+                    anyhow::Error::new(failure).context(
+                        "The requested rig-project R provider is unavailable; use a synchronized rig project in the current directory",
+                    )
+                })?;
+                return Ok(RSourceResolutionReport::from_rig_project(
+                    target,
+                    Vec::new(),
+                    RSourceSelectionRoute::Explicit,
+                    override_state,
+                )
+                .with_explicit_request(request));
+            }
             ExplicitRSource::Home(path) => {
                 if !path.exists() {
                     anyhow::bail!(
@@ -316,6 +351,17 @@ pub(crate) fn resolve_r_source(
                     RSourceOverrideState::Applied,
                 ));
             }
+            OverrideResolution::RigProjectApplied {
+                target,
+                diagnostics,
+            } => {
+                return Ok(RSourceResolutionReport::from_rig_project(
+                    *target,
+                    diagnostics,
+                    RSourceSelectionRoute::Override,
+                    RSourceOverrideState::Applied,
+                ));
+            }
             OverrideResolution::Applied {
                 status,
                 r_home,
@@ -358,8 +404,14 @@ pub(crate) fn apply_r_source(resolution: &RSourceResolutionReport) -> Result<()>
         .context("Resolved R source has no R_HOME")?;
     // SAFETY: This is called single-threaded during startup, before R is initialized.
     unsafe { std::env::set_var("R_HOME", r_home) };
-    if let RSourceStatus::Pixi { info } = &resolution.status {
-        arf_libr::select_r_library(info.library.clone(), Some(info.prefix.clone()))?;
+    match &resolution.status {
+        RSourceStatus::Pixi { info } => {
+            arf_libr::select_r_library(info.library.clone(), Some(info.prefix.clone()))?;
+        }
+        RSourceStatus::RigProject { info } => {
+            arf_libr::select_r_library(info.library.clone(), None)?;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -372,11 +424,9 @@ pub(crate) fn setup_r(
     explicit_request: Option<&ExplicitRSourceRequest>,
     no_r_source_overrides: bool,
 ) -> Result<RSourceResolutionReport> {
-    let resolution = if let Some(carrier) = super::pixi::reexec::restored_target(
-        explicit_request,
-        no_r_source_overrides,
-        r_source_overrides,
-    ) {
+    let resolution = if let Some(carrier) =
+        super::reexec::restored_target(explicit_request, no_r_source_overrides, r_source_overrides)
+    {
         carrier?
     } else {
         resolve_r_source(

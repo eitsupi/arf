@@ -13,6 +13,8 @@ use std::path::PathBuf;
 pub enum RSourceOverride {
     /// Resolve R using the active pixi environment.
     Pixi,
+    /// Resolve R using the synchronized rig project in the current directory.
+    RigProject,
     /// Read the R version from a version file.
     VersionFile { file: PathBuf },
     /// Read the R version from a TOML key.

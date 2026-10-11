@@ -1,6 +1,6 @@
 //! Shared machine-readable provenance for the selected R source.
 
-use crate::app::explicit_r_source::{ExplicitRSource, RProvider, RSourceOrigin};
+use crate::app::explicit_r_source::{ExplicitRSource, RSourceOrigin};
 use crate::app::setup::{RSourceResolutionReport, RSourceSelectionRoute};
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use serde::Serialize;
@@ -37,6 +37,12 @@ pub(crate) enum RSourceMetadata {
         prefix: String,
         r_binary: String,
     },
+    RigProject {
+        root: String,
+        manifest: String,
+        r_installation: String,
+        r_binary: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +59,12 @@ impl RSourceMetadata {
                 environment: info.environment.clone(),
                 manifest: display_path(cwd, &info.manifest),
                 prefix: display_path(cwd, &info.prefix),
+                r_binary: display_path(cwd, &info.binary),
+            }),
+            RSourceStatus::RigProject { info } => Some(Self::RigProject {
+                root: display_path(cwd, &info.root),
+                manifest: display_path(cwd, &info.manifest),
+                r_installation: info.installation_name.clone(),
                 r_binary: display_path(cwd, &info.binary),
             }),
             _ => None,
@@ -107,11 +119,11 @@ fn selected_by(
                     "--with-r-version",
                     "ARF_R_VERSION",
                 ),
-                ExplicitRSource::Provider(RProvider::Pixi) => (
+                ExplicitRSource::Provider(provider) => (
                     "provider_request",
                     None,
                     None,
-                    Some("pixi".to_owned()),
+                    Some(provider.as_str().to_owned()),
                     "--r-provider",
                     "ARF_R_PROVIDER",
                 ),
@@ -139,6 +151,21 @@ fn selected_by(
                 source: selection_source(
                     "pixi",
                     Some(info.environment.clone()),
+                    Some(display_path(cwd, &info.manifest)),
+                    None,
+                    None,
+                ),
+            };
+        }
+        if let RSourceStatus::RigProject { info } = &report.status {
+            return SelectedBy {
+                kind: "project_environment",
+                requested_r_home: None,
+                requested_version: None,
+                requested_provider: None,
+                source: selection_source(
+                    "rig-project",
+                    None,
                     Some(display_path(cwd, &info.manifest)),
                     None,
                     None,
@@ -206,5 +233,94 @@ fn provider(status: &RSourceStatus) -> String {
         RSourceStatus::Path => "path".to_owned(),
         RSourceStatus::ExplicitPath { .. } => "explicit_path".to_owned(),
         RSourceStatus::Pixi { .. } => "pixi".to_owned(),
+        RSourceStatus::RigProject { .. } => "rig-project".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rig_project_selection_keeps_project_metadata_and_provenance_separate() {
+        let info = crate::config::RigProjectRSourceInfo {
+            root: "/workspace".into(),
+            manifest: "/workspace/rproj.toml".into(),
+            binary: "/workspace/.rvenv/bin/R".into(),
+            home: "/rig/4.6.1/lib/R".into(),
+            library: "/rig/4.6.1/lib/R/lib/libR.so".into(),
+            installation_name: "4.6.1".into(),
+        };
+        let report = RSourceResolutionReport {
+            status: RSourceStatus::RigProject { info },
+            r_home: Some("/rig/4.6.1/lib/R".into()),
+            selection_route: RSourceSelectionRoute::Override,
+            override_provider: Some("rig-project".into()),
+            file: Some("/workspace/rproj.toml".into()),
+            key: None,
+            requested_version: None,
+            resolved_version: None,
+            diagnostics: Vec::new(),
+            override_state: crate::app::setup::RSourceOverrideState::Applied,
+            explicit_request: None,
+        };
+
+        let value = serde_json::to_value(RSourceSelection::from_report(
+            Path::new("/workspace"),
+            &report,
+            None,
+        ))
+        .unwrap();
+        insta::assert_snapshot!(serde_json::to_string_pretty(&value).unwrap(), @r###"
+        {
+          "metadata": {
+            "kind": "rig_project",
+            "manifest": "/workspace/rproj.toml",
+            "r_binary": "/workspace/.rvenv/bin/R",
+            "r_installation": "4.6.1",
+            "root": "/workspace"
+          },
+          "provider": "rig-project",
+          "selected_by": {
+            "kind": "project_environment",
+            "requested_provider": null,
+            "requested_r_home": null,
+            "requested_version": null,
+            "source": {
+              "format": null,
+              "key": null,
+              "kind": "rig-project",
+              "name": null,
+              "path": "/workspace/rproj.toml"
+            }
+          }
+        }
+        "###);
+
+        let mut explicit_report = report;
+        explicit_report.selection_route = RSourceSelectionRoute::Explicit;
+        explicit_report.override_provider = None;
+        explicit_report.file = None;
+        explicit_report.override_state = crate::app::setup::RSourceOverrideState::ShadowedByCli;
+        explicit_report.explicit_request =
+            Some(crate::app::explicit_r_source::ExplicitRSourceRequest {
+                source: ExplicitRSource::Provider(
+                    crate::app::explicit_r_source::RProvider::RigProject,
+                ),
+                origin: crate::app::explicit_r_source::RSourceOrigin::Cli,
+            });
+        let explicit =
+            RSourceSelection::from_report(Path::new("/workspace"), &explicit_report, None);
+        assert_eq!(explicit.provider.as_deref(), Some("rig-project"));
+        assert_eq!(explicit.selected_by.kind, "provider_request");
+        assert_eq!(
+            explicit.selected_by.requested_provider.as_deref(),
+            Some("rig-project")
+        );
+        assert_eq!(
+            explicit.selected_by.source.name.as_deref(),
+            Some("--r-provider")
+        );
+        assert!(explicit.metadata.is_some());
     }
 }

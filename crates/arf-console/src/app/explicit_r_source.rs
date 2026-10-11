@@ -7,6 +7,17 @@ use std::path::PathBuf;
 pub(crate) enum RProvider {
     #[value(name = "pixi")]
     Pixi,
+    #[value(name = "rig-project")]
+    RigProject,
+}
+
+impl RProvider {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pixi => "pixi",
+            Self::RigProject => "rig-project",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +67,9 @@ impl std::fmt::Display for ExplicitRSourceError {
             Self::InvalidVersionEnvironment => {
                 f.write_str("ARF_R_VERSION must contain valid Unicode")
             }
-            Self::InvalidProviderEnvironment => f.write_str("ARF_R_PROVIDER must be `pixi`"),
+            Self::InvalidProviderEnvironment => {
+                f.write_str("ARF_R_PROVIDER must be `pixi` or `rig-project`")
+            }
         }
     }
 }
@@ -122,6 +135,7 @@ pub(crate) fn explicit_r_source_request(
             .ok_or(ExplicitRSourceError::InvalidProviderEnvironment)?;
         let provider = match provider {
             "pixi" => RProvider::Pixi,
+            "rig-project" => RProvider::RigProject,
             _ => return Err(ExplicitRSourceError::InvalidProviderEnvironment),
         };
         return Ok(Some(ExplicitRSourceRequest {

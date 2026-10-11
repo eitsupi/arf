@@ -99,8 +99,9 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
             .env("HOME", user_home.to_string_lossy())
             .env("DYLD_LIBRARY_PATH", startup_dyld)
             .args([
-                "--with-r-version",
-                "4.6.1",
+                "--r-provider",
+                "rig-project",
+                "--no-r-source-overrides",
                 "--no-r-auto-discovery",
                 "--no-auto-match",
                 "--no-completion",

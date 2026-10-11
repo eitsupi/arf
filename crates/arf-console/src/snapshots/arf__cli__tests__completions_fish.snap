@@ -36,7 +36,8 @@ format\t'Format code with the configured formatter before reprex evaluation'"
 complete -c arf -n "__fish_arf_needs_command" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_needs_command" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
-complete -c arf -n "__fish_arf_needs_command" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''"
+complete -c arf -n "__fish_arf_needs_command" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''
+rig-project\t''"
 complete -c arf -n "__fish_arf_needs_command" -l max-connections -d '[R] Set max number of connections to N' -r
 complete -c arf -n "__fish_arf_needs_command" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
 complete -c arf -n "__fish_arf_needs_command" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
@@ -158,7 +159,8 @@ complete -c arf -n "__fish_arf_using_subcommand ipc; and __fish_seen_subcommand_
 complete -c arf -n "__fish_arf_using_subcommand headless" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
-complete -c arf -n "__fish_arf_using_subcommand headless" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''"
+complete -c arf -n "__fish_arf_using_subcommand headless" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''
+rig-project\t''"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-bind -d 'Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-pid-file -d 'Write server PID to a file (removed on shutdown)' -r -F
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-eval-allow-function -d 'Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`' -r
@@ -185,7 +187,8 @@ complete -c arf -n "__fish_arf_using_subcommand r; and not __fish_seen_subcomman
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -s c -l config -d 'Path to configuration file' -r -F
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l r-home -d 'Highest-priority R source: use this explicit R_HOME path' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l with-r-version -d 'Highest-priority R source: use this R version via rig' -r
-complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''"
+complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l r-provider -d 'Use R from an externally activated provider environment' -r -f -a "pixi\t''
+rig-project\t''"
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_using_subcommand r; and __fish_seen_subcommand_from resolve" -s h -l help -d 'Print help (see more with \'--help\')'
