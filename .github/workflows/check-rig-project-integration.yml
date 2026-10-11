@@ -1,0 +1,86 @@
+name: Check rig project integration
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/check-rig-project-integration.yml
+      - .github/rig-project-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*rig*"
+      - "**/*rig*/**"
+      - "!**/*.md"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/check-rig-project-integration.yml
+      - .github/rig-project-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*rig*"
+      - "**/*rig*/**"
+      - "!**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      ARF_RIG_RESULTS: ${{ runner.temp }}/arf-rig-project-integration
+      RIG_MODE: user
+      RIG_R_INSTALL_DIR: ${{ runner.temp }}/arf-rig-project-integration/rig-r
+      RIG_BINARY_DIR: ${{ runner.temp }}/arf-rig-project-integration/rig-bin
+      RIG_DOWNLOAD_DIR: ${{ runner.temp }}/arf-rig-project-integration/downloads
+      XDG_CACHE_HOME: ${{ runner.temp }}/arf-rig-project-integration/cache
+      XDG_CONFIG_HOME: ${{ runner.temp }}/arf-rig-project-integration/config
+      XDG_DATA_HOME: ${{ runner.temp }}/arf-rig-project-integration/data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install released rig 0.11.0
+        run: |
+          if command -v python3 >/dev/null; then
+            python3 .github/rig-project-integration/install_rig.py
+          else
+            python .github/rig-project-integration/install_rig.py
+          fi
+      - name: Install isolated R 4.5.2 with rig 0.11.0
+        run: rig add --user --without-fonts 4.5.2
+      - name: Build arf
+        run: cargo build --locked --bin arf
+      - name: Compare rig wrapper and arf startup
+        run: |
+          if command -v python3 >/dev/null; then
+            python3 .github/rig-project-integration/run.py
+          else
+            python .github/rig-project-integration/run.py
+          fi
+      - name: Upload rig project startup evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rig-project-startup-${{ matrix.os }}
+          path: ${{ runner.temp }}/arf-rig-project-integration/evidence
+          include-hidden-files: true
+          if-no-files-found: warn
