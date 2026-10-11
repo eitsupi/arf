@@ -2,31 +2,33 @@
 
 ## [Unreleased]
 
+## [0.7.0-alpha.1] - 2026-10-11
+
 ### Added
 
-- **Experimental:** `{ provider = "pixi" }` in `experimental.r_source_overrides` selects R from an externally activated Pixi environment without requiring rig. Resolve reports its environment and verified executable; headless and restart use the same validated R target.
-- `--r-provider pixi` and `ARF_R_PROVIDER=pixi` explicitly select R from an active Pixi environment, independently of configured overrides.
-- Resolve and headless JSON report shared provider metadata and selection provenance; explicit Pixi resolution errors include a stable reason code in `error.data`.
-- **Experimental:** The `rig-project` provider selects R from a synced `rig proj` project, and can be chosen explicitly with `--r-provider rig-project` or `ARF_R_PROVIDER=rig-project`.
-- **Experimental limitation:** rig 0.11.0 can leave an incompatible project library active after a cross-minor `:switch` warning ([rig#450](https://github.com/r-lib/rig/issues/450), fixed upstream in [rig#451](https://github.com/r-lib/rig/pull/451)); use a rig release containing the fix and run `rig proj sync` before switching across R major/minor versions.
+- **Experimental:** `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
+- **Experimental:** `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420).
+  - With rig 0.11.0, `:switch` to another R minor version can leave an incompatible project library active ([rig#450](https://github.com/r-lib/rig/issues/450)); use a rig release with the fix and run `rig proj sync` first.
+- **Experimental:** `--r-provider` and `ARF_R_PROVIDER` select `pixi` or `rig-project` explicitly. Unlike configured overrides, an unavailable provider is an error rather than a fallback (#411, #420).
+- **Experimental:** `arf r resolve` and `arf headless --json` report the selected provider, where it was requested, and its details; failed explicit provider requests include a `reason_code` (#412, #423).
 
 ### Changed
 
-- **Breaking:** `experimental.r_source_overrides` entries now use the `provider` key instead of `type`.
-- Explicit `--r-home` and `--with-r-version` selections now take precedence over either R source environment variable; conflicting environment-only selections are rejected.
-- R version switches now remove rig's `RVENV` and `RVENV_UNSYNCED` markers so project activation is reevaluated on startup. They also replace prior R source CLI selections while preserving arguments after `--`.
-- R source overrides now continue to later providers when rig is unavailable or its version list cannot be read, with one final fallback notice.
-- RHOME probes used during source resolution and automatic discovery now have time and output limits.
-- The interactive help browser now searches package help metadata in a background worker, keeping query editing responsive while results are ranked.
-- `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, matching Rscript.
+- **Experimental/Breaking:** `experimental.r_source_overrides` entries use the `provider` key instead of `type` (#409).
+- `--r-home` and `--with-r-version` now take precedence over `ARF_R_HOME` and `ARF_R_VERSION`; setting both environment variables is an error (#408).
+- `:switch` now replaces earlier R version and provider options instead of adding to them, and the new session applies rig project activation afresh (#417).
+- R source overrides now try later entries when rig is unavailable, and show a single notice if all of them fail (#407).
+- Checking an R installation's home directory during startup and `arf r resolve` now times out instead of waiting indefinitely (#407).
+- The interactive help browser stays responsive while searching large help indexes (#404).
+- `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, as Rscript does (#422).
 
 ### Fixed
 
-- `arf -e` and `arf -f` now accept R code with CRLF line endings, as Rscript does.
-- Windows embedded R now reads Renviron once during normal startup and skips it for `--no-environ` and `--vanilla`, avoiding repeated environment expansion such as project `R_LIBS_USER`.
-- R wrapper path assignments containing `${R_HOME}` now resolve against the selected R home when deriving `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR`.
-- macOS embedded R now prioritizes the selected R library directory when loading shared-library dependencies and restores the inherited loader path when switching R versions.
-- On restart after changing project directories, arf clears `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` when they were absent from the original environment and still contain values derived from the previous R installation, allowing the selected R to recompute them.
+- `arf -e` and `arf -f` accept R code with CRLF line endings (#422).
+- On Windows, Renviron files are read only once at startup and are skipped with `--no-environ` and `--vanilla` (#415).
+- R's documentation, share, and include directories are found for installations whose `R` script refers to `${R_HOME}` (#415).
+- On macOS, the selected R's own libraries take priority when loading, and switching R versions restores the original library search path (#416).
+- After changing directories, `:restart` no longer keeps stale R directory paths from the previous R installation (#421).
 
 ## [0.6.0] - 2026-10-08
 
