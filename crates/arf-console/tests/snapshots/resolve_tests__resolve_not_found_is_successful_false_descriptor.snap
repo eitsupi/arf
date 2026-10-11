@@ -12,6 +12,7 @@ expression: normalize_descriptor(&value)
       "severity": "warning"
     }
   ],
+  "metadata": null,
   "provider": null,
   "resolved": false,
   "resolver": {
@@ -21,6 +22,7 @@ expression: normalize_descriptor(&value)
   "schema_version": 1,
   "selected_by": {
     "kind": "default",
+    "requested_provider": null,
     "requested_r_home": null,
     "requested_version": null,
     "source": {

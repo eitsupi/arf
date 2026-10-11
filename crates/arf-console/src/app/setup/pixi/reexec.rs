@@ -161,12 +161,15 @@ pub(crate) fn restored_target(
             r_source_overrides,
         )?;
         validate(&info, resolve_strict(None))?;
-        Ok(RSourceResolutionReport::from_pixi(
-            info,
-            diagnostics,
-            selection_route,
-            override_state,
-        ))
+        let report =
+            RSourceResolutionReport::from_pixi(info, diagnostics, selection_route, override_state);
+        Ok(if selection_route == RSourceSelectionRoute::Explicit {
+            report.with_explicit_request(
+                explicit_request.expect("explicit route validates a provider request"),
+            )
+        } else {
+            report
+        })
     })())
 }
 

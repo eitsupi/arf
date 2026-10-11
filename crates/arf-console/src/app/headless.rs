@@ -7,12 +7,13 @@ use crate::app::config_load::{
 use crate::app::explicit_r_source::ExplicitRSourceRequest;
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
+use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection};
 use crate::app::session_id::create_session_id;
 use crate::app::setup::{
     RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute, setup_r,
 };
 use crate::cli::RArgsBuilder;
-use crate::config;
+use crate::config::{self, ConfigLoadProvenance};
 use crate::history::HistoryRuntime;
 use crate::ipc;
 use crate::ipc::policy::IpcPolicy;
@@ -43,6 +44,7 @@ struct HeadlessInfo {
     ipc_policy: IpcPolicy,
     history_runtime: HeadlessHistoryRuntime,
     r_source_override: HeadlessRSourceOverride,
+    r_source_selection: RSourceSelection,
     warnings: Vec<String>,
 }
 
@@ -75,23 +77,11 @@ pub(crate) struct HeadlessRSourceOverride {
     key: Option<String>,
     requested_version: Option<String>,
     resolved_version: Option<String>,
-    metadata: Option<HeadlessOverrideMetadata>,
-}
-
-/// Provider metadata is an open enum inside one extensible JSON object.
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum HeadlessOverrideMetadata {
-    Pixi {
-        environment: String,
-        manifest: String,
-        prefix: String,
-        r_binary: String,
-    },
+    metadata: Option<RSourceMetadata>,
 }
 
 impl HeadlessRSourceOverride {
-    pub(crate) fn from_report(report: &RSourceResolutionReport) -> Self {
+    pub(crate) fn from_report(report: &RSourceResolutionReport, cwd: &std::path::Path) -> Self {
         let applied = report.selection_route == RSourceSelectionRoute::Override;
         let override_state: RSourceOverrideState = report.override_state;
         Self {
@@ -103,17 +93,9 @@ impl HeadlessRSourceOverride {
             key: applied.then(|| report.key.clone()).flatten(),
             requested_version: applied.then(|| report.requested_version.clone()).flatten(),
             resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
-            metadata: match &report.status {
-                config::RSourceStatus::Pixi { info } if applied => {
-                    Some(HeadlessOverrideMetadata::Pixi {
-                        environment: info.environment.clone(),
-                        manifest: info.manifest.display().to_string(),
-                        prefix: info.prefix.display().to_string(),
-                        r_binary: info.binary.display().to_string(),
-                    })
-                }
-                _ => None,
-            },
+            metadata: applied
+                .then(|| RSourceMetadata::from_report(report, cwd))
+                .flatten(),
         }
     }
 }
@@ -124,6 +106,8 @@ impl HeadlessInfo {
         history_runtime: &HistoryRuntime,
         warnings: Vec<String>,
         resolution: &RSourceResolutionReport,
+        launch_cwd: &std::path::Path,
+        loaded_config: Option<&ConfigLoadProvenance>,
     ) -> Self {
         // Normalize empty/whitespace-only R version to None so JSON shows null
         let r_version = session
@@ -143,7 +127,12 @@ impl HeadlessInfo {
             history_session_id: session.history_session_id,
             ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
             history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
-            r_source_override: HeadlessRSourceOverride::from_report(resolution),
+            r_source_override: HeadlessRSourceOverride::from_report(resolution, launch_cwd),
+            r_source_selection: RSourceSelection::from_report(
+                launch_cwd,
+                resolution,
+                loaded_config,
+            ),
             warnings,
         }
     }
@@ -177,6 +166,7 @@ pub(crate) fn run_headless(
         // Resolve before R startup can change the working directory.
         crate::pid_file::set_initial_pid_file_path(path);
     }
+    let launch_cwd = std::env::current_dir().ok();
 
     // --json implies --quiet: suppress status messages on stderr since
     // all relevant info is in the JSON output on stdout.
@@ -188,13 +178,12 @@ pub(crate) fn run_headless(
     let mut warnings: Vec<String> = Vec::new();
 
     // Load config for r_source resolution
-    let (mut config, config_diagnostics) = if json {
-        (
-            load_config_collecting_warnings(config_path, &mut warnings),
-            Vec::new(),
-        )
+    let (mut config, config_diagnostics, loaded_config) = if json {
+        let (config, provenance) = load_config_collecting_warnings(config_path, &mut warnings);
+        (config, Vec::new(), provenance)
     } else {
-        load_config_for_startup(config_path)
+        let (config, diagnostics) = load_config_for_startup(config_path);
+        (config, diagnostics, None)
     };
 
     // Set up R
@@ -375,7 +364,16 @@ pub(crate) fn run_headless(
 
     if json {
         // Output session info as JSON to stdout
-        let output = HeadlessInfo::from_session(&session, &history_runtime, warnings, &resolution);
+        let output = HeadlessInfo::from_session(
+            &session,
+            &history_runtime,
+            warnings,
+            &resolution,
+            launch_cwd
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+            loaded_config.as_ref(),
+        );
         // Use writeln + flush instead of println to ensure the JSON is
         // delivered immediately when stdout is piped (non-TTY). This is the
         // readiness signal for CI scripts waiting on the output.
@@ -526,6 +524,7 @@ mod tests {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state: state,
+            explicit_request: None,
         }
     }
 
@@ -539,8 +538,11 @@ mod tests {
             RSourceOverrideState::Disabled,
             RSourceOverrideState::ShadowedByCli,
         ] {
-            let value =
-                serde_json::to_value(HeadlessRSourceOverride::from_report(&report(state))).unwrap();
+            let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
+                &report(state),
+                std::path::Path::new("/"),
+            ))
+            .unwrap();
             assert_eq!(value["state"], state.as_str());
             assert!(value.get("provider").is_some());
             assert!(value.get("file").is_some());
@@ -571,15 +573,35 @@ mod tests {
             log_file: None,
             history_session_id: None,
         };
+        let config_provenance = ConfigLoadProvenance {
+            path: "arf.toml".into(),
+            startup_r_source_present: true,
+            history_migration_warning: None,
+        };
 
         let output = HeadlessInfo::from_session(
             &session,
             &history_runtime,
             Vec::new(),
             &report(RSourceOverrideState::NotConfigured),
+            std::path::Path::new("/launch"),
+            Some(&config_provenance),
         );
         let json = serde_json::to_value(output).unwrap();
         assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+        assert_eq!(json["cwd"], "/tmp");
+        assert_eq!(json["r_source_selection"]["selected_by"]["kind"], "default");
+        assert_eq!(
+            json["r_source_selection"]["metadata"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            json["r_source_selection"]["selected_by"]["source"]["path"],
+            std::path::Path::new("/launch")
+                .join("arf.toml")
+                .display()
+                .to_string()
+        );
         assert_eq!(json["history_runtime"]["state"], "volatile");
         assert_eq!(json["history_runtime"]["reason"], "configured");
 
@@ -589,6 +611,8 @@ mod tests {
             &history_runtime,
             Vec::new(),
             &report(RSourceOverrideState::NotConfigured),
+            std::path::Path::new("/tmp"),
+            None,
         );
         let json = serde_json::to_value(output).unwrap();
         assert!(json["r_home"].is_null());
@@ -695,7 +719,11 @@ mod tests {
         report.requested_version = Some("4.4".to_string());
         report.resolved_version = Some("4.4.2".to_string());
 
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
+            &report,
+            std::path::Path::new("/"),
+        ))
+        .unwrap();
         assert_eq!(value["state"], "applied");
         assert_eq!(value["provider"], "toml-key");
         assert_eq!(value["file"], "rproject.toml");
@@ -722,7 +750,11 @@ mod tests {
             },
         };
 
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
+            &report,
+            std::path::Path::new("/"),
+        ))
+        .unwrap();
         assert_eq!(
             value,
             serde_json::json!({
@@ -735,16 +767,63 @@ mod tests {
                 "metadata": {
                     "kind": "pixi",
                     "environment": "analysis",
-                    "manifest": "pixi.toml",
-                    "prefix": "prefix",
-                    "r_binary": "R.exe"
+                    "manifest": "/pixi.toml",
+                    "prefix": "/prefix",
+                    "r_binary": "/R.exe"
                 }
             })
         );
 
+        let selection = RSourceSelection::from_report(std::path::Path::new("/"), &report, None);
+        let selection_json = serde_json::to_value(selection).unwrap();
+        insta::assert_snapshot!(
+            serde_json::to_string_pretty(&selection_json).unwrap(),
+            @r###"
+            {
+              "metadata": {
+                "environment": "analysis",
+                "kind": "pixi",
+                "manifest": "/pixi.toml",
+                "prefix": "/prefix",
+                "r_binary": "/R.exe"
+              },
+              "provider": "pixi",
+              "selected_by": {
+                "kind": "active_environment",
+                "requested_provider": null,
+                "requested_r_home": null,
+                "requested_version": null,
+                "source": {
+                  "format": null,
+                  "key": null,
+                  "kind": "pixi",
+                  "name": "analysis",
+                  "path": "/pixi.toml"
+                }
+              }
+            }"###
+        );
+        let applied_metadata = selection_json["metadata"].clone();
+
         report.override_state = RSourceOverrideState::ShadowedByCli;
         report.selection_route = RSourceSelectionRoute::Explicit;
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        report.explicit_request = Some(crate::app::explicit_r_source::ExplicitRSourceRequest {
+            source: crate::app::explicit_r_source::ExplicitRSource::Provider(
+                crate::app::explicit_r_source::RProvider::Pixi,
+            ),
+            origin: crate::app::explicit_r_source::RSourceOrigin::Cli,
+        });
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
+            &report,
+            std::path::Path::new("/"),
+        ))
+        .unwrap();
         assert_eq!(value["metadata"], serde_json::Value::Null);
+        let selection = RSourceSelection::from_report(std::path::Path::new("/"), &report, None);
+        let selection_json = serde_json::to_value(selection).unwrap();
+        assert_eq!(selection_json["provider"], "pixi");
+        assert_eq!(selection_json["selected_by"]["kind"], "provider_request");
+        assert_eq!(selection_json["selected_by"]["requested_provider"], "pixi");
+        assert_eq!(selection_json["metadata"], applied_metadata);
     }
 }

@@ -180,6 +180,26 @@ fn active_pixi_resolve_preserves_the_launcher_outside_home() {
     );
     assert!(descriptor["target"]["resolved_version"].is_null());
     assert_eq!(descriptor["diagnostics"], serde_json::json!([]));
+    assert_eq!(descriptor["selected_by"]["requested_provider"], Value::Null);
+    assert_eq!(descriptor["metadata"]["kind"], "pixi");
+    assert_eq!(descriptor["metadata"]["environment"], "analysis");
+    assert_eq!(
+        descriptor["metadata"]["manifest"],
+        fixture
+            .manifest
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    assert_eq!(
+        descriptor["metadata"]["prefix"],
+        fixture.prefix.canonicalize().unwrap().display().to_string()
+    );
+    assert_eq!(
+        descriptor["metadata"]["r_binary"],
+        fixture.binary.canonicalize().unwrap().display().to_string()
+    );
 }
 
 #[test]
@@ -208,6 +228,26 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
         );
         let descriptor: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(descriptor["provider"], "pixi");
+        assert_eq!(descriptor["metadata"]["kind"], "pixi");
+        assert_eq!(descriptor["metadata"]["environment"], "analysis");
+        assert_eq!(
+            descriptor["metadata"]["manifest"],
+            fixture
+                .manifest
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            descriptor["metadata"]["prefix"],
+            fixture.prefix.canonicalize().unwrap().display().to_string()
+        );
+        assert_eq!(
+            descriptor["metadata"]["r_binary"],
+            fixture.binary.canonicalize().unwrap().display().to_string()
+        );
+        assert_eq!(descriptor["selected_by"]["requested_provider"], "pixi");
         assert_eq!(
             descriptor["target"]["r_binary"],
             fixture.binary.canonicalize().unwrap().display().to_string()
@@ -225,6 +265,7 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
+              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {
@@ -240,6 +281,7 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
+              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {
@@ -256,32 +298,86 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
 }
 
 #[test]
-fn explicit_provider_fails_without_active_pixi_instead_of_using_configured_fallback() {
-    let fixture = Fixture::new();
-    std::fs::write(
-        &fixture.config,
-        r#"[startup]
+fn explicit_provider_failures_are_typed_and_never_fall_back() {
+    let cases = [
+        "r_provider.pixi_not_active",
+        "r_provider.pixi_environment_invalid",
+        "r_provider.pixi_r_unavailable",
+    ];
+    let mut errors = Vec::new();
+
+    for reason_code in cases {
+        let fixture = Fixture::new();
+        std::fs::write(
+            &fixture.config,
+            r#"[startup]
 r_source = "auto""#,
-    )
-    .unwrap();
-    let output = fixture
-        .command_with_args(&["r", "resolve", "--r-provider", "pixi"])
-        .env_remove("PIXI_IN_SHELL")
-        .env_remove("PIXI_WORKSPACE_MANIFEST")
-        .env_remove("PIXI_ENVIRONMENT_NAME")
-        .env_remove("CONDA_PREFIX")
-        .output()
+        )
         .unwrap();
-    assert!(!output.status.success());
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(error["error"]["code"], "INVALID_PARAMS");
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("pixi run")
+        let mut command = fixture.command_with_args(&["r", "resolve", "--r-provider", "pixi"]);
+        match reason_code {
+            "r_provider.pixi_not_active" => {
+                command
+                    .env_remove("PIXI_IN_SHELL")
+                    .env_remove("PIXI_WORKSPACE_MANIFEST")
+                    .env_remove("PIXI_ENVIRONMENT_NAME")
+                    .env_remove("CONDA_PREFIX");
+            }
+            "r_provider.pixi_environment_invalid" => {
+                command.env("PIXI_WORKSPACE_MANIFEST", "");
+            }
+            "r_provider.pixi_r_unavailable" => {
+                command.env("ARF_TEST_RHOME_OUTPUT", fixture.root.path());
+            }
+            _ => unreachable!(),
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{reason_code}");
+        assert!(output.stdout.is_empty(), "{reason_code}");
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "INVALID_PARAMS");
+        assert_eq!(error["error"]["data"]["reason_code"], reason_code);
+        if reason_code == "r_provider.pixi_not_active" {
+            assert!(
+                error["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("pixi run")
+            );
+        }
+        errors.push(serde_json::json!({
+            "code": error["error"]["code"],
+            "hint": error["error"]["hint"],
+            "data": error["error"]["data"],
+        }));
+    }
+
+    insta::assert_snapshot!(
+        serde_json::to_string_pretty(&errors).unwrap(),
+        @r###"
+        [
+          {
+            "code": "INVALID_PARAMS",
+            "data": {
+              "reason_code": "r_provider.pixi_not_active"
+            },
+            "hint": null
+          },
+          {
+            "code": "INVALID_PARAMS",
+            "data": {
+              "reason_code": "r_provider.pixi_environment_invalid"
+            },
+            "hint": null
+          },
+          {
+            "code": "INVALID_PARAMS",
+            "data": {
+              "reason_code": "r_provider.pixi_r_unavailable"
+            },
+            "hint": null
+          }
+        ]"###
     );
 }
 

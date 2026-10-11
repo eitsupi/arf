@@ -25,7 +25,8 @@ pub(crate) enum RSourceOverrideState {
     Failed,
     /// Override resolution was disabled by the CLI.
     Disabled,
-    /// A CLI R source took precedence over overrides.
+    /// An explicit CLI or environment R source took precedence over overrides;
+    /// the legacy JSON state name remains `shadowed_by_cli`.
     ShadowedByCli,
 }
 
@@ -85,6 +86,7 @@ pub(crate) struct RSourceResolutionReport {
     pub(crate) resolved_version: Option<String>,
     pub(crate) diagnostics: Vec<RSourceDiagnostic>,
     pub(crate) override_state: RSourceOverrideState,
+    pub(crate) explicit_request: Option<ExplicitRSourceRequest>,
 }
 
 impl RSourceResolutionReport {
@@ -151,7 +153,13 @@ impl RSourceResolutionReport {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state,
+            explicit_request: None,
         }
+    }
+
+    pub(crate) fn with_explicit_request(mut self, request: &ExplicitRSourceRequest) -> Self {
+        self.explicit_request = Some(request.clone());
+        self
     }
 
     pub(super) fn applied(
@@ -171,6 +179,7 @@ impl RSourceResolutionReport {
             resolved_version: Some(info.resolved_version),
             diagnostics,
             override_state: RSourceOverrideState::Applied,
+            explicit_request: None,
         }
     }
 
@@ -253,7 +262,8 @@ pub(crate) fn resolve_r_source(
                     Vec::new(),
                     RSourceSelectionRoute::Explicit,
                     override_state,
-                ));
+                )
+                .with_explicit_request(request));
             }
             ExplicitRSource::Home(path) => {
                 if !path.exists() {
@@ -271,7 +281,8 @@ pub(crate) fn resolve_r_source(
                     },
                     Some(r_home),
                     override_state,
-                ));
+                )
+                .with_explicit_request(request));
             }
             ExplicitRSource::Version(version) => {
                 return setup_r_via_rig(version).map(|resolved| {
@@ -280,6 +291,7 @@ pub(crate) fn resolve_r_source(
                         resolved.r_home,
                         override_state,
                     )
+                    .with_explicit_request(request)
                 });
             }
         }

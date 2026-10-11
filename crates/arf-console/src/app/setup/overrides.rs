@@ -916,6 +916,7 @@ mod r_source_override_tests {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state: RSourceOverrideState::NotConfigured,
+            explicit_request: None,
         };
 
         apply_r_source(&report).unwrap();

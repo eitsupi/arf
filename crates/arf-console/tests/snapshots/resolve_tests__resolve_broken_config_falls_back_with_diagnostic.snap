@@ -12,6 +12,7 @@ expression: normalize_descriptor(&value)
       "severity": "warning"
     }
   ],
+  "metadata": null,
   "provider": "explicit_path",
   "resolved": true,
   "resolver": {
@@ -21,6 +22,7 @@ expression: normalize_descriptor(&value)
   "schema_version": 1,
   "selected_by": {
     "kind": "r_home",
+    "requested_provider": null,
     "requested_r_home": "<requested-r-home>",
     "requested_version": null,
     "source": {
