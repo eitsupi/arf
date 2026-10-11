@@ -118,7 +118,7 @@ fn test_eval_r_event_processing_api() {
     );
 }
 
-/// Test that R errors are handled gracefully.
+/// Test that R errors are reported and exit with a failure status, as with Rscript.
 #[test]
 fn test_eval_error_handling() {
     let output = sanitized_arf_command()
@@ -126,10 +126,10 @@ fn test_eval_error_handling() {
         .output()
         .expect("Failed to run arf -e");
 
-    // Should still exit successfully (R errors are expected behavior)
-    assert!(
-        output.status.success(),
-        "arf -e should succeed even with R errors"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "arf -e should exit with status 1 on R errors"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -148,9 +148,10 @@ fn test_eval_pipe_error() {
         .output()
         .expect("Failed to run arf -e");
 
-    assert!(
-        output.status.success(),
-        "arf -e should succeed even with R errors"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "arf -e should exit with status 1 on R errors"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);

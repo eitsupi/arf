@@ -87,6 +87,53 @@ fn test_script_file_reprex() {
     );
 }
 
+/// Test that CRLF line endings are accepted and converted like Rscript does.
+#[test]
+fn test_script_file_crlf() {
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(b"x <- \"a\r\nb\"\r\nprint(charToRaw(x))\r\n")
+        .expect("Failed to write");
+
+    let output = sanitized_arf_command()
+        .arg("-f")
+        .arg(file.path())
+        .output()
+        .expect("Failed to run arf with CRLF script file");
+
+    assert!(
+        output.status.success(),
+        "arf -f with CRLF script should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[1] 61 0a 62"),
+        "CRLF inside a string should become LF: {}",
+        stdout
+    );
+}
+
+/// Test that a script with a parse error exits with a failure status.
+#[test]
+fn test_script_file_parse_error_fails() {
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    writeln!(file, "1 +* 2").expect("Failed to write");
+
+    let output = sanitized_arf_command()
+        .arg("-f")
+        .arg(file.path())
+        .output()
+        .expect("Failed to run arf with invalid script file");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "arf -f should exit with status 1 on parse errors: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Test non-existent script file.
 #[test]
 fn test_script_file_not_found() {

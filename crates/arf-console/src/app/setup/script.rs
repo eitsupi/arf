@@ -83,6 +83,7 @@ pub(crate) fn run_script(
         // Should not happen - we checked script_mode earlier
         return Ok(());
     };
+    let code = normalize_line_endings(code);
 
     // Evaluate the code using the CLI override or configured reprex mode.
     let mut reprex_mode = cli.reprex.unwrap_or(config.startup.reprex);
@@ -117,21 +118,38 @@ pub(crate) fn run_script(
             code
         };
         // In reprex mode, echo source code before each result
-        match arf_harp::eval_string_reprex(&code, &config.reprex.comment) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                eprintln!("{}", e);
-                Ok(())
-            }
-        }
+        arf_harp::eval_string_reprex(&code, &config.reprex.comment)
     } else {
         // Normal script execution
-        match arf_harp::eval_string(&code) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                eprintln!("{}", e);
-                Ok(())
-            }
-        }
+        arf_harp::eval_string(&code)
+    }
+    // Report only the top-level message; its source chain repeats the same text.
+    .map(|_| ())
+    .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Convert CRLF line endings to LF, as Rscript does when reading R code.
+///
+/// R's string parser rejects a CR before LF, while lone CR characters are left
+/// unchanged so that they behave the same as in Rscript.
+fn normalize_line_endings(code: String) -> String {
+    if code.contains("\r\n") {
+        code.replace("\r\n", "\n")
+    } else {
+        code
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_line_endings;
+
+    #[test]
+    fn normalize_line_endings_converts_only_crlf_pairs() {
+        assert_eq!(
+            normalize_line_endings("x <- \"a\r\nb\"\r\ny\r\n".to_string()),
+            "x <- \"a\nb\"\ny\n"
+        );
+        assert_eq!(normalize_line_endings("a\rb\n".to_string()), "a\rb\n");
     }
 }
