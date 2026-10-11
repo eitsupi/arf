@@ -1046,21 +1046,20 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 ## R Source Precedence
 
-The first three tiers are explicit CLI and environment selections. Tiers 4 and 5 are settings in the single loaded `arf.toml` (`r_source_overrides` and `startup.r_source`), selected by `--config`, `ARF_CONFIG`, or the platform default (see [Configuration File Location](configuration.md#configuration-file-location)). Project-local files such as `rproject.toml` and `.r-version` are inputs to override providers, not separate arf configuration files. Tiers 6 and 7 describe how arf discovers R after the selected configuration resolves to PATH mode.
+The first two tiers are explicit CLI and environment selections. Tiers 3 and 4 are settings in the single loaded `arf.toml` (`r_source_overrides` and `startup.r_source`), selected by `--config`, `ARF_CONFIG`, or the platform default (see [Configuration File Location](configuration.md#configuration-file-location)). Project-local files such as `rproject.toml` and `.r-version` are inputs to override providers, not separate arf configuration files. Tiers 5 and 6 describe how arf discovers R after the selected configuration resolves to PATH mode.
 
-For `headless` and `r resolve`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R` or `arf r resolve --r-home /opt/R`, not `arf --r-home /opt/R headless` or `arf --r-home /opt/R r resolve`. Placing them before the subcommand is an error that names the corrected form; placing `--r-home` between `r` and `resolve` is an unexpected argument. `ARF_R_HOME` and `ARF_R_VERSION` need no placement — the subcommands read them directly.
+For `headless` and `r resolve`, `--r-home` and `--with-r-version` are resolved as one mutually exclusive R-source pair, and the flags belong to the subcommand: write `arf headless --r-home /opt/R` or `arf r resolve --r-home /opt/R`, not `arf --r-home /opt/R headless` or `arf --r-home /opt/R r resolve`. Placing them before the subcommand is an error that names the corrected form; placing `--r-home` between `r` and `resolve` is an unexpected argument. `ARF_R_HOME` and `ARF_R_VERSION` need no placement. A CLI selection takes precedence over either environment variable. If no CLI selection is present and both environment variables are set, arf reports a conflict.
 
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|
-| 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
-| 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
-| 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. The interactive console, `headless` and `r resolve` each read these variables for themselves. |
-| 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A file provider may have no matching file or version, and an active-environment provider may be unavailable; those cases fall through to the next provider and then to tier 5. |
-| 5 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
-| 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
-| 7 | `R RHOME` / built-in default paths | Final fallback search used to discover R when PATH-mode resolution needs it. |
+| 1 | CLI `--r-home` or `--with-r-version` | Returns immediately with the requested source; no lower tier is evaluated. These CLI flags conflict with each other and take precedence over either R source environment variable. |
+| 2 | `ARF_R_HOME` or `ARF_R_VERSION` | Used only when no CLI source is given. Setting both is an error. The interactive console, `headless` and `r resolve` read these variables for themselves. |
+| 3 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A file provider may have no matching file or version, and an active-environment provider may be unavailable; those cases fall through to the next provider and then to tier 4. |
+| 4 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
+| 5 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 4 resolves to PATH mode. |
+| 6 | `R RHOME` / built-in default paths | Final fallback search used to discover R when PATH-mode resolution needs it. |
 
-Specifying `--r-home` or `--with-r-version` (or `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
+Specifying `--r-home` or `--with-r-version` (or either `ARF_R_HOME` or `ARF_R_VERSION`) skips the `r_source_overrides` detection step entirely: an existing `rproject.toml` is not read and no warning is emitted. Inherited `R_HOME` likewise matters only as a discovery-layer input when `startup.r_source` falls into PATH mode.
 
 > [!WARNING]
 > With the default `startup.r_source = "auto"`, arf uses rig's default R directly when rig is available and its default can be resolved; otherwise it falls back to the R found on PATH. This does not guarantee that arf and an editor use the same installation: for example, a conda-provided R can appear before rig's shim on PATH, so the editor may discover it while arf uses rig's default.

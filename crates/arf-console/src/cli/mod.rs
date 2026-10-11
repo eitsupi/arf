@@ -14,6 +14,7 @@ pub(crate) use history::{HistoryAction, ImportSource};
 pub(crate) use ipc::IpcAction;
 pub(crate) use r_args::RArgsBuilder;
 pub(crate) use resolve::RCommand;
+pub(crate) use shared::RSourceArgs;
 
 use clap::{ArgAction, Parser, Subcommand, ValueHint};
 #[cfg(test)]
@@ -425,6 +426,63 @@ mod tests {
         assert_eq!(config, Some(PathBuf::from(&config_path)));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_r_home_parser_preserves_non_utf8_command_line_path() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
+
+        let path = std::ffi::OsString::from_vec(b"/tmp/R-\xff".to_vec());
+        let cli = Cli::try_parse_from([
+            std::ffi::OsString::from("arf"),
+            std::ffi::OsString::from("--r-home"),
+            path.clone(),
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.r_source
+                .r_home
+                .as_deref()
+                .unwrap()
+                .as_os_str()
+                .as_bytes(),
+            path.as_os_str().as_bytes()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_r_home_parser_preserves_non_unicode_command_line_path() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
+
+        let path = std::ffi::OsString::from_wide(&[b'C' as u16, b':' as u16, 0xD800]);
+        let cli = Cli::try_parse_from([
+            std::ffi::OsString::from("arf"),
+            std::ffi::OsString::from("--r-home"),
+            path.clone(),
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.r_source
+                .r_home
+                .as_deref()
+                .unwrap()
+                .as_os_str()
+                .encode_wide()
+                .collect::<Vec<_>>(),
+            path.as_os_str().encode_wide().collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn test_no_r_source_overrides_does_not_conflict_with_r_home() {
         let mut guard = crate::test_utils::lock_env();
@@ -437,13 +495,24 @@ mod tests {
     }
 
     #[test]
+    fn test_r_home_conflicts_with_with_r_version() {
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_CONFIG");
+
+        assert!(Cli::try_parse_from(["arf", "--r-home", "/r", "--with-r-version", "4.5"]).is_err());
+    }
+
+    #[test]
     fn test_arf_r_home_has_same_precedence_as_r_home() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
-        let cli = Cli::try_parse_from(["arf"]).unwrap();
+        let mut cli = Cli::try_parse_from(["arf"]).unwrap();
+        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
 
         assert_eq!(
             cli.r_source.r_home.as_deref(),
@@ -458,7 +527,8 @@ mod tests {
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
         guard.set("ARF_R_VERSION", "4.5");
-        let cli = Cli::try_parse_from(["arf"]).unwrap();
+        let mut cli = Cli::try_parse_from(["arf"]).unwrap();
+        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
 
         assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
     }
@@ -470,7 +540,8 @@ mod tests {
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
-        let home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
+        let mut home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
+        crate::app::option_scope::normalize_r_source_args(&mut home_cli.r_source).unwrap();
         assert_eq!(
             home_cli.r_source.r_home.as_deref(),
             Some(std::path::Path::new("/cli/r-home"))
@@ -478,20 +549,21 @@ mod tests {
 
         guard.unset("ARF_R_HOME");
         guard.set("ARF_R_VERSION", "4.4");
-        let version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
+        let mut version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
+        crate::app::option_scope::normalize_r_source_args(&mut version_cli.r_source).unwrap();
         assert_eq!(version_cli.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
-    fn test_arf_r_home_conflicts_with_with_r_version() {
+    fn test_cli_r_version_wins_over_r_home_environment() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
         guard.set("ARF_R_HOME", "/env/r-home");
-        let result = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]);
-
-        assert!(result.is_err());
+        let mut cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
+        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
+        assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
@@ -500,33 +572,49 @@ mod tests {
         guard.set("ARF_R_HOME", "/env/r-home");
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
-        let cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
-        let Some(Commands::Headless(args)) = cli.command else {
+        let mut cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+        let Some(Commands::Headless(args)) = &mut cli.command else {
             panic!("expected headless command");
         };
+        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
         assert_eq!(args.r_source.r_home, Some(PathBuf::from("/env/r-home")));
 
         guard.unset("ARF_R_HOME");
         guard.set("ARF_R_VERSION", "4.5");
-        let cli = Cli::try_parse_from(["arf", "r", "resolve"]).unwrap();
-        let Some(Commands::R(args)) = cli.command else {
+        let mut cli = Cli::try_parse_from(["arf", "r", "resolve"]).unwrap();
+        let Some(Commands::R(args)) = &mut cli.command else {
             panic!("expected r command");
         };
-        let RCommand::Resolve(args) = args.command;
+        let RCommand::Resolve(args) = &mut args.command;
+        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
         assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
     }
 
     #[test]
-    fn test_headless_r_source_flags_conflict_with_environment_values() {
+    fn test_headless_cli_r_source_wins_over_environment_values() {
         let mut guard = crate::test_utils::lock_env();
         guard.set("ARF_R_HOME", "/env/r-home");
         guard.unset("ARF_R_VERSION");
         guard.unset("ARF_CONFIG");
-        assert!(Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).is_err());
+        let mut cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
+        let Some(Commands::Headless(args)) = &mut cli.command else {
+            panic!("expected headless command");
+        };
+        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
+        assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
 
         guard.unset("ARF_R_HOME");
         guard.set("ARF_R_VERSION", "4.5");
-        assert!(Cli::try_parse_from(["arf", "r", "resolve", "--r-home", "/cli"]).is_err());
+        let mut cli = Cli::try_parse_from(["arf", "r", "resolve", "--r-home", "/cli"]).unwrap();
+        let Some(Commands::R(args)) = &mut cli.command else {
+            panic!("expected r command");
+        };
+        let RCommand::Resolve(args) = &mut args.command;
+        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
+        assert_eq!(
+            args.r_source.r_home.as_deref(),
+            Some(std::path::Path::new("/cli"))
+        );
     }
 
     #[test]

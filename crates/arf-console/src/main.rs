@@ -36,7 +36,7 @@ use app::config_load::{
 };
 use app::headless::run_headless;
 use app::option_scope::{
-    config_file_source, effective_config_path, r_source_origin, validate_top_level_scope,
+    config_file_source, effective_config_path, normalize_r_source_args, validate_top_level_scope,
 };
 #[cfg(windows)]
 use app::r_profiles::source_r_profiles;
@@ -85,7 +85,26 @@ fn run() -> Result<()> {
     let mut command = Cli::command();
     let matches = command.clone().get_matches();
     validate_top_level_scope(&command, &matches);
-    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let explicit_r_source = match &mut cli.command {
+        None => normalize_r_source_args(&mut cli.r_source),
+        Some(Commands::Headless(args)) => normalize_r_source_args(&mut args.r_source),
+        Some(Commands::R(args)) => {
+            let RCommand::Resolve(resolve_args) = &mut args.command;
+            normalize_r_source_args(&mut resolve_args.r_source)
+        }
+        Some(
+            Commands::Completions(_)
+            | Commands::Config(_)
+            | Commands::History(_)
+            | Commands::Ipc(_),
+        ) => Ok(None),
+    }
+    .unwrap_or_else(|error| {
+        command
+            .error(clap::error::ErrorKind::ValueValidation, error.to_string())
+            .exit()
+    });
     if effective_config_path(&cli).is_some_and(|path| path.as_os_str().is_empty()) {
         command
             .error(
@@ -240,7 +259,7 @@ fn run() -> Result<()> {
         }
         Some(Commands::R(args)) => {
             let RCommand::Resolve(resolve_args) = &args.command;
-            let origin = r_source_origin(&matches);
+            let origin = explicit_r_source.as_ref().map(|request| request.origin);
             return run_resolve(
                 resolve_args.r_source.config.as_deref(),
                 resolve_args.r_source.r_home.as_deref(),

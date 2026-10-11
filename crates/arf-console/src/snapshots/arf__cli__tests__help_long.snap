@@ -40,13 +40,11 @@ Options:
       --r-home <R_HOME>
           Highest-priority R source: use this explicit R_HOME path
           
-          Mutually exclusive with --with-r-version and ARF_R_VERSION.
+          Mutually exclusive with --with-r-version.
           
-          Takes precedence over ARF_R_HOME, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          Takes precedence over ARF_R_HOME, ARF_R_VERSION, r_source_overrides and startup.r_source.
           
           Config: startup.r_source
-          
-          [env: ARF_R_HOME=]
 
       --with-r-version <R_VERSION>
           Highest-priority R source: use this R version via rig
@@ -55,11 +53,9 @@ Options:
           
           Requires rig. Candidates are limited to R versions rig has installed (from `rig list --json`); the version string is never passed to rig.
           
-          Takes precedence over ARF_R_VERSION, r_source_overrides and startup.r_source, which are not consulted at all when this is set.
+          Takes precedence over ARF_R_HOME, ARF_R_VERSION, r_source_overrides and startup.r_source.
           
           Config: startup.r_source
-          
-          [env: ARF_R_VERSION=]
 
       --no-r-source-overrides
           Disable experimental directory-level R source overrides

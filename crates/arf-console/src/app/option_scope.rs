@@ -1,7 +1,9 @@
 //! Top-level CLI option scope and R source origin validation.
 
-use crate::app::resolve::RSourceOrigin;
-use crate::cli::{Cli, Commands, ConfigAction, RCommand};
+use crate::app::explicit_r_source::{
+    ExplicitRSource, ExplicitRSourceRequest, explicit_r_source_request,
+};
+use crate::cli::{Cli, Commands, ConfigAction, RCommand, RSourceArgs};
 use crate::config::ConfigFileSource;
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Command};
@@ -31,22 +33,32 @@ pub(crate) fn config_file_source(matches: &ArgMatches) -> ConfigFileSource {
     }
 }
 
-pub(crate) fn r_source_origin(matches: &ArgMatches) -> Option<RSourceOrigin> {
-    let resolve_matches = matches
-        .subcommand_matches("r")
-        .and_then(|matches| matches.subcommand_matches("resolve"))?;
-
-    if resolve_matches.value_source("r_home") == Some(ValueSource::CommandLine)
-        || resolve_matches.value_source("r_version") == Some(ValueSource::CommandLine)
-    {
-        Some(RSourceOrigin::Cli)
-    } else if resolve_matches.value_source("r_home") == Some(ValueSource::EnvVariable)
-        || resolve_matches.value_source("r_version") == Some(ValueSource::EnvVariable)
-    {
-        Some(RSourceOrigin::Environment)
+pub(crate) fn normalize_r_source_args(
+    args: &mut RSourceArgs,
+) -> Result<Option<ExplicitRSourceRequest>, crate::app::explicit_r_source::ExplicitRSourceError> {
+    let (env_home, env_version) = if args.r_home.is_none() && args.r_version.is_none() {
+        (
+            std::env::var_os("ARF_R_HOME"),
+            std::env::var_os("ARF_R_VERSION"),
+        )
     } else {
-        None
+        // A CLI request takes precedence over every R source environment value.
+        // Do not even parse inherited values that cannot affect this invocation.
+        (None, None)
+    };
+    let request = explicit_r_source_request(
+        args.r_home.clone(),
+        args.r_version.clone(),
+        env_home,
+        env_version,
+    )?;
+    if let Some(request) = &request {
+        match &request.source {
+            ExplicitRSource::Home(path) => args.r_home = Some(path.clone()),
+            ExplicitRSource::Version(version) => args.r_version = Some(version.clone()),
+        }
     }
+    Ok(request)
 }
 
 pub(crate) fn validate_top_level_scope(command: &Command, matches: &ArgMatches) {

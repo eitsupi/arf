@@ -16,16 +16,15 @@ pub struct RSourceArgs {
 
     /// Highest-priority R source: use this explicit R_HOME path
     ///
-    /// Mutually exclusive with --with-r-version and ARF_R_VERSION.
+    /// Mutually exclusive with --with-r-version.
     ///
-    /// Takes precedence over ARF_R_HOME, r_source_overrides and
-    /// startup.r_source, which are not consulted at all when this is set.
+    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION,
+    /// r_source_overrides and startup.r_source.
     ///
     /// Config: startup.r_source
     #[arg(
         long = "r-home",
         value_hint = ValueHint::DirPath,
-        env = "ARF_R_HOME",
         conflicts_with = "r_version"
     )]
     pub r_home: Option<PathBuf>,
@@ -40,15 +39,11 @@ pub struct RSourceArgs {
     /// Requires rig. Candidates are limited to R versions rig has installed
     /// (from `rig list --json`); the version string is never passed to rig.
     ///
-    /// Takes precedence over ARF_R_VERSION, r_source_overrides and
-    /// startup.r_source, which are not consulted at all when this is set.
+    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION,
+    /// r_source_overrides and startup.r_source.
     ///
     /// Config: startup.r_source
-    #[arg(
-        long = "with-r-version",
-        env = "ARF_R_VERSION",
-        conflicts_with = "r_home"
-    )]
+    #[arg(long = "with-r-version", conflicts_with = "r_home")]
     pub r_version: Option<String>,
 
     /// Disable experimental directory-level R source overrides
