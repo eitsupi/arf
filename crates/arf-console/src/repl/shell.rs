@@ -147,6 +147,24 @@ where
     changes
 }
 
+fn arf_supplied_wrapper_paths_to_remove<FStartup, FCurrent>(
+    wrapper_values: impl IntoIterator<Item = (&'static str, OsString)>,
+    mut startup_value: FStartup,
+    mut current_value: FCurrent,
+) -> Vec<&'static str>
+where
+    FStartup: FnMut(&str) -> Option<OsString>,
+    FCurrent: FnMut(&str) -> Option<OsString>,
+{
+    wrapper_values
+        .into_iter()
+        .filter_map(|(name, expected)| {
+            (startup_value(name).is_none() && current_value(name).as_ref() == Some(&expected))
+                .then_some(name)
+        })
+        .collect()
+}
+
 /// Build the command used to restart the process with the requested changes.
 ///
 /// Using `Command::env_remove()` (rather than mutating the current process's
@@ -205,7 +223,7 @@ fn print_env_changes(changes: &EnvChanges) {
     }
 
     arf_println!(
-        "Environment variables for the R version switch: {}",
+        "Environment variables for the R restart: {}",
         details.join("; ")
     );
 }
@@ -258,7 +276,16 @@ pub fn restart_process(version: Option<&str>) {
         args = args_with_r_version(args, v);
     }
 
-    let changes = env_changes_for_switch(version, crate::startup_env_value);
+    let mut changes = env_changes_for_switch(version, crate::startup_env_value);
+    if version.is_none()
+        && let Some(old_r_home) = std::env::var_os("R_HOME")
+    {
+        changes.removed.extend(arf_supplied_wrapper_paths_to_remove(
+            arf_libr::r_path_vars_from_wrapper(std::path::Path::new(&old_r_home)),
+            crate::startup_env_value,
+            |name| std::env::var_os(name),
+        ));
+    }
     print_env_changes(&changes);
     let startup_env_carrier = crate::startup_env_carrier();
 
@@ -596,6 +623,27 @@ mod tests {
                 .map(|(_, value)| value),
             Some(Some(OsStr::new(TEST_STARTUP_ENV_CARRIER)))
         );
+    }
+
+    #[test]
+    fn restart_only_removes_unchanged_arf_supplied_wrapper_paths() {
+        let wrapper_values = [
+            ("R_DOC_DIR", OsString::from(r"/old/R/doc")),
+            ("R_SHARE_DIR", OsString::from(r"/old/R/share")),
+            ("R_INCLUDE_DIR", OsString::from(r"/old/R/include")),
+        ];
+        let removed = arf_supplied_wrapper_paths_to_remove(
+            wrapper_values,
+            |name| (name == "R_DOC_DIR").then(|| OsString::from(r"/user/selected/doc")),
+            |name| match name {
+                "R_DOC_DIR" => Some(OsString::from(r"/old/R/doc")),
+                "R_SHARE_DIR" => Some(OsString::from(r"/old/R/share")),
+                "R_INCLUDE_DIR" => Some(OsString::from(r"/session/selected/include")),
+                _ => None,
+            },
+        );
+
+        assert_eq!(removed, ["R_SHARE_DIR"]);
     }
 
     #[test]

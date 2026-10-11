@@ -44,7 +44,7 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
 | `--r-home <PATH>` | Explicit R_HOME path |
-| `--r-provider <PROVIDER>` | Explicitly select an active Pixi environment or the current synced rig project |
+| `--r-provider <PROVIDER>` | Explicitly select the current synced rig project or an active Pixi environment |
 | `--no-r-source-overrides` | Disable the configured R source override provider chain |
 | `--vanilla` | Start R without init files |
 
@@ -129,11 +129,11 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 
 All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
 
-For a Pixi override, `provider` is `"pixi"`, `file` is the manifest path, and the extensible `metadata` object describes the validated active environment: `kind` is `"pixi"`, with `environment`, `manifest`, `prefix`, and the verified `r_binary`. `key` and `requested_version` remain `null`; `resolved_version` may be `null`. `metadata` is `null` when no provider metadata applies. Its `kind` is an open enum: clients must accept unknown kinds and fields, so future providers can add metadata without adding top-level fields. Pixi warnings use the same `warnings` array and never require an interactive confirmation.
-
 For a rig-project override, `provider` is `"rig-project"`, `file` is the `rproj.toml` path, and `metadata.kind` is `"rig_project"` with the fields `root`, `manifest`, `r_installation`, and `r_binary`. The installation name is not treated as an exact R version, so `resolved_version` is `null`.
 
 `r_source_selection` carries the same rig-project metadata for explicit `--r-provider rig-project` and `ARF_R_PROVIDER=rig-project` requests. The legacy `r_source_override` object continues to describe the configured override state and does not claim that an override was applied for an explicit request.
+
+For a Pixi override, `provider` is `"pixi"`, `file` is the manifest path, and the extensible `metadata` object describes the validated active environment: `kind` is `"pixi"`, with `environment`, `manifest`, `prefix`, and the verified `r_binary`. `key` and `requested_version` remain `null`; `resolved_version` may be `null`. `metadata` is `null` when no provider metadata applies. Its `kind` is an open enum: clients must accept unknown kinds and fields, so future providers can add metadata without adding top-level fields. Pixi warnings use the same `warnings` array and never require an interactive confirmation.
 
 `r_source_selection` reports the actual selected provider and provenance using the same fields as `arf r resolve`, including explicit `--r-provider` and `ARF_R_PROVIDER` requests. The legacy `r_source_override` object continues to report configured override state; an explicit provider request does not mark that override as applied (`shadowed_by_cli`, or `disabled` when overrides were disabled).
 

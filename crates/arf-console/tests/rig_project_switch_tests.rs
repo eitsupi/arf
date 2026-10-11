@@ -157,3 +157,59 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
         },
     )
 }
+
+#[test]
+#[ignore = "requires rig 0.11.0 and synchronized project roots using R 4.6.1 and 4.6.0"]
+fn rig_project_restart_reevaluates_the_current_working_directory() -> Result<()> {
+    let state = state()?;
+    let project = required_path(&state, "project")?;
+    let project_b = required_path(&state, "project_b")?;
+    let user_home = required_path(&state, "user_home")?;
+    let script = required_path(&state, "proof_script")?;
+    let proof_dir = required_path(&state, "proof_dir")?;
+    let startup_dyld = state["base_dyld_library_path"]
+        .as_str()
+        .context("initial DYLD_LIBRARY_PATH in switch state")?;
+    fs::create_dir_all(&proof_dir)?;
+
+    run_case_with(
+        Terminal::builder("rig-project-cwd-restart")
+            .cwd(&project)
+            .vanilla(false)
+            .artifacts(proof_dir.join("cwd-restart-tui"))
+            .env("HOME", user_home.to_string_lossy())
+            .env("DYLD_LIBRARY_PATH", startup_dyld)
+            .args([
+                "--r-provider",
+                "rig-project",
+                "--no-r-auto-discovery",
+                "--no-auto-match",
+                "--no-completion",
+                "--with-ipc",
+                "--ipc-eval-unrestricted",
+            ]),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            capture_proof(terminal, &script, &proof_dir, "cwd-restart-project-a")?;
+
+            let project_b = serde_json::to_string(&project_b.to_string_lossy())?;
+            terminal.submit(
+                &format!(r#"setwd({project_b}); cat("RIG_PROJECT_B_CWD_READY")"#),
+                "RIG_PROJECT_B_CWD_READY",
+                PROMPT,
+            )?;
+            capture_proof(
+                terminal,
+                &script,
+                &proof_dir,
+                "cwd-restart-before-project-b",
+            )?;
+
+            let checkpoint = terminal.checkpoint()?;
+            terminal.enter(":restart!")?;
+            wait_for_replacement(terminal, checkpoint, "restart in project B")?;
+            capture_proof(terminal, &script, &proof_dir, "project-b-restart")?;
+            terminal.quit()
+        },
+    )
+}
