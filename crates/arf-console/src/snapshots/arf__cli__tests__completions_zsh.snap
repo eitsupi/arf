@@ -28,8 +28,9 @@ on\:"Evaluate and show reprex output"
 format\:"Format code with the configured formatter before reprex evaluation"))' \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
-'(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
-'(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--with-r-version --r-provider)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
+'(--r-home --r-provider)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--r-home --with-r-version)--r-provider=[Use R from an externally activated provider environment]:R_PROVIDER:(pixi)' \
 '--max-connections=[\[R\] Set max number of connections to N]:MAX_CONNECTIONS:_default' \
 '--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
@@ -351,8 +352,9 @@ esac
 _arguments "${_arguments_options[@]}" : \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
-'(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
-'(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--with-r-version --r-provider)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
+'(--r-home --r-provider)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--r-home --with-r-version)--r-provider=[Use R from an externally activated provider environment]:R_PROVIDER:(pixi)' \
 '--ipc-bind=[Bind IPC socket to a specific path instead of the default. On Unix, ensure the parent directory is user-private (mode 0700) to avoid a brief permission window before the socket is restricted]:BIND:_files' \
 '--ipc-pid-file=[Write server PID to a file (removed on shutdown)]:PID_FILE:_files' \
 '*--ipc-eval-allow-function=[Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use \`package\:\:function\`]:IPC_EVAL_ALLOW_FUNCTION:_default' \
@@ -394,8 +396,9 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-c+[Path to configuration file]:CONFIG:_files' \
 '--config=[Path to configuration file]:CONFIG:_files' \
-'(--with-r-version)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
-'(--r-home)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--with-r-version --r-provider)--r-home=[Highest-priority R source\: use this explicit R_HOME path]:R_HOME:_files -/' \
+'(--r-home --r-provider)--with-r-version=[Highest-priority R source\: use this R version via rig]:R_VERSION:_default' \
+'(--r-home --with-r-version)--r-provider=[Use R from an externally activated provider environment]:R_PROVIDER:(pixi)' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '-h[Print help (see more with '\''--help'\'')]' \

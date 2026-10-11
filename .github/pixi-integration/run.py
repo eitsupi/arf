@@ -24,9 +24,13 @@ mode='volatile'
 [experimental]
 r_source_overrides=[{provider='version-file',file='.r-version'},{provider='pixi'}]
 """)
+EXPLICIT_CONFIG = RESULTS / "explicit-arf.toml"
+EXPLICIT_CONFIG.write_text(r"""[history]
+mode='volatile'
+""")
 ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
 ENV = os.environ.copy()
-for key in ("R_HOME", "ARF_R_HOME", "ARF_R_VERSION", "ARF_CONFIG", "R_LIBS",
+for key in ("R_HOME", "ARF_R_HOME", "ARF_R_VERSION", "ARF_R_PROVIDER", "ARF_CONFIG", "R_LIBS",
             "R_LIBS_SITE", "R_LIBS_USER", "R_PROFILE_USER", "R_ENVIRON_USER",
             "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR", "RUST_LOG"):
     ENV.pop(key, None)
@@ -135,6 +139,23 @@ stopifnot(abs(stats::sd(1:3) - 1) < 1e-10);
 stopifnot(jsonlite::fromJSON('{"answer":42}')$answer == 42);
 stopifnot(nchar(curl::curl_version()$version) > 0);
 cat('PIXI_COMPILED_OK\n')"""
+    explicit_resolved = run(
+        "explicit-resolve",
+        [ARF, "r", "resolve", "--r-provider", "pixi", "--no-r-source-overrides",
+         "--config", EXPLICIT_CONFIG],
+    )
+    require(explicit_resolved, "explicit Pixi resolve")
+    assert not explicit_resolved.stderr, explicit_resolved.stderr
+    explicit_descriptor = json.loads(explicit_resolved.stdout)
+    assert explicit_descriptor["provider"] == "pixi", explicit_descriptor
+    assert explicit_descriptor["selected_by"]["kind"] == "provider_request", explicit_descriptor
+    selected_source = explicit_descriptor["selected_by"]["source"]
+    assert selected_source["kind"] == "command_line_argument", selected_source
+    assert selected_source["name"] == "--r-provider", selected_source
+    assert Path(explicit_descriptor["target"]["r_binary"]).samefile(binary), explicit_descriptor
+    assert Path(explicit_descriptor["target"]["r_home"]).samefile(home), explicit_descriptor
+    assert explicit_descriptor["diagnostics"] == [], explicit_descriptor
+
     clean = ENV.copy()
     clean.pop("R_HOME")
     # Conda's Windows launcher does not forward captured output reliably.
@@ -152,6 +173,15 @@ cat('PIXI_COMPILED_OK\n')"""
     assert b"PIXI_COMPILED_OK" in result.stdout, result.stdout
     assert result.stderr.count(b"Warning:") == 1, result.stderr
     assert b"All R source overrides failed" not in result.stderr, result.stderr
+    explicit_eval = run(
+        "explicit-eval",
+        [ARF, "--config", EXPLICIT_CONFIG, "--r-provider", "pixi", "--no-r-source-overrides",
+         "--vanilla", "--no-r-auto-discovery", "-e", expression],
+    )
+    require(explicit_eval, "explicit Pixi eval")
+    assert explicit_eval.stdout.count(b"PIXI_COMPILED_OK") == 1, explicit_eval.stdout
+    assert b"Warning:" not in explicit_eval.stderr, explicit_eval.stderr
+    assert b"r_source_override" not in explicit_eval.stderr, explicit_eval.stderr
     script = RESULTS / "compiled.R"
     script.write_text(expression)
     require(run("script", [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-f", script]), "script")

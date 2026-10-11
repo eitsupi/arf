@@ -3,6 +3,7 @@
 use crate::app::config_load::{
     load_config_for_startup, report_diagnostics_on_setup_error, report_startup_diagnostics,
 };
+use crate::app::explicit_r_source::ExplicitRSourceRequest;
 use crate::cli::Cli;
 use crate::config::ReprexMode;
 use crate::external::formatter;
@@ -10,7 +11,10 @@ use anyhow::{Context, Result};
 use std::fs;
 
 /// Run in script execution mode (non-interactive).
-pub(crate) fn run_script(cli: &Cli) -> Result<()> {
+pub(crate) fn run_script(
+    cli: &Cli,
+    explicit_request: Option<&ExplicitRSourceRequest>,
+) -> Result<()> {
     // Load configuration (from file or default)
     let (config, config_diagnostics) = load_config_for_startup(cli.r_source.config.as_ref());
 
@@ -20,8 +24,7 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
             &config.startup.r_source,
             &config.experimental.r_source_overrides,
             None,
-            cli.r_source.r_home.as_deref(),
-            cli.r_source.r_version.as_deref(),
+            explicit_request,
             cli.r_source.no_r_source_overrides,
         ),
         config_diagnostics,

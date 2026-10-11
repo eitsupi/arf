@@ -1,7 +1,9 @@
 //! Core R source resolution.
 
 use super::overrides::{OverrideResolution, setup_r_via_overrides};
+use super::pixi::resolve_strict;
 use super::rig::{ResolvedRSource, resolve_r_home_from_path, setup_r_via_rig};
+use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RProvider};
 use crate::config::{
     RSource, RSourceMode, RSourceOverride, RSourceOverrideInfo, RSourceStatus, mask_home_path,
 };
@@ -9,15 +11,8 @@ use crate::external;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Set up R based on r_source configuration.
-///
-/// CLI options override config in this order:
-/// 1. `cli_r_home` - explicit R_HOME path
-/// 2. `cli_version` - rig version specification
-/// 3. Experimental directory-level R source overrides
-/// 4. Config `r_source` setting
-///
-/// The state of override resolution for reporting to users and headless clients.
+/// Outcome of evaluating configured R source overrides, retained for reports.
+/// An explicit CLI or environment request is tracked separately as the selection route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RSourceOverrideState {
     /// An override selected the active R installation.
@@ -233,52 +228,65 @@ pub(crate) fn resolve_r_source(
     r_source: &RSource,
     r_source_overrides: &[RSourceOverride],
     base_dir: Option<&Path>,
-    cli_r_home: Option<&std::path::Path>,
-    cli_version: Option<&str>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     no_r_source_overrides: bool,
 ) -> Result<RSourceResolutionReport> {
-    // CLI --r-home overrides everything. An explicit disable still controls
-    // the reported override state without changing the selected R source.
-    if let Some(path) = cli_r_home {
-        if !path.exists() {
-            anyhow::bail!(
-                "R_HOME path does not exist: {}\n\
-                 Check your --r-home argument.",
-                path.display()
-            );
+    // Explicit selections take precedence over every configured source.
+    if let Some(request) = explicit_request {
+        let override_state = if no_r_source_overrides {
+            RSourceOverrideState::Disabled
+        } else {
+            RSourceOverrideState::ShadowedByCli
+        };
+        match &request.source {
+            ExplicitRSource::Provider(RProvider::Pixi) => {
+                let cwd = base_dir
+                    .map(Path::to_path_buf)
+                    .or_else(|| std::env::current_dir().ok());
+                let target = resolve_strict(cwd.as_deref()).map_err(|failure| {
+                    anyhow::Error::new(failure).context(
+                        "The requested Pixi R provider is unavailable; run arf through `pixi run` with an R-enabled environment",
+                    )
+                })?;
+                return Ok(RSourceResolutionReport::from_pixi(
+                    target,
+                    Vec::new(),
+                    RSourceSelectionRoute::Explicit,
+                    override_state,
+                ));
+            }
+            ExplicitRSource::Home(path) => {
+                if !path.exists() {
+                    anyhow::bail!(
+                        "R_HOME path does not exist: {}\n\
+                         Check your --r-home argument.",
+                        path.display()
+                    );
+                }
+                let r_home = resolve_r_home_from_path(path)?;
+                log::info!("Using R from --r-home: {}", r_home.display());
+                return Ok(RSourceResolutionReport::from_explicit_status(
+                    RSourceStatus::ExplicitPath {
+                        path: r_home.clone(),
+                    },
+                    Some(r_home),
+                    override_state,
+                ));
+            }
+            ExplicitRSource::Version(version) => {
+                return setup_r_via_rig(version).map(|resolved| {
+                    RSourceResolutionReport::from_explicit_status(
+                        resolved.status,
+                        resolved.r_home,
+                        override_state,
+                    )
+                });
+            }
         }
-        // Resolve R_HOME: if path looks like an installation prefix (has bin/R),
-        // run `bin/R RHOME` to get the actual R_HOME directory
-        let r_home = resolve_r_home_from_path(path)?;
-        log::info!("Using R from --r-home: {}", r_home.display());
-        return Ok(RSourceResolutionReport::from_explicit_status(
-            RSourceStatus::ExplicitPath {
-                path: r_home.clone(),
-            },
-            Some(r_home),
-            if no_r_source_overrides {
-                RSourceOverrideState::Disabled
-            } else {
-                RSourceOverrideState::ShadowedByCli
-            },
-        ));
     }
 
-    // CLI --with-r-version overrides config (uses rig)
-    if let Some(version) = cli_version {
-        return setup_r_via_rig(version).map(|resolved| {
-            RSourceResolutionReport::from_explicit_status(
-                resolved.status,
-                resolved.r_home,
-                if no_r_source_overrides {
-                    RSourceOverrideState::Disabled
-                } else {
-                    RSourceOverrideState::ShadowedByCli
-                },
-            )
-        });
-    }
-
+    // With no explicit request, disabling overrides skips only the configured
+    // provider chain and continues with startup.r_source.
     if no_r_source_overrides {
         return setup_r_fallback(r_source, RSourceOverrideState::Disabled);
     }
@@ -349,28 +357,21 @@ pub(crate) fn setup_r(
     r_source: &RSource,
     r_source_overrides: &[RSourceOverride],
     base_dir: Option<&Path>,
-    cli_r_home: Option<&std::path::Path>,
-    cli_version: Option<&str>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     no_r_source_overrides: bool,
 ) -> Result<RSourceResolutionReport> {
-    let resolution = if let Some(carrier) = super::pixi::reexec::restored_target() {
-        anyhow::ensure!(
-            cli_r_home.is_none()
-                && cli_version.is_none()
-                && !no_r_source_overrides
-                && r_source_overrides
-                    .iter()
-                    .any(|source| matches!(source, RSourceOverride::Pixi)),
-            "The selected Pixi R source was changed during loader re-exec"
-        );
+    let resolution = if let Some(carrier) = super::pixi::reexec::restored_target(
+        explicit_request,
+        no_r_source_overrides,
+        r_source_overrides,
+    ) {
         carrier?
     } else {
         resolve_r_source(
             r_source,
             r_source_overrides,
             base_dir,
-            cli_r_home,
-            cli_version,
+            explicit_request,
             no_r_source_overrides,
         )?
     };

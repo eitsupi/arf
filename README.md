@@ -296,7 +296,7 @@ r_source_overrides = [
 ]
 ```
 
-For Pixi, configure `r_source_overrides = [{ provider = "pixi" }]` and start arf with `pixi run arf`. arf validates the active environment without managing it. Missing activation produces guidance and permits fallback; failures after Pixi is selected are startup errors.
+For Pixi, configure `r_source_overrides = [{ provider = "pixi" }]` or select it explicitly with `arf --r-provider pixi` (or `ARF_R_PROVIDER=pixi`). Start arf inside the activated environment, such as with `pixi run arf`; arf validates the environment without managing it.
 
 See [R Source Overrides configuration](docs/configuration.md#r-source-overrides) for provider options and resolution details.
 

@@ -6,6 +6,7 @@ mod r_source;
 mod rig;
 mod script;
 
+pub(crate) use pixi::PixiFailure;
 pub(crate) use pixi::reexec::capture_loader_target;
 #[cfg(unix)]
 pub(crate) use pixi::reexec::{clear_loader_target, forward_loader_target};

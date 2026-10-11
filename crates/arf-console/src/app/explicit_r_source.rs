@@ -3,6 +3,12 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum RProvider {
+    #[value(name = "pixi")]
+    Pixi,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RSourceOrigin {
     Cli,
@@ -13,6 +19,7 @@ pub(crate) enum RSourceOrigin {
 pub(crate) enum ExplicitRSource {
     Home(PathBuf),
     Version(String),
+    Provider(RProvider),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +31,11 @@ pub(crate) struct ExplicitRSourceRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExplicitRSourceError {
     ConflictingCli,
+    ConflictingProviderCli,
     ConflictingEnvironment,
+    ConflictingProviderEnvironment,
     InvalidVersionEnvironment,
+    InvalidProviderEnvironment,
 }
 
 impl std::fmt::Display for ExplicitRSourceError {
@@ -34,12 +44,19 @@ impl std::fmt::Display for ExplicitRSourceError {
             Self::ConflictingCli => {
                 f.write_str("--r-home and --with-r-version cannot be used together")
             }
+            Self::ConflictingProviderCli => {
+                f.write_str("--r-home, --with-r-version, and --r-provider cannot be used together")
+            }
             Self::ConflictingEnvironment => {
                 f.write_str("ARF_R_HOME and ARF_R_VERSION cannot be used together")
+            }
+            Self::ConflictingProviderEnvironment => {
+                f.write_str("ARF_R_HOME, ARF_R_VERSION, and ARF_R_PROVIDER cannot be used together")
             }
             Self::InvalidVersionEnvironment => {
                 f.write_str("ARF_R_VERSION must contain valid Unicode")
             }
+            Self::InvalidProviderEnvironment => f.write_str("ARF_R_PROVIDER must be `pixi`"),
         }
     }
 }
@@ -53,13 +70,22 @@ impl std::error::Error for ExplicitRSourceError {}
 pub(crate) fn explicit_r_source_request(
     cli_home: Option<PathBuf>,
     cli_version: Option<String>,
+    cli_provider: Option<RProvider>,
     env_home: Option<OsString>,
     env_version: Option<OsString>,
+    env_provider: Option<OsString>,
 ) -> Result<Option<ExplicitRSourceRequest>, ExplicitRSourceError> {
-    if cli_home.is_some() && cli_version.is_some() {
+    let cli_count = usize::from(cli_home.is_some())
+        + usize::from(cli_version.is_some())
+        + usize::from(cli_provider.is_some());
+    if cli_count > 1 {
         // clap rejects this combination as well; retain the invariant for
         // callers that construct the normalized request directly.
-        return Err(ExplicitRSourceError::ConflictingCli);
+        return Err(if cli_provider.is_none() {
+            ExplicitRSourceError::ConflictingCli
+        } else {
+            ExplicitRSourceError::ConflictingProviderCli
+        });
     }
 
     if let Some(home) = cli_home {
@@ -72,6 +98,35 @@ pub(crate) fn explicit_r_source_request(
         return Ok(Some(ExplicitRSourceRequest {
             source: ExplicitRSource::Version(version),
             origin: RSourceOrigin::Cli,
+        }));
+    }
+    if let Some(provider) = cli_provider {
+        return Ok(Some(ExplicitRSourceRequest {
+            source: ExplicitRSource::Provider(provider),
+            origin: RSourceOrigin::Cli,
+        }));
+    }
+    let env_count = usize::from(env_home.is_some())
+        + usize::from(env_version.is_some())
+        + usize::from(env_provider.is_some());
+    if env_count > 1 {
+        return Err(if env_provider.is_none() {
+            ExplicitRSourceError::ConflictingEnvironment
+        } else {
+            ExplicitRSourceError::ConflictingProviderEnvironment
+        });
+    }
+    if let Some(provider) = env_provider.as_deref() {
+        let provider = provider
+            .to_str()
+            .ok_or(ExplicitRSourceError::InvalidProviderEnvironment)?;
+        let provider = match provider {
+            "pixi" => RProvider::Pixi,
+            _ => return Err(ExplicitRSourceError::InvalidProviderEnvironment),
+        };
+        return Ok(Some(ExplicitRSourceRequest {
+            source: ExplicitRSource::Provider(provider),
+            origin: RSourceOrigin::Environment,
         }));
     }
 
@@ -97,6 +152,15 @@ pub(crate) fn explicit_r_source_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legacy_request(
+        cli_home: Option<PathBuf>,
+        cli_version: Option<String>,
+        env_home: Option<OsString>,
+        env_version: Option<OsString>,
+    ) -> Result<Option<ExplicitRSourceRequest>, ExplicitRSourceError> {
+        super::explicit_r_source_request(cli_home, cli_version, None, env_home, env_version, None)
+    }
 
     #[test]
     fn explicit_source_precedence_and_conflicts_are_table_driven() {
@@ -166,11 +230,66 @@ mod tests {
 
         for (name, cli_home, cli_version, env_home, env_version, expected) in cases {
             assert_eq!(
-                explicit_r_source_request(cli_home, cli_version, env_home, env_version),
+                legacy_request(cli_home, cli_version, env_home, env_version),
                 expected,
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn provider_request_is_normalized_and_cli_ignores_conflicting_environment() {
+        let cli = super::explicit_r_source_request(
+            None,
+            None,
+            Some(RProvider::Pixi),
+            Some(OsString::from("/env/R")),
+            None,
+            Some(OsString::from("unknown")),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cli.source, ExplicitRSource::Provider(RProvider::Pixi));
+        assert_eq!(cli.origin, RSourceOrigin::Cli);
+
+        let env = super::explicit_r_source_request(
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(OsString::from("pixi")),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(env.source, ExplicitRSource::Provider(RProvider::Pixi));
+        assert_eq!(env.origin, RSourceOrigin::Environment);
+    }
+
+    #[test]
+    fn environment_provider_conflicts_and_invalid_value_are_rejected() {
+        assert_eq!(
+            explicit_r_source_request(
+                None,
+                None,
+                None,
+                Some(OsString::from("/env/R")),
+                None,
+                Some(OsString::from("pixi")),
+            ),
+            Err(ExplicitRSourceError::ConflictingProviderEnvironment)
+        );
+        assert_eq!(
+            super::explicit_r_source_request(
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(OsString::from("unknown")),
+            ),
+            Err(ExplicitRSourceError::InvalidProviderEnvironment)
+        );
     }
 
     #[cfg(unix)]
@@ -179,7 +298,7 @@ mod tests {
         use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
         let path = OsString::from_vec(b"/tmp/R-\xff".to_vec());
-        let request = explicit_r_source_request(None, None, Some(path.clone()), None)
+        let request = legacy_request(None, None, Some(path.clone()), None)
             .unwrap()
             .unwrap();
         let ExplicitRSource::Home(home) = request.source else {
@@ -195,7 +314,7 @@ mod tests {
         use std::os::windows::ffi::OsStringExt;
 
         let path = OsString::from_wide(&[b'R' as u16, b':' as u16, 0xD800]);
-        let request = explicit_r_source_request(None, None, Some(path.clone()), None)
+        let request = legacy_request(None, None, Some(path.clone()), None)
             .unwrap()
             .unwrap();
         let ExplicitRSource::Home(home) = request.source else {
@@ -210,7 +329,7 @@ mod tests {
     fn cli_source_ignores_non_utf8_version_environment() {
         use std::os::unix::ffi::OsStringExt;
 
-        let request = explicit_r_source_request(
+        let request = legacy_request(
             Some(PathBuf::from("/cli/R")),
             None,
             None,
@@ -231,7 +350,7 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         assert_eq!(
-            explicit_r_source_request(
+            legacy_request(
                 None,
                 None,
                 None,
@@ -248,11 +367,11 @@ mod tests {
 
         let invalid_version = OsString::from_wide(&[b'4' as u16, b'.' as u16, 0xD800]);
         assert_eq!(
-            explicit_r_source_request(None, None, None, Some(invalid_version.clone())),
+            legacy_request(None, None, None, Some(invalid_version.clone())),
             Err(ExplicitRSourceError::InvalidVersionEnvironment)
         );
 
-        let request = explicit_r_source_request(
+        let request = legacy_request(
             Some(PathBuf::from(r"C:\cli\R")),
             None,
             None,
