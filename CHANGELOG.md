@@ -12,6 +12,7 @@
 
 - **Breaking:** `experimental.r_source_overrides` entries now use the `provider` key instead of `type`.
 - Explicit `--r-home` and `--with-r-version` selections now take precedence over either R source environment variable; conflicting environment-only selections are rejected.
+- R version switches now remove rig's `RVENV` and `RVENV_UNSYNCED` markers so project activation is reevaluated on startup. They also replace prior R source CLI selections while preserving arguments after `--`.
 - R source overrides now continue to later providers when rig is unavailable or its version list cannot be read, with one final fallback notice.
 - RHOME probes used during source resolution and automatic discovery now have time and output limits.
 - The interactive help browser now searches package help metadata in a background worker, keeping query editing responsive while results are ranked.

@@ -20,6 +20,8 @@ EVIDENCE = RESULTS / "evidence"
 EVIDENCE.mkdir(parents=True, exist_ok=True)
 PROJECT = RESULTS / "project"
 PROJECT.mkdir(parents=True, exist_ok=True)
+USER_HOME = RESULTS / "user-home"
+USER_HOME.mkdir(parents=True, exist_ok=True)
 ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
 R_VERSION = "4.6.1"
 MARKER = "rig-project-renviron-loaded"
@@ -51,7 +53,10 @@ for key in (
     "RVENV",
     "RIG_PROJECT_MARKER",
     "ARF_RIG_RENVIRON_READS",
+    "ARF_RIG_HOME_MARKER",
+    "ARF_RIG_HOME_RENVIRON_READS",
     "RIG_INHERITED_MARKER",
+    "R_USER",
     "DYLD_LIBRARY_PATH",
     "DYLD_FALLBACK_LIBRARY_PATH",
     "DYLD_FRAMEWORK_PATH",
@@ -78,6 +83,7 @@ for path in ("RIG_R_INSTALL_DIR", "RIG_BINARY_DIR", "RIG_DOWNLOAD_DIR", "XDG_CAC
 
 CONFIG = RESULTS / "arf.toml"
 CONFIG.write_text('[history]\nmode = "volatile"\n', encoding="utf-8")
+ENV["R_USER"] = str(USER_HOME)
 
 EXPRESSION = r'''local({
   norm <- function(x) normalizePath(x, winslash = "/", mustWork = FALSE)
@@ -99,6 +105,12 @@ EXPRESSION = r'''local({
     jsonlite_available = as.character(has_jsonlite),
     jsonlite_package = if (has_jsonlite) norm(find.package("jsonlite")) else "",
     jsonlite_dll = if (has_jsonlite) norm(getLoadedDLLs()[["jsonlite"]][["path"]]) else "",
+    r_version = as.character(getRversion()),
+    cwd = norm(getwd()),
+    rvenv_unsynced = if (nzchar(Sys.getenv("RVENV_UNSYNCED"))) norm(Sys.getenv("RVENV_UNSYNCED")) else "",
+    home = norm(path.expand("~")),
+    home_marker = Sys.getenv("ARF_RIG_HOME_MARKER", unset = ""),
+    home_renviron_reads = Sys.getenv("ARF_RIG_HOME_RENVIRON_READS", unset = ""),
     doc = norm(R.home("doc")),
     share = norm(R.home("share")),
     include = norm(R.home("include"))
@@ -159,11 +171,14 @@ def require(result, name):
 
 
 def proof(result, name):
-    text = result.stdout.decode(errors="replace")
+    return proof_text(result.stdout.decode(errors="replace"), name)
+
+
+def proof_text(text, name):
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     start = text.find("ARF_RIG_PROOF_BEGIN\n")
     end = text.find("ARF_RIG_PROOF_END\n", start)
-    if result.returncode or start < 0 or end < 0:
+    if start < 0 or end < 0:
         raise RuntimeError(f"{name} produced no proof payload: {text[-3000:]}")
     fields = {}
     for line in text[start + len("ARF_RIG_PROOF_BEGIN\n"):end].splitlines():
@@ -328,6 +343,123 @@ def loader_diagnostics(home, native_binary):
     }
 
 
+def switch_native_baselines(switch_env):
+    homes = {}
+    baselines = {}
+    for version in ("4.6.1", "4.6.0", "4.5.3"):
+        resolved, resolve_record = run(
+            f"switch-resolve-{version}",
+            [ARF, "r", "resolve", "--with-r-version", version],
+            cwd=PROJECT,
+            env=switch_env,
+        )
+        require(resolved, f"arf resolve R {version}")
+        descriptor = json.loads(resolved.stdout)
+        home_value = descriptor.get("target", {}).get("r_home")
+        if not isinstance(home_value, str):
+            raise RuntimeError(f"arf resolve did not report R_HOME for {version}: {descriptor}")
+        home = Path(home_value).resolve(strict=True)
+        native_binary = native_r_binary(home)
+        native, native_record = run(
+            f"switch-native-{version}",
+            [native_binary, "--slave", "--no-save", "-e", EXPRESSION],
+            cwd=PROJECT,
+            env=switch_env,
+        )
+        require(native, f"native R {version} switch baseline")
+        native_proof = proof(native, f"native R {version} switch baseline")
+        homes[version] = str(home)
+        baselines[version] = {
+            "resolve": resolve_record,
+            "native": native_record,
+            "proof": native_proof,
+        }
+    return homes, baselines
+
+
+def compare_switch_proofs(homes, baselines):
+    proof_dir = EVIDENCE / "switch-proofs"
+    stages = {
+        "initial": "4.6.1",
+        "restart": "4.6.1",
+        "same-minor-after-invalid": "4.6.0",
+        "switch-same-minor": "4.6.0",
+        "switch-different-minor": "4.5.3",
+        "restart-different-minor": "4.5.3",
+    }
+    ignored = DIAGNOSTIC_ONLY_FIELDS | {"renviron_reads", "home_renviron_reads"}
+    records = {}
+    errors = []
+    project_lib = str((PROJECT / ".rvenv" / "lib").resolve()).replace("\\", "/").casefold()
+    unrelated_loader_dir = str((RESULTS / "dyld-unrelated").resolve()).replace("\\", "/").casefold()
+    for stage, version in stages.items():
+        path = proof_dir / f"{stage}.txt"
+        if not path.is_file():
+            errors.append(f"missing switch proof {stage}: {path}")
+            continue
+        try:
+            observed = proof_text(path.read_text(encoding="utf-8"), stage)
+            expected = baselines[version]["proof"]
+            records[stage] = observed
+            comparable_observed = {key: value for key, value in observed.items() if key not in ignored}
+            comparable_expected = {key: value for key, value in expected.items() if key not in ignored}
+            if comparable_observed != comparable_expected:
+                errors.append(f"{stage}: arf switch proof differs from native R {version}")
+            expected_home = homes[version].replace("\\", "/")
+            actual_home = observed["r_home"].replace("\\", "/")
+            if actual_home != expected_home:
+                errors.append(f"{stage}: R.home() is {actual_home}, expected {expected_home}")
+            if observed["cwd"].replace("\\", "/").casefold() != str(PROJECT.resolve()).replace("\\", "/").casefold():
+                errors.append(f"{stage}: restart changed CWD: {observed['cwd']}")
+            if observed["marker"] != MARKER:
+                errors.append(f"{stage}: project .Renviron marker is missing")
+            if observed["home_marker"] != "rig-home-renviron-loaded":
+                errors.append(f"{stage}: user .Renviron marker is missing")
+            if observed["inherited_marker"] != INHERITED_MARKER:
+                errors.append(f"{stage}: inherited process marker was lost")
+            if version in ("4.6.1", "4.6.0"):
+                if not observed["rvenv"]:
+                    errors.append(f"{stage}: rig project activation was not retained")
+                if not any(item.replace("\\", "/").casefold() == project_lib for item in observed["lib_paths"]):
+                    errors.append(f"{stage}: project library is missing from .libPaths()")
+                if not observed["jsonlite_available"]:
+                    errors.append(f"{stage}: compiled jsonlite did not load")
+                elif not observed["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                    errors.append(f"{stage}: jsonlite package did not load from the project library")
+                elif not observed["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                    errors.append(f"{stage}: jsonlite DLL did not load from the project library")
+            else:
+                if observed["rvenv"]:
+                    errors.append(f"{stage}: stale RVENV was retained after the R minor mismatch")
+                if any(item.replace("\\", "/").casefold() == project_lib for item in observed["lib_paths"]):
+                    errors.append(f"{stage}: incompatible project library remains in .libPaths()")
+            if stage in ("switch-same-minor", "switch-different-minor", "restart-different-minor"):
+                target_lib = str((Path(homes[version]) / "lib").resolve()).replace("\\", "/").casefold()
+                loader_paths = [item.replace("\\", "/").casefold() for item in observed["dyld_library_path"].split(os.pathsep) if item]
+                if not loader_paths or loader_paths[0] != target_lib:
+                    errors.append(f"{stage}: selected R lib is not first in DYLD_LIBRARY_PATH: {loader_paths}")
+                if unrelated_loader_dir not in loader_paths:
+                    errors.append(f"{stage}: unrelated startup loader path was not preserved: {loader_paths}")
+        except Exception as error:
+            errors.append(f"{stage}: {error}")
+
+    read_counts = {
+        "initial": ("x", "x"),
+        "restart": ("xx", "x"),
+        "same-minor-after-invalid": ("xxx", "xx"),
+        "switch-same-minor": ("xxx", "xx"),
+        "switch-different-minor": ("xxxx", "xxx"),
+        "restart-different-minor": ("xxxxx", "xxxx"),
+    }
+    for stage, (project_reads, home_reads) in read_counts.items():
+        if stage in records:
+            if records[stage]["renviron_reads"] != project_reads:
+                errors.append(f"{stage}: project .Renviron read marker is not {project_reads!r}")
+            if records[stage]["home_renviron_reads"] != home_reads:
+                errors.append(f"{stage}: home .Renviron read marker is not {home_reads!r}")
+    return records, errors
+
+
 def main():
     rig = shutil.which("rig")
     if not rig:
@@ -383,6 +515,12 @@ jsonlite = "*"
         json.dumps(status_data, indent=2), encoding="utf-8"
     )
 
+    (USER_HOME / ".Renviron").write_text(
+        "ARF_RIG_HOME_MARKER=rig-home-renviron-loaded\n"
+        'ARF_RIG_HOME_RENVIRON_READS="${ARF_RIG_HOME_RENVIRON_READS}x"\n',
+        encoding="utf-8",
+    )
+
     home, wrapper_record = wrapper_rhome()
     native_binary = native_r_binary(home)
     if not ARF.is_file():
@@ -391,8 +529,8 @@ jsonlite = "*"
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
         "version_context": "released rig 0.11.0 user-mode fixture",
-        "arf_startup": "explicit R_HOME and normal embedded startup",
-        "comparison": "native rig wrapper and arf use the same initial environment; raw loader paths are diagnostic",
+        "arf_startup": "explicit R_HOME startup proof plus a rig-version TUI switch case",
+        "comparison": "startup compares the native rig wrapper with arf; switch baselines use arf-resolved native R binaries; raw loader paths are diagnostic except for selected-lib precedence",
         "setup": {"init": init_record, "lock": lock_record, "sync": sync_record,
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
@@ -401,6 +539,7 @@ jsonlite = "*"
             key: ENV.get(key, "") for key in (
                 "R_LIBS", "R_LIBS_SITE", "R_LIBS_USER", "RVENV",
                 "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR",
+                "R_USER",
                 "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
                 "DYLD_FRAMEWORK_PATH",
             )
@@ -494,6 +633,47 @@ jsonlite = "*"
             target = EVIDENCE / "project" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
+
+    unrelated_loader_dir = RESULTS / "dyld-unrelated"
+    unrelated_loader_dir.mkdir(parents=True, exist_ok=True)
+    switch_env = ENV.copy()
+    switch_env["DYLD_LIBRARY_PATH"] = os.pathsep.join((str(home / "lib"), str(unrelated_loader_dir)))
+    proof_script = EVIDENCE / "switch-proof.R"
+    proof_script.write_text(EXPRESSION + "\n", encoding="utf-8")
+    switch_proof_dir = EVIDENCE / "switch-proofs"
+    switch_proof_dir.mkdir(parents=True, exist_ok=True)
+    switch_homes, switch_baselines = switch_native_baselines(switch_env)
+    switch_state_path = RESULTS / "switch-state.json"
+    switch_state = {
+        "project": str(PROJECT.resolve()),
+        "user_home": str(USER_HOME.resolve()),
+        "r_homes": switch_homes,
+        "proof_script": str(proof_script.resolve()),
+        "proof_dir": str(switch_proof_dir.resolve()),
+        "base_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
+    }
+    switch_state_path.write_text(json.dumps(switch_state, indent=2), encoding="utf-8")
+    switch_env["ARF_RIG_SWITCH_STATE"] = str(switch_state_path.resolve())
+    switch_test, switch_test_record = run(
+        "rig-project-version-switch-test",
+        ["cargo", "test", "--locked", "--test", "rig_project_switch_tests", "--", "--ignored", "--nocapture", "--test-threads=1"],
+        cwd=ROOT,
+        env=switch_env,
+        timeout=600,
+    )
+    outcomes["switch"] = {
+        "versions": ["4.6.1", "4.6.0", "4.5.3"],
+        "startup_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
+        "native_baselines": switch_baselines,
+        "tui_test": switch_test_record,
+        "proofs": {},
+    }
+    if switch_test.returncode:
+        errors.append(f"rig project version switch TUI test failed: {switch_test_record['stderr'][-4000:]}")
+    else:
+        switch_proofs, switch_errors = compare_switch_proofs(switch_homes, switch_baselines)
+        outcomes["switch"]["proofs"] = switch_proofs
+        errors.extend(switch_errors)
 
     outcomes["result"] = "failed" if errors else "passed"
     outcomes["platform"] = platform.platform()

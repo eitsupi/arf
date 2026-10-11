@@ -78,6 +78,9 @@ const R_VERSION_ENV_VARS: &[&str] = &[
     "R_HOME",
     // Always removed, whatever its origin; see `ALWAYS_REMOVE_ENV_VARS`.
     "LD_LIBRARY_PATH",
+    // Always removed so rig reevaluates project activation on the new startup.
+    "RVENV",
+    "RVENV_UNSYNCED",
     #[cfg(target_os = "macos")]
     // Restored from the startup snapshot before the next R target is selected.
     "DYLD_LIBRARY_PATH",
@@ -98,15 +101,14 @@ const R_VERSION_ENV_VARS: &[&str] = &[
 ///
 /// `R_HOME` is removed because arf always sets it from the R version it
 /// resolved, so any inherited value is meaningless and restoring it would be
-/// wrong. `LD_LIBRARY_PATH` is removed to preserve the behaviour it has had
-/// until now, even though the startup snapshot preserves the user's intent
-/// when they set it themselves.
+/// wrong. `LD_LIBRARY_PATH` keeps its existing removal policy. Rig's
+/// activation markers are removed so the new startup reevaluates the project.
 ///
 /// TODO: Let `LD_LIBRARY_PATH` follow the same restore-or-remove rule as the
 /// rest of `R_VERSION_ENV_VARS`, so a value the user set for unrelated
 /// libraries survives a switch instead of being dropped. That changes what
 /// users observe, so it belongs in a change of its own.
-const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME"];
+const ALWAYS_REMOVE_ENV_VARS: &[&str] = &["LD_LIBRARY_PATH", "R_HOME", "RVENV", "RVENV_UNSYNCED"];
 
 #[derive(Default)]
 struct EnvChanges {
@@ -250,15 +252,10 @@ pub fn restart_process(version: Option<&str>) {
     };
 
     // Get command-line arguments (skip the program name, we'll use current_exe instead)
-    // Also filter out any existing --with-r-version argument if we're switching versions
     let mut args: Vec<OsString> = crate::normalized_args();
 
     if let Some(v) = &version {
-        // Remove existing --with-r-version arguments
-        args = filter_r_version_args(args);
-        // Add the new version
-        args.push(OsString::from("--with-r-version"));
-        args.push(OsString::from(v));
+        args = args_with_r_version(args, v);
     }
 
     let changes = env_changes_for_switch(version, crate::startup_env_value);
@@ -340,32 +337,69 @@ where
     })
 }
 
-/// Filter out --with-r-version and its value from command-line arguments.
+/// Filter explicit R source selections before adding the new R version.
+/// Preserve all arguments after `--` because they belong to the user program.
 fn filter_r_version_args(args: Vec<OsString>) -> Vec<OsString> {
     let mut result = Vec::new();
-    let mut skip_next = false;
+    let mut index = 0;
 
-    for arg in args {
-        if skip_next {
-            skip_next = false;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            result.extend(args[index..].iter().cloned());
+            break;
+        }
+
+        if arg == "--with-r-version" || arg == "--r-provider" {
+            index = (index + 2).min(args.len());
             continue;
         }
 
-        if arg == OsStr::new("--with-r-version") {
-            // Skip this and the next argument (the version value)
-            skip_next = true;
+        if arg_has_ascii_prefix(arg, b"--with-r-version=")
+            || arg_has_ascii_prefix(arg, b"--r-provider=")
+        {
+            index += 1;
             continue;
         }
 
-        if arg.to_string_lossy().starts_with("--with-r-version=") {
-            // Skip --with-r-version=value form
-            continue;
-        }
-
-        result.push(arg);
+        result.push(arg.clone());
+        index += 1;
     }
 
     result
+}
+
+fn args_with_r_version(args: Vec<OsString>, version: &str) -> Vec<OsString> {
+    let mut args = filter_r_version_args(args);
+    let separator = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len());
+    args.splice(
+        separator..separator,
+        [OsString::from("--with-r-version"), OsString::from(version)],
+    );
+    args
+}
+
+fn arg_has_ascii_prefix(arg: &OsStr, prefix: &[u8]) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        arg.as_bytes().starts_with(prefix)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        arg.encode_wide()
+            .take(prefix.len())
+            .eq(prefix.iter().copied().map(u16::from))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        arg.to_str()
+            .is_some_and(|arg| arg.as_bytes().starts_with(prefix))
+    }
 }
 
 #[cfg(test)]
@@ -515,6 +549,29 @@ mod tests {
     }
 
     #[test]
+    fn build_restart_command_removes_rig_activation_markers() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| match var {
+            "RVENV" => Some(OsString::from(r"/project/.rvenv")),
+            "RVENV_UNSYNCED" => Some(OsString::from("1")),
+            _ => None,
+        });
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
+
+        for marker in ["RVENV", "RVENV_UNSYNCED"] {
+            assert!(
+                cmd.get_envs()
+                    .any(|(key, value)| key == OsStr::new(marker) && value.is_none())
+            );
+            assert!(!changes.restored.iter().any(|(key, _)| *key == marker));
+        }
+    }
+
+    #[test]
     fn version_none_registers_no_environment_changes() {
         let changes = env_changes_for_switch(None, |_| {
             panic!("restart without a version must not inspect the startup snapshot")
@@ -528,6 +585,11 @@ mod tests {
 
         assert!(changes.restored.is_empty());
         assert!(changes.removed.is_empty());
+        assert!(
+            cmd.get_envs().all(|(key, _)| {
+                key != OsStr::new("RVENV") && key != OsStr::new("RVENV_UNSYNCED")
+            })
+        );
         assert_eq!(
             cmd.get_envs()
                 .find(|(key, _)| *key == OsStr::new(crate::STARTUP_ENV_CARRIER))
@@ -551,6 +613,55 @@ mod tests {
                 .find(|(key, _)| *key == OsStr::new(crate::STARTUP_ENV_CARRIER))
                 .map(|(_, value)| value),
             Some(Some(OsStr::new(TEST_STARTUP_ENV_CARRIER)))
+        );
+    }
+
+    #[test]
+    fn switching_replaces_explicit_r_sources_before_user_arguments() {
+        let args = vec![
+            OsString::from("--quiet"),
+            OsString::from("--with-r-version"),
+            OsString::from("4.3"),
+            OsString::from("--r-provider=rig-project"),
+            OsString::from("--r-provider"),
+            OsString::from("pixi"),
+            OsString::from("--with-r-version=4.4"),
+            OsString::from("--"),
+            OsString::from("--r-provider"),
+            OsString::from("script-argument"),
+        ];
+
+        assert_eq!(
+            args_with_r_version(args, "4.5"),
+            vec![
+                OsString::from("--quiet"),
+                OsString::from("--with-r-version"),
+                OsString::from("4.5"),
+                OsString::from("--"),
+                OsString::from("--r-provider"),
+                OsString::from("script-argument"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn switching_preserves_non_utf8_arguments_after_separator() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let user_arg = OsString::from_vec(vec![b'R', b'-', 0xff]);
+        let args = vec![OsString::from("--"), user_arg.clone()];
+
+        let switched = args_with_r_version(args, "4.5");
+
+        assert_eq!(
+            switched,
+            vec![
+                OsString::from("--with-r-version"),
+                OsString::from("4.5"),
+                OsString::from("--"),
+                user_arg,
+            ]
         );
     }
 }
