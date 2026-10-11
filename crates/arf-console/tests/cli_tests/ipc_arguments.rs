@@ -168,6 +168,86 @@ fn test_eval_vanilla_skips_user_rprofile() {
     );
 }
 
+/// Check that Windows embedding reads the user Renviron exactly once, and
+/// honors the options that suppress it before the Rstart params are applied.
+#[cfg(windows)]
+#[test]
+fn test_windows_renviron_is_read_once_or_suppressed() {
+    let fixture = tempfile::tempdir().expect("Failed to create Renviron fixture");
+    let site_renviron_path = fixture.path().join("Renviron.site");
+    let renviron_path = fixture.path().join("Renviron");
+    std::fs::write(&site_renviron_path, "").expect("Failed to write site Renviron fixture");
+    let project_library = fixture.path().join("project-library");
+    let project_library = project_library.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        &renviron_path,
+        r#"ARF_RENVIRON_READS="${ARF_RENVIRON_READS}x"
+ARF_SAVED_R_LIBS_USER=${R_LIBS_USER}
+R_LIBS_USER="${R_LIBS_USER};${ARF_TEST_PROJECT_LIBRARY}"
+"#,
+    )
+    .expect("Failed to write Renviron fixture");
+
+    let cases: [(&[&str], &str); 3] = [
+        (&[], "normal startup"),
+        (&["--no-environ"], "--no-environ"),
+        (&["--vanilla"], "--vanilla"),
+    ];
+
+    for (flags, case_name) in cases {
+        let mut command = sanitized_arf_command();
+        command
+            .env("R_ENVIRON", &site_renviron_path)
+            .env("R_ENVIRON_USER", &renviron_path)
+            .env_remove("ARF_RENVIRON_READS")
+            .env_remove("ARF_SAVED_R_LIBS_USER")
+            .env("R_LIBS_USER", "arf-original-user-library")
+            .env("ARF_TEST_PROJECT_LIBRARY", &project_library)
+            .args(flags)
+            .args([
+                "-e",
+                r#"cat("ARF_RENVIRON_READS<", Sys.getenv("ARF_RENVIRON_READS"), ">\n", sep = ""); cat("ARF_SAVED_R_LIBS_USER<", Sys.getenv("ARF_SAVED_R_LIBS_USER"), ">\n", sep = ""); cat("R_LIBS_USER<", Sys.getenv("R_LIBS_USER"), ">\n", sep = "")"#,
+            ]);
+
+        let output = command.output().expect("Failed to run arf");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{case_name} should succeed: stdout={stdout}, stderr={stderr}"
+        );
+
+        if flags.is_empty() {
+            assert!(
+                stdout.contains("ARF_RENVIRON_READS<x>"),
+                "{case_name} should read Renviron once (expected marker x): stdout={stdout}, stderr={stderr}"
+            );
+            assert!(
+                stdout.contains("ARF_SAVED_R_LIBS_USER<arf-original-user-library>"),
+                "{case_name} should preserve the original R_LIBS_USER before project activation: stdout={stdout}, stderr={stderr}"
+            );
+            assert_eq!(
+                stdout.matches(&project_library).count(),
+                1,
+                "{case_name} should apply the project library once: stdout={stdout}, stderr={stderr}"
+            );
+        } else {
+            assert!(
+                stdout.contains("ARF_RENVIRON_READS<>"),
+                "{case_name} should not read Renviron: stdout={stdout}, stderr={stderr}"
+            );
+            assert!(
+                stdout.contains("ARF_SAVED_R_LIBS_USER<>"),
+                "{case_name} should leave the Renviron-only saved value unset: stdout={stdout}, stderr={stderr}"
+            );
+            assert!(
+                !stdout.contains(&project_library),
+                "{case_name} should not apply the project library: stdout={stdout}, stderr={stderr}"
+            );
+        }
+    }
+}
+
 /// Test that positional script argument is rejected (regression test).
 /// The old `arf file.R` syntax was removed; clap now rejects it as an unknown subcommand/argument.
 #[test]

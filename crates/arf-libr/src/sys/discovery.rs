@@ -1,5 +1,6 @@
 use crate::error::{RError, RResult};
 use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -216,12 +217,12 @@ pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
 
     for var_name in R_WRAPPER_ENV_VARS {
         // Skip if already set in the environment
-        if env::var(var_name).is_ok() {
+        if env::var_os(var_name).is_some() {
             continue;
         }
 
-        if let Some(value) = parse_var_from_wrapper_script(&content, var_name) {
-            log::debug!("Setting {} from R wrapper: {}", var_name, value);
+        if let Some(value) = parse_var_from_wrapper_script(&content, var_name, r_home) {
+            log::debug!("Setting {} from R wrapper", var_name);
             // SAFETY: We're in single-threaded initialization
             unsafe { env::set_var(var_name, &value) };
         }
@@ -230,13 +231,15 @@ pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
 
 /// Extract a variable assignment from an R wrapper script.
 ///
-/// Looks for lines of the form `VAR_NAME=value` and returns the value with
-/// surrounding quotes stripped. Returns `None` if the variable is not found
-/// or the value is empty.
+/// Looks for lines of the form `VAR_NAME=value`, strips matching outer quotes,
+/// and expands known `$R_HOME` references in unquoted or double-quoted values.
+/// Single-quoted values and unsupported shell expressions are preserved
+/// literally. Returns `None` if the variable is not found or the value is empty.
 pub(super) fn parse_var_from_wrapper_script(
     script_content: &str,
     var_name: &str,
-) -> Option<String> {
+    r_home: &Path,
+) -> Option<OsString> {
     let value = script_content.lines().find_map(|line| {
         let trimmed = line.trim();
         // Split on first '=' and compare the key exactly to avoid partial
@@ -245,14 +248,64 @@ pub(super) fn parse_var_from_wrapper_script(
         if key == var_name { Some(val) } else { None }
     })?;
 
-    // Strip surrounding quotes if present
-    let value = value.trim_matches('\'').trim_matches('"');
+    let value = value.trim();
+    let (value, expand_r_home) = if let Some(value) = value.strip_prefix('\'') {
+        (value.strip_suffix('\'')?, false)
+    } else if let Some(value) = value.strip_prefix('"') {
+        (value.strip_suffix('"')?, true)
+    } else {
+        (value, true)
+    };
 
     if value.is_empty() {
         None
     } else {
-        Some(value.to_string())
+        Some(expand_wrapper_r_home(value, r_home, expand_r_home))
     }
+}
+
+fn expand_wrapper_r_home(value: &str, r_home: &Path, expand: bool) -> OsString {
+    // Do not partially interpret shell expressions or command substitutions.
+    if !expand || value.contains('`') {
+        return OsString::from(value);
+    }
+
+    let mut result = OsString::new();
+    let mut remaining = value;
+
+    while let Some(dollar_index) = remaining.find('$') {
+        if dollar_index > 0 && remaining.as_bytes()[dollar_index - 1] == b'\\' {
+            // Preserve escaped references as written; this parser is not a shell evaluator.
+            return OsString::from(value);
+        }
+
+        result.push(&remaining[..dollar_index]);
+        remaining = &remaining[dollar_index..];
+
+        if let Some(after) = remaining.strip_prefix("${R_HOME}") {
+            result.push(r_home.as_os_str());
+            remaining = after;
+            continue;
+        }
+
+        if let Some(after) = remaining.strip_prefix("$R_HOME") {
+            let is_variable_boundary = after
+                .chars()
+                .next()
+                .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'));
+            if is_variable_boundary {
+                result.push(r_home.as_os_str());
+                remaining = after;
+                continue;
+            }
+        }
+
+        // Leave unknown variables and shell expressions untouched as a whole.
+        return OsString::from(value);
+    }
+
+    result.push(remaining);
+    result
 }
 
 /// Check if LD_LIBRARY_PATH includes the R library directory.

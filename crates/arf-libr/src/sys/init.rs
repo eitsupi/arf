@@ -339,12 +339,26 @@ unsafe fn initialize_r_windows(
             R_DEFERRED_INTERRUPT_FLAG.store(lib.r_interrupts_pending, Ordering::Release);
         }
 
-        // Step 1: Call cmdlineoptions with empty args (ark pattern)
-        // R does initialization here that's not accessible in any other way
-        let empty_arg = CString::new("arf").unwrap();
-        let mut empty_args: Vec<*mut c_char> = vec![empty_arg.as_ptr() as *mut c_char];
-        (lib.cmdlineoptions)(1, empty_args.as_mut_ptr());
-        log::info!("[WINDOWS] cmdlineoptions called with empty args");
+        // Step 1: Call cmdlineoptions before creating Rstart params (ark pattern).
+        // This is where R reads Renviron and applies environment-based memory
+        // defaults. Forward only flags that suppress Renviron so that the
+        // later R_common_command_line call remains the sole parser for the
+        // complete argument list.
+        let mut early_args = vec![CString::new("arf").unwrap()];
+        for arg in r_args.iter().take_while(|&&arg| arg != "--args") {
+            if matches!(*arg, "--no-environ" | "--vanilla") {
+                early_args.push(CString::new(*arg).unwrap());
+            }
+        }
+        let mut early_arg_ptrs: Vec<*mut c_char> = early_args
+            .iter()
+            .map(|arg| arg.as_ptr() as *mut c_char)
+            .collect();
+        (lib.cmdlineoptions)(early_arg_ptrs.len() as c_int, early_arg_ptrs.as_mut_ptr());
+        log::info!(
+            "[WINDOWS] cmdlineoptions called with {} environment flags",
+            early_args.len() - 1
+        );
 
         // Step 2: Create and initialize the Rstart params struct
         let mut params: MaybeUninit<Rstart> = MaybeUninit::uninit();
@@ -369,6 +383,12 @@ unsafe fn initialize_r_windows(
             "[WINDOWS] R_common_command_line processed {} args",
             args.len()
         );
+
+        // cmdlineoptions already owns Renviron processing. Keep the parsed
+        // Rstart version bits while marking Renviron as handled so R_SetParams
+        // does not read the same files a second time. CLI options and memory
+        // fields populated above are unaffected by this bitfield update.
+        (*params_ptr).bitfield = ((*params_ptr).bitfield & !0xffff) | 1;
 
         // Step 4: Configure the params
         (*params_ptr).r_interactive = 1;
