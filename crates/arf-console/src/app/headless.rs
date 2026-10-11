@@ -789,16 +789,16 @@ mod tests {
               },
               "provider": "pixi",
               "selected_by": {
-                "kind": "active_environment",
-                "requested_provider": null,
+                "kind": "provider_request",
+                "requested_provider": "pixi",
                 "requested_r_home": null,
                 "requested_version": null,
                 "source": {
-                  "format": null,
-                  "key": null,
-                  "kind": "pixi",
-                  "name": "analysis",
-                  "path": "/pixi.toml"
+                  "format": "toml",
+                  "key": "experimental.r_source_overrides",
+                  "kind": "configuration_file",
+                  "name": null,
+                  "path": null
                 }
               }
             }"###

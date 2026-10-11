@@ -37,6 +37,7 @@ pub(crate) enum RSourceMetadata {
         prefix: String,
         r_binary: String,
     },
+    #[serde(rename = "rig-project")]
     RigProject {
         root: String,
         manifest: String,
@@ -142,33 +143,23 @@ fn selected_by(
     }
 
     if report.selection_route == RSourceSelectionRoute::Override {
-        if let RSourceStatus::Pixi { info } = &report.status {
+        if matches!(
+            report.status,
+            RSourceStatus::Pixi { .. } | RSourceStatus::RigProject { .. }
+        ) {
+            // The provider's identity is reported in `metadata`; the source
+            // records where the provider request was configured.
             return SelectedBy {
-                kind: "active_environment",
+                kind: "provider_request",
                 requested_r_home: None,
                 requested_version: None,
-                requested_provider: None,
+                requested_provider: Some(provider(&report.status)),
                 source: selection_source(
-                    "pixi",
-                    Some(info.environment.clone()),
-                    Some(display_path(cwd, &info.manifest)),
+                    "configuration_file",
                     None,
-                    None,
-                ),
-            };
-        }
-        if let RSourceStatus::RigProject { info } = &report.status {
-            return SelectedBy {
-                kind: "project_environment",
-                requested_r_home: None,
-                requested_version: None,
-                requested_provider: None,
-                source: selection_source(
-                    "rig-project",
-                    None,
-                    Some(display_path(cwd, &info.manifest)),
-                    None,
-                    None,
+                    loaded_config.map(|config| display_path(cwd, &config.path)),
+                    Some("toml"),
+                    Some("experimental.r_source_overrides".to_owned()),
                 ),
             };
         }
@@ -265,16 +256,21 @@ mod tests {
             explicit_request: None,
         };
 
+        let loaded_config = ConfigLoadProvenance {
+            path: "/config/arf.toml".into(),
+            startup_r_source_present: false,
+            history_migration_warning: None,
+        };
         let value = serde_json::to_value(RSourceSelection::from_report(
             Path::new("/workspace"),
             &report,
-            None,
+            Some(&loaded_config),
         ))
         .unwrap();
         insta::assert_snapshot!(serde_json::to_string_pretty(&value).unwrap(), @r###"
         {
           "metadata": {
-            "kind": "rig_project",
+            "kind": "rig-project",
             "manifest": "/workspace/rproj.toml",
             "r_binary": "/workspace/.rvenv/bin/R",
             "r_installation": "4.6.1",
@@ -282,16 +278,16 @@ mod tests {
           },
           "provider": "rig-project",
           "selected_by": {
-            "kind": "project_environment",
-            "requested_provider": null,
+            "kind": "provider_request",
+            "requested_provider": "rig-project",
             "requested_r_home": null,
             "requested_version": null,
             "source": {
-              "format": null,
-              "key": null,
-              "kind": "rig-project",
+              "format": "toml",
+              "key": "experimental.r_source_overrides",
+              "kind": "configuration_file",
               "name": null,
-              "path": "/workspace/rproj.toml"
+              "path": "/config/arf.toml"
             }
           }
         }

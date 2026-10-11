@@ -140,16 +140,17 @@ def main():
     assert not resolved.stderr, resolved.stderr
     descriptor = json.loads(resolved.stdout)
     assert descriptor["provider"] == "pixi", descriptor
-    assert descriptor["selected_by"]["kind"] == "active_environment", descriptor
+    assert descriptor["selected_by"]["kind"] == "provider_request", descriptor
+    assert descriptor["selected_by"]["requested_provider"] == "pixi", descriptor
     source = descriptor["selected_by"]["source"]
-    assert source["kind"] == "pixi" and source["name"] == os.environ["PIXI_ENVIRONMENT_NAME"], source
+    assert source["kind"] == "configuration_file", source
+    assert source["key"] == "experimental.r_source_overrides", source
+    assert Path(source["path"]).samefile(CONFIG), source
     manifest = os.environ.get("PIXI_WORKSPACE_MANIFEST", os.environ.get("PIXI_PROJECT_MANIFEST"))
     # Rust canonical paths use Windows extended-length prefixes. Compare file
     # identity so equivalent native and extended-length spellings both work.
-    assert Path(source["path"]).samefile(manifest), source
     assert Path(descriptor["target"]["r_binary"]).samefile(binary), descriptor
     assert Path(descriptor["target"]["r_home"]).samefile(home), descriptor
-    assert descriptor["selected_by"]["requested_provider"] is None, descriptor
     metadata = descriptor["metadata"]
     assert metadata["kind"] == "pixi" and metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
     assert Path(metadata["manifest"]).samefile(manifest), metadata

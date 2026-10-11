@@ -423,7 +423,7 @@ def explicit_rig_project_resolution(source, home, installation_name):
         or selected_by.get("source", {}).get("name") != expected_source["name"]
     ):
         raise RuntimeError(f"{source} provider provenance is incorrect: {selected_by}")
-    if metadata.get("kind") != "rig_project" or metadata.get("r_installation") != installation_name:
+    if metadata.get("kind") != "rig-project" or metadata.get("r_installation") != installation_name:
         raise RuntimeError(f"{source} provider metadata is incorrect: {metadata}")
     for label, actual, expected in (
         ("metadata root", metadata.get("root"), PROJECT),

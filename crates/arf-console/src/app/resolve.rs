@@ -353,7 +353,7 @@ fn resolution_diagnostic(diagnostic: &RSourceDiagnostic) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn pixi_descriptor_uses_verified_launcher_and_active_environment_provenance() {
+    fn pixi_descriptor_uses_verified_launcher_and_configured_provider_provenance() {
         let info = crate::config::PixiRSourceInfo {
             manifest: "/workspace/pixi.toml".into(),
             environment: "analysis".into(),
@@ -387,11 +387,12 @@ mod tests {
         .unwrap();
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["provider"], "pixi");
-        assert_eq!(value["selected_by"]["kind"], "active_environment");
-        assert_eq!(value["selected_by"]["source"]["kind"], "pixi");
-        assert_eq!(value["selected_by"]["source"]["name"], "analysis");
+        assert_eq!(value["selected_by"]["kind"], "provider_request");
+        assert_eq!(value["selected_by"]["requested_provider"], "pixi");
+        assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
+        assert_eq!(value["metadata"]["environment"], "analysis");
         assert_eq!(
-            value["selected_by"]["source"]["path"],
+            value["metadata"]["manifest"],
             info.manifest.display().to_string()
         );
         assert_eq!(

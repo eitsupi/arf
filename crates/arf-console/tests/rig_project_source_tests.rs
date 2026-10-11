@@ -211,7 +211,7 @@ fn explicit_cli_and_environment_selection_report_project_metadata() {
             descriptor["selected_by"]["source"]["kind"], source_kind,
             "{label}"
         );
-        assert_eq!(descriptor["metadata"]["kind"], "rig_project", "{label}");
+        assert_eq!(descriptor["metadata"]["kind"], "rig-project", "{label}");
         assert_eq!(
             descriptor["metadata"]["root"],
             fixture
@@ -278,8 +278,19 @@ fn configured_provider_uses_the_same_resolution_and_override_metadata() {
     .unwrap();
     let descriptor = fixture.descriptor(&["r", "resolve"]);
     assert_eq!(descriptor["provider"], "rig-project");
-    assert_eq!(descriptor["selected_by"]["kind"], "project_environment");
-    assert_eq!(descriptor["selected_by"]["source"]["kind"], "rig-project");
+    assert_eq!(descriptor["selected_by"]["kind"], "provider_request");
+    assert_eq!(
+        descriptor["selected_by"]["requested_provider"],
+        "rig-project"
+    );
+    assert_eq!(
+        descriptor["selected_by"]["source"]["kind"],
+        "configuration_file"
+    );
+    assert_eq!(
+        descriptor["selected_by"]["source"]["path"],
+        fixture.config.display().to_string()
+    );
     assert_eq!(
         descriptor["metadata"]["manifest"],
         fixture
@@ -289,7 +300,6 @@ fn configured_provider_uses_the_same_resolution_and_override_metadata() {
             .display()
             .to_string()
     );
-    assert_eq!(descriptor["selected_by"]["requested_provider"], Value::Null);
 }
 
 #[test]
