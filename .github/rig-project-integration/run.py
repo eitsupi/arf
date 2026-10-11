@@ -1,8 +1,10 @@
 """Compare rig's project wrapper with arf's normal embedded R startup."""
 
+import ctypes
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +24,15 @@ ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
 R_VERSION = "4.5.2"
 MARKER = "rig-project-renviron-loaded"
 INHERITED_MARKER = "inherited-process-environment-preserved"
+DIAGNOSTIC_ONLY_FIELDS = {
+    "r_home_env",
+    "r_doc_dir_env",
+    "r_share_dir_env",
+    "r_include_dir_env",
+    "dyld_library_path",
+    "dyld_fallback_library_path",
+    "dyld_framework_path",
+}
 
 ENV = os.environ.copy()
 for key in (
@@ -67,6 +78,13 @@ EXPRESSION = r'''local({
   has_jsonlite <- requireNamespace("jsonlite", quietly = TRUE)
   fields <- list(
     r_home = norm(R.home()),
+    r_home_env = Sys.getenv("R_HOME", unset = ""),
+    r_doc_dir_env = Sys.getenv("R_DOC_DIR", unset = ""),
+    r_share_dir_env = Sys.getenv("R_SHARE_DIR", unset = ""),
+    r_include_dir_env = Sys.getenv("R_INCLUDE_DIR", unset = ""),
+    dyld_library_path = Sys.getenv("DYLD_LIBRARY_PATH", unset = ""),
+    dyld_fallback_library_path = Sys.getenv("DYLD_FALLBACK_LIBRARY_PATH", unset = ""),
+    dyld_framework_path = Sys.getenv("DYLD_FRAMEWORK_PATH", unset = ""),
     lib_paths = paste(vapply(.libPaths(), norm, character(1)), collapse = "\n"),
     rvenv = if (nzchar(Sys.getenv("RVENV"))) norm(Sys.getenv("RVENV")) else "",
     marker = Sys.getenv("RIG_PROJECT_MARKER", unset = ""),
@@ -187,6 +205,94 @@ def native_r_binary(home):
     raise RuntimeError(f"could not locate native R executable under {home}")
 
 
+def r_library_path(home):
+    if sys.platform == "darwin":
+        return home / "lib" / "libR.dylib"
+    if os.name == "nt":
+        bin_dir = home / "bin"
+        if platform.machine().lower() not in ("arm64", "aarch64"):
+            bin_dir /= "x64"
+        return bin_dir / "R.dll"
+    return home / "lib" / "libR.so"
+
+
+def loader_diagnostics(home, native_binary):
+    library = r_library_path(home)
+    wrapper_candidates = [home / "bin" / "R", native_binary]
+    dependency_result = None
+    if library.is_file():
+        tool = "otool" if sys.platform == "darwin" else "ldd" if os.name != "nt" else None
+        if tool and shutil.which(tool):
+            command = [tool, "-L", library] if tool == "otool" else [tool, library]
+            _, dependency_result = run("r-library-dependencies", command, cwd=ROOT)
+        try:
+            ctypes.CDLL(str(library), mode=getattr(ctypes, "RTLD_GLOBAL", 0))
+            dlopen = {"loaded": True, "error": None}
+        except OSError as error:
+            dlopen = {"loaded": False, "error": str(error)}
+    else:
+        dlopen = {"loaded": False, "error": "R shared library path does not exist"}
+
+    wrapper_details = {}
+    relevant = ("R_HOME", "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR", "DYLD_", "LD_LIBRARY_PATH")
+    assignments = ("R_HOME", "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR")
+
+    def assignment_matches(lines, key):
+        patterns = (
+            re.compile(rf"^\s*(?:export\s+)?{key}\s*=\s*(.*?)\s*$", re.IGNORECASE),
+            re.compile(rf"^\s*set\s+[\"']?{key}=(.*?)[\"']?\s*$", re.IGNORECASE),
+            re.compile(rf"^\s*\$env:{key}\s*=\s*(.*?)\s*$", re.IGNORECASE),
+        )
+        matches = []
+        for line in lines:
+            for pattern in patterns:
+                match = pattern.match(line)
+                if match:
+                    matches.append({"line": line.strip(), "value": match.group(1)})
+                    break
+        return matches[:20]
+
+    for path in dict.fromkeys(wrapper_candidates):
+        if not path.is_file():
+            wrapper_details[str(path)] = {"exists": False}
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            wrapper_details[str(path)] = {
+                "exists": True,
+                "relevant_lines": [line.strip() for line in lines if any(key in line for key in relevant)][:80],
+                "path_assignments": {
+                    key: assignment_matches(lines, key)
+                    for key in assignments
+                },
+            }
+        except OSError as error:
+            wrapper_details[str(path)] = {"exists": True, "read_error": str(error)}
+
+    return {
+        "r_home": str(home),
+        "r_library": str(library),
+        "r_library_exists": library.is_file(),
+        "ctypes_dlopen": dlopen,
+        "dependency_inspection": dependency_result,
+        "wrapper_candidates": wrapper_details,
+        "r_home_etc": {
+            str(path): {"exists": path.is_file(), "relevant_lines": [
+                line.strip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                if any(key in line for key in relevant)
+            ][:80]} if path.is_file() else {"exists": False}
+            for path in (home / "etc" / "Renviron", home / "etc" / "Renviron.site")
+        },
+        "inherited_loader_environment": {
+            key: ENV.get(key, "") for key in (
+                "R_HOME", "R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR",
+                "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
+                "LD_LIBRARY_PATH",
+            )
+        },
+    }
+
+
 def main():
     rig = shutil.which("rig")
     if not rig:
@@ -246,6 +352,7 @@ jsonlite = "*"
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
                   "native_r_binary": str(native_binary), "rig_mode": mode},
+        "loader_diagnostics": loader_diagnostics(home, native_binary),
         "modes": {},
     }
     errors = []
@@ -262,12 +369,14 @@ jsonlite = "*"
         outcomes["modes"][name] = case
         try:
             require(native, f"native R {name} startup")
-            require(arf, f"arf {name} startup")
             expected = proof(native, f"native R {name}")
-            actual = proof(arf, f"arf {name}")
             case["native_proof"] = expected
+            require(arf, f"arf {name} startup")
+            actual = proof(arf, f"arf {name}")
             case["arf_proof"] = actual
-            if expected != actual:
+            compared_expected = {key: value for key, value in expected.items() if key not in DIAGNOSTIC_ONLY_FIELDS}
+            compared_actual = {key: value for key, value in actual.items() if key not in DIAGNOSTIC_ONLY_FIELDS}
+            if compared_expected != compared_actual:
                 errors.append(f"{name}: arf proof differs from native R")
             if actual["inherited_marker"] != INHERITED_MARKER:
                 errors.append(f"{name}: inherited process environment was unexpectedly cleared")
