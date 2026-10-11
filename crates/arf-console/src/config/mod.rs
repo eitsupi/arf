@@ -283,6 +283,12 @@ pub(crate) fn load_config_from_path_with_provenance(
         .get("startup")
         .and_then(|startup| startup.get("r_source"))
         .is_some();
+    if let Some(message) = legacy_r_source_override_type_key(&document) {
+        return Err(ConfigLoadError::Validation {
+            message,
+            path: path.to_path_buf(),
+        });
+    }
     if let Some(message) = removed_reprex_keys(&document) {
         return Err(ConfigLoadError::Validation {
             message,
@@ -304,6 +310,23 @@ pub(crate) fn load_config_from_path_with_provenance(
             history_migration_warning: migration_warning,
         }),
     ))
+}
+
+fn legacy_r_source_override_type_key(document: &toml::Value) -> Option<String> {
+    let overrides = document
+        .get("experimental")?
+        .get("r_source_overrides")?
+        .as_array()?;
+    overrides
+        .iter()
+        .any(|entry| {
+            entry
+                .as_table()
+                .is_some_and(|table| table.contains_key("type") && !table.contains_key("provider"))
+        })
+        .then(|| {
+            "experimental.r_source_overrides entries now use `provider` instead of `type`; update each entry before starting arf".to_string()
+        })
 }
 
 fn removed_reprex_keys(document: &toml::Value) -> Option<String> {

@@ -291,12 +291,12 @@ Select an R version per directory or project with `experimental.r_source_overrid
 ```toml
 [experimental]
 r_source_overrides = [
-  { type = "version-file", file = ".r-version" },
-  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { provider = "version-file", file = ".r-version" },
+  { provider = "toml-key", file = "rproject.toml", key = "project.r_version" },
 ]
 ```
 
-For Pixi, configure `r_source_overrides = [{ type = "pixi" }]` and start arf with `pixi run arf`. arf validates the active environment without managing it. Missing activation produces guidance and permits fallback; failures after Pixi is selected are startup errors.
+For Pixi, configure `r_source_overrides = [{ provider = "pixi" }]` and start arf with `pixi run arf`. arf validates the active environment without managing it. Missing activation produces guidance and permits fallback; failures after Pixi is selected are startup errors.
 
 See [R Source Overrides configuration](docs/configuration.md#r-source-overrides) for provider options and resolution details.
 

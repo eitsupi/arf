@@ -350,6 +350,32 @@ mod tests {
     }
 
     #[test]
+    fn legacy_r_source_type_tag_warns_and_falls_back_to_default_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("arf.toml");
+        std::fs::write(
+            &path,
+            r#"
+[experimental]
+r_source_overrides = [{ type = "pixi" }]
+"#,
+        )
+        .unwrap();
+
+        let (config, diagnostics) = load_config_for_startup(Some(&path));
+
+        assert!(config.experimental.r_source_overrides.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        let warning = diagnostics[0]
+            .message
+            .replace(&mask_home_path(&path), "<CONFIG>");
+        insta::assert_snapshot!(warning, @r###"
+Warning: Failed to load config from <CONFIG>: experimental.r_source_overrides entries now use `provider` instead of `type`; update each entry before starting arf
+         Using default configuration.
+"###);
+    }
+
+    #[test]
     fn interactive_config_load_holds_deprecation_warning_for_the_caller() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("arf.toml");

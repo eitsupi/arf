@@ -22,7 +22,7 @@ CONFIG = RESULTS / "arf.toml"
 CONFIG.write_text(r"""[history]
 mode='volatile'
 [experimental]
-r_source_overrides=[{type='version-file',file='.r-version'},{type='pixi'}]
+r_source_overrides=[{provider='version-file',file='.r-version'},{provider='pixi'}]
 """)
 ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
 ENV = os.environ.copy()
