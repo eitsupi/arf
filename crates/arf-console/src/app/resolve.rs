@@ -395,7 +395,7 @@ mod tests {
         );
         assert!(value["target"]["resolved_version"].is_null());
         assert!(value["selected_by"]["requested_version"].is_null());
-        assert!(!report.status.rig_enabled());
+        assert!(!report.status.switch_available());
     }
     use super::*;
     use crate::app::explicit_r_source::RSourceOrigin;

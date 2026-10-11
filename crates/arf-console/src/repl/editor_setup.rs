@@ -52,7 +52,7 @@ impl Repl {
         };
 
         // Set up combined completer (R + meta commands) if completion is enabled
-        // When rig is not enabled, :switch is excluded from completion
+        // When :switch is unavailable, it is excluded from completion
         if self.config.completion.enabled {
             let static_formals = arf_harp::completion::StaticFormalsPolicy {
                 mode: match self.config.experimental.r_completion.r#static.formals.mode {
@@ -86,7 +86,7 @@ impl Repl {
                 self.config.completion.timeout_ms,
                 self.config.completion.debounce_ms,
                 self.config.completion.auto_paren_limit,
-                self.r_source_status.rig_enabled(),
+                self.r_source_status.switch_available(),
                 self.config.experimental.r_completion.fuzzy,
                 self.config
                     .experimental

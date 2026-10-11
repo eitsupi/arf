@@ -304,7 +304,7 @@ where
         list_versions,
         resolve_selected_rig_version,
         pixi::resolve_strict,
-        |_| resolve_rig_project(),
+        resolve_rig_project,
     )
 }
 
@@ -331,7 +331,7 @@ where
         list_versions,
         resolve_selected_rig_version,
         resolve_pixi,
-        |_| resolve_rig_project(),
+        resolve_rig_project,
     )
 }
 
@@ -1307,7 +1307,7 @@ mod r_source_override_tests {
             override_info: Some(info),
         };
 
-        assert!(status.rig_enabled());
+        assert!(status.switch_available());
         assert_eq!(
             status.display(),
             r#"rig (R 4.4.2; override: toml-key rproject.toml:project.r_version = "4.4")"#

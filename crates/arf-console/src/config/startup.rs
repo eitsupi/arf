@@ -141,10 +141,10 @@ pub enum RSourceStatus {
 }
 
 impl RSourceStatus {
-    /// Returns true if rig was used to resolve R.
+    /// Returns true if `:switch` can select another rig R version.
     ///
-    /// This determines if features like `:switch` are available.
-    pub fn rig_enabled(&self) -> bool {
+    /// This holds when R came from rig, including a synchronized rig project.
+    pub fn switch_available(&self) -> bool {
         matches!(
             self,
             RSourceStatus::Rig { .. } | RSourceStatus::RigProject { .. }
