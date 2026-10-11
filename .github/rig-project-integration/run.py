@@ -367,6 +367,7 @@ jsonlite = "*"
         )
         case = {"native": native_record, "arf": arf_record}
         outcomes["modes"][name] = case
+        expected = None
         try:
             require(native, f"native R {name} startup")
             expected = proof(native, f"native R {name}")
@@ -406,6 +407,57 @@ jsonlite = "*"
         except Exception as error:
             case["comparison_error"] = str(error)
             errors.append(f"{name}: {error}")
+
+        if sys.platform == "darwin":
+            variant = {"status": "skipped", "reason": "native R proof unavailable"}
+            if expected is not None:
+                variant_env = ENV.copy()
+                path_keys = {
+                    "R_DOC_DIR": "r_doc_dir_env",
+                    "R_SHARE_DIR": "r_share_dir_env",
+                    "R_INCLUDE_DIR": "r_include_dir_env",
+                    "DYLD_LIBRARY_PATH": "dyld_library_path",
+                    "DYLD_FALLBACK_LIBRARY_PATH": "dyld_fallback_library_path",
+                }
+                applied_environment = {}
+                for env_key, proof_key in path_keys.items():
+                    value = expected[proof_key]
+                    if value:
+                        variant_env[env_key] = value
+                        applied_environment[env_key] = value
+                    else:
+                        variant_env.pop(env_key, None)
+                        applied_environment[env_key] = ""
+
+                variant_result, variant_record = run(
+                    f"arf-native-path-env-{name}",
+                    [ARF, "--config", CONFIG, "--r-home", home, "--no-r-auto-discovery",
+                     "--no-r-source-overrides", *flags, "-e", EXPRESSION],
+                    env=variant_env,
+                )
+                variant = {
+                    "status": "failed" if variant_result.returncode else "started",
+                    "environment": applied_environment,
+                    "arf": variant_record,
+                }
+                if not variant_result.returncode:
+                    try:
+                        actual_variant = proof(variant_result, f"arf path-env variant {name}")
+                        variant["arf_proof"] = actual_variant
+                        comparable_expected = {
+                            key: value for key, value in expected.items()
+                            if key not in DIAGNOSTIC_ONLY_FIELDS
+                        }
+                        comparable_actual = {
+                            key: value for key, value in actual_variant.items()
+                            if key not in DIAGNOSTIC_ONLY_FIELDS
+                        }
+                        variant["proof_matches_native"] = comparable_expected == comparable_actual
+                        variant["status"] = "passed" if variant["proof_matches_native"] else "mismatch"
+                    except Exception as error:
+                        variant["status"] = "invalid-proof"
+                        variant["comparison_error"] = str(error)
+            case["arf_native_path_env_variant"] = variant
 
     wrappers = (".rvenv/bin/R.exe", ".rvenv/bin/Rscript.exe") if os.name == "nt" else (
         ".rvenv/bin/R", ".rvenv/bin/Rscript"
