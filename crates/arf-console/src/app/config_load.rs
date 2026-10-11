@@ -206,7 +206,9 @@ pub(crate) fn load_config_collecting_warnings(
     warnings: &mut Vec<String>,
 ) -> (Config, Option<ConfigLoadProvenance>) {
     let path = config_path.cloned().or_else(config_file_path);
-    let result = if let Some(path) = path.as_deref() {
+    let result = if config_path.is_none() && path.as_ref().is_some_and(|path| !path.exists()) {
+        Ok((Config::default(), None))
+    } else if let Some(path) = path.as_deref() {
         load_config_from_path_with_provenance(path)
     } else {
         Ok((Config::default(), None))
