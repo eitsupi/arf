@@ -8,6 +8,7 @@ mod rig;
 mod rig_project;
 mod script;
 
+pub(crate) use overrides::override_notice;
 pub(crate) use pixi::PixiFailure;
 pub(crate) use r_source::{
     RSourceDiagnostic, RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute,

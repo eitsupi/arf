@@ -482,9 +482,12 @@ where
                 status: RSourceStatus::Rig { version, .. },
                 r_home,
             }) => {
+                let Some(file) = provider.file_path() else {
+                    unreachable!("only file providers read an R version request");
+                };
                 let info = RSourceOverrideInfo {
                     provider: provider.name.to_owned(),
-                    file: provider.file_path(),
+                    file,
                     key: provider.key().map(str::to_owned),
                     requested_version: trimmed_version,
                     resolved_version: version.clone(),
@@ -627,7 +630,8 @@ fn invalid_override_file_warning(provider: &str, file: &Path) -> RSourceDiagnost
     )
 }
 
-pub(super) fn script_override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
+/// Format the startup notice for an R source selected by a configured override.
+pub(crate) fn override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
     if resolution.selection_route == super::r_source::RSourceSelectionRoute::Override
         && matches!(
             resolution.status,
@@ -1265,7 +1269,7 @@ mod r_source_override_tests {
     fn override_status_display_includes_resolution_metadata() {
         let info = RSourceOverrideInfo {
             provider: "toml-key".to_string(),
-            file: Some("rproject.toml".into()),
+            file: "rproject.toml".into(),
             key: Some("project.r_version".to_string()),
             requested_version: "4.4".to_string(),
             resolved_version: "4.4.2".to_string(),
@@ -1341,13 +1345,13 @@ mod r_source_override_tests {
     }
 
     #[test]
-    fn script_override_notice_is_available_with_default_banner_setting() {
+    fn override_notice_is_available_with_default_banner_setting() {
         let config = Config::default();
         assert!(config.startup.show_banner);
 
         let info = RSourceOverrideInfo {
             provider: "version-file".to_string(),
-            file: Some(".r-version".into()),
+            file: ".r-version".into(),
             key: None,
             requested_version: "4.4".to_string(),
             resolved_version: "4.4.2".to_string(),
@@ -1360,7 +1364,7 @@ mod r_source_override_tests {
             PathBuf::from("/tmp/r-home"),
             RSourceOverrideInfo {
                 provider: "version-file".to_string(),
-                file: Some(".r-version".into()),
+                file: ".r-version".into(),
                 key: None,
                 requested_version: "4.4".to_string(),
                 resolved_version: "4.4.2".to_string(),
@@ -1369,8 +1373,20 @@ mod r_source_override_tests {
         );
 
         assert_eq!(
-            script_override_notice(&report).as_deref(),
+            override_notice(&report).as_deref(),
             Some(r#"# R source override: version-file .r-version = "4.4""#)
+        );
+
+        let info = RSourceOverrideInfo {
+            provider: "toml-key".to_string(),
+            file: "rproject.toml".into(),
+            key: Some("project.r_version".to_string()),
+            requested_version: "4.4".to_string(),
+            resolved_version: "4.4.2".to_string(),
+        };
+        assert_eq!(
+            info.display(),
+            r#"toml-key rproject.toml:project.r_version = "4.4""#
         );
     }
 
@@ -1418,7 +1434,7 @@ mod r_source_override_tests {
                 ..
             } => {
                 assert!(matches!(*status, RSourceStatus::Rig { .. }));
-                assert_eq!(info.file, Some(second_file));
+                assert_eq!(info.file, second_file);
                 assert_eq!(info.resolved_version, "4.4.2");
                 assert_eq!(diagnostics.len(), 1);
                 assert_eq!(
@@ -1523,7 +1539,7 @@ mod r_source_override_tests {
             }
             OverrideResolution::Applied { info, .. } => {
                 assert_eq!(info.provider, "json-key");
-                assert_eq!(info.file, Some(PathBuf::from("renv.lock")));
+                assert_eq!(info.file, PathBuf::from("renv.lock"));
                 assert_eq!(info.key.as_deref(), Some("R.Version"));
                 assert_eq!(info.requested_version, "4.4");
             }
@@ -1575,7 +1591,7 @@ mod r_source_override_tests {
                 info, diagnostics, ..
             } => {
                 assert_eq!(info.provider, "version-file");
-                assert_eq!(info.file, Some(second_file));
+                assert_eq!(info.file, second_file);
                 assert_eq!(diagnostics.len(), 1);
                 assert!(diagnostics[0].message.contains("renv.lock:R.Version"));
             }
@@ -1934,7 +1950,7 @@ mod r_source_override_tests {
                     OverrideResolution::Applied {
                         info, diagnostics, ..
                     } => {
-                        assert_eq!(info.file, Some(valid_file));
+                        assert_eq!(info.file, valid_file);
                         assert_eq!(diagnostics.len(), 1);
                         assert_eq!(diagnostics[0].code, "r_source_override.value_invalid");
                         assert!(

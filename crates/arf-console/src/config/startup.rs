@@ -90,8 +90,8 @@ pub enum RSourceMode {
 pub struct RSourceOverrideInfo {
     /// The provider that supplied the version.
     pub provider: String,
-    /// The file read by the provider, if any.
-    pub file: Option<PathBuf>,
+    /// The file read by the provider.
+    pub file: PathBuf,
     /// The key read by the provider, if any.
     pub key: Option<String>,
     /// The version specification read from the provider.
@@ -103,11 +103,9 @@ pub struct RSourceOverrideInfo {
 impl RSourceOverrideInfo {
     /// Format the override metadata for startup and session displays.
     pub fn display(&self) -> String {
-        let source = match (&self.file, &self.key) {
-            (Some(file), Some(key)) => format!("{}:{}", file.display(), key),
-            (Some(file), None) => file.display().to_string(),
-            (None, Some(key)) => key.clone(),
-            (None, None) => "pixi".to_string(),
+        let source = match &self.key {
+            Some(key) => format!("{}:{}", self.file.display(), key),
+            None => self.file.display().to_string(),
         };
         format!(
             r#"{} {} = "{}""#,
@@ -174,17 +172,6 @@ impl RSourceStatus {
                 info.root.display(),
                 info.installation_name
             ),
-        }
-    }
-
-    /// Return metadata for the override that selected this R version, if any.
-    pub fn override_info(&self) -> Option<&RSourceOverrideInfo> {
-        match self {
-            Self::Rig { override_info, .. } => override_info.as_ref(),
-            Self::Path
-            | Self::ExplicitPath { .. }
-            | Self::Pixi { .. }
-            | Self::RigProject { .. } => None,
         }
     }
 }
