@@ -29,18 +29,18 @@ impl CombinedCompleter {
 
     /// Create a new CombinedCompleter with custom settings and rig availability.
     ///
-    /// When `rig_enabled` is false, the `:switch` command is excluded from completion.
+    /// When `switch_available` is false, the `:switch` command is excluded from completion.
     pub fn with_settings_and_rig(
         timeout_ms: u64,
         debounce_ms: u64,
         auto_paren_limit: usize,
-        rig_enabled: bool,
+        switch_available: bool,
     ) -> Self {
         Self::with_settings_full(
             timeout_ms,
             debounce_ms,
             auto_paren_limit,
-            rig_enabled,
+            switch_available,
             false,
             vec!["library".to_string(), "require".to_string()],
         )
@@ -51,7 +51,7 @@ impl CombinedCompleter {
         timeout_ms: u64,
         debounce_ms: u64,
         auto_paren_limit: usize,
-        rig_enabled: bool,
+        switch_available: bool,
         fuzzy_namespace: bool,
         package_functions: Vec<String>,
     ) -> Self {
@@ -59,7 +59,7 @@ impl CombinedCompleter {
             timeout_ms,
             debounce_ms,
             auto_paren_limit,
-            rig_enabled,
+            switch_available,
             fuzzy_namespace,
             package_functions,
             StaticFormalsPolicy::off(),
@@ -71,7 +71,7 @@ impl CombinedCompleter {
         timeout_ms: u64,
         debounce_ms: u64,
         auto_paren_limit: usize,
-        rig_enabled: bool,
+        switch_available: bool,
         fuzzy_namespace: bool,
         package_functions: Vec<String>,
         static_formals: StaticFormalsPolicy,
@@ -79,8 +79,8 @@ impl CombinedCompleter {
         // Build exclusion list: always exclude `:r` in R mode
         let mut exclusions: Vec<&'static str> = vec!["r"];
 
-        // Exclude `:switch` when rig is not enabled
-        if !rig_enabled {
+        // Exclude `:switch` when it cannot select another R version
+        if !switch_available {
             exclusions.push("switch");
         }
 

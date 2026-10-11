@@ -254,10 +254,7 @@ pub(crate) fn resolve_r_source(
         };
         match &request.source {
             ExplicitRSource::Provider(RProvider::Pixi) => {
-                let cwd = base_dir
-                    .map(Path::to_path_buf)
-                    .or_else(|| std::env::current_dir().ok());
-                let info = resolve_strict(cwd.as_deref()).map_err(|failure| {
+                let info = resolve_strict(base_dir).map_err(|failure| {
                     anyhow::Error::new(failure).context(
                         "The requested Pixi R provider is unavailable; run arf through `pixi run` with an R-enabled environment",
                     )
@@ -271,7 +268,7 @@ pub(crate) fn resolve_r_source(
                 .with_explicit_request(request));
             }
             ExplicitRSource::Provider(RProvider::RigProject) => {
-                let info = resolve_rig_project().map_err(|failure| {
+                let info = resolve_rig_project(base_dir).map_err(|failure| {
                     anyhow::Error::new(failure).context(
                         "The requested rig-project R provider is unavailable; use a synchronized rig project in the current directory",
                     )

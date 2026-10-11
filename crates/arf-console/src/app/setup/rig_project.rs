@@ -56,10 +56,16 @@ impl fmt::Display for RigProjectFailure {
 
 impl std::error::Error for RigProjectFailure {}
 
-pub(crate) fn resolve_strict() -> Result<RigProjectRSourceInfo, RigProjectFailure> {
-    let cwd = std::env::current_dir().map_err(|_| RigProjectFailure::ProjectNotFound {
-        path: PathBuf::from("."),
-    })?;
+/// Resolve the synchronized rig project in `cwd`, or in the current directory.
+pub(crate) fn resolve_strict(
+    cwd: Option<&Path>,
+) -> Result<RigProjectRSourceInfo, RigProjectFailure> {
+    let cwd = match cwd {
+        Some(cwd) => cwd.to_path_buf(),
+        None => std::env::current_dir().map_err(|_| RigProjectFailure::ProjectNotFound {
+            path: PathBuf::from("."),
+        })?,
+    };
     resolve_strict_at(&cwd, run_status_command, probe_wrapper)
 }
 

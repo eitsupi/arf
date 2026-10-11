@@ -229,7 +229,7 @@ pub(crate) fn restored_target(
         match &status {
             RSourceStatus::Pixi { info } => validate_pixi(info, resolve_pixi(None))?,
             RSourceStatus::RigProject { info } => {
-                validate_rig_project(info, resolve_rig_project())?
+                validate_rig_project(info, resolve_rig_project(None))?
             }
             _ => unreachable!("the carrier only restores environment providers"),
         }

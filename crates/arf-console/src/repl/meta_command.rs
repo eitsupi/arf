@@ -153,7 +153,7 @@ pub fn process_meta_command(
         }
         "switch" | "switch!" => {
             // :switch requires rig to be enabled at startup
-            if !r_source_status.rig_enabled() {
+            if !r_source_status.switch_available() {
                 arf_println!("Error: :switch requires rig to be available at startup.");
                 arf_println!(
                     r#"Start arf with r_source = "auto" (with rig installed) or r_source = "rig"."#
