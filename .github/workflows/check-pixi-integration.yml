@@ -1,9 +1,9 @@
-name: Pixi R source
+name: Check Pixi integration
 
 on:
   pull_request:
     paths:
-      - .github/workflows/pixi-r-source.yml
+      - .github/workflows/check-pixi-integration.yml
       - .github/pixi-r-source/**
       - "**/Cargo.toml"
       - Cargo.lock
@@ -14,7 +14,7 @@ on:
     branches:
       - main
     paths:
-      - .github/workflows/pixi-r-source.yml
+      - .github/workflows/check-pixi-integration.yml
       - .github/pixi-r-source/**
       - "**/Cargo.toml"
       - Cargo.lock

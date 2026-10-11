@@ -275,7 +275,7 @@ fn auto_path_discovery_remains_bounded_after_pixi_probe_rejection() {
 }
 
 #[test]
-#[ignore = "Runs once per OS in the Pixi R source workflow; waits for two production probe timeouts"]
+#[ignore = "Runs once per OS in the Pixi integration workflow; waits for two production probe timeouts"]
 fn auto_path_discovery_times_out_after_pixi_probe_rejection() {
     assert_auto_path_discovery_is_bounded(&["hang"]);
 }
