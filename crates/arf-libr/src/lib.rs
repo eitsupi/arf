@@ -3,6 +3,7 @@
 //! This crate provides dynamic bindings to R's C API using `libloading`.
 //! It allows loading R at runtime without compile-time linking.
 
+mod bounded_process;
 mod error;
 mod functions;
 mod library_selection;
@@ -14,6 +15,9 @@ mod windows_loader;
 mod sys;
 
 // error
+pub use bounded_process::{
+    BOUNDED_COMMAND_OUTPUT_LIMIT, BOUNDED_COMMAND_TIMEOUT, BoundedProcessError, run_bounded_command,
+};
 pub use error::{RError, RResult};
 pub use library_selection::select_r_library;
 pub use rhome_probe::{RHomeProbeError, probe_r_home};
