@@ -271,6 +271,16 @@ fn selected_unloadable_library_never_falls_back_to_system_r() {
 
 #[test]
 fn auto_path_discovery_remains_bounded_after_pixi_probe_rejection() {
+    assert_auto_path_discovery_is_bounded(&["stdout", "stderr"]);
+}
+
+#[test]
+#[ignore = "Runs once per OS in the Pixi R source workflow; waits for two production probe timeouts"]
+fn auto_path_discovery_times_out_after_pixi_probe_rejection() {
+    assert_auto_path_discovery_is_bounded(&["hang"]);
+}
+
+fn assert_auto_path_discovery_is_bounded(modes: &[&str]) {
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
@@ -283,7 +293,7 @@ r_source='auto'
 r_source_overrides=[{type='pixi'}]",
     )
     .unwrap();
-    for mode in ["stdout", "stderr", "hang"] {
+    for &mode in modes {
         let counter = fixture.root.path().join(format!("{mode}-calls"));
         let start = Instant::now();
         let mut child = fixture

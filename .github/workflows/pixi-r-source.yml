@@ -5,16 +5,21 @@ on:
     paths:
       - .github/workflows/pixi-r-source.yml
       - .github/pixi-r-source/**
-      - crates/**
-      - Cargo.*
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*pixi*"
+      - "**/*pixi*/**"
       - "!**/*.md"
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - .github/workflows/pixi-r-source.yml
       - .github/pixi-r-source/**
-      - crates/**
-      - Cargo.*
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*pixi*"
+      - "**/*pixi*/**"
       - "!**/*.md"
   workflow_dispatch:
 
@@ -30,7 +35,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022]
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -44,6 +52,11 @@ jobs:
       - name: Build production arf and integration tests
         shell: bash
         run: cargo build --locked --bin arf --tests
+      - name: Verify timeout after Pixi probe rejection
+        shell: bash
+        run: >-
+          cargo test --locked -p arf-console --test pixi_source_tests
+          auto_path_discovery_times_out_after_pixi_probe_rejection -- --ignored --exact
       - name: Verify default activated environment
         shell: bash
         env:
