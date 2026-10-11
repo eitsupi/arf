@@ -170,6 +170,21 @@ fn display_message(diagnostic: &RSourceDiagnostic) -> String {
     diagnostic.message.replace(&raw_path, &mask_home_path(path))
 }
 
+fn finalize_fallback_diagnostic(report: &mut RSourceResolutionReport) {
+    if let Some(diagnostic) = report.diagnostics.last_mut()
+        && diagnostic.code == "r_source_override.fallback"
+    {
+        diagnostic.message = format!(
+            "Warning: All R source overrides failed.\n         Using startup.r_source: {}.",
+            report.status.display()
+        );
+        if let RSourceStatus::ExplicitPath { path } = &report.status {
+            // Keep real paths in JSON; human rendering masks the associated path.
+            diagnostic.path = Some(path.clone());
+        }
+    }
+}
+
 /// Resolve R and return a report without changing the process environment.
 pub(crate) fn resolve_r_source(
     r_source: &RSource,
@@ -249,14 +264,7 @@ pub(crate) fn resolve_r_source(
             OverrideResolution::Fallback { diagnostics } => {
                 let mut report = setup_r_fallback(r_source, RSourceOverrideState::Failed)?;
                 report.diagnostics = diagnostics;
-                if let Some(diagnostic) = report.diagnostics.last_mut()
-                    && diagnostic.code == "r_source_override.fallback"
-                {
-                    diagnostic.message = format!(
-                        "Warning: All R source overrides failed.\n         Using startup.r_source: {}.",
-                        report.status.display()
-                    );
-                }
+                finalize_fallback_diagnostic(&mut report);
                 return Ok(report);
             }
         }
@@ -501,6 +509,28 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fallback_explicit_path_is_masked_only_for_human_output() {
+        let _guard = crate::test_utils::lock_env();
+        let home = dirs::home_dir().expect("test requires a home directory");
+        let path = home.join("arf-fallback-R");
+        let mut report = RSourceResolutionReport::from_status(
+            RSourceStatus::ExplicitPath { path: path.clone() },
+            Some(path.clone()),
+            RSourceOverrideState::Failed,
+        );
+        report
+            .diagnostics
+            .push(warning("r_source_override.fallback", "fallback", None));
+        finalize_fallback_diagnostic(&mut report);
+        let diagnostic = &report.diagnostics[0];
+        assert_eq!(diagnostic.path.as_ref(), Some(&path));
+        assert!(diagnostic.message.contains(&path.display().to_string()));
+        let human = display_message(diagnostic);
+        assert!(human.contains("path (~"), "{human}");
+        assert!(!human.contains(&home.display().to_string()), "{human}");
+    }
 
     #[test]
     fn display_message_masks_its_own_path_and_leaves_pathless_messages_unchanged() {

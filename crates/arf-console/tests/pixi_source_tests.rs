@@ -235,22 +235,36 @@ r_source_overrides=[{{type='pixi'}}]",
             .unwrap()
             .contains("Using startup.r_source: path")
     );
+    assert_eq!(diagnostics[1]["path"], fixture.home.display().to_string());
+    assert!(
+        diagnostics[1]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&fixture.home.display().to_string())
+    );
 }
 
 #[test]
 fn selected_unloadable_library_never_falls_back_to_system_r() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(false)
-        .args(["--vanilla", "--quiet", "-e", "cat('UNEXPECTED_R_STARTED')"])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "selected dummy library must fail startup"
-    );
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("UNEXPECTED_R_STARTED"));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to initialize R"), "{stderr}");
-    assert!(!stderr.to_lowercase().contains("falling back"), "{stderr}");
+    for args in [
+        &["--vanilla", "--quiet"][..],
+        &["--vanilla", "--quiet", "-e", "cat('UNEXPECTED_R_STARTED')"][..],
+    ] {
+        let output = fixture.command(false).args(args).output().unwrap();
+        assert!(
+            !output.status.success(),
+            "selected dummy library must fail startup: {args:?}"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains("UNEXPECTED_R_STARTED"), "{stdout}");
+        assert!(!stdout.contains("Edit mode:"), "REPL started: {stdout}");
+        assert!(
+            !stdout.contains("R is not initialized"),
+            "REPL started: {stdout}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Failed to initialize R"), "{stderr}");
+        assert!(!stderr.to_lowercase().contains("falling back"), "{stderr}");
+    }
 }
