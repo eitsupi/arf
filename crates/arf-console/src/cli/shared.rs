@@ -1,3 +1,4 @@
+use crate::app::explicit_r_source::RProvider;
 use clap::builder::TypedValueParser;
 use clap::{Args, ValueHint};
 use std::path::PathBuf;
@@ -16,16 +17,16 @@ pub struct RSourceArgs {
 
     /// Highest-priority R source: use this explicit R_HOME path
     ///
-    /// Mutually exclusive with --with-r-version.
+    /// Mutually exclusive with --with-r-version and --r-provider.
     ///
-    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION,
+    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION, ARF_R_PROVIDER,
     /// r_source_overrides and startup.r_source.
     ///
     /// Config: startup.r_source
     #[arg(
         long = "r-home",
         value_hint = ValueHint::DirPath,
-        conflicts_with = "r_version"
+        conflicts_with_all = ["r_version", "r_provider"]
     )]
     pub r_home: Option<PathBuf>,
 
@@ -39,17 +40,27 @@ pub struct RSourceArgs {
     /// Requires rig. Candidates are limited to R versions rig has installed
     /// (from `rig list --json`); the version string is never passed to rig.
     ///
-    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION,
+    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION, ARF_R_PROVIDER,
     /// r_source_overrides and startup.r_source.
     ///
     /// Config: startup.r_source
-    #[arg(long = "with-r-version", conflicts_with = "r_home")]
+    #[arg(long = "with-r-version", conflicts_with_all = ["r_home", "r_provider"])]
     pub r_version: Option<String>,
+
+    /// Use R from an externally activated provider environment
+    ///
+    /// Currently supported: pixi. This does not activate or install an environment.
+    ///
+    /// Takes precedence over ARF_R_HOME, ARF_R_VERSION, ARF_R_PROVIDER,
+    /// r_source_overrides and startup.r_source.
+    #[arg(long = "r-provider", value_enum, conflicts_with_all = ["r_home", "r_version"])]
+    pub r_provider: Option<RProvider>,
 
     /// Disable experimental directory-level R source overrides
     ///
     /// This only disables r_source_overrides. An R source given by
-    /// --r-home, --with-r-version, ARF_R_HOME or ARF_R_VERSION still applies.
+    /// --r-home, --with-r-version, --r-provider, ARF_R_HOME, ARF_R_VERSION or
+    /// ARF_R_PROVIDER still applies.
     ///
     /// Config: [experimental].r_source_overrides
     #[arg(long = "no-r-source-overrides")]

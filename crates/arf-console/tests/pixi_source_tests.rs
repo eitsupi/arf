@@ -99,10 +99,16 @@ r_source_overrides=[{provider='pixi'}]",
     }
 
     fn command(&self, resolve: bool) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
         if resolve {
-            command.args(["r", "resolve"]);
+            self.command_with_args(&["r", "resolve"])
+        } else {
+            self.command_with_args(&[])
         }
+    }
+
+    fn command_with_args(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_arf"));
+        command.args(args);
         command
             .arg("--config")
             .arg(&self.config)
@@ -115,6 +121,7 @@ r_source_overrides=[{provider='pixi'}]",
             .env("ARF_TEST_RHOME_OUTPUT", &self.home)
             .env_remove("ARF_R_HOME")
             .env_remove("ARF_R_VERSION")
+            .env_remove("ARF_R_PROVIDER")
             .env_remove("ARF_CONFIG")
             .env_remove("PIXI_PROJECT_MANIFEST")
             .env_remove("RUST_LOG")
@@ -173,6 +180,109 @@ fn active_pixi_resolve_preserves_the_launcher_outside_home() {
     );
     assert!(descriptor["target"]["resolved_version"].is_null());
     assert_eq!(descriptor["diagnostics"], serde_json::json!([]));
+}
+
+#[test]
+fn explicit_provider_resolve_reports_request_source_without_configured_override() {
+    let fixture = Fixture::new();
+    std::fs::write(&fixture.config, "").unwrap();
+    let cases = [
+        (
+            "--r-provider",
+            vec!["r", "resolve", "--r-provider", "pixi"],
+            None,
+        ),
+        ("ARF_R_PROVIDER", vec!["r", "resolve"], Some("pixi")),
+    ];
+    let mut provenance = Vec::new();
+    for (label, args, env_provider) in cases {
+        let mut command = fixture.command_with_args(&args);
+        if let Some(provider) = env_provider {
+            command.env("ARF_R_PROVIDER", provider);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{label}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let descriptor: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(descriptor["provider"], "pixi");
+        assert_eq!(
+            descriptor["target"]["r_binary"],
+            fixture.binary.canonicalize().unwrap().display().to_string()
+        );
+        provenance.push(serde_json::json!({
+            "provider": descriptor["provider"],
+            "selected_by": descriptor["selected_by"],
+        }));
+    }
+    insta::assert_snapshot!(
+        serde_json::to_string_pretty(&provenance).unwrap(),
+        @r###"
+        [
+          {
+            "provider": "pixi",
+            "selected_by": {
+              "kind": "provider_request",
+              "requested_r_home": null,
+              "requested_version": null,
+              "source": {
+                "format": null,
+                "key": null,
+                "kind": "command_line_argument",
+                "name": "--r-provider",
+                "path": null
+              }
+            }
+          },
+          {
+            "provider": "pixi",
+            "selected_by": {
+              "kind": "provider_request",
+              "requested_r_home": null,
+              "requested_version": null,
+              "source": {
+                "format": null,
+                "key": null,
+                "kind": "environment_variable",
+                "name": "ARF_R_PROVIDER",
+                "path": null
+              }
+            }
+          }
+        ]"###
+    );
+}
+
+#[test]
+fn explicit_provider_fails_without_active_pixi_instead_of_using_configured_fallback() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        &fixture.config,
+        r#"[startup]
+r_source = "auto""#,
+    )
+    .unwrap();
+    let output = fixture
+        .command_with_args(&["r", "resolve", "--r-provider", "pixi"])
+        .env_remove("PIXI_IN_SHELL")
+        .env_remove("PIXI_WORKSPACE_MANIFEST")
+        .env_remove("PIXI_ENVIRONMENT_NAME")
+        .env_remove("CONDA_PREFIX")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "INVALID_PARAMS");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("pixi run")
+    );
 }
 
 #[test]
@@ -267,6 +377,62 @@ fn selected_unloadable_library_never_falls_back_to_system_r() {
         assert!(stderr.contains("Failed to initialize R"), "{stderr}");
         assert!(!stderr.to_lowercase().contains("falling back"), "{stderr}");
     }
+}
+
+#[test]
+fn explicit_provider_without_override_config_fails_after_load_error() {
+    let fixture = Fixture::new();
+    std::fs::write(&fixture.config, "").unwrap();
+    let output = fixture
+        .command(false)
+        .args([
+            "--no-r-source-overrides",
+            "--r-provider",
+            "pixi",
+            "--vanilla",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Failed to initialize R from the selected Pixi environment"),
+        "{stderr}"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Edit mode:"));
+
+    let script = fixture
+        .command(false)
+        .args([
+            "--no-r-source-overrides",
+            "--r-provider",
+            "pixi",
+            "--vanilla",
+            "--quiet",
+            "-e",
+            r#"cat("UNEXPECTED_R_STARTED")"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(!script.status.success());
+    assert!(String::from_utf8_lossy(&script.stderr).contains("Failed to initialize R"));
+    assert!(!String::from_utf8_lossy(&script.stdout).contains("UNEXPECTED_R_STARTED"));
+
+    let headless = fixture
+        .command_with_args(&[
+            "headless",
+            "--no-r-source-overrides",
+            "--r-provider",
+            "pixi",
+            "--vanilla",
+            "--quiet",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!headless.status.success());
+    assert!(String::from_utf8_lossy(&headless.stderr).contains("Failed to initialize R"));
 }
 
 #[test]

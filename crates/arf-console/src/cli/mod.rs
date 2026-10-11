@@ -505,6 +505,48 @@ mod tests {
     }
 
     #[test]
+    fn test_r_provider_conflicts_with_other_explicit_sources() {
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.unset("ARF_R_PROVIDER");
+        guard.unset("ARF_CONFIG");
+
+        assert!(Cli::try_parse_from(["arf", "--r-provider", "pixi", "--r-home", "/r"]).is_err());
+        assert!(
+            Cli::try_parse_from(["arf", "--r-provider", "pixi", "--with-r-version", "4.5"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_arf_r_provider_is_normalized_for_headless() {
+        let mut guard = crate::test_utils::lock_env();
+        guard.unset("ARF_R_HOME");
+        guard.unset("ARF_R_VERSION");
+        guard.set("ARF_R_PROVIDER", "pixi");
+        guard.unset("ARF_CONFIG");
+
+        let mut cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
+        let Some(Commands::Headless(args)) = &mut cli.command else {
+            panic!("expected headless command");
+        };
+        let request = crate::app::option_scope::normalize_r_source_args(&mut args.r_source)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            request.source,
+            crate::app::explicit_r_source::ExplicitRSource::Provider(
+                crate::app::explicit_r_source::RProvider::Pixi
+            )
+        );
+        assert_eq!(
+            args.r_source.r_provider,
+            Some(crate::app::explicit_r_source::RProvider::Pixi)
+        );
+    }
+
+    #[test]
     fn test_arf_r_home_has_same_precedence_as_r_home() {
         let mut guard = crate::test_utils::lock_env();
         guard.unset("ARF_R_HOME");

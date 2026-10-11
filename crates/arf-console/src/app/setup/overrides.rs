@@ -608,6 +608,7 @@ mod r_source_override_tests {
     };
     use super::super::rig::ResolvedRSource;
     use super::*;
+    use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RSourceOrigin};
     use crate::config::{Config, RSource, RSourceMode};
     use std::path::Path;
     use std::path::PathBuf;
@@ -793,12 +794,22 @@ mod r_source_override_tests {
         cli_version: Option<&str>,
         no_r_source_overrides: bool,
     ) -> Result<RSourceResolutionReport> {
+        let request = cli_r_home
+            .map(|home| ExplicitRSourceRequest {
+                source: ExplicitRSource::Home(home.to_path_buf()),
+                origin: RSourceOrigin::Cli,
+            })
+            .or_else(|| {
+                cli_version.map(|version| ExplicitRSourceRequest {
+                    source: ExplicitRSource::Version(version.to_owned()),
+                    origin: RSourceOrigin::Cli,
+                })
+            });
         resolve_r_source(
             r_source,
             r_source_overrides,
             base_dir,
-            cli_r_home,
-            cli_version,
+            request.as_ref(),
             no_r_source_overrides,
         )
     }
@@ -810,12 +821,15 @@ mod r_source_override_tests {
         let original = std::env::var_os("R_HOME");
         let temp = tempfile::tempdir().unwrap();
 
+        let explicit_request = ExplicitRSourceRequest {
+            source: ExplicitRSource::Home(temp.path().to_path_buf()),
+            origin: RSourceOrigin::Cli,
+        };
         let report = resolve_r_source(
             &path_source(temp.path()),
             &[],
             None,
-            Some(temp.path()),
-            None,
+            Some(&explicit_request),
             false,
         )
         .unwrap();
@@ -913,12 +927,15 @@ mod r_source_override_tests {
     fn cli_resolution_has_priority_over_overrides_and_config() {
         let config_path = tempfile::tempdir().unwrap();
         let cli_path = tempfile::tempdir().unwrap();
+        let explicit_request = ExplicitRSourceRequest {
+            source: ExplicitRSource::Home(cli_path.path().to_path_buf()),
+            origin: RSourceOrigin::Cli,
+        };
         let report = resolve_r_source(
             &path_source(config_path.path()),
             &[RSourceOverride::Pixi],
             Some(config_path.path()),
-            Some(cli_path.path()),
-            None,
+            Some(&explicit_request),
             false,
         )
         .unwrap();

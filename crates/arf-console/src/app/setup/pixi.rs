@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PixiFailure {
+pub(crate) enum PixiFailure {
     NotActive {
         workspace_manifest: Option<PathBuf>,
     },
@@ -22,6 +22,33 @@ pub(super) enum PixiFailure {
         path: Option<PathBuf>,
     },
 }
+
+impl std::fmt::Display for PixiFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotActive { workspace_manifest } => {
+                if workspace_manifest.is_some() {
+                    f.write_str("Pixi is not active for the current workspace")
+                } else {
+                    f.write_str("No active Pixi environment was found")
+                }
+            }
+            Self::EnvironmentInvalid { reason, .. } => {
+                write!(f, "Pixi environment identity is invalid: {reason}")?;
+                Ok(())
+            }
+            Self::RUnavailable { reason, .. } => {
+                write!(
+                    f,
+                    "R from the active Pixi environment is unavailable: {reason}"
+                )?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for PixiFailure {}
 
 pub(super) fn resolve_strict(cwd: Option<&Path>) -> Result<PixiRTarget, PixiFailure> {
     resolve_strict_with(cwd, |key| std::env::var_os(key), probe::r_home)

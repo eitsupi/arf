@@ -2,8 +2,9 @@
 
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
 pub(crate) use crate::app::explicit_r_source::RSourceOrigin;
+use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RProvider};
 use crate::app::setup::{
-    RSourceDiagnostic, RSourceResolutionReport, RSourceSelectionRoute,
+    PixiFailure, RSourceDiagnostic, RSourceResolutionReport, RSourceSelectionRoute,
     resolve_path_r_home_for_report, resolve_r_source,
 };
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
@@ -174,9 +175,7 @@ pub(crate) fn print_error(error: &ResolveCommandError) {
 /// Resolve and print the R target without initializing R.
 pub(crate) fn run_resolve(
     config_path: Option<&Path>,
-    r_home: Option<&Path>,
-    r_version: Option<&str>,
-    r_source_origin: Option<RSourceOrigin>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     no_r_source_overrides: bool,
 ) -> Result<()> {
     let cwd = std::env::current_dir().map_err(|error| {
@@ -193,27 +192,30 @@ pub(crate) fn run_resolve(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
-        r_home,
-        r_version,
+        explicit_request,
         no_r_source_overrides,
     )
-    .map_err(|error| classify_resolution_error(error, r_home))?;
+    .map_err(|error| classify_resolution_error(error, explicit_request))?;
     resolve_path_r_home_for_report(&mut resolution);
 
     let descriptor = descriptor(
         &cwd,
         &resolution,
         &config_warnings,
-        r_home,
-        r_version,
-        r_source_origin,
+        explicit_request,
         loaded_config.as_ref(),
     );
     print_json(&descriptor).map_err(|error| ResolveCommandError::internal(format!("{error:#}")))?;
     Ok(())
 }
 
-fn classify_resolution_error(error: anyhow::Error, r_home: Option<&Path>) -> ResolveCommandError {
+fn classify_resolution_error(
+    error: anyhow::Error,
+    explicit_request: Option<&ExplicitRSourceRequest>,
+) -> ResolveCommandError {
+    if error.downcast_ref::<PixiFailure>().is_some() {
+        return ResolveCommandError::invalid_invocation(format!("{error:#}"));
+    }
     let invalid_invocation = match error.downcast_ref::<RigError>() {
         Some(
             RigError::NotInstalled
@@ -222,7 +224,10 @@ fn classify_resolution_error(error: anyhow::Error, r_home: Option<&Path>) -> Res
             | RigError::VersionNotFound(_),
         ) => true,
         Some(RigError::CommandFailed(_) | RigError::ParseError(_)) => false,
-        None => r_home.is_some_and(|path| !path.exists()),
+        None => matches!(
+            explicit_request.map(|request| &request.source),
+            Some(ExplicitRSource::Home(path)) if !path.exists()
+        ),
     };
 
     if invalid_invocation {
@@ -236,9 +241,7 @@ fn descriptor(
     cwd: &Path,
     resolution: &RSourceResolutionReport,
     config_warnings: &[ConfigLoadWarning],
-    r_home: Option<&Path>,
-    r_version: Option<&str>,
-    r_source_origin: Option<RSourceOrigin>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     loaded_config: Option<&ConfigLoadProvenance>,
 ) -> ResolveDescriptor {
     let target = resolution.r_home.as_ref().map(|r_home| {
@@ -254,14 +257,7 @@ fn descriptor(
     });
     let resolved = target.is_some();
 
-    let selected_by = selected_by(
-        cwd,
-        resolution,
-        r_home,
-        r_version,
-        r_source_origin,
-        loaded_config,
-    );
+    let selected_by = selected_by(cwd, resolution, explicit_request, loaded_config);
     let diagnostics = config_warnings
         .iter()
         .map(config_diagnostic)
@@ -286,43 +282,44 @@ fn descriptor(
 fn selected_by(
     cwd: &Path,
     resolution: &RSourceResolutionReport,
-    r_home: Option<&Path>,
-    r_version: Option<&str>,
-    r_source_origin: Option<RSourceOrigin>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     loaded_config: Option<&ConfigLoadProvenance>,
 ) -> SelectedBy {
     if resolution.selection_route == RSourceSelectionRoute::Explicit
-        && let Some(r_home) = r_home
+        && let Some(request) = explicit_request
     {
-        let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
-            RSourceOrigin::Cli => ("command_line_argument", "--r-home"),
-            RSourceOrigin::Environment => ("environment_variable", "ARF_R_HOME"),
+        let (kind, requested_r_home, requested_version, cli_name, env_name) = match &request.source
+        {
+            ExplicitRSource::Home(home) => (
+                "r_home",
+                Some(display_path(cwd, home)),
+                None,
+                "--r-home",
+                "ARF_R_HOME",
+            ),
+            ExplicitRSource::Version(version) => (
+                "version_request",
+                None,
+                Some(version.clone()),
+                "--with-r-version",
+                "ARF_R_VERSION",
+            ),
+            ExplicitRSource::Provider(RProvider::Pixi) => (
+                "provider_request",
+                None,
+                None,
+                "--r-provider",
+                "ARF_R_PROVIDER",
+            ),
+        };
+        let (source_kind, source_name) = match request.origin {
+            RSourceOrigin::Cli => ("command_line_argument", cli_name),
+            RSourceOrigin::Environment => ("environment_variable", env_name),
         };
         return SelectedBy {
-            kind: "r_home",
-            requested_r_home: Some(display_path(cwd, r_home)),
-            requested_version: None,
-            source: SelectionSource {
-                kind: source_kind,
-                name: Some(source_name.to_owned()),
-                path: None,
-                format: None,
-                key: None,
-            },
-        };
-    }
-
-    if resolution.selection_route == RSourceSelectionRoute::Explicit
-        && let Some(r_version) = r_version
-    {
-        let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
-            RSourceOrigin::Cli => ("command_line_argument", "--with-r-version"),
-            RSourceOrigin::Environment => ("environment_variable", "ARF_R_VERSION"),
-        };
-        return SelectedBy {
-            kind: "version_request",
-            requested_r_home: None,
-            requested_version: Some(r_version.to_owned()),
+            kind,
+            requested_r_home,
+            requested_version,
             source: SelectionSource {
                 kind: source_kind,
                 name: Some(source_name.to_owned()),
@@ -501,8 +498,6 @@ mod tests {
             &[],
             None,
             None,
-            None,
-            None,
         ))
         .unwrap();
         assert_eq!(value["schema_version"], 1);
@@ -545,8 +540,6 @@ mod tests {
             &[],
             None,
             None,
-            None,
-            None,
         ))
         .unwrap();
 
@@ -575,9 +568,10 @@ mod tests {
             Path::new("/project"),
             &resolution,
             &[],
-            None,
-            Some("4.4.1"),
-            Some(RSourceOrigin::Cli),
+            Some(&ExplicitRSourceRequest {
+                source: ExplicitRSource::Version("4.4.1".to_owned()),
+                origin: RSourceOrigin::Cli,
+            }),
             None,
         ))
         .unwrap();

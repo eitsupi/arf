@@ -5,6 +5,7 @@
 ### Added
 
 - **Experimental:** `{ provider = "pixi" }` in `experimental.r_source_overrides` selects R from an externally activated Pixi environment without requiring rig. Resolve reports its environment and verified executable; headless and restart use the same validated R target.
+- `--r-provider pixi` and `ARF_R_PROVIDER=pixi` explicitly select R from an active Pixi environment, independently of configured overrides.
 
 ### Changed
 

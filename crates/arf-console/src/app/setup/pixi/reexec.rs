@@ -1,12 +1,14 @@
 //! Carry an applied target across the Unix loader exec, never across :restart.
 
 use super::{PixiFailure, PixiRTarget, resolve_strict};
+use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RProvider};
 use crate::app::setup::r_source::{
     RSourceDiagnostic, RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute,
 };
 use crate::app::startup_env::decode_os_string;
 #[cfg(any(unix, test))]
 use crate::app::startup_env::encode_os_string;
+use crate::config::RSourceOverride;
 #[cfg(unix)]
 use crate::config::RSourceStatus;
 use anyhow::{Context, Result};
@@ -20,6 +22,7 @@ static RESTORED: OnceLock<Option<OsString>> = OnceLock::new();
 
 #[derive(Serialize, Deserialize)]
 struct TargetCarrier {
+    route: CarrierRoute,
     manifest: String,
     environment: String,
     prefix: String,
@@ -28,6 +31,12 @@ struct TargetCarrier {
     library: String,
     version: Option<String>,
     diagnostics: Vec<DiagnosticCarrier>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+enum CarrierRoute {
+    Explicit,
+    Override,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,7 +62,7 @@ pub(crate) fn forward_loader_target(report: &RSourceResolutionReport) {
     let RSourceStatus::Pixi { info } = &report.status else {
         return;
     };
-    let carrier = serialize(info, &report.diagnostics);
+    let carrier = serialize(info, report.selection_route, &report.diagnostics);
     // SAFETY: Called only immediately before the single-threaded loader exec.
     unsafe { std::env::set_var(CARRIER, carrier) };
 }
@@ -65,8 +74,19 @@ pub(crate) fn clear_loader_target() {
 }
 
 #[cfg(any(unix, test))]
-fn serialize(info: &PixiRTarget, diagnostics: &[RSourceDiagnostic]) -> String {
+fn serialize(
+    info: &PixiRTarget,
+    route: RSourceSelectionRoute,
+    diagnostics: &[RSourceDiagnostic],
+) -> String {
     let carrier = TargetCarrier {
+        route: match route {
+            RSourceSelectionRoute::Explicit => CarrierRoute::Explicit,
+            RSourceSelectionRoute::Override => CarrierRoute::Override,
+            RSourceSelectionRoute::Startup => {
+                unreachable!("Pixi target cannot be selected by startup R source")
+            }
+        },
         manifest: encode_os_string(info.manifest.as_os_str()),
         environment: info.environment.clone(),
         prefix: encode_os_string(info.prefix.as_os_str()),
@@ -90,7 +110,7 @@ fn serialize(info: &PixiRTarget, diagnostics: &[RSourceDiagnostic]) -> String {
     serde_json::to_string(&carrier).expect("string-only loader carrier is serializable")
 }
 
-fn deserialize(carrier: &str) -> Result<(PixiRTarget, Vec<RSourceDiagnostic>)> {
+fn deserialize(carrier: &str) -> Result<(PixiRTarget, CarrierRoute, Vec<RSourceDiagnostic>)> {
     let carrier: TargetCarrier =
         serde_json::from_str(carrier).context("Invalid Pixi loader target")?;
     let path = |value: &str| -> Result<PathBuf> {
@@ -119,25 +139,76 @@ fn deserialize(carrier: &str) -> Result<(PixiRTarget, Vec<RSourceDiagnostic>)> {
             })
         })
         .collect::<Result<_>>()?;
-    Ok((info, diagnostics))
+    Ok((info, carrier.route, diagnostics))
 }
 
-pub(crate) fn restored_target() -> Option<Result<RSourceResolutionReport>> {
+pub(crate) fn restored_target(
+    explicit_request: Option<&ExplicitRSourceRequest>,
+    no_r_source_overrides: bool,
+    r_source_overrides: &[RSourceOverride],
+) -> Option<Result<RSourceResolutionReport>> {
     let carrier = RESTORED.get()?.as_ref()?;
     Some((|| {
-        let (info, diagnostics) = deserialize(
+        let (info, route, diagnostics) = deserialize(
             carrier
                 .to_str()
                 .context("Invalid Pixi loader target encoding")?,
+        )?;
+        let (selection_route, override_state) = restore_route(
+            route,
+            explicit_request,
+            no_r_source_overrides,
+            r_source_overrides,
         )?;
         validate(&info, resolve_strict(None))?;
         Ok(RSourceResolutionReport::from_pixi(
             info,
             diagnostics,
-            RSourceSelectionRoute::Override,
-            RSourceOverrideState::Applied,
+            selection_route,
+            override_state,
         ))
     })())
+}
+
+fn restore_route(
+    route: CarrierRoute,
+    explicit_request: Option<&ExplicitRSourceRequest>,
+    no_r_source_overrides: bool,
+    r_source_overrides: &[RSourceOverride],
+) -> Result<(RSourceSelectionRoute, RSourceOverrideState)> {
+    match route {
+        CarrierRoute::Explicit => {
+            anyhow::ensure!(
+                matches!(
+                    explicit_request.map(|request| &request.source),
+                    Some(ExplicitRSource::Provider(RProvider::Pixi))
+                ),
+                "The explicit Pixi provider request changed during loader re-exec"
+            );
+            Ok((
+                RSourceSelectionRoute::Explicit,
+                if no_r_source_overrides {
+                    RSourceOverrideState::Disabled
+                } else {
+                    RSourceOverrideState::ShadowedByCli
+                },
+            ))
+        }
+        CarrierRoute::Override => {
+            anyhow::ensure!(
+                explicit_request.is_none()
+                    && !no_r_source_overrides
+                    && r_source_overrides
+                        .iter()
+                        .any(|source| matches!(source, RSourceOverride::Pixi)),
+                "The selected Pixi R source was changed during loader re-exec"
+            );
+            Ok((
+                RSourceSelectionRoute::Override,
+                RSourceOverrideState::Applied,
+            ))
+        }
+    }
 }
 
 fn validate(previous: &PixiRTarget, resolution: Result<PixiRTarget, PixiFailure>) -> Result<()> {
@@ -161,6 +232,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn loader_carrier_route_must_match_the_reparsed_selection() {
+        let explicit = ExplicitRSourceRequest {
+            source: ExplicitRSource::Provider(RProvider::Pixi),
+            origin: crate::app::explicit_r_source::RSourceOrigin::Environment,
+        };
+        let pixi_override = [RSourceOverride::Pixi];
+        assert_eq!(
+            restore_route(CarrierRoute::Explicit, Some(&explicit), true, &[]).unwrap(),
+            (
+                RSourceSelectionRoute::Explicit,
+                RSourceOverrideState::Disabled
+            )
+        );
+        assert!(restore_route(CarrierRoute::Explicit, None, false, &[]).is_err());
+        assert_eq!(
+            restore_route(CarrierRoute::Override, None, false, &pixi_override).unwrap(),
+            (
+                RSourceSelectionRoute::Override,
+                RSourceOverrideState::Applied
+            )
+        );
+        assert!(
+            restore_route(
+                CarrierRoute::Override,
+                Some(&explicit),
+                false,
+                &pixi_override
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn reexec_carries_native_paths_and_diagnostics_and_rejects_target_changes() {
         let info = PixiRTarget {
             manifest: "/workspace/pixi.toml".into(),
@@ -176,8 +280,14 @@ mod tests {
             "earlier provider warning",
             Some(info.manifest.clone()),
         )];
-        let (roundtrip, warnings) = deserialize(&serialize(&info, &diagnostics)).unwrap();
+        let (roundtrip, route, warnings) = deserialize(&serialize(
+            &info,
+            RSourceSelectionRoute::Override,
+            &diagnostics,
+        ))
+        .unwrap();
         assert_eq!(roundtrip, info);
+        assert_eq!(route, CarrierRoute::Override);
         assert_eq!(warnings[0].message, diagnostics[0].message);
         assert_eq!(warnings[0].path, diagnostics[0].path);
         assert!(
@@ -224,7 +334,12 @@ mod tests {
             use std::os::unix::ffi::OsStringExt;
             let mut native = info;
             native.binary = PathBuf::from(OsString::from_vec(b"/prefix/\xff/R".to_vec()));
-            assert_eq!(deserialize(&serialize(&native, &[])).unwrap().0, native);
+            assert_eq!(
+                deserialize(&serialize(&native, RSourceSelectionRoute::Explicit, &[]))
+                    .unwrap()
+                    .0,
+                native
+            );
         }
     }
 }

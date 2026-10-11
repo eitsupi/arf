@@ -36,26 +36,32 @@ pub(crate) fn config_file_source(matches: &ArgMatches) -> ConfigFileSource {
 pub(crate) fn normalize_r_source_args(
     args: &mut RSourceArgs,
 ) -> Result<Option<ExplicitRSourceRequest>, crate::app::explicit_r_source::ExplicitRSourceError> {
-    let (env_home, env_version) = if args.r_home.is_none() && args.r_version.is_none() {
+    let has_cli_selection =
+        args.r_home.is_some() || args.r_version.is_some() || args.r_provider.is_some();
+    let (env_home, env_version, env_provider) = if !has_cli_selection {
         (
             std::env::var_os("ARF_R_HOME"),
             std::env::var_os("ARF_R_VERSION"),
+            std::env::var_os("ARF_R_PROVIDER"),
         )
     } else {
         // A CLI request takes precedence over every R source environment value.
         // Do not even parse inherited values that cannot affect this invocation.
-        (None, None)
+        (None, None, None)
     };
     let request = explicit_r_source_request(
         args.r_home.clone(),
         args.r_version.clone(),
+        args.r_provider,
         env_home,
         env_version,
+        env_provider,
     )?;
     if let Some(request) = &request {
         match &request.source {
             ExplicitRSource::Home(path) => args.r_home = Some(path.clone()),
             ExplicitRSource::Version(version) => args.r_version = Some(version.clone()),
+            ExplicitRSource::Provider(provider) => args.r_provider = Some(*provider),
         }
     }
     Ok(request)

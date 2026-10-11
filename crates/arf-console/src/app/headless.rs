@@ -4,6 +4,7 @@ use crate::app::config_load::{
     load_config_collecting_warnings, load_config_for_startup, report_diagnostics_on_setup_error,
     report_startup_diagnostics,
 };
+use crate::app::explicit_r_source::ExplicitRSourceRequest;
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
 use crate::app::session_id::create_session_id;
@@ -156,8 +157,7 @@ impl HeadlessInfo {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_headless(
     config_path: Option<&std::path::PathBuf>,
-    r_home: Option<&std::path::Path>,
-    r_version: Option<&str>,
+    explicit_request: Option<&ExplicitRSourceRequest>,
     r_args_builder: RArgsBuilder<'_>,
     bind: Option<&str>,
     pid_file: Option<&std::path::Path>,
@@ -202,8 +202,7 @@ pub(crate) fn run_headless(
         &config.startup.r_source,
         &config.experimental.r_source_overrides,
         None,
-        r_home,
-        r_version,
+        explicit_request,
         no_r_source_overrides,
     );
     let (resolution, config_diagnostics) = if json {

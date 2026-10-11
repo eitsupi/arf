@@ -42,7 +42,7 @@ use app::option_scope::{
 use app::r_profiles::source_r_profiles;
 use app::resolve::{ResolveCommandError, print_error, run_resolve};
 use app::session_id::create_session_id;
-use app::setup::{run_script, setup_r};
+use app::setup::run_script;
 use app::startup_env::capture_startup_env;
 pub(crate) use app::startup_env::{
     STARTUP_ENV_CARRIER, capture_runtime_r_home, startup_env_carrier, startup_env_value,
@@ -242,8 +242,7 @@ fn run() -> Result<()> {
             };
             return run_headless(
                 args.r_source.config.as_ref(),
-                args.r_source.r_home.as_deref(),
-                args.r_source.r_version.as_deref(),
+                explicit_r_source.as_ref(),
                 r_args_builder,
                 args.bind.as_deref(),
                 args.pid_file.as_deref(),
@@ -259,12 +258,9 @@ fn run() -> Result<()> {
         }
         Some(Commands::R(args)) => {
             let RCommand::Resolve(resolve_args) = &args.command;
-            let origin = explicit_r_source.as_ref().map(|request| request.origin);
             return run_resolve(
                 resolve_args.r_source.config.as_deref(),
-                resolve_args.r_source.r_home.as_deref(),
-                resolve_args.r_source.r_version.as_deref(),
-                origin,
+                explicit_r_source.as_ref(),
                 resolve_args.r_source.no_r_source_overrides,
             );
         }
@@ -276,7 +272,7 @@ fn run() -> Result<()> {
 
     if script_mode {
         // Script execution mode - no REPL, just run code and exit
-        return run_script(&cli);
+        return run_script(&cli, explicit_r_source.as_ref());
     }
 
     log::info!("Starting arf");
@@ -357,12 +353,11 @@ fn run() -> Result<()> {
 
     // Set up R based on r_source config (with optional CLI override)
     let (resolution, startup_diagnostics) = report_diagnostics_on_setup_error(
-        setup_r(
+        app::setup::setup_r(
             &config.startup.r_source,
             &config.experimental.r_source_overrides,
             None,
-            cli.r_source.r_home.as_deref(),
-            cli.r_source.r_version.as_deref(),
+            explicit_r_source.as_ref(),
             cli.r_source.no_r_source_overrides,
         ),
         startup_diagnostics,
