@@ -7,7 +7,9 @@ use crate::app::config_load::{
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
 use crate::app::session_id::create_session_id;
-use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, setup_r};
+use crate::app::setup::{
+    RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute, setup_r,
+};
 use crate::cli::RArgsBuilder;
 use crate::config;
 use crate::history::HistoryRuntime;
@@ -89,10 +91,11 @@ enum HeadlessOverrideMetadata {
 
 impl HeadlessRSourceOverride {
     pub(crate) fn from_report(report: &RSourceResolutionReport) -> Self {
-        let applied = report.override_state == RSourceOverrideState::Applied;
+        let applied = report.selection_route == RSourceSelectionRoute::Override;
+        let override_state: RSourceOverrideState = report.override_state;
         Self {
-            state: report.override_state.as_str().to_owned(),
-            provider: applied.then(|| report.provider.clone()).flatten(),
+            state: override_state.as_str().to_owned(),
+            provider: applied.then(|| report.override_provider.clone()).flatten(),
             file: applied
                 .then(|| report.file.as_ref().map(|path| path.display().to_string()))
                 .flatten(),
@@ -512,7 +515,12 @@ mod tests {
         RSourceResolutionReport {
             status: crate::config::RSourceStatus::Path,
             r_home: Some("/tmp/r-home".into()),
-            provider: None,
+            selection_route: if state == RSourceOverrideState::Applied {
+                RSourceSelectionRoute::Override
+            } else {
+                RSourceSelectionRoute::Startup
+            },
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,
@@ -682,7 +690,7 @@ mod tests {
     #[test]
     fn applied_r_source_override_json_contains_resolution_metadata() {
         let mut report = report(RSourceOverrideState::Applied);
-        report.provider = Some("toml-key".to_string());
+        report.override_provider = Some("toml-key".to_string());
         report.file = Some("rproject.toml".into());
         report.key = Some("project.r_version".to_string());
         report.requested_version = Some("4.4".to_string());
@@ -701,7 +709,7 @@ mod tests {
     #[test]
     fn pixi_json_keeps_provider_specific_fields_inside_metadata() {
         let mut report = report(RSourceOverrideState::Applied);
-        report.provider = Some("pixi".to_owned());
+        report.override_provider = Some("pixi".to_owned());
         report.file = Some("pixi.toml".into());
         report.status = config::RSourceStatus::Pixi {
             info: config::PixiRSourceInfo {
@@ -736,6 +744,7 @@ mod tests {
         );
 
         report.override_state = RSourceOverrideState::ShadowedByCli;
+        report.selection_route = RSourceSelectionRoute::Explicit;
         let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
         assert_eq!(value["metadata"], serde_json::Value::Null);
     }

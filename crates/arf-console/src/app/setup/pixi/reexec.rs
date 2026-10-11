@@ -1,7 +1,9 @@
 //! Carry an applied target across the Unix loader exec, never across :restart.
 
-use super::{PixiRTarget, PixiResolution};
-use crate::app::setup::r_source::{RSourceDiagnostic, RSourceResolutionReport};
+use super::{PixiFailure, PixiRTarget, resolve_strict};
+use crate::app::setup::r_source::{
+    RSourceDiagnostic, RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute,
+};
 use crate::app::startup_env::decode_os_string;
 #[cfg(any(unix, test))]
 use crate::app::startup_env::encode_os_string;
@@ -128,13 +130,18 @@ pub(crate) fn restored_target() -> Option<Result<RSourceResolutionReport>> {
                 .to_str()
                 .context("Invalid Pixi loader target encoding")?,
         )?;
-        validate(&info, super::resolve(None))?;
-        Ok(RSourceResolutionReport::from_pixi(info, diagnostics))
+        validate(&info, resolve_strict(None))?;
+        Ok(RSourceResolutionReport::from_pixi(
+            info,
+            diagnostics,
+            RSourceSelectionRoute::Override,
+            RSourceOverrideState::Applied,
+        ))
     })())
 }
 
-fn validate(previous: &PixiRTarget, resolution: PixiResolution) -> Result<()> {
-    let PixiResolution::Applied(current) = resolution else {
+fn validate(previous: &PixiRTarget, resolution: Result<PixiRTarget, PixiFailure>) -> Result<()> {
+    let Ok(current) = resolution else {
         anyhow::bail!("The selected Pixi R target is no longer available after loader re-exec");
     };
     anyhow::ensure!(
@@ -173,8 +180,25 @@ mod tests {
         assert_eq!(roundtrip, info);
         assert_eq!(warnings[0].message, diagnostics[0].message);
         assert_eq!(warnings[0].path, diagnostics[0].path);
-        assert!(validate(&info, PixiResolution::NoMatch).is_err());
-        assert!(validate(&info, PixiResolution::Rejected(diagnostics[0].clone())).is_err());
+        assert!(
+            validate(
+                &info,
+                Err(PixiFailure::NotActive {
+                    workspace_manifest: None,
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            validate(
+                &info,
+                Err(PixiFailure::RUnavailable {
+                    reason: "R from the active Pixi environment is unavailable",
+                    path: None,
+                })
+            )
+            .is_err()
+        );
         for field in [
             "binary",
             "home",
@@ -192,12 +216,9 @@ mod tests {
                 "prefix" => changed.prefix.push("changed"),
                 _ => changed.environment.push_str("changed"),
             }
-            assert!(
-                validate(&info, PixiResolution::Applied(changed)).is_err(),
-                "{field}"
-            );
+            assert!(validate(&info, Ok(changed)).is_err(), "{field}");
         }
-        assert!(validate(&info, PixiResolution::Applied(info.clone())).is_ok());
+        assert!(validate(&info, Ok(info.clone())).is_ok());
         #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStringExt;

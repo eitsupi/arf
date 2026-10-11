@@ -34,6 +34,14 @@ pub(crate) enum RSourceOverrideState {
     ShadowedByCli,
 }
 
+/// The resolution route that selected the active R target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RSourceSelectionRoute {
+    Explicit,
+    Override,
+    Startup,
+}
+
 impl RSourceOverrideState {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -74,7 +82,8 @@ pub(super) fn warning(
 pub(crate) struct RSourceResolutionReport {
     pub(crate) status: RSourceStatus,
     pub(crate) r_home: Option<PathBuf>,
-    pub(crate) provider: Option<String>,
+    pub(crate) selection_route: RSourceSelectionRoute,
+    pub(crate) override_provider: Option<String>,
     pub(crate) file: Option<std::path::PathBuf>,
     pub(crate) key: Option<String>,
     pub(crate) requested_version: Option<String>,
@@ -87,14 +96,19 @@ impl RSourceResolutionReport {
     pub(super) fn from_pixi(
         info: crate::config::PixiRSourceInfo,
         diagnostics: Vec<RSourceDiagnostic>,
+        selection_route: RSourceSelectionRoute,
+        override_state: RSourceOverrideState,
     ) -> Self {
-        let mut report = Self::from_status(
+        let is_override = selection_route == RSourceSelectionRoute::Override;
+        debug_assert_eq!(is_override, override_state == RSourceOverrideState::Applied);
+        let mut report = Self::from_status_with_route(
             RSourceStatus::Pixi { info: info.clone() },
             Some(info.home),
-            RSourceOverrideState::Applied,
+            override_state,
+            selection_route,
         );
-        report.provider = Some("pixi".to_owned());
-        report.file = Some(info.manifest);
+        report.override_provider = is_override.then(|| "pixi".to_owned());
+        report.file = is_override.then_some(info.manifest);
         report.resolved_version = info.version;
         report.diagnostics = diagnostics;
         report
@@ -104,10 +118,38 @@ impl RSourceResolutionReport {
         r_home: Option<PathBuf>,
         override_state: RSourceOverrideState,
     ) -> Self {
+        Self::from_status_with_route(
+            status,
+            r_home,
+            override_state,
+            RSourceSelectionRoute::Startup,
+        )
+    }
+
+    pub(super) fn from_explicit_status(
+        status: RSourceStatus,
+        r_home: Option<PathBuf>,
+        override_state: RSourceOverrideState,
+    ) -> Self {
+        Self::from_status_with_route(
+            status,
+            r_home,
+            override_state,
+            RSourceSelectionRoute::Explicit,
+        )
+    }
+
+    fn from_status_with_route(
+        status: RSourceStatus,
+        r_home: Option<PathBuf>,
+        override_state: RSourceOverrideState,
+        selection_route: RSourceSelectionRoute,
+    ) -> Self {
         Self {
             status,
             r_home,
-            provider: None,
+            selection_route,
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,
@@ -126,7 +168,8 @@ impl RSourceResolutionReport {
         Self {
             status,
             r_home: Some(r_home),
-            provider: Some(info.provider),
+            selection_route: RSourceSelectionRoute::Override,
+            override_provider: Some(info.provider),
             file: info.file,
             key: info.key,
             requested_version: Some(info.requested_version),
@@ -152,7 +195,7 @@ impl RSourceResolutionReport {
 
     pub(crate) fn override_info(&self) -> Option<RSourceOverrideInfo> {
         Some(RSourceOverrideInfo {
-            provider: self.provider.clone()?,
+            provider: self.override_provider.clone()?,
             file: self.file.clone(),
             key: self.key.clone(),
             requested_version: self.requested_version.clone()?,
@@ -208,7 +251,7 @@ pub(crate) fn resolve_r_source(
         // run `bin/R RHOME` to get the actual R_HOME directory
         let r_home = resolve_r_home_from_path(path)?;
         log::info!("Using R from --r-home: {}", r_home.display());
-        return Ok(RSourceResolutionReport::from_status(
+        return Ok(RSourceResolutionReport::from_explicit_status(
             RSourceStatus::ExplicitPath {
                 path: r_home.clone(),
             },
@@ -224,7 +267,7 @@ pub(crate) fn resolve_r_source(
     // CLI --with-r-version overrides config (uses rig)
     if let Some(version) = cli_version {
         return setup_r_via_rig(version).map(|resolved| {
-            RSourceResolutionReport::from_status(
+            RSourceResolutionReport::from_explicit_status(
                 resolved.status,
                 resolved.r_home,
                 if no_r_source_overrides {
@@ -246,7 +289,12 @@ pub(crate) fn resolve_r_source(
                 target,
                 diagnostics,
             } => {
-                return Ok(RSourceResolutionReport::from_pixi(*target, diagnostics));
+                return Ok(RSourceResolutionReport::from_pixi(
+                    *target,
+                    diagnostics,
+                    RSourceSelectionRoute::Override,
+                    RSourceOverrideState::Applied,
+                ));
             }
             OverrideResolution::Applied {
                 status,
@@ -509,6 +557,40 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_pixi_report_retains_target_without_override_metadata() {
+        let info = crate::config::PixiRSourceInfo {
+            manifest: "/workspace/pixi.toml".into(),
+            environment: "analysis".to_owned(),
+            prefix: "/prefix".into(),
+            binary: "/prefix/bin/R".into(),
+            home: "/prefix/lib/R".into(),
+            library: "/prefix/lib/R/lib/libR.so".into(),
+            version: Some("4.5.1".to_owned()),
+        };
+        for override_state in [
+            RSourceOverrideState::ShadowedByCli,
+            RSourceOverrideState::Disabled,
+        ] {
+            let report = RSourceResolutionReport::from_pixi(
+                info.clone(),
+                Vec::new(),
+                RSourceSelectionRoute::Explicit,
+                override_state,
+            );
+
+            assert_eq!(report.selection_route, RSourceSelectionRoute::Explicit);
+            assert_eq!(report.override_state, override_state);
+            assert_eq!(report.r_home.as_deref(), Some(info.home.as_path()));
+            assert!(
+                matches!(report.status, RSourceStatus::Pixi { info: ref target } if target == &info)
+            );
+            assert!(report.override_provider.is_none());
+            assert!(report.file.is_none());
+            assert!(report.override_info().is_none());
+        }
+    }
 
     #[test]
     fn fallback_explicit_path_is_masked_only_for_human_output() {

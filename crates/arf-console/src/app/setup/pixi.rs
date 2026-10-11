@@ -3,20 +3,28 @@
 mod probe;
 pub(super) mod reexec;
 
-use super::r_source::{RSourceDiagnostic, warning};
 use crate::config::PixiRSourceInfo as PixiRTarget;
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-pub(super) enum PixiResolution {
-    NoMatch,
-    Rejected(RSourceDiagnostic),
-    Applied(PixiRTarget),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PixiFailure {
+    NotActive {
+        workspace_manifest: Option<PathBuf>,
+    },
+    EnvironmentInvalid {
+        reason: &'static str,
+        path: Option<PathBuf>,
+    },
+    RUnavailable {
+        reason: &'static str,
+        path: Option<PathBuf>,
+    },
 }
 
-pub(super) fn resolve(cwd: Option<&Path>) -> PixiResolution {
-    resolve_with(cwd, |key| std::env::var_os(key), probe::r_home)
+pub(super) fn resolve_strict(cwd: Option<&Path>) -> Result<PixiRTarget, PixiFailure> {
+    resolve_strict_with(cwd, |key| std::env::var_os(key), probe::r_home)
 }
 
 #[derive(Deserialize)]
@@ -25,31 +33,11 @@ struct Marker {
     environment_name: String,
 }
 
-fn invalid(reason: &'static str) -> PixiResolution {
-    PixiResolution::Rejected(warning(
-        "r_source_override.pixi_environment_invalid",
-        format!(
-            "Warning: The active Pixi environment is invalid: {reason}; trying the next R source override."
-        ),
-        None,
-    ))
-}
-
-fn unavailable(reason: &'static str) -> PixiResolution {
-    PixiResolution::Rejected(warning(
-        "r_source_override.pixi_r_unavailable",
-        format!(
-            "Warning: R from the active Pixi environment is unavailable: {reason}; trying the next R source override."
-        ),
-        None,
-    ))
-}
-
-fn resolve_with(
+fn resolve_strict_with(
     cwd: Option<&Path>,
     env: impl Fn(&str) -> Option<OsString>,
     probe: impl Fn(&Path) -> Result<PathBuf, probe::ProbeError>,
-) -> PixiResolution {
+) -> Result<PixiRTarget, PixiFailure> {
     let in_shell = env("PIXI_IN_SHELL");
     let current_manifest = env("PIXI_WORKSPACE_MANIFEST");
     let legacy_manifest = env("PIXI_PROJECT_MANIFEST");
@@ -63,14 +51,8 @@ fn resolve_with(
         let cwd = cwd
             .map(Path::to_path_buf)
             .or_else(|| std::env::current_dir().ok());
-        return match cwd.as_deref().and_then(workspace_manifest) {
-            Some(path) => PixiResolution::Rejected(warning(
-                "r_source_override.pixi_not_active",
-                "Warning: A Pixi workspace was found, but its environment is not active. Start arf with `pixi run arf`; trying the next R source override.",
-                Some(path),
-            )),
-            None => PixiResolution::NoMatch,
-        };
+        let workspace_manifest = cwd.as_deref().and_then(workspace_manifest);
+        return Err(PixiFailure::NotActive { workspace_manifest });
     }
 
     // Prefer the current name even when its value is empty or invalid.
@@ -79,70 +61,131 @@ fn resolve_with(
     let (Some(_), Some(manifest), Some(environment), Some(prefix)) =
         (in_shell, manifest, environment, prefix)
     else {
-        return invalid("activation variables are incomplete");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "activation variables are incomplete",
+            path: None,
+        });
     };
     if manifest.is_empty() || environment.is_empty() || prefix.is_empty() {
-        return invalid("an activation identity value is empty");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "an activation identity value is empty",
+            path: None,
+        });
     }
     let Some(environment) = environment.to_str() else {
-        return invalid("the environment name is not valid Unicode");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the environment name is not valid Unicode",
+            path: None,
+        });
     };
-    let Ok(prefix) = Path::new(&prefix).canonicalize() else {
-        return invalid("the prefix cannot be resolved");
+    let prefix_path = PathBuf::from(prefix);
+    let Ok(prefix) = prefix_path.canonicalize() else {
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the prefix cannot be resolved",
+            path: Some(prefix_path),
+        });
     };
     if !prefix.is_dir() {
-        return invalid("the prefix is not a directory");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the prefix is not a directory",
+            path: Some(prefix),
+        });
     }
-    let Ok(manifest) = Path::new(&manifest).canonicalize() else {
-        return invalid("the manifest cannot be resolved");
+    let manifest_path = PathBuf::from(manifest);
+    let Ok(manifest) = manifest_path.canonicalize() else {
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the manifest cannot be resolved",
+            path: Some(manifest_path),
+        });
     };
     if !manifest.is_file() {
-        return invalid("the manifest is not a file");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the manifest is not a file",
+            path: Some(manifest),
+        });
     }
     let Ok(marker_path) = prefix.join("conda-meta/pixi").canonicalize() else {
-        return invalid("the environment marker is missing");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the environment marker is missing",
+            path: Some(prefix.join("conda-meta/pixi")),
+        });
     };
     if !marker_path.is_file() || !marker_path.starts_with(&prefix) {
-        return invalid("the environment marker is outside the prefix or not a file");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the environment marker is outside the prefix or not a file",
+            path: Some(marker_path),
+        });
     }
     let marker = std::fs::read(&marker_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Marker>(&bytes).ok());
     let Some(marker) = marker else {
-        return invalid("the environment marker cannot be read");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the environment marker cannot be read",
+            path: Some(marker_path),
+        });
     };
     if marker.environment_name != environment
         || marker.manifest_path.canonicalize().ok().as_ref() != Some(&manifest)
     {
-        return invalid("the environment marker does not match activation");
+        return Err(PixiFailure::EnvironmentInvalid {
+            reason: "the environment marker does not match activation",
+            path: Some(marker_path),
+        });
     }
 
     let Some(binary) = env("PATH").as_deref().and_then(first_r_on_path) else {
-        return unavailable("PATH contains no executable R");
+        return Err(PixiFailure::RUnavailable {
+            reason: "PATH contains no executable R",
+            path: None,
+        });
     };
     let Ok(binary) = binary.canonicalize() else {
-        return unavailable("the PATH executable cannot be resolved");
+        return Err(PixiFailure::RUnavailable {
+            reason: "the PATH executable cannot be resolved",
+            path: Some(binary),
+        });
     };
     if !binary.starts_with(&prefix) {
-        return unavailable("the first R on PATH is outside the Pixi prefix");
+        return Err(PixiFailure::RUnavailable {
+            reason: "the first R on PATH is outside the Pixi prefix",
+            path: Some(binary),
+        });
     }
     let home = match probe(&binary) {
         Ok(home) => home,
-        Err(error) => return unavailable(error.description()),
+        Err(error) => {
+            return Err(PixiFailure::RUnavailable {
+                reason: error.description(),
+                path: Some(binary),
+            });
+        }
     };
     let Ok(home) = home.canonicalize() else {
-        return unavailable("R_HOME cannot be resolved");
+        return Err(PixiFailure::RUnavailable {
+            reason: "R_HOME cannot be resolved",
+            path: Some(home),
+        });
     };
     if !home.is_dir() || !home.starts_with(&prefix) {
-        return unavailable("R_HOME is outside the Pixi prefix or not a directory");
+        return Err(PixiFailure::RUnavailable {
+            reason: "R_HOME is outside the Pixi prefix or not a directory",
+            path: Some(home),
+        });
     }
     let Ok(library) = arf_libr::r_library_path(&home).canonicalize() else {
-        return unavailable("the R shared library is missing");
+        return Err(PixiFailure::RUnavailable {
+            reason: "the R shared library is missing",
+            path: Some(arf_libr::r_library_path(&home)),
+        });
     };
     if !library.is_file() || !library.starts_with(&prefix) {
-        return unavailable("the R shared library is outside the Pixi prefix or not a file");
+        return Err(PixiFailure::RUnavailable {
+            reason: "the R shared library is outside the Pixi prefix or not a file",
+            path: Some(library),
+        });
     }
-    PixiResolution::Applied(PixiRTarget {
+    Ok(PixiRTarget {
         version: r_base_version(&prefix),
         manifest,
         environment: environment.to_owned(),

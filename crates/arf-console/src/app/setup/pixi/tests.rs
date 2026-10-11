@@ -77,12 +77,12 @@ name = 'active'
         }
     }
 
-    fn resolve(&self) -> PixiResolution {
+    fn resolve(&self) -> Result<PixiRTarget, PixiFailure> {
         self.resolve_in(Some(self.root.path()))
     }
 
-    fn resolve_in(&self, cwd: Option<&Path>) -> PixiResolution {
-        resolve_with(
+    fn resolve_in(&self, cwd: Option<&Path>) -> Result<PixiRTarget, PixiFailure> {
+        resolve_strict_with(
             cwd,
             |key| self.env.get(key).cloned(),
             |binary| {
@@ -93,11 +93,21 @@ name = 'active'
     }
 }
 
-fn rejected(resolution: PixiResolution, code: &'static str) {
-    let PixiResolution::Rejected(diagnostic) = resolution else {
-        panic!("expected rejection: {code}");
+#[derive(Debug, Clone, Copy)]
+enum FailureKind {
+    EnvironmentInvalid,
+    RUnavailable,
+}
+
+fn rejected(resolution: Result<PixiRTarget, PixiFailure>, expected: FailureKind) {
+    let Err(error) = resolution else {
+        panic!("expected rejected Pixi activation");
     };
-    assert_eq!(diagnostic.code, code);
+    match (expected, error) {
+        (FailureKind::EnvironmentInvalid, PixiFailure::EnvironmentInvalid { .. })
+        | (FailureKind::RUnavailable, PixiFailure::RUnavailable { .. }) => {}
+        (expected, error) => panic!("unexpected Pixi failure: {expected:?} {error:?}"),
+    }
 }
 
 #[test]
@@ -111,9 +121,7 @@ fn active_named_detached_environment_preserves_verified_target_and_marker() {
 name='other'",
     )
     .unwrap();
-    let PixiResolution::Applied(target) = fixture.resolve() else {
-        panic!("expected an applied Pixi target");
-    };
+    let target = fixture.resolve().expect("expected an applied Pixi target");
     assert_eq!(target.environment, "analysis");
     assert_eq!(target.binary, fixture.binary.canonicalize().unwrap());
     assert_eq!(target.home, fixture.home.canonicalize().unwrap());
@@ -138,31 +146,22 @@ fn missing_empty_and_legacy_activation_values_are_distinct() {
     ] {
         let mut fixture = Fixture::new();
         fixture.env.remove(key);
-        rejected(
-            fixture.resolve(),
-            "r_source_override.pixi_environment_invalid",
-        );
+        rejected(fixture.resolve(), FailureKind::EnvironmentInvalid);
         if key != "PIXI_IN_SHELL" {
             let mut fixture = Fixture::new();
             fixture.env.insert(key.into(), OsString::new());
-            rejected(
-                fixture.resolve(),
-                "r_source_override.pixi_environment_invalid",
-            );
+            rejected(fixture.resolve(), FailureKind::EnvironmentInvalid);
         }
     }
     let mut fixture = Fixture::new();
     let manifest = fixture.env.remove("PIXI_WORKSPACE_MANIFEST").unwrap();
     fixture.env.insert("PIXI_PROJECT_MANIFEST".into(), manifest);
-    assert!(matches!(fixture.resolve(), PixiResolution::Applied(_)));
+    assert!(fixture.resolve().is_ok());
     for invalid in ["", "nonexistent.toml"] {
         fixture
             .env
             .insert("PIXI_WORKSPACE_MANIFEST".into(), invalid.into());
-        rejected(
-            fixture.resolve(),
-            "r_source_override.pixi_environment_invalid",
-        );
+        rejected(fixture.resolve(), FailureKind::EnvironmentInvalid);
     }
 }
 
@@ -171,7 +170,7 @@ fn generic_conda_and_absent_signals_are_silent() {
     let fixture = Fixture::new();
     for conda in [None, Some(OsString::from("/conda"))] {
         assert!(matches!(
-            resolve_with(
+            resolve_strict_with(
                 Some(fixture.root.path()),
                 |key| {
                     if key == "CONDA_PREFIX" {
@@ -182,7 +181,9 @@ fn generic_conda_and_absent_signals_are_silent() {
                 },
                 |_| panic!("must not probe inactive environment")
             ),
-            PixiResolution::NoMatch
+            Err(PixiFailure::NotActive {
+                workspace_manifest: None,
+            })
         ));
     }
 }
@@ -216,11 +217,22 @@ name='python'",
             matched.then_some(path.clone()),
             "{filename}: {text}"
         );
-        let result = resolve_with(Some(&child), |_| None, |_| panic!("must not probe"));
+        let result = resolve_strict_with(Some(&child), |_| None, |_| panic!("must not probe"));
         if matched {
-            rejected(result, "r_source_override.pixi_not_active");
+            let Err(PixiFailure::NotActive {
+                workspace_manifest: Some(path),
+            }) = result
+            else {
+                panic!("expected inactive Pixi workspace");
+            };
+            assert_eq!(path, child.join(filename));
         } else {
-            assert!(matches!(result, PixiResolution::NoMatch));
+            assert!(matches!(
+                result,
+                Err(PixiFailure::NotActive {
+                    workspace_manifest: None
+                })
+            ));
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -238,17 +250,11 @@ fn invalid_markers_are_never_repaired_or_deleted() {
         br#"{"environment_name":"other","manifest_path":"/missing"}"#,
     ] {
         std::fs::write(&fixture.marker, bytes).unwrap();
-        rejected(
-            fixture.resolve(),
-            "r_source_override.pixi_environment_invalid",
-        );
+        rejected(fixture.resolve(), FailureKind::EnvironmentInvalid);
         assert_eq!(std::fs::read(&fixture.marker).unwrap(), bytes);
     }
     std::fs::remove_file(&fixture.marker).unwrap();
-    rejected(
-        fixture.resolve(),
-        "r_source_override.pixi_environment_invalid",
-    );
+    rejected(fixture.resolve(), FailureKind::EnvironmentInvalid);
     assert!(!fixture.marker.exists());
 }
 
@@ -267,15 +273,15 @@ fn first_path_r_outside_prefix_is_rejected_without_probing_later_r() {
             .unwrap(),
     );
     rejected(
-        resolve_with(
+        resolve_strict_with(
             Some(fixture.root.path()),
             |key| fixture.env.get(key).cloned(),
             |_| panic!("must not probe outside R"),
         ),
-        "r_source_override.pixi_r_unavailable",
+        FailureKind::RUnavailable,
     );
     fixture.env.remove("PATH");
-    rejected(fixture.resolve(), "r_source_override.pixi_r_unavailable");
+    rejected(fixture.resolve(), FailureKind::RUnavailable);
 }
 
 #[test]
@@ -289,16 +295,16 @@ fn missing_library_outside_home_and_probe_failure_reject() {
         Err(probe::ProbeError::OutputLimit),
     ] {
         rejected(
-            resolve_with(
+            resolve_strict_with(
                 Some(fixture.root.path()),
                 |key| fixture.env.get(key).cloned(),
                 |_| result.clone(),
             ),
-            "r_source_override.pixi_r_unavailable",
+            FailureKind::RUnavailable,
         );
     }
     std::fs::remove_file(arf_libr::r_library_path(&fixture.home)).unwrap();
-    rejected(fixture.resolve(), "r_source_override.pixi_r_unavailable");
+    rejected(fixture.resolve(), FailureKind::RUnavailable);
 }
 
 #[test]
@@ -315,9 +321,7 @@ fn version_metadata_is_optional_and_best_effort() {
         (r#"{"name":"r-base","version":"4.5.3"}"#, Some("4.5.3")),
     ] {
         std::fs::write(&metadata, text).unwrap();
-        let PixiResolution::Applied(target) = fixture.resolve() else {
-            panic!("expected success")
-        };
+        let target = fixture.resolve().expect("expected success");
         assert_eq!(target.version.as_deref(), expected);
     }
 }
@@ -337,9 +341,9 @@ fn symlinks_cannot_escape_prefix_validation() {
         std::fs::rename(&path, &outside).unwrap();
         symlink(&outside, &path).unwrap();
         let code = if escaped == "marker" {
-            "r_source_override.pixi_environment_invalid"
+            FailureKind::EnvironmentInvalid
         } else {
-            "r_source_override.pixi_r_unavailable"
+            FailureKind::RUnavailable
         };
         rejected(fixture.resolve(), code);
     }
