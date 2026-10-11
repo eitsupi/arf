@@ -452,9 +452,16 @@ fn run() -> Result<()> {
                 (true, capture_runtime_r_home(pre_init_dir.as_deref()))
             }
             Err(e) => {
-                if matches!(r_source_status, config::RSourceStatus::Pixi { .. }) {
-                    return Err(anyhow::Error::new(e)
-                        .context("Failed to initialize R from the selected Pixi environment"));
+                match r_source_status {
+                    config::RSourceStatus::Pixi { .. } => {
+                        return Err(anyhow::Error::new(e)
+                            .context("Failed to initialize R from the selected Pixi environment"));
+                    }
+                    config::RSourceStatus::RigProject { .. } => {
+                        return Err(anyhow::Error::new(e)
+                            .context("Failed to initialize R from the selected rig project"));
+                    }
+                    _ => {}
                 }
                 eprintln!("Warning: Failed to initialize R: {}", e);
                 eprintln!("R evaluation will not be available.");

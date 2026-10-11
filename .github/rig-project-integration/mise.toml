@@ -6,5 +6,7 @@ version = "0.11.0"
 bin_path = "bin"
 
 [tools."github:r-lib/rig".platforms]
+linux-x64 = { asset_pattern = "rig-linux-x86_64-*.tar.gz" }
 macos-arm64 = { asset_pattern = "rig-macos-arm64-*.tar.gz" }
 macos-x64 = { asset_pattern = "rig-macos-x86_64-*.tar.gz" }
+windows-x64 = { asset_pattern = "rig-windows-x86_64-*.zip" }

@@ -125,7 +125,7 @@ r_source_overrides=[{provider='pixi'}]",
             .env_remove("ARF_CONFIG")
             .env_remove("PIXI_PROJECT_MANIFEST")
             .env_remove("RUST_LOG")
-            .env_remove("_ARF_INTERNAL_PIXI_LOADER_TARGET")
+            .env_remove("_ARF_INTERNAL_R_SOURCE_LOADER_TARGET")
             .env(
                 "PATH",
                 std::env::join_paths(

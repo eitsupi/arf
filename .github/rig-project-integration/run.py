@@ -1,4 +1,4 @@
-"""Compare rig's project wrapper with arf's embedded R startup on macOS."""
+"""Compare rig's project wrapper with arf's embedded R startup across platforms."""
 
 import ctypes
 import json
@@ -389,6 +389,50 @@ def switch_native_baselines(switch_env):
     return homes, baselines
 
 
+def explicit_rig_project_resolution(source, home, installation_name):
+    child_env = r_process_env(ENV)
+    args = [ARF, "r", "resolve", "--no-r-source-overrides", "--config", CONFIG]
+    if source == "cli":
+        args.extend(["--r-provider", "rig-project"])
+    elif source == "environment":
+        child_env["ARF_R_PROVIDER"] = "rig-project"
+    else:
+        raise ValueError(f"unknown rig-project selection source: {source}")
+    result, record = run(f"resolve-rig-project-{source}", args, env=child_env)
+    require(result, f"rig-project resolve from {source}")
+    descriptor = json.loads(result.stdout)
+    selected_by = descriptor.get("selected_by", {})
+    expected_source = {
+        "kind": "command_line_argument" if source == "cli" else "environment_variable",
+        "name": "--r-provider" if source == "cli" else "ARF_R_PROVIDER",
+    }
+    metadata = descriptor.get("metadata", {})
+    target = descriptor.get("target", {})
+    if descriptor.get("provider") != "rig-project":
+        raise RuntimeError(f"{source} request selected an unexpected provider: {descriptor}")
+    if (
+        selected_by.get("kind") != "provider_request"
+        or selected_by.get("requested_provider") != "rig-project"
+        or selected_by.get("source", {}).get("kind") != expected_source["kind"]
+        or selected_by.get("source", {}).get("name") != expected_source["name"]
+    ):
+        raise RuntimeError(f"{source} provider provenance is incorrect: {selected_by}")
+    if metadata.get("kind") != "rig_project" or metadata.get("r_installation") != installation_name:
+        raise RuntimeError(f"{source} provider metadata is incorrect: {metadata}")
+    for label, actual, expected in (
+        ("metadata root", metadata.get("root"), PROJECT),
+        ("metadata manifest", metadata.get("manifest"), PROJECT / "rproj.toml"),
+        ("metadata wrapper", metadata.get("r_binary"), wrapper_path()),
+        ("target R_HOME", target.get("r_home"), home),
+        ("target wrapper", target.get("r_binary"), wrapper_path()),
+    ):
+        if not isinstance(actual, str) or not Path(actual).samefile(expected):
+            raise RuntimeError(f"{source} {label} is {actual!r}, expected {expected}")
+    if target.get("resolved_version") is not None:
+        raise RuntimeError(f"{source} reported an exact R version for an installation name: {target}")
+    return record, descriptor
+
+
 def compare_switch_proofs(homes, baselines):
     proof_dir = EVIDENCE / "switch-proofs"
     stages = {
@@ -547,11 +591,19 @@ jsonlite = "*"
     if not ARF.is_file():
         raise RuntimeError(f"arf binary does not exist: {ARF}")
 
+    resolution_records = {}
+    for source in ("cli", "environment"):
+        record, _ = explicit_rig_project_resolution(
+            source, home, status_data["sync"]["r_version"]
+        )
+        resolution_records[source] = record
+
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
         "version_context": "released rig 0.11.0 user-mode fixture",
-        "arf_startup": "explicit R_HOME startup proof plus a rig-version TUI switch case",
+        "arf_startup": "explicit rig-project provider startup and compiled package loading; macOS also runs the rig-version TUI switch case",
         "comparison": "startup compares the native rig wrapper with arf; switch baselines use arf-resolved native R binaries; raw loader paths are diagnostic except for selected-lib precedence",
+        "rig_project_resolution": resolution_records,
         "setup": {"init": init_record, "lock": lock_record, "sync": sync_record,
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
@@ -577,7 +629,7 @@ jsonlite = "*"
         )
         arf, arf_record = run(
             f"arf-{name}",
-            [ARF, "--config", CONFIG, "--r-home", home,
+            [ARF, "--r-provider", "rig-project", "--config", CONFIG,
              "--no-r-auto-discovery", "--no-r-source-overrides", *flags,
              "-e", EXPRESSION],
             env=r_env,
@@ -664,46 +716,50 @@ jsonlite = "*"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
 
-    unrelated_loader_dir = RESULTS / "dyld-unrelated"
-    unrelated_loader_dir.mkdir(parents=True, exist_ok=True)
-    switch_env = ENV.copy()
-    switch_env["DYLD_LIBRARY_PATH"] = os.pathsep.join((str(home / "lib"), str(unrelated_loader_dir)))
-    proof_script = EVIDENCE / "switch-proof.R"
-    proof_script.write_text(EXPRESSION + "\n", encoding="utf-8")
-    switch_proof_dir = EVIDENCE / "switch-proofs"
-    switch_proof_dir.mkdir(parents=True, exist_ok=True)
-    switch_homes, switch_baselines = switch_native_baselines(switch_env)
-    switch_state_path = RESULTS / "switch-state.json"
-    switch_state = {
-        "project": str(PROJECT.resolve()),
-        "user_home": str(USER_HOME.resolve()),
-        "r_homes": switch_homes,
-        "proof_script": str(proof_script.resolve()),
-        "proof_dir": str(switch_proof_dir.resolve()),
-        "base_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
-    }
-    switch_state_path.write_text(json.dumps(switch_state, indent=2), encoding="utf-8")
-    switch_env["ARF_RIG_SWITCH_STATE"] = str(switch_state_path.resolve())
-    switch_test, switch_test_record = run(
-        "rig-project-version-switch-test",
-        ["cargo", "test", "--locked", "--test", "rig_project_switch_tests", "--", "--ignored", "--nocapture", "--test-threads=1"],
-        cwd=ROOT,
-        env=switch_env,
-        timeout=600,
-    )
-    outcomes["switch"] = {
-        "versions": ["4.6.1", "4.6.0", "4.5.3"],
-        "startup_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
-        "native_baselines": switch_baselines,
-        "tui_test": switch_test_record,
-        "proofs": {},
-    }
-    if switch_test.returncode:
-        errors.append(f"rig project version switch TUI test failed: {switch_test_record['stderr'][-4000:]}")
+    # The multi-version TUI harness also checks selected-library DYLD ordering.
+    if sys.platform == "darwin":
+        unrelated_loader_dir = RESULTS / "dyld-unrelated"
+        unrelated_loader_dir.mkdir(parents=True, exist_ok=True)
+        switch_env = ENV.copy()
+        switch_env["DYLD_LIBRARY_PATH"] = os.pathsep.join((str(home / "lib"), str(unrelated_loader_dir)))
+        proof_script = EVIDENCE / "switch-proof.R"
+        proof_script.write_text(EXPRESSION + "\n", encoding="utf-8")
+        switch_proof_dir = EVIDENCE / "switch-proofs"
+        switch_proof_dir.mkdir(parents=True, exist_ok=True)
+        switch_homes, switch_baselines = switch_native_baselines(switch_env)
+        switch_state_path = RESULTS / "switch-state.json"
+        switch_state = {
+            "project": str(PROJECT.resolve()),
+            "user_home": str(USER_HOME.resolve()),
+            "r_homes": switch_homes,
+            "proof_script": str(proof_script.resolve()),
+            "proof_dir": str(switch_proof_dir.resolve()),
+            "base_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
+        }
+        switch_state_path.write_text(json.dumps(switch_state, indent=2), encoding="utf-8")
+        switch_env["ARF_RIG_SWITCH_STATE"] = str(switch_state_path.resolve())
+        switch_test, switch_test_record = run(
+            "rig-project-version-switch-test",
+            ["cargo", "test", "--locked", "--test", "rig_project_switch_tests", "--", "--ignored", "--nocapture", "--test-threads=1"],
+            cwd=ROOT,
+            env=switch_env,
+            timeout=600,
+        )
+        outcomes["switch"] = {
+            "versions": ["4.6.1", "4.6.0", "4.5.3"],
+            "startup_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
+            "native_baselines": switch_baselines,
+            "tui_test": switch_test_record,
+            "proofs": {},
+        }
+        if switch_test.returncode:
+            errors.append(f"rig project version switch TUI test failed: {switch_test_record['stderr'][-4000:]}")
+        else:
+            switch_proofs, switch_errors = compare_switch_proofs(switch_homes, switch_baselines)
+            outcomes["switch"]["proofs"] = switch_proofs
+            errors.extend(switch_errors)
     else:
-        switch_proofs, switch_errors = compare_switch_proofs(switch_homes, switch_baselines)
-        outcomes["switch"]["proofs"] = switch_proofs
-        errors.extend(switch_errors)
+        outcomes["switch"] = {"skipped": "the rig project version-switch test currently validates macOS DYLD behavior"}
 
     outcomes["result"] = "failed" if errors else "passed"
     outcomes["platform"] = platform.platform()

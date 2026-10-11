@@ -291,7 +291,7 @@ _arf() {
                     return 0
                     ;;
                 --r-provider)
-                    COMPREPLY=($(compgen -W "pixi" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "pixi rig-project" -- "${cur}"))
                     return 0
                     ;;
                 --max-connections)
@@ -577,7 +577,7 @@ _arf() {
                     return 0
                     ;;
                 --r-provider)
-                    COMPREPLY=($(compgen -W "pixi" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "pixi rig-project" -- "${cur}"))
                     return 0
                     ;;
                 --ipc-bind)
@@ -1474,7 +1474,7 @@ _arf() {
                     return 0
                     ;;
                 --r-provider)
-                    COMPREPLY=($(compgen -W "pixi" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "pixi rig-project" -- "${cur}"))
                     return 0
                     ;;
                 *)

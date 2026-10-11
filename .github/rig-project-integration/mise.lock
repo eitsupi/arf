@@ -4,6 +4,11 @@
 version = "0.11.0"
 backend = "github:r-lib/rig"
 
+[tools."github:r-lib/rig"."platforms.linux-x64"]
+checksum = "sha256:27e063df84b6dadb325fa96d13951676b44b69103bb4237b061518fbf564fcf1"
+url = "https://github.com/r-lib/rig/releases/download/v0.11.0/rig-linux-x86_64-0.11.0.tar.gz"
+url_api = "https://api.github.com/repos/r-lib/rig/releases/assets/619799802"
+
 [tools."github:r-lib/rig"."platforms.macos-arm64"]
 checksum = "sha256:abf557e9ed51a4f64b6584fee3451fcad2b4d2d091a1ae46dc19cbe10ac6d8b0"
 url = "https://github.com/r-lib/rig/releases/download/v0.11.0/rig-macos-arm64-0.11.0.tar.gz"
@@ -13,3 +18,8 @@ url_api = "https://api.github.com/repos/r-lib/rig/releases/assets/619799804"
 checksum = "sha256:e6683110d04eb88ecf57a0c8862a6806b9ec367e23fff57b16e55e383ad57822"
 url = "https://github.com/r-lib/rig/releases/download/v0.11.0/rig-macos-x86_64-0.11.0.tar.gz"
 url_api = "https://api.github.com/repos/r-lib/rig/releases/assets/619799810"
+
+[tools."github:r-lib/rig"."platforms.windows-x64"]
+checksum = "sha256:81218ebc88d24f100686106542ac487fa9b2755f905539b450e0eb87a5364f9d"
+url = "https://github.com/r-lib/rig/releases/download/v0.11.0/rig-windows-x86_64-0.11.0.zip"
+url_api = "https://api.github.com/repos/r-lib/rig/releases/assets/619799867"
