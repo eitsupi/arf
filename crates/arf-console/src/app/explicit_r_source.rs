@@ -3,12 +3,31 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+/// An R provider that can be requested explicitly or configured as an override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RProvider {
-    #[value(name = "pixi")]
     Pixi,
-    #[value(name = "rig-project")]
     RigProject,
+}
+
+impl RProvider {
+    /// The provider name used by the CLI, environment, configuration, and JSON output.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pixi => "pixi",
+            Self::RigProject => "rig-project",
+        }
+    }
+}
+
+impl clap::ValueEnum for RProvider {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Pixi, Self::RigProject]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,11 +143,8 @@ pub(crate) fn explicit_r_source_request(
         let provider = provider
             .to_str()
             .ok_or(ExplicitRSourceError::InvalidProviderEnvironment)?;
-        let provider = match provider {
-            "pixi" => RProvider::Pixi,
-            "rig-project" => RProvider::RigProject,
-            _ => return Err(ExplicitRSourceError::InvalidProviderEnvironment),
-        };
+        let provider = <RProvider as clap::ValueEnum>::from_str(provider, false)
+            .map_err(|_| ExplicitRSourceError::InvalidProviderEnvironment)?;
         return Ok(Some(ExplicitRSourceRequest {
             source: ExplicitRSource::Provider(provider),
             origin: RSourceOrigin::Environment,
