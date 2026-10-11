@@ -30,9 +30,17 @@ pub(crate) fn run_script(cli: &Cli) -> Result<()> {
     let override_notice = super::overrides::script_override_notice(&resolution);
 
     // Ensure LD_LIBRARY_PATH includes R library directory
-    if let Err(e) = arf_libr::ensure_ld_library_path() {
+    #[cfg(unix)]
+    let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
+        super::forward_loader_target(&resolution)
+    });
+    #[cfg(not(unix))]
+    let loader_result = arf_libr::ensure_ld_library_path();
+    if let Err(e) = loader_result {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
+    #[cfg(unix)]
+    super::clear_loader_target();
 
     report_startup_diagnostics(config_diagnostics);
     resolution.emit_diagnostics();

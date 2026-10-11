@@ -1,0 +1,84 @@
+name: Check Pixi integration
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/check-pixi-integration.yml
+      - .github/pixi-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*pixi*"
+      - "**/*pixi*/**"
+      - "!**/*.md"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/check-pixi-integration.yml
+      - .github/pixi-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*pixi*"
+      - "**/*pixi*/**"
+      - "!**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
+        with:
+          pixi-version: v0.81.0
+          manifest-path: .github/pixi-integration/pixi.toml
+          cache: false
+          locked: true
+      - name: Build production arf and integration tests
+        run: cargo build --locked --bin arf --tests
+      - name: Verify timeout after Pixi probe rejection
+        run: >-
+          cargo test --locked -p arf-console --test pixi_source_tests
+          auto_path_discovery_times_out_after_pixi_probe_rejection -- --ignored --exact
+      - name: Verify default activated environment
+        env:
+          ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-default
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default verify
+      - name: Configure detached named environment
+        env:
+          ARF_TEST_DETACHED_PREFIX: ${{ runner.temp }}/arf-pixi-detached
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default python .github/pixi-integration/configure_detached.py
+      - name: Verify detached named activated environment
+        env:
+          ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-analysis
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment analysis verify
+      - name: Upload diagnostics and terminal recordings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pixi-r-source-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/arf-pixi-default
+            ${{ runner.temp }}/arf-pixi-analysis
+          if-no-files-found: warn

@@ -121,6 +121,8 @@ impl RSourceOverrideInfo {
 /// This is used to display session info and determine if features like `:switch` are available.
 #[derive(Debug, Clone, Default)]
 pub enum RSourceStatus {
+    /// R belongs to an externally activated Pixi environment.
+    Pixi { info: PixiRSourceInfo },
     /// R was resolved via rig.
     Rig {
         /// The R version being used.
@@ -158,6 +160,10 @@ impl RSourceStatus {
             },
             RSourceStatus::Path => "PATH".to_string(),
             RSourceStatus::ExplicitPath { path } => format!("path ({})", path.display()),
+            RSourceStatus::Pixi { info } => match &info.version {
+                Some(version) => format!("pixi (environment {}; R {})", info.environment, version),
+                None => format!("pixi (environment {})", info.environment),
+            },
         }
     }
 
@@ -165,7 +171,19 @@ impl RSourceStatus {
     pub fn override_info(&self) -> Option<&RSourceOverrideInfo> {
         match self {
             Self::Rig { override_info, .. } => override_info.as_ref(),
-            Self::Path | Self::ExplicitPath { .. } => None,
+            Self::Path | Self::ExplicitPath { .. } | Self::Pixi { .. } => None,
         }
     }
+}
+
+/// Identity and verified R target of an externally activated Pixi environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PixiRSourceInfo {
+    pub manifest: PathBuf,
+    pub environment: String,
+    pub prefix: PathBuf,
+    pub binary: PathBuf,
+    pub home: PathBuf,
+    pub library: PathBuf,
+    pub version: Option<String>,
 }

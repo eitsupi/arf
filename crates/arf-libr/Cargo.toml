@@ -11,6 +11,7 @@ libloading.workspace = true
 once_cell.workspace = true
 log.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["process"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -19,6 +20,7 @@ rpassword.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 encoding_rs.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 tempfile.workspace = true

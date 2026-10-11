@@ -290,7 +290,25 @@ unsafe fn initialize_r_windows(
     // Get R_HOME and user home
     // These must be set before R_SetParams because it accesses them
     let r_home = get_r_home()?;
-    let r_home_cstr = CString::new(r_home.to_string_lossy().as_ref())
+    // R converts backslashes in R_HOME to forward slashes, so a canonical
+    // Windows verbatim prefix would become the unusable //?/ form. Preserve
+    // canonical discovery/loader identity and normalize only this C API input.
+    let native_home = windows_r_home_path(&r_home);
+    if native_home != r_home {
+        let validate = |path: &std::path::Path| {
+            path.canonicalize().map_err(|_| {
+                crate::error::RError::LibraryNotFound(
+                    "Could not validate R_HOME for Windows initialization".into(),
+                )
+            })
+        };
+        if validate(&native_home)? != validate(&r_home)? {
+            return Err(crate::error::RError::LibraryNotFound(
+                "Windows initialization path does not match selected R_HOME".into(),
+            ));
+        }
+    }
+    let r_home_cstr = CString::new(native_home.to_string_lossy().as_ref())
         .map_err(|_| crate::error::RError::LibraryNotFound("Invalid R_HOME path".to_string()))?;
 
     // Use R's getRUser() to determine the user home directory.
@@ -434,6 +452,41 @@ unsafe fn initialize_r_windows(
     }
 
     Ok(())
+}
+
+#[cfg(windows)]
+fn windows_r_home_path(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf, Prefix};
+
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path.to_path_buf();
+    };
+    let mut native = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => PathBuf::from(r"\\").join(server).join(share),
+        _ => return path.to_path_buf(),
+    };
+    native.push(components.as_path());
+    native
+}
+
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::windows_r_home_path;
+    use std::path::Path;
+
+    #[test]
+    fn r_home_uses_native_drive_and_unc_prefixes() {
+        for (input, expected) in [
+            (r"\\?\D:\pixi\lib\R", r"D:\pixi\lib\R"),
+            (r"\\?\UNC\server\share\lib\R", r"\\server\share\lib\R"),
+            (r"D:\pixi\lib\R", r"D:\pixi\lib\R"),
+            (r"\\server\share\lib\R", r"\\server\share\lib\R"),
+        ] {
+            assert_eq!(windows_r_home_path(Path::new(input)), Path::new(expected));
+        }
+    }
 }
 
 /// Get R's user home directory on Windows using `getRUser()` from R.dll.

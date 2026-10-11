@@ -1,5 +1,6 @@
 //! Directory-level R source overrides.
 
+use super::pixi::{self, PixiResolution};
 use super::r_source::{RSourceDiagnostic, RSourceResolutionReport, warning};
 use super::rig::{ResolvedRSource, setup_r_via_selected_rig_version};
 use crate::config::{RSourceOverride, RSourceOverrideInfo, RSourceStatus};
@@ -9,6 +10,10 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 pub(super) enum OverrideResolution {
+    PixiApplied {
+        target: Box<crate::config::PixiRSourceInfo>,
+        diagnostics: Vec<RSourceDiagnostic>,
+    },
     Applied {
         status: Box<RSourceStatus>,
         r_home: PathBuf,
@@ -53,7 +58,7 @@ enum FileReader<'a> {
 }
 
 enum ProviderKind<'a> {
-    Unsupported,
+    Pixi,
     File {
         file: &'a Path,
         reader: FileReader<'a>,
@@ -74,7 +79,7 @@ impl<'a> From<&'a RSourceOverride> for ProviderSpec<'a> {
         match source {
             RSourceOverride::Pixi => Self {
                 name: "pixi",
-                kind: ProviderKind::Unsupported,
+                kind: ProviderKind::Pixi,
             },
             RSourceOverride::VersionFile { file } => Self {
                 name: "version-file",
@@ -104,14 +109,14 @@ impl<'a> From<&'a RSourceOverride> for ProviderSpec<'a> {
 impl ProviderSpec<'_> {
     fn file_path(&self) -> Option<PathBuf> {
         match &self.kind {
-            ProviderKind::Unsupported => None,
+            ProviderKind::Pixi => None,
             ProviderKind::File { file, .. } => Some((*file).to_path_buf()),
         }
     }
 
     fn key(&self) -> Option<&str> {
         match &self.kind {
-            ProviderKind::Unsupported => None,
+            ProviderKind::Pixi => None,
             ProviderKind::File { reader, .. } => match reader {
                 FileReader::VersionFile => None,
                 FileReader::TomlKey { key } | FileReader::JsonKey { key } => Some(key),
@@ -121,7 +126,7 @@ impl ProviderSpec<'_> {
 
     fn location(&self) -> String {
         match &self.kind {
-            ProviderKind::Unsupported => self.name.to_owned(),
+            ProviderKind::Pixi => self.name.to_owned(),
             ProviderKind::File { file, reader } => match reader {
                 FileReader::VersionFile => file.display().to_string(),
                 FileReader::TomlKey { key } | FileReader::JsonKey { key } => {
@@ -141,14 +146,7 @@ enum ReadOverride {
 /// Read one provider's value and normalize its result for the resolution loop.
 fn read_override(spec: &ProviderSpec<'_>, base_dir: &mut Option<PathBuf>) -> ReadOverride {
     let ProviderKind::File { file, reader } = &spec.kind else {
-        return ReadOverride::Rejected(warning(
-            "r_source_override.provider_unsupported",
-            format!(
-                "Warning: R source override provider '{}' is not implemented; trying the next R source override.",
-                spec.name
-            ),
-            None,
-        ));
+        unreachable!("Pixi is evaluated as an active environment provider");
     };
     if !is_bare_filename(file) {
         return ReadOverride::Rejected(invalid_override_file_warning(spec.name, file));
@@ -279,6 +277,29 @@ where
     FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
     FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<ResolvedRSource>,
 {
+    setup_r_via_overrides_with_pixi(
+        overrides,
+        base_dir,
+        rig_available,
+        list_versions,
+        resolve_selected_rig_version,
+        pixi::resolve,
+    )
+}
+
+fn setup_r_via_overrides_with_pixi<FAvailable, FList, FResolve>(
+    overrides: &[RSourceOverride],
+    base_dir: Option<&Path>,
+    rig_available: FAvailable,
+    list_versions: FList,
+    resolve_selected_rig_version: FResolve,
+    resolve_pixi: impl Fn(Option<&Path>) -> PixiResolution,
+) -> Option<OverrideResolution>
+where
+    FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
+    FList: Fn() -> std::result::Result<Vec<external::rig::RigVersion>, external::rig::RigError>,
+    FResolve: Fn(&semver::Version, &[external::rig::RigVersion]) -> Result<ResolvedRSource>,
+{
     let mut diagnostics = Vec::new();
     let mut evaluated_provider = false;
     let mut rig_available_cache = None;
@@ -287,6 +308,22 @@ where
 
     for source in overrides {
         let provider = ProviderSpec::from(source);
+        if matches!(provider.kind, ProviderKind::Pixi) {
+            match resolve_pixi(base_dir.as_deref()) {
+                PixiResolution::NoMatch => continue,
+                PixiResolution::Rejected(diagnostic) => {
+                    evaluated_provider = true;
+                    diagnostics.push(diagnostic);
+                    continue;
+                }
+                PixiResolution::Applied(target) => {
+                    return Some(OverrideResolution::PixiApplied {
+                        target: Box::new(target),
+                        diagnostics,
+                    });
+                }
+            }
+        }
         let version = match read_override(&provider, &mut base_dir) {
             ReadOverride::Missing => continue,
             ReadOverride::Value(version) => {
@@ -342,25 +379,21 @@ where
         let rig_availability = rig_available_cache.get_or_insert_with(&rig_available);
         if let Err(error) = rig_availability {
             diagnostics.push(rig_unavailable_warning(error));
-            return Some(OverrideResolution::Fallback { diagnostics });
+            continue;
         }
 
-        let installed = if let Some(installed) = installed_versions_cache.as_ref() {
-            installed
-        } else {
-            match list_versions() {
-                Ok(versions) => installed_versions_cache.insert(versions),
-                Err(error) => {
-                    diagnostics.push(warning(
-                        "r_source_override.fallback",
+        let installed = match installed_versions_cache.get_or_insert_with(&list_versions) {
+            Ok(versions) => versions,
+            Err(error) => {
+                diagnostics.push(warning(
+                        "r_source_override.resolution_failed",
                         format!(
-                            "Warning: Could not inspect installed R versions for {}: {error}; falling back to startup.r_source.",
+                            "Warning: Could not inspect installed R versions for {}: {error}; trying the next R source override.",
                             provider.location()
                         ),
                         provider.file_path(),
                     ));
-                    return Some(OverrideResolution::Fallback { diagnostics });
-                }
+                continue;
             }
         };
         let installed_versions = installed
@@ -393,11 +426,11 @@ where
                 };
                 let Some(r_home) = r_home else {
                     diagnostics.push(warning(
-                        "r_source_override.fallback",
-                        "Warning: R source override resolved without an R_HOME; falling back to startup.r_source.",
+                        "r_source_override.resolution_failed",
+                        "Warning: R source override resolved without an R_HOME; trying the next R source override.",
                         provider.file_path(),
                     ));
-                    return Some(OverrideResolution::Fallback { diagnostics });
+                    continue;
                 };
                 return Some(OverrideResolution::Applied {
                     status: RSourceStatus::Rig {
@@ -414,12 +447,12 @@ where
                 diagnostics.push(warning(
                     "r_source_override.provider_unsupported",
                     format!(
-                        "Warning: R source override {} resolved to an unsupported R source status ({status:?}); falling back to startup.r_source.",
+                        "Warning: R source override {} resolved to an unsupported R source status ({status:?}); trying the next R source override.",
                         provider.location()
                     ),
                     provider.file_path(),
                 ));
-                return Some(OverrideResolution::Fallback { diagnostics });
+                continue;
             }
             Err(error) => {
                 diagnostics.push(warning(
@@ -475,6 +508,12 @@ fn invalid_override_file_warning(provider: &str, file: &Path) -> RSourceDiagnost
 }
 
 pub(super) fn script_override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
+    if let RSourceStatus::Pixi { .. } = resolution.status {
+        return Some(format!(
+            "# R source override: {}",
+            resolution.status.display()
+        ));
+    }
     resolution
         .override_info()
         .map(|info| format!("# R source override: {}", info.display()))
@@ -483,14 +522,14 @@ pub(super) fn script_override_notice(resolution: &RSourceResolutionReport) -> Op
 fn rig_unavailable_warning(error: &external::rig::RigError) -> RSourceDiagnostic {
     let message = match error {
         external::rig::RigError::NotInstalled => {
-            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Trying the next R source override."
                 .to_string()
         }
         external::rig::RigError::CommandFailed(reason) => format!(
-            "Warning: rig is installed but could not be run, so the R source override cannot be resolved: {reason}.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+            "Warning: rig is installed but could not be run, so the R source override cannot be resolved: {reason}.\n         Fix the rig installation or command, then restart arf.\n         Trying the next R source override."
         ),
         error => format!(
-            "Warning: rig availability could not be checked ({error}), so the R source override cannot be resolved.\n         Fix the rig installation or command, then restart arf.\n         Falling back to startup.r_source."
+            "Warning: rig availability could not be checked ({error}), so the R source override cannot be resolved.\n         Fix the rig installation or command, then restart arf.\n         Trying the next R source override."
         ),
     };
 
@@ -537,6 +576,138 @@ mod r_source_override_tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn pixi_target() -> crate::config::PixiRSourceInfo {
+        crate::config::PixiRSourceInfo {
+            manifest: "/workspace/pixi.toml".into(),
+            environment: "analysis".into(),
+            prefix: "/prefix".into(),
+            binary: "/prefix/Scripts/R.exe".into(),
+            home: "/prefix/lib/R".into(),
+            library: "/prefix/lib/R/lib/libR.so".into(),
+            version: None,
+        }
+    }
+
+    #[test]
+    fn rig_failure_is_cached_and_does_not_block_later_pixi() {
+        for unavailable in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            std::fs::write(temp.path().join("first.r-version"), "4.4.2").unwrap();
+            std::fs::write(temp.path().join("second.r-version"), "4.4.2").unwrap();
+            let availability_calls = AtomicUsize::new(0);
+            let list_calls = AtomicUsize::new(0);
+            let result = setup_r_via_overrides_with_pixi(
+                &[
+                    RSourceOverride::VersionFile {
+                        file: "first.r-version".into(),
+                    },
+                    RSourceOverride::VersionFile {
+                        file: "second.r-version".into(),
+                    },
+                    RSourceOverride::Pixi,
+                ],
+                Some(temp.path()),
+                || {
+                    availability_calls.fetch_add(1, Ordering::SeqCst);
+                    if unavailable {
+                        Err(external::rig::RigError::NotInstalled)
+                    } else {
+                        Ok(())
+                    }
+                },
+                || {
+                    list_calls.fetch_add(1, Ordering::SeqCst);
+                    Err(external::rig::RigError::CommandFailed("list failed".into()))
+                },
+                |_, _| panic!("must not resolve rig after failure"),
+                |_| PixiResolution::Applied(pixi_target()),
+            )
+            .unwrap();
+            let OverrideResolution::PixiApplied {
+                target,
+                diagnostics,
+            } = result
+            else {
+                panic!("expected Pixi despite rig failure")
+            };
+            assert_eq!(target.environment, "analysis");
+            assert_eq!(availability_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(list_calls.load(Ordering::SeqCst), usize::from(!unavailable));
+            assert_eq!(diagnostics.len(), 2);
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| !diagnostic.message.to_lowercase().contains("falling back"))
+            );
+        }
+    }
+
+    #[test]
+    fn successful_provider_short_circuits_and_rejected_pixi_continues() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join(".r-version"), "4.4.2").unwrap();
+        let file = RSourceOverride::VersionFile {
+            file: ".r-version".into(),
+        };
+        let version = external::rig::RigVersion {
+            version: "4.4.2".into(),
+            name: "4.4.2".into(),
+            default: true,
+            aliases: Vec::new(),
+            path: String::new(),
+            binary: String::new(),
+        };
+        let resolve = |_: &semver::Version, _: &[external::rig::RigVersion]| {
+            Ok(ResolvedRSource {
+                status: RSourceStatus::Rig {
+                    version: "4.4.2".into(),
+                    override_info: None,
+                },
+                r_home: Some(temp.path().to_path_buf()),
+            })
+        };
+        let result = setup_r_via_overrides_with_pixi(
+            &[file.clone(), RSourceOverride::Pixi],
+            Some(temp.path()),
+            || Ok(()),
+            || Ok(vec![version.clone()]),
+            resolve,
+            |_| panic!("successful file provider must skip Pixi"),
+        );
+        assert!(matches!(result, Some(OverrideResolution::Applied { .. })));
+        let result = setup_r_via_overrides_with_pixi(
+            &[RSourceOverride::Pixi, file],
+            Some(temp.path()),
+            || Ok(()),
+            || Ok(vec![version.clone()]),
+            resolve,
+            |_| {
+                PixiResolution::Rejected(warning(
+                    "r_source_override.pixi_r_unavailable",
+                    "Pixi R unavailable",
+                    None,
+                ))
+            },
+        );
+        let Some(OverrideResolution::Applied { diagnostics, .. }) = result else {
+            panic!("expected file provider")
+        };
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "r_source_override.pixi_r_unavailable");
+        let result = setup_r_via_overrides_with_pixi(
+            &[RSourceOverride::Pixi],
+            Some(temp.path()),
+            || panic!("must not query rig"),
+            || panic!("must not query rig"),
+            resolve,
+            |_| PixiResolution::Applied(pixi_target()),
+        );
+        assert!(matches!(
+            result,
+            Some(OverrideResolution::PixiApplied { .. })
+        ));
+    }
 
     fn diagnostic_text(diagnostics: &[RSourceDiagnostic]) -> String {
         diagnostics
@@ -746,19 +917,18 @@ mod r_source_override_tests {
 
     #[test]
     fn pixi_only_override_resolution_does_not_need_a_base_dir() {
-        let temp = tempfile::tempdir().unwrap();
-        let report = setup_r(
-            &path_source(temp.path()),
+        let result = setup_r_via_overrides_with_pixi(
             &[RSourceOverride::Pixi],
             None,
-            None,
-            None,
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(report.override_state, RSourceOverrideState::Failed);
-        assert!(report.diagnostics[0].message.contains("pixi"));
+            || panic!("must not query rig"),
+            || panic!("must not query rig"),
+            |_, _| panic!("must not query rig"),
+            |cwd| {
+                assert!(cwd.is_none());
+                PixiResolution::NoMatch
+            },
+        );
+        assert!(result.is_none());
     }
 
     #[test]
@@ -822,8 +992,18 @@ mod r_source_override_tests {
     }
 
     #[test]
-    fn unsupported_pixi_provider_is_reported_and_falls_back() {
+    fn inactive_pixi_workspace_is_reported_and_falls_back() {
+        let mut guard = crate::test_utils::lock_env();
+        for key in [
+            "PIXI_IN_SHELL",
+            "PIXI_WORKSPACE_MANIFEST",
+            "PIXI_PROJECT_MANIFEST",
+            "PIXI_ENVIRONMENT_NAME",
+        ] {
+            guard.unset(key);
+        }
         let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("pixi.toml"), "[workspace]").unwrap();
         let report = setup_r(
             &path_source(temp.path()),
             &[RSourceOverride::Pixi],
@@ -838,14 +1018,14 @@ mod r_source_override_tests {
         assert_eq!(report.diagnostics.len(), 2);
         assert_eq!(
             report.diagnostics[0].code,
-            "r_source_override.provider_unsupported"
+            "r_source_override.pixi_not_active"
         );
         assert_eq!(report.diagnostics[1].code, "r_source_override.fallback");
-        assert!(report.diagnostics[0].message.contains("pixi"));
+        assert!(report.diagnostics[0].message.contains("pixi run arf"));
         assert!(
             report.diagnostics[1]
                 .message
-                .contains("Falling back to startup.r_source")
+                .contains("Using startup.r_source: path")
         );
     }
 
@@ -871,10 +1051,10 @@ mod r_source_override_tests {
     }
 
     #[test]
-    fn rig_unavailable_warning_explains_fallback() {
+    fn rig_unavailable_warning_explains_provider_failure() {
         assert_eq!(
             rig_unavailable_warning(&external::rig::RigError::NotInstalled).message,
-            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Falling back to startup.r_source."
+            "Warning: rig is not installed, so the R source override cannot be resolved.\n         Install rig from https://github.com/r-lib/rig or use \"auto\".\n         Trying the next R source override."
         );
     }
 
@@ -995,6 +1175,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Applied {
                 status,
                 info,
@@ -1058,6 +1239,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Applied {
                 info, diagnostics, ..
             } => {
@@ -1097,6 +1279,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Applied { info, .. } => {
                 assert_eq!(info.provider, "json-key");
                 assert_eq!(info.file, Some(PathBuf::from("renv.lock")));
@@ -1143,6 +1326,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Applied {
                 info, diagnostics, ..
             } => {
@@ -1195,6 +1379,7 @@ mod r_source_override_tests {
             .unwrap();
 
             match result {
+                OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
                 OverrideResolution::Applied {
                     info, diagnostics, ..
                 } => {
@@ -1231,6 +1416,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Fallback { diagnostics } => {
                 let diagnostics = diagnostic_text(&diagnostics);
                 assert!(diagnostics.contains("exceeds 256 bytes"));
@@ -1264,6 +1450,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Fallback { diagnostics } => {
                 let diagnostics = diagnostic_text(&diagnostics);
                 assert!(!diagnostics.contains(private_contents));
@@ -1317,6 +1504,7 @@ mod r_source_override_tests {
             .unwrap();
 
             match result {
+                OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
                 OverrideResolution::Fallback { diagnostics } => {
                     let diagnostics = diagnostic_text(&diagnostics);
                     assert!(!diagnostics.contains(marker));
@@ -1352,6 +1540,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Fallback { diagnostics } => {
                 let diagnostics = diagnostic_text(&diagnostics);
                 assert!(diagnostics.contains(
@@ -1388,6 +1577,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
+            OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
             OverrideResolution::Fallback { diagnostics } => {
                 let diagnostics = diagnostic_text(&diagnostics);
                 assert!(diagnostics.contains(
@@ -1475,6 +1665,7 @@ mod r_source_override_tests {
                 .unwrap();
 
                 match result {
+                    OverrideResolution::PixiApplied { .. } => panic!("unexpected Pixi target"),
                     OverrideResolution::Applied {
                         info, diagnostics, ..
                     } => {

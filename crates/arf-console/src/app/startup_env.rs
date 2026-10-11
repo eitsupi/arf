@@ -121,7 +121,7 @@ fn deserialize_startup_env(serialized: &str) -> Result<HashMap<String, OsString>
         .collect()
 }
 
-fn encode_os_string(value: &OsStr) -> String {
+pub(crate) fn encode_os_string(value: &OsStr) -> String {
     #[cfg(unix)]
     let bytes = {
         use std::os::unix::ffi::OsStrExt;
@@ -143,7 +143,7 @@ fn encode_os_string(value: &OsStr) -> String {
     general_purpose::STANDARD.encode(bytes)
 }
 
-fn decode_os_string(encoded: &str) -> Result<OsString, String> {
+pub(crate) fn decode_os_string(encoded: &str) -> Result<OsString, String> {
     let bytes = general_purpose::STANDARD
         .decode(encoded)
         .map_err(|error| error.to_string())?;

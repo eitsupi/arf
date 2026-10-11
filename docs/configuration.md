@@ -909,16 +909,16 @@ Abbreviations are matched against the word immediately to the left of the cursor
 
 ### R Source Overrides
 
-Automatically select an installed R version from project tooling. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
+Select R from project version files or an externally activated Pixi environment. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
 
 > [!IMPORTANT]
-> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file`, `toml-key`, and `json-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and falls back to `startup.r_source` rather than failing to start.
+> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file`, `toml-key`, and `json-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and tries the next provider, including Pixi. It falls back to `startup.r_source` only after all providers have been exhausted.
 
 Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
 
 arf uses the `file` value as written and performs no case folding, so whether `.r-version` also matches a file named `.R-version` depends on the filesystem: case-insensitive on typical macOS and Windows setups, case-sensitive on typical Linux ones. Write the exact spelling your project uses to keep the config portable across platforms.
 
-Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves a version is used; later entries are not evaluated once one succeeds.
+Entries are evaluated in array order, which is the priority order. The first entry that successfully resolves an R source is used; later entries are not evaluated once one succeeds.
 
 **Configuration options:**
 
@@ -928,7 +928,7 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | `type = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
 | `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
 | `type = "json-key"` | — | Reads a string version specification from the dot-separated JSON key in the `file` and `key` fields. |
-| `type = "pixi"` | — | Uses the active pixi environment. This provider is not implemented yet and has no additional fields. |
+| `type = "pixi"` | — | Uses R from an externally activated Pixi environment, without requiring rig. Has no additional fields. |
 
 For example, [rv](https://a2-ai.github.io/rv-docs/) stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
 
@@ -992,16 +992,43 @@ r_source_overrides = [
 
 `--with-r-version`, `:switch` and `r_source_overrides` share the numeric and range matching described above. Only selectors from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, while named selectors are unsupported in an override file.
 
-When resolving providers, a missing file is silently skipped and arf moves to the next entry. If a file exists but its value cannot be parsed, arf logs a warning and moves to the next entry. `pixi` logs the following warning and also moves to the next entry:
+**Active Pixi environments**
 
-> Warning: R source override provider 'pixi' is not implemented; trying the next R source override.
+Enable the provider in the loaded `arf.toml`, then start arf through Pixi:
 
-When a provider's requested version is not installed, arf prints installation guidance and tries the next provider. Only after all providers fail does it fall back to `startup.r_source`; startup continues rather than aborting. Rig being unavailable is different: arf cannot evaluate the overrides, so it falls back immediately without trying further providers. Numeric version selectors use `rig add`, while version ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
+```toml
+[experimental]
+r_source_overrides = [{ type = "pixi" }]
+```
+
+```sh
+pixi run arf
+pixi run arf r resolve
+pixi run arf headless --json
+```
+
+Pixi selects and activates the environment. arf does not invoke the Pixi CLI, create or update environments, run activation scripts, install packages, or change lockfiles. Named and detached environments are accepted through the same activation identity; arf does not assume a `.pixi/envs/default` layout. A valid active environment takes precedence over a different workspace in the current directory.
+
+arf checks Pixi's activation variables and the read-only `conda-meta/pixi` marker. `PIXI_WORKSPACE_MANIFEST` takes precedence over legacy `PIXI_PROJECT_MANIFEST`, including when the newer variable is empty or invalid. `PIXI_IN_SHELL` must be present, and the manifest, environment name and `CONDA_PREFIX` must be non-empty and agree with the marker. `CONDA_PREFIX` alone does not identify Pixi. arf does not check environment freshness or repair an invalid marker.
+
+The first native R executable on PATH, the `R_HOME` it reports, and its shared library must belong to the canonical Pixi prefix. If the first executable is outside the prefix, arf does not search for another one later on PATH. The RHOME probe removes inherited `R_HOME` in its child process and has a 10-second deadline, with stdout and stderr each limited to 64 KiB. A failed probe rejects that provider and allows the next provider to run. These per-probe limits also apply to automatic discovery and explicit installation-prefix resolution, including after a provider is rejected.
+
+If activation is missing, arf only checks the exact current directory for a workspace in `pixi.toml` or `pyproject.toml` and suggests `pixi run arf` when one is found. It does not search parent directories. Package-only manifests, ordinary Python projects and malformed TOML do not trigger workspace guidance. With no activation signals or matching workspace, the provider is silently skipped.
+
+Unavailable or invalid Pixi environments produce a warning and allow later providers, followed by `startup.r_source`, to run. No confirmation prompt is shown, including in headless mode. Once Pixi has been selected, library loading or R initialization failures are startup errors: arf does not silently start another R. `:restart` inherits and revalidates activation; `:switch` is unavailable for Pixi sessions. On Windows, only a selected Pixi source uses prefix-limited dependency DLL directories; ordinary R installations retain their existing DLL search policy.
+
+REPL, script and plain headless startup warnings go to stderr once. JSON headless startup includes them in `warnings`; `arf r resolve` includes them in `diagnostics` without extra human-readable stderr. An unknown Pixi R version is reported as `null`, and resolve reports the verified PATH executable, which can live outside `R_HOME` on Windows.
+
+The production provider has been validated on Linux x64, macOS ARM64 and Windows x64 using Pixi 0.81.0 with conda-forge R 4.5.3. The dedicated integration workflow covers `pixi run` in default and named detached environments, compiled `stats`, `jsonlite` and `curl`, eval/script/headless startup, and restart from a different workspace. Windows initialization converts canonical drive/UNC paths to the native spelling R accepts while preserving the validated target. Windows ARM64, `pixi exec`, global environments and standalone Pixi scripts are outside the initial verified scope.
+
+When resolving file providers, a missing file is silently skipped. An unreadable or invalid value produces a warning and arf moves to the next entry.
+
+When a provider's requested version is not installed, arf prints installation guidance and tries the next provider. Only after all providers fail does it fall back to `startup.r_source`; startup continues rather than aborting. If rig is unavailable or its version list cannot be read, the affected file provider is skipped and later providers are still evaluated. Numeric version selectors use `rig add`, while version ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
 
 ```text
 Warning: rig is not installed, so the R source override cannot be resolved.
          Install rig from https://github.com/r-lib/rig or use "auto".
-         Falling back to startup.r_source.
+         Trying the next R source override.
 
 Warning: R source override provider 'version-file' at .r-version requested R version "4.4", which is not installed.
          Install it with rig add 4.4, then restart arf.
@@ -1012,7 +1039,7 @@ Warning: R source override provider 'version-file' at .r-version has no installe
          Trying the next R source override.
 
 Warning: All R source overrides failed.
-         Falling back to startup.r_source.
+         Using startup.r_source: PATH.
 ```
 
 Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It is an override-disable switch, not an R source tier, and it does not disable explicit `--r-home`, `--with-r-version`, `ARF_R_HOME`, or `ARF_R_VERSION` selection.
@@ -1028,7 +1055,7 @@ For `headless` and `r resolve`, `--r-home` and `--with-r-version` are resolved a
 | 1 | CLI `--r-home` | Returns immediately with the explicit path; no lower tier is evaluated. |
 | 2 | CLI `--with-r-version` | Returns immediately with the rig-selected version; no lower tier is evaluated. |
 | 3 | `ARF_R_HOME` / `ARF_R_VERSION` | Clap converts these into the corresponding CLI values, so they have the same early-return behavior as tiers 1–2. A command-line value wins over its env var. The interactive console, `headless` and `r resolve` each read these variables for themselves. |
-| 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A provider's project-local file may be absent or fail to resolve; those cases fall through to the next provider and then to tier 5. |
+| 4 | `r_source_overrides` (setting in the loaded `arf.toml`) | Evaluates providers in order. A file provider may have no matching file or version, and an active-environment provider may be unavailable; those cases fall through to the next provider and then to tier 5. |
 | 5 | `startup.r_source` (setting in the loaded `arf.toml`) | Resolves the configured source after the override providers have been exhausted; when it resolves here, source selection ends. |
 | 6 | Inherited `R_HOME` | Not a selection tier. It is a discovery-layer input consulted only when tier 5 resolves to PATH mode. |
 | 7 | `R RHOME` / built-in default paths | Final fallback search used to discover R when PATH-mode resolution needs it. |

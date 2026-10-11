@@ -77,6 +77,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     capture_startup_env();
+    app::setup::capture_loader_target();
 
     // Parse command-line arguments first, then initialize the logger exactly
     // once based on the parsed command. This avoids the fragile pre-parse
@@ -377,10 +378,12 @@ fn run() -> Result<()> {
             // its number in the environment solely across this loader exec.
             unsafe { std::env::set_var(pid_file::RESTART_PID_FD_ENV, fd) };
         }
-        if let Err(e) = arf_libr::ensure_ld_library_path_with_pre_exec_and_args(
-            &normalized_args(),
-            console_mode::restore_original_input_mode,
-        ) {
+        if let Err(e) =
+            arf_libr::ensure_ld_library_path_with_pre_exec_and_args(&normalized_args(), || {
+                app::setup::forward_loader_target(&resolution);
+                console_mode::restore_original_input_mode();
+            })
+        {
             log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
             // Drop old guard before calling install(): assignment evaluates the RHS
             // first (capturing and disabling echo), then drops the old guard, which
@@ -393,6 +396,7 @@ fn run() -> Result<()> {
         //
         // SAFETY: same single-threaded, pre-R-init context as above.
         unsafe { std::env::remove_var(STARTUP_ENV_CARRIER) };
+        app::setup::clear_loader_target();
         unsafe { std::env::remove_var(pid_file::RESTART_PID_FD_ENV) };
         pid_file::finish_loader_reexec();
     }
@@ -434,6 +438,10 @@ fn run() -> Result<()> {
                 (true, capture_runtime_r_home(pre_init_dir.as_deref()))
             }
             Err(e) => {
+                if matches!(r_source_status, config::RSourceStatus::Pixi { .. }) {
+                    return Err(anyhow::Error::new(e)
+                        .context("Failed to initialize R from the selected Pixi environment"));
+                }
                 eprintln!("Warning: Failed to initialize R: {}", e);
                 eprintln!("R evaluation will not be available.");
                 eprintln!("Make sure R is installed and R_HOME is set correctly.\n");

@@ -139,3 +139,43 @@ fn error_handler_does_not_leak_variables_into_globalenv() -> Result<()> {
         },
     )
 }
+
+#[test]
+fn invalid_pixi_activation_warns_once_and_starts_without_confirmation() -> anyhow::Result<()> {
+    let library = arf_libr::find_r_library()?;
+    let home = arf_libr::r_home_from_library_path(&library).expect("known R library layout");
+    let home = toml::Value::String(home.display().to_string()).to_string();
+    let config = format!(
+        r"{}
+[startup]
+r_source={{path={home}}}
+[experimental]
+r_source_overrides=[{{type='pixi'}}]
+",
+        super::support::DEFAULT_CONFIG
+    );
+    super::support::run_case_with(
+        super::support::Terminal::builder("pixi-warning-only")
+            .with_r_source_overrides()
+            .config(config)
+            .env("PIXI_IN_SHELL", "1")
+            .env("PIXI_WORKSPACE_MANIFEST", "")
+            .args(["--no-auto-match"]),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let output = terminal.output()?;
+            anyhow::ensure!(
+                output
+                    .matches("The active Pixi environment is invalid")
+                    .count()
+                    == 1,
+                "Pixi warning must appear exactly once: {output}"
+            );
+            anyhow::ensure!(
+                output.matches("All R source overrides failed").count() == 1,
+                "fallback warning must appear exactly once: {output}"
+            );
+            terminal.quit()
+        },
+    )
+}

@@ -43,7 +43,7 @@ struct Target {
 #[derive(Debug, Serialize)]
 struct SelectionSource {
     kind: &'static str,
-    name: Option<&'static str>,
+    name: Option<String>,
     path: Option<String>,
     format: Option<&'static str>,
     key: Option<String>,
@@ -250,7 +250,10 @@ fn descriptor(
         let r_home = normalize_path(cwd, r_home);
         Target {
             r_home: r_home.display().to_string(),
-            r_binary: find_r_binary(&r_home),
+            r_binary: match &resolution.status {
+                RSourceStatus::Pixi { info } => Some(info.binary.display().to_string()),
+                _ => find_r_binary(&r_home),
+            },
             resolved_version: resolved_version(resolution),
         }
     });
@@ -304,7 +307,7 @@ fn selected_by(
             requested_version: None,
             source: SelectionSource {
                 kind: source_kind,
-                name: Some(source_name),
+                name: Some(source_name.to_owned()),
                 path: None,
                 format: None,
                 key: None,
@@ -323,7 +326,7 @@ fn selected_by(
             requested_version: Some(r_version.to_owned()),
             source: SelectionSource {
                 kind: source_kind,
-                name: Some(source_name),
+                name: Some(source_name.to_owned()),
                 path: None,
                 format: None,
                 key: None,
@@ -332,6 +335,20 @@ fn selected_by(
     }
 
     if resolution.override_state == crate::app::setup::RSourceOverrideState::Applied {
+        if let RSourceStatus::Pixi { info } = &resolution.status {
+            return SelectedBy {
+                kind: "active_environment",
+                requested_r_home: None,
+                requested_version: None,
+                source: SelectionSource {
+                    kind: "pixi",
+                    name: Some(info.environment.clone()),
+                    path: Some(display_path(cwd, &info.manifest)),
+                    format: None,
+                    key: None,
+                },
+            };
+        }
         let format = match resolution.provider.as_deref() {
             Some("version-file") => Some("text"),
             Some("toml-key") => Some("toml"),
@@ -397,6 +414,7 @@ fn provider(status: &RSourceStatus) -> String {
         RSourceStatus::Rig { .. } => "rig".to_owned(),
         RSourceStatus::Path => "path".to_owned(),
         RSourceStatus::ExplicitPath { .. } => "explicit_path".to_owned(),
+        RSourceStatus::Pixi { .. } => "pixi".to_owned(),
     }
 }
 
@@ -407,6 +425,7 @@ fn resolved_version(resolution: &RSourceResolutionReport) -> Option<String> {
         .or_else(|| match &resolution.status {
             RSourceStatus::Rig { version, .. } => Some(version.clone()),
             RSourceStatus::Path | RSourceStatus::ExplicitPath { .. } => None,
+            RSourceStatus::Pixi { info } => info.version.clone(),
         })
 }
 
@@ -452,6 +471,57 @@ fn resolution_diagnostic(diagnostic: &RSourceDiagnostic) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pixi_descriptor_uses_verified_launcher_and_active_environment_provenance() {
+        let info = crate::config::PixiRSourceInfo {
+            manifest: "/workspace/pixi.toml".into(),
+            environment: "analysis".into(),
+            prefix: "/prefix".into(),
+            binary: "/prefix/Scripts/R.exe".into(),
+            home: "/prefix/lib/R".into(),
+            library: "/prefix/lib/R/bin/x64/R.dll".into(),
+            version: None,
+        };
+        let mut report = super::RSourceResolutionReport {
+            status: super::RSourceStatus::Pixi { info: info.clone() },
+            r_home: Some(info.home.clone()),
+            provider: None,
+            file: None,
+            key: None,
+            requested_version: None,
+            resolved_version: None,
+            diagnostics: Vec::new(),
+            override_state: crate::app::setup::RSourceOverrideState::Applied,
+        };
+        report.provider = Some("pixi".into());
+        report.file = Some(info.manifest.clone());
+        let value = serde_json::to_value(super::descriptor(
+            std::path::Path::new("/"),
+            &report,
+            &[],
+            None,
+            None,
+            None,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["provider"], "pixi");
+        assert_eq!(value["selected_by"]["kind"], "active_environment");
+        assert_eq!(value["selected_by"]["source"]["kind"], "pixi");
+        assert_eq!(value["selected_by"]["source"]["name"], "analysis");
+        assert_eq!(
+            value["selected_by"]["source"]["path"],
+            info.manifest.display().to_string()
+        );
+        assert_eq!(
+            value["target"]["r_binary"],
+            info.binary.display().to_string()
+        );
+        assert!(value["target"]["resolved_version"].is_null());
+        assert!(value["selected_by"]["requested_version"].is_null());
+        assert!(!report.status.rig_enabled());
+    }
     use super::*;
     use crate::app::setup::RSourceOverrideState;
 
@@ -523,7 +593,7 @@ mod tests {
     #[test]
     fn resolution_diagnostic_uses_assigned_code_not_message_wording() {
         let first = RSourceDiagnostic {
-            code: "r_source_override.value_invalid",
+            code: "r_source_override.value_invalid".to_owned(),
             severity: "warning",
             message: "Warning: original wording".to_owned(),
             path: None,

@@ -31,7 +31,8 @@ pub use prompt::{
 pub use r::RConfig;
 pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
-    RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode, StartupConfig,
+    PixiRSourceInfo, RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode,
+    StartupConfig,
 };
 
 use schemars::JsonSchema;

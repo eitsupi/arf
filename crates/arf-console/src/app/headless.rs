@@ -72,6 +72,19 @@ pub(crate) struct HeadlessRSourceOverride {
     key: Option<String>,
     requested_version: Option<String>,
     resolved_version: Option<String>,
+    metadata: Option<HeadlessOverrideMetadata>,
+}
+
+/// Provider metadata is an open enum inside one extensible JSON object.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum HeadlessOverrideMetadata {
+    Pixi {
+        environment: String,
+        manifest: String,
+        prefix: String,
+        r_binary: String,
+    },
 }
 
 impl HeadlessRSourceOverride {
@@ -86,6 +99,17 @@ impl HeadlessRSourceOverride {
             key: applied.then(|| report.key.clone()).flatten(),
             requested_version: applied.then(|| report.requested_version.clone()).flatten(),
             resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
+            metadata: match &report.status {
+                config::RSourceStatus::Pixi { info } if applied => {
+                    Some(HeadlessOverrideMetadata::Pixi {
+                        environment: info.environment.clone(),
+                        manifest: info.manifest.display().to_string(),
+                        prefix: info.prefix.display().to_string(),
+                        r_binary: info.binary.display().to_string(),
+                    })
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -198,9 +222,17 @@ pub(crate) fn run_headless(
     }
 
     // Ensure LD_LIBRARY_PATH includes R library directory
-    if let Err(e) = arf_libr::ensure_ld_library_path() {
+    #[cfg(unix)]
+    let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
+        crate::app::setup::forward_loader_target(&resolution)
+    });
+    #[cfg(not(unix))]
+    let loader_result = arf_libr::ensure_ld_library_path();
+    if let Err(e) = loader_result {
         log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
     }
+    #[cfg(unix)]
+    crate::app::setup::clear_loader_target();
 
     if !json {
         report_startup_diagnostics(config_diagnostics);
@@ -508,6 +540,7 @@ mod tests {
             assert!(value.get("key").is_some());
             assert!(value.get("requested_version").is_some());
             assert!(value.get("resolved_version").is_some());
+            assert_eq!(value["metadata"], serde_json::Value::Null);
         }
     }
 
@@ -662,5 +695,48 @@ mod tests {
         assert_eq!(value["key"], "project.r_version");
         assert_eq!(value["requested_version"], "4.4");
         assert_eq!(value["resolved_version"], "4.4.2");
+        assert_eq!(value["metadata"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn pixi_json_keeps_provider_specific_fields_inside_metadata() {
+        let mut report = report(RSourceOverrideState::Applied);
+        report.provider = Some("pixi".to_owned());
+        report.file = Some("pixi.toml".into());
+        report.status = config::RSourceStatus::Pixi {
+            info: config::PixiRSourceInfo {
+                manifest: "pixi.toml".into(),
+                environment: "analysis".to_owned(),
+                prefix: "prefix".into(),
+                binary: "R.exe".into(),
+                home: "home".into(),
+                library: "R.dll".into(),
+                version: None,
+            },
+        };
+
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "state": "applied",
+                "provider": "pixi",
+                "file": "pixi.toml",
+                "key": null,
+                "requested_version": null,
+                "resolved_version": null,
+                "metadata": {
+                    "kind": "pixi",
+                    "environment": "analysis",
+                    "manifest": "pixi.toml",
+                    "prefix": "prefix",
+                    "r_binary": "R.exe"
+                }
+            })
+        );
+
+        report.override_state = RSourceOverrideState::ShadowedByCli;
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
+        assert_eq!(value["metadata"], serde_json::Value::Null);
     }
 }
