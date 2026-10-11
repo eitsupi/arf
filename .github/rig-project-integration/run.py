@@ -961,7 +961,9 @@ jsonlite = "*"
             errors.append(f"arf embedded R {name}: {error}")
 
     script_path = EVIDENCE / "rig-project-proof.R"
-    script_path.write_text(EXPRESSION + "\n", encoding="utf-8")
+    # Keep the generated source LF-terminated; the embedded parser rejects CRLF input.
+    with script_path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(EXPRESSION + "\n")
     script_result, script_record = run(
         "arf-rig-project-script",
         [ARF, "--r-provider", "rig-project", "--config", CONFIG,
