@@ -203,7 +203,7 @@ const R_WRAPPER_ENV_VARS: &[&str] = &["R_DOC_DIR", "R_SHARE_DIR", "R_INCLUDE_DIR
 ///
 /// We parse the wrapper script directly instead to avoid the ~300ms R
 /// startup cost, which matters for a terminal application.
-pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
+pub fn r_path_vars_from_wrapper(r_home: &Path) -> Vec<(&'static str, OsString)> {
     let wrapper_path = r_home.join("bin").join("R");
     let content = match std::fs::read_to_string(&wrapper_path) {
         Ok(c) => c,
@@ -213,21 +213,29 @@ pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
                 wrapper_path.display(),
                 e
             );
-            return;
+            return Vec::new();
         }
     };
 
-    for var_name in R_WRAPPER_ENV_VARS {
+    R_WRAPPER_ENV_VARS
+        .iter()
+        .filter_map(|var_name| {
+            parse_var_from_wrapper_script(&content, var_name, r_home)
+                .map(|value| (*var_name, value))
+        })
+        .collect()
+}
+
+pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
+    for (var_name, value) in r_path_vars_from_wrapper(r_home) {
         // Skip if already set in the environment
         if env::var_os(var_name).is_some() {
             continue;
         }
 
-        if let Some(value) = parse_var_from_wrapper_script(&content, var_name, r_home) {
-            log::debug!("Setting {} from R wrapper", var_name);
-            // SAFETY: We're in single-threaded initialization
-            unsafe { env::set_var(var_name, &value) };
-        }
+        log::debug!("Setting {} from R wrapper", var_name);
+        // SAFETY: We're in single-threaded initialization
+        unsafe { env::set_var(var_name, &value) };
     }
 }
 

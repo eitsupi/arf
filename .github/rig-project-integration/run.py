@@ -4,10 +4,12 @@ import ctypes
 import json
 import os
 import platform
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.parse import unquote
@@ -20,6 +22,7 @@ EVIDENCE = RESULTS / "evidence"
 EVIDENCE.mkdir(parents=True, exist_ok=True)
 PROJECT = RESULTS / "project"
 PROJECT.mkdir(parents=True, exist_ok=True)
+PROJECT_B = RESULTS / "project-b"
 USER_HOME = RESULTS / "user-home"
 USER_HOME.mkdir(parents=True, exist_ok=True)
 ARF = ROOT / ("target/debug/arf.exe" if os.name == "nt" else "target/debug/arf")
@@ -90,6 +93,9 @@ EXPRESSION = r'''local({
   fields <- list(
     r_home = norm(R.home()),
     r_home_env = Sys.getenv("R_HOME", unset = ""),
+    r_libs_env = Sys.getenv("R_LIBS", unset = ""),
+    r_libs_site_env = Sys.getenv("R_LIBS_SITE", unset = ""),
+    r_libs_user_env = Sys.getenv("R_LIBS_USER", unset = ""),
     r_doc_dir_env = Sys.getenv("R_DOC_DIR", unset = ""),
     r_share_dir_env = Sys.getenv("R_SHARE_DIR", unset = ""),
     r_include_dir_env = Sys.getenv("R_INCLUDE_DIR", unset = ""),
@@ -201,9 +207,9 @@ def rig_command(mode, *args):
     return ["rig", *args, f"--{mode}"]
 
 
-def wrapper_path():
+def wrapper_path(project=PROJECT):
     name = "R.exe" if os.name == "nt" else "R"
-    return PROJECT / ".rvenv" / "bin" / name
+    return project / ".rvenv" / "bin" / name
 
 
 def wrapper_rhome():
@@ -433,6 +439,244 @@ def explicit_rig_project_resolution(source, home, installation_name):
     return record, descriptor
 
 
+def require_nonproject_strict_failure():
+    nonproject = RESULTS / "not-a-rig-project"
+    nonproject.mkdir(parents=True, exist_ok=True)
+    result, record = run(
+        "resolve-rig-project-outside-project",
+        [ARF, "r", "resolve", "--r-provider", "rig-project",
+         "--no-r-source-overrides", "--config", CONFIG],
+        cwd=nonproject,
+    )
+    if result.returncode == 0:
+        raise RuntimeError("explicit rig-project selection unexpectedly succeeded outside a project")
+    error = json.loads(result.stderr)
+    reason_code = error.get("error", {}).get("data", {}).get("reason_code")
+    if reason_code != "r_provider.rig_project_not_found":
+        raise RuntimeError(f"strict non-project failure had the wrong reason code: {error}")
+    return record
+
+
+def run_headless_provider(home, expected_resolution):
+    stderr_path = EVIDENCE / "headless-rig-project.stderr"
+    command = [
+        ARF, "headless", "--r-provider", "rig-project", "--no-r-source-overrides",
+        "--no-r-auto-discovery", "--ipc-eval-unrestricted", "--json", "--config", CONFIG,
+    ]
+    ready = queue.Queue(maxsize=1)
+    with stderr_path.open("wb") as stderr:
+        process = subprocess.Popen(
+            [str(arg) for arg in command], cwd=PROJECT, env=r_process_env(ENV),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr,
+        )
+
+        def read_ready_line():
+            line = process.stdout.readline()
+            ready.put(line)
+
+        reader = threading.Thread(target=read_ready_line, daemon=True)
+        reader.start()
+        headless_record = {"pid": process.pid, "stderr": str(stderr_path)}
+        try:
+            try:
+                line = ready.get(timeout=180)
+            except queue.Empty as error:
+                raise RuntimeError("headless rig-project session did not report JSON readiness") from error
+            if not line:
+                stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+                raise RuntimeError(
+                    f"headless rig-project exited before readiness: {process.poll()}: {stderr_text}"
+                )
+            info = json.loads(line)
+            selection = info.get("r_source_selection", {})
+            for key in ("provider", "selected_by", "metadata"):
+                if selection.get(key) != expected_resolution.get(key):
+                    raise RuntimeError(
+                        f"headless {key} differs from arf r resolve: "
+                        f"{selection.get(key)!r} != {expected_resolution.get(key)!r}"
+                    )
+            if info.get("r_home") is None or not Path(info["r_home"]).samefile(home):
+                raise RuntimeError(f"headless session selected the wrong R_HOME: {info.get('r_home')}")
+
+            evaluated, eval_record = run(
+                "headless-rig-project-eval",
+                [ARF, "ipc", "eval", EXPRESSION, "--pid", str(info["pid"]), "--timeout", "90000"],
+                cwd=PROJECT,
+                env=r_process_env(ENV),
+                timeout=120,
+            )
+            require(evaluated, "headless rig-project IPC evaluation")
+            response = json.loads(evaluated.stdout)
+            if response.get("error") is not None:
+                raise RuntimeError(f"headless rig-project R evaluation failed: {response}")
+            observed = proof_text(response.get("stdout", ""), "headless rig-project")
+            project_lib = str((PROJECT / ".rvenv" / "lib").resolve()).replace("\\", "/").casefold()
+            if not observed["jsonlite_available"] or not observed["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                raise RuntimeError(f"headless jsonlite did not load from the project library: {observed}")
+            if not observed["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                raise RuntimeError(f"headless jsonlite DLL did not load from the project library: {observed}")
+            headless_record["selection"] = selection
+            headless_record["ipc_eval"] = eval_record
+            headless_record["proof"] = observed
+            return headless_record
+        finally:
+            active_error = sys.exc_info()[0] is not None
+            cleanup_errors = []
+            shutdown_sent = False
+            forced_termination = False
+            if process.poll() is None and "info" in locals() and isinstance(info, dict) and info.get("pid"):
+                try:
+                    shutdown, shutdown_record = run(
+                        "headless-rig-project-shutdown",
+                        [ARF, "ipc", "shutdown", "--pid", str(info["pid"])],
+                        cwd=PROJECT,
+                        env=r_process_env(ENV),
+                        timeout=30,
+                    )
+                except Exception as error:
+                    cleanup_errors.append(f"headless rig-project shutdown failed: {error}")
+                else:
+                    if shutdown.returncode:
+                        cleanup_errors.append(
+                            "headless rig-project shutdown failed: "
+                            f"{shutdown.stderr.decode(errors='replace')}"
+                        )
+                    else:
+                        shutdown_sent = True
+                        headless_record["shutdown"] = shutdown_record
+            elif process.poll() is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                forced_termination = True
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                forced_termination = True
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        cleanup_errors.append("headless rig-project process remained alive after kill")
+            exit_code = process.returncode
+            headless_record["exit_code"] = exit_code
+            if forced_termination:
+                cleanup_errors.append("headless rig-project required forced process termination")
+            if shutdown_sent and exit_code != 0:
+                cleanup_errors.append(
+                    f"headless rig-project exited with status {exit_code} after shutdown"
+                )
+            if not shutdown_sent and not active_error:
+                cleanup_errors.append("headless rig-project exited before graceful shutdown")
+            if cleanup_errors:
+                headless_record["cleanup_errors"] = cleanup_errors
+                if not active_error:
+                    raise RuntimeError("; ".join(cleanup_errors))
+
+
+def project_b_native_baselines(home, a_proof):
+    binary = native_r_binary(home)
+    clean_env = r_process_env(ENV)
+    inherited_env = clean_env.copy()
+    inherited_fields = {
+        "R_HOME": "r_home_env",
+        "R_DOC_DIR": "r_doc_dir_env",
+        "R_SHARE_DIR": "r_share_dir_env",
+        "R_INCLUDE_DIR": "r_include_dir_env",
+        "R_LIBS": "r_libs_env",
+        "R_LIBS_SITE": "r_libs_site_env",
+        "R_LIBS_USER": "r_libs_user_env",
+        "RVENV": "rvenv",
+        "RVENV_UNSYNCED": "rvenv_unsynced",
+        "DYLD_LIBRARY_PATH": "dyld_library_path",
+        "DYLD_FALLBACK_LIBRARY_PATH": "dyld_fallback_library_path",
+        "DYLD_FRAMEWORK_PATH": "dyld_framework_path",
+    }
+    for key, field in inherited_fields.items():
+        value = a_proof[field]
+        if value:
+            inherited_env[key] = value
+        else:
+            inherited_env.pop(key, None)
+
+    baselines = {}
+    for name, child_env in (("clean", clean_env), ("inherited-a", inherited_env)):
+        result, record = run(
+            f"project-b-native-{name}",
+            [binary, "--slave", "--no-save", "-e", EXPRESSION],
+            cwd=PROJECT_B,
+            env=child_env,
+        )
+        require(result, f"native R project B {name} baseline")
+        baselines[name] = {"record": record, "proof": proof(result, f"native project B {name}")}
+    return baselines
+
+
+def compare_project_b_restart(baselines):
+    path = EVIDENCE / "switch-proofs" / "project-b-restart.txt"
+    if not path.is_file():
+        return {}, [f"missing project B restart proof: {path}"]
+    try:
+        observed = proof_text(path.read_text(encoding="utf-8"), "project B restart")
+        inherited = baselines["inherited-a"]["proof"]
+        clean = baselines["clean"]["proof"]
+
+        def same_path(actual, expected):
+            try:
+                return Path(actual).samefile(expected)
+            except OSError:
+                return os.path.normcase(str(Path(actual).resolve())) == os.path.normcase(
+                    str(Path(expected).resolve())
+                )
+
+        ignored = DIAGNOSTIC_ONLY_FIELDS | {"renviron_reads", "home_renviron_reads"}
+        comparable_observed = {key: value for key, value in observed.items() if key not in ignored}
+        comparable_inherited = {key: value for key, value in inherited.items() if key not in ignored}
+        errors = []
+        if comparable_observed != comparable_inherited:
+            errors.append("project B restart differs from native R B with project A's inherited environment")
+        for field in (
+            "r_home", "doc", "share", "include", "r_home_env", "r_doc_dir_env",
+            "r_share_dir_env", "r_include_dir_env",
+        ):
+            observed_value = observed[field]
+            clean_value = clean[field]
+            if not observed_value or not clean_value:
+                same = observed_value == clean_value
+            else:
+                same = same_path(observed_value, clean_value)
+            if not same:
+                errors.append(
+                    f"project B restart retained a stale R {field} path: "
+                    f"{observed_value!r}, clean project B uses {clean_value!r}"
+                )
+        project_b_rvenv = PROJECT_B / ".rvenv"
+        project_b_lib = project_b_rvenv / "lib"
+        if clean["rvenv"] and same_path(clean["rvenv"], project_b_rvenv):
+            if not observed["rvenv"] or not same_path(observed["rvenv"], project_b_rvenv):
+                errors.append(f"project B restart did not select project B's RVENV: {observed['rvenv']!r}")
+            if not any(same_path(item, project_b_lib) for item in observed["lib_paths"]):
+                errors.append(f"project B restart omitted project B's library: {observed['lib_paths']}")
+        if observed["cwd"].replace("\\", "/").casefold() != str(PROJECT_B.resolve()).replace("\\", "/").casefold():
+            errors.append(f"project B restart did not retain the new CWD: {observed['cwd']}")
+        if observed["marker"] != "rig-project-b-renviron-loaded":
+            errors.append(f"project B .Renviron marker was not loaded: {observed['marker']!r}")
+        return observed, errors
+    except Exception as error:
+        return {}, [f"project B restart proof could not be compared: {error}"]
+
+
 def compare_switch_proofs(homes, baselines):
     proof_dir = EVIDENCE / "switch-proofs"
     stages = {
@@ -592,18 +836,23 @@ jsonlite = "*"
         raise RuntimeError(f"arf binary does not exist: {ARF}")
 
     resolution_records = {}
+    resolution_descriptors = {}
     for source in ("cli", "environment"):
-        record, _ = explicit_rig_project_resolution(
+        record, descriptor = explicit_rig_project_resolution(
             source, home, status_data["sync"]["r_version"]
         )
         resolution_records[source] = record
+        resolution_descriptors[source] = descriptor
+
+    strict_failure = require_nonproject_strict_failure()
 
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
         "version_context": "released rig 0.11.0 user-mode fixture",
-        "arf_startup": "explicit rig-project provider startup and compiled package loading; macOS also runs the rig-version TUI switch case",
-        "comparison": "startup compares the native rig wrapper with arf; switch baselines use arf-resolved native R binaries; raw loader paths are diagnostic except for selected-lib precedence",
+        "arf_startup": "explicit rig-project provider startup, script mode, and headless IPC package loading; macOS also checks version switching and project-CWD restart",
+        "comparison": "startup compares the native rig wrapper with arf; project-CWD restart compares inherited and clean native baselines; switch baselines use arf-resolved native R binaries",
         "rig_project_resolution": resolution_records,
+        "strict_nonproject_failure": strict_failure,
         "setup": {"init": init_record, "lock": lock_record, "sync": sync_record,
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
@@ -706,6 +955,39 @@ jsonlite = "*"
             case["arf_error"] = str(error)
             errors.append(f"arf embedded R {name}: {error}")
 
+    script_path = EVIDENCE / "rig-project-proof.R"
+    # Keep the generated source LF-terminated; the embedded parser rejects CRLF input.
+    with script_path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(EXPRESSION + "\n")
+    script_result, script_record = run(
+        "arf-rig-project-script",
+        [ARF, "--r-provider", "rig-project", "--config", CONFIG,
+         "--no-r-auto-discovery", "--no-r-source-overrides", "--file", script_path],
+        env=r_env,
+    )
+    outcomes["script"] = script_record
+    try:
+        require(script_result, "arf rig-project script mode")
+        script_proof = proof(script_result, "arf rig-project script")
+        project_lib = str((PROJECT / ".rvenv" / "lib").resolve()).replace("\\", "/").casefold()
+        if script_proof["marker"] != MARKER or not script_proof["rvenv"]:
+            errors.append("script mode did not activate the rig project .Renviron")
+        if not script_proof["jsonlite_available"] or not script_proof["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+            errors.append(f"script mode jsonlite did not load from the project library: {script_proof}")
+        if not script_proof["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+            errors.append(f"script mode jsonlite DLL did not load from the project library: {script_proof}")
+        outcomes["script_proof"] = script_proof
+    except Exception as error:
+        errors.append(f"arf rig-project script mode: {error}")
+
+    try:
+        outcomes["headless"] = run_headless_provider(
+            home, resolution_descriptors["cli"]
+        )
+    except Exception as error:
+        outcomes["headless_error"] = str(error)
+        errors.append(f"headless rig-project provider: {error}")
+
     wrappers = (".rvenv/bin/R.exe", ".rvenv/bin/Rscript.exe") if os.name == "nt" else (
         ".rvenv/bin/R", ".rvenv/bin/Rscript"
     )
@@ -727,11 +1009,65 @@ jsonlite = "*"
         switch_proof_dir = EVIDENCE / "switch-proofs"
         switch_proof_dir.mkdir(parents=True, exist_ok=True)
         switch_homes, switch_baselines = switch_native_baselines(switch_env)
+        PROJECT_B.mkdir(parents=True, exist_ok=True)
+        init_b, init_b_record = run(
+            "rig-project-b-init",
+            rig_command(mode, "proj", "init", "--r-version", "4.6.0"),
+            cwd=PROJECT_B,
+        )
+        require(init_b, "rig proj init for project B")
+        (PROJECT_B / "rproj.toml").write_text(
+            '''[project]
+name = "arf-rig-project-b-proof"
+version = "0.1.0"
+type = "project"
+
+[dependencies]
+R = "=4.6.0"
+''',
+            encoding="utf-8",
+        )
+        with (PROJECT_B / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(
+                '\nRIG_PROJECT_MARKER=rig-project-b-renviron-loaded\n'
+                'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
+            )
+        lock_b, lock_b_record = run(
+            "rig-project-b-lock",
+            rig_command(mode, "proj", "lock", "--r-version", "4.6.0"),
+            cwd=PROJECT_B,
+        )
+        require(lock_b, "rig proj lock for project B")
+        sync_b, sync_b_record = run(
+            "rig-project-b-sync", rig_command(mode, "proj", "sync", "--no-install-r"),
+            cwd=PROJECT_B,
+        )
+        require(sync_b, "rig proj sync for project B")
+        status_b, status_b_record = run(
+            "rig-project-b-status", rig_command(mode, "proj", "status", "--json"),
+            cwd=PROJECT_B,
+        )
+        require(status_b, "rig proj status for project B")
+        status_b_data = json.loads(status_b.stdout)
+        if (
+            status_b_data.get("warnings") != []
+            or status_b_data.get("sync", {}).get("up_to_date") is not True
+            or status_b_data.get("sync", {}).get("reason") is not None
+            or not isinstance(status_b_data.get("root"), str)
+            or Path(status_b_data["root"]).resolve() != PROJECT_B.resolve()
+        ):
+            raise RuntimeError(f"rig project B is not an up-to-date project root: {status_b_data}")
+        (EVIDENCE / "rig-project-b-status.json").write_text(
+            json.dumps(status_b_data, indent=2), encoding="utf-8"
+        )
+        b_home = Path(switch_homes["4.6.0"])
         switch_state_path = RESULTS / "switch-state.json"
         switch_state = {
             "project": str(PROJECT.resolve()),
+            "project_b": str(PROJECT_B.resolve()),
             "user_home": str(USER_HOME.resolve()),
             "r_homes": switch_homes,
+            "project_b_r_home": str(b_home),
             "proof_script": str(proof_script.resolve()),
             "proof_dir": str(switch_proof_dir.resolve()),
             "base_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
@@ -747,6 +1083,12 @@ jsonlite = "*"
         )
         outcomes["switch"] = {
             "versions": ["4.6.1", "4.6.0", "4.5.3"],
+            "project_b": {
+                "init": init_b_record,
+                "lock": lock_b_record,
+                "sync": sync_b_record,
+                "status": status_b_record,
+            },
             "startup_dyld_library_path": switch_env["DYLD_LIBRARY_PATH"],
             "native_baselines": switch_baselines,
             "tui_test": switch_test_record,
@@ -758,6 +1100,17 @@ jsonlite = "*"
             switch_proofs, switch_errors = compare_switch_proofs(switch_homes, switch_baselines)
             outcomes["switch"]["proofs"] = switch_proofs
             errors.extend(switch_errors)
+            a_proof_path = switch_proof_dir / "cwd-restart-before-project-b.txt"
+            if a_proof_path.is_file():
+                a_proof = proof_text(a_proof_path.read_text(encoding="utf-8"), "project A before CWD restart")
+                b_baselines = project_b_native_baselines(b_home, a_proof)
+                outcomes["switch"]["project_b"]["native_baselines"] = b_baselines
+            else:
+                b_baselines = {}
+                errors.append(f"missing project A proof before CWD restart: {a_proof_path}")
+            project_b_proof, project_b_errors = compare_project_b_restart(b_baselines)
+            outcomes["switch"]["project_b"]["restart_proof"] = project_b_proof
+            errors.extend(project_b_errors)
     else:
         outcomes["switch"] = {"skipped": "the rig project version-switch test currently validates macOS DYLD behavior"}
 

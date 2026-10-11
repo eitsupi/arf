@@ -51,7 +51,7 @@ arf r resolve
 
 Every key is always present. A value is `null` when it does not apply, so consumers can rely on the key set being stable. `resolved` is `false`, and `target` and `provider` are `null`, exactly when no R installation could be found. That is not an error: the command still exits 0, because normal arf startup also continues in that state with R evaluation unavailable.
 
-`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation and is `null` when nothing was located; current values are `rig`, `path`, `explicit_path`, `pixi`, and `rig-project`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
+`resolver` names the tool that produced the descriptor, so resolution could later move behind a separate tool without breaking readers. `provider` identifies the mechanism that located the installation and is `null` when nothing was located; current values are `rig`, `path`, `explicit_path`, `rig-project`, and `pixi`. `resolved_version` is deliberately not called `r_version`: it is a prediction made before R starts, unlike the versions reported from a running session by the IPC layer. See [IPC session information](ipc.md#arf-ipc-session--get-session-info) for those runtime values.
 
 ### `selected_by` and `source`
 
@@ -62,8 +62,8 @@ Every key is always present. A value is `null` when it does not apply, so consum
 | `r_home` | An explicit R_HOME path was selected. |
 | `version_request` | A requested R version was selected, from the command line, environment, or a project file. |
 | `provider_request` | An R provider was explicitly requested with `--r-provider` or `ARF_R_PROVIDER`. |
-| `active_environment` | An externally activated environment supplied R; Pixi does not fabricate a version request. |
 | `project_environment` | The synchronized rig project in the current directory supplied R. |
+| `active_environment` | An externally activated environment supplied R; Pixi does not fabricate a version request. |
 | `default` | No explicit request selected the R source; configuration or the built-in default was used. |
 
 The `source.kind` values identify the origin of that condition:
@@ -74,8 +74,8 @@ The `source.kind` values identify the origin of that condition:
 | `environment_variable` | An explicit R source variable such as `ARF_R_HOME`, `ARF_R_VERSION`, or `ARF_R_PROVIDER`. |
 | `project_file` | A project file, with its path, format, and optional key. |
 | `configuration_file` | The loaded `arf.toml`, with its path, format, and key. |
-| `pixi` | The active Pixi environment, with its dynamic environment name and manifest path. |
 | `rig-project` | The rig project manifest path. |
+| `pixi` | The active Pixi environment, with its dynamic environment name and manifest path. |
 | `built_in_default` | arf's built-in default when no configuration file setting applies. |
 
 Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `requested_provider`, `name`, `path`, `format`, and `key` fields remain present in every descriptor. `requested_provider` is the explicit provider request, or `null` when none was made.
@@ -115,6 +115,6 @@ Exit codes match `arf ipc`: `0` means success, including `resolved: false`; `2` 
 
 Errors raised after the arguments parse successfully are JSON on stderr, in the same shape used by `arf ipc`. Argument-parsing failures — an unknown flag, a missing value, or mutually exclusive explicit R source flags combined — are reported by the argument parser as plain text and also exit `2`, so a client that needs to distinguish them must tolerate a non-JSON stderr at that exit code.
 
-An explicit Pixi request that cannot be satisfied exits `2` with `error.code: "INVALID_PARAMS"`. Its `error.data.reason_code` distinguishes `r_provider.pixi_not_active`, `r_provider.pixi_environment_invalid`, and `r_provider.pixi_r_unavailable`.
+An explicit rig-project request that cannot be satisfied exits `2` with `error.code: "INVALID_PARAMS"`. `error.data.reason_code` distinguishes `r_provider.rig_project_not_found`, `r_provider.rig_project_unavailable`, `r_provider.rig_project_status_invalid`, `r_provider.rig_project_not_synced`, and `r_provider.rig_project_r_unavailable`.
 
-An explicit rig-project request that cannot be satisfied also exits `2` with `error.code: "INVALID_PARAMS"`. `error.data.reason_code` distinguishes `r_provider.rig_project_not_found`, `r_provider.rig_project_unavailable`, `r_provider.rig_project_status_invalid`, `r_provider.rig_project_not_synced`, and `r_provider.rig_project_r_unavailable`.
+An explicit Pixi request that cannot be satisfied exits `2` with `error.code: "INVALID_PARAMS"`. Its `error.data.reason_code` distinguishes `r_provider.pixi_not_active`, `r_provider.pixi_environment_invalid`, and `r_provider.pixi_r_unavailable`.

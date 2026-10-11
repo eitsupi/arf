@@ -667,8 +667,8 @@ arf --with-r-version 4.5
 The `--r-provider` flag explicitly selects an active provider environment or synced rig project:
 
 ```bash
-arf --r-provider pixi
 arf --r-provider rig-project
+arf --r-provider pixi
 ```
 
 These options are mutually exclusive.
@@ -916,10 +916,10 @@ Abbreviations are matched against the word immediately to the left of the cursor
 
 ### R Source Overrides
 
-Select R from project version files, an externally activated Pixi environment, or a synced rig project. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
+Select R from project version files, a synced rig project, or an externally activated Pixi environment. This feature is fully opt-in: `r_source_overrides` defaults to an empty array. If it is unset or empty, arf falls back entirely to `startup.r_source`, exactly as before.
 
 > [!IMPORTANT]
-> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file`, `toml-key`, and `json-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and tries the next provider, including Pixi or rig-project. It falls back to `startup.r_source` only after all providers have been exhausted.
+> A version read from a file is only ever matched against the R installations that rig knows about — arf takes the candidate list from `rig list --json`. **The `version-file`, `toml-key`, and `json-key` providers therefore require rig**, and can only select an R version that rig has already installed. Without rig, or when no installed version matches, arf warns and tries the next provider, including rig-project or Pixi. It falls back to `startup.r_source` only after all providers have been exhausted.
 
 Override files are resolved as `<current directory>/<file>`. `file` must be a bare filename: it cannot be empty, `.`, `..`, contain subdirectories, or be an absolute path. arf does **not** walk up parent directories, even though the tools that write these files often do.
 
@@ -935,8 +935,8 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | `provider = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
 | `provider = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
 | `provider = "json-key"` | — | Reads a string version specification from the dot-separated JSON key in the `file` and `key` fields. |
-| `provider = "pixi"` | — | Uses R from an externally activated Pixi environment, without requiring rig. Has no additional fields. |
 | `provider = "rig-project"` | — | Uses R from the synchronized rig project in the current directory. Requires `rproj.toml` and a successful `rig proj status --json` check. |
+| `provider = "pixi"` | — | Uses R from an externally activated Pixi environment, without requiring rig. Has no additional fields. |
 
 For example, [rv](https://a2-ai.github.io/rv-docs/) stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
 
@@ -951,8 +951,8 @@ The other provider forms are:
 
 ```toml
 { provider = "version-file", file = ".r-version" }
-{ provider = "pixi" }
 { provider = "rig-project" }
+{ provider = "pixi" }
 ```
 
 **File formats read by each provider:**
@@ -1001,6 +1001,18 @@ r_source_overrides = [
 
 `--with-r-version`, `:switch` and `r_source_overrides` share the numeric and range matching described above. Only selectors from rig's own metadata differ: `default`, aliases such as `release`, and exact rig names work with `--with-r-version` and `:switch`, while named selectors are unsupported in an override file.
 
+**Rig projects**
+
+`rig-project` reads the project selected by `rig proj status --json` from the current directory's `rproj.toml`. It accepts only a project that rig reports as current and synchronized, with no status warnings; arf does not create or synchronize the environment. Run `rig proj sync` after changing project dependencies or when rig asks to rebuild the environment. `arf r resolve` reports the verified project wrapper and rig installation name; the installation name is not treated as an exact R version.
+
+For example, add `{ provider = "rig-project" }` to `experimental.r_source_overrides`, or explicitly select it with `arf --r-provider rig-project` or `ARF_R_PROVIDER=rig-project`. Explicit selection is strict: if the current directory is not a synced rig project, arf reports an error instead of choosing another R. `startup.r_source = "rig"` remains the normal rig default selection.
+
+During normal R startup, R reads the project `.Renviron` and rig's `rvenv` package activates the project library. `--no-environ` and `--vanilla` suppress reading the project `.Renviron` for that startup, though environment variables inherited by arf may still affect R. `:restart` resolves the project at the current working directory. It clears `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR` only when arf derived them from the previous R installation and they were absent from the original startup environment, allowing the selected installation to recompute them. Other environment variables remain inherited, so changing directories does not fully reset project activation state. `:switch VERSION` explicitly selects an installed rig R version; rig then decides during R startup whether that project's library can be used with the selected version.
+
+The integration test has validated user-mode rig 0.11.0 project startup and loading compiled `jsonlite` from the project library on Linux x64, macOS ARM64, and Windows x64. Its macOS TUI test covers R 4.6.1, 4.6.0, and 4.5.3, including a same-root restart after switching; it does not assert that rig deactivates the project library after a minor-version mismatch. The macOS integration test also validates `:restart` after changing the working directory from project A (R 4.6.1) to synchronized project B (R 4.6.0), including reevaluation of the current project.
+
+rig 0.11.0 has an upstream issue where switching across R minor versions can leave an incompatible project library active after rig warns ([rig issue #450](https://github.com/r-lib/rig/issues/450), fix merged in [rig PR #451](https://github.com/r-lib/rig/pull/451)). Until using a rig release containing the fix and running `rig proj sync`, avoid `:switch` across R major/minor versions. arf does not restrict these switches or synchronize projects automatically. The mismatch was observed with native R and arf on macOS and reproduced on Linux with a minimal rig-source test; Windows has not been independently reproduced.
+
 **Active Pixi environments**
 
 Enable the provider in the loaded `arf.toml`, then start arf through Pixi:
@@ -1030,16 +1042,6 @@ REPL, script and plain headless startup warnings go to stderr once. JSON headles
 
 The production provider has been validated on Linux x64, macOS ARM64 and Windows x64 using Pixi 0.81.0 with conda-forge R 4.5.3. The dedicated integration workflow covers `pixi run` in default and named detached environments, compiled `stats`, `jsonlite` and `curl`, eval/script/headless startup, and restart from a different workspace. Windows initialization converts canonical drive/UNC paths to the native spelling R accepts while preserving the validated target. Windows ARM64, `pixi exec`, global environments and standalone Pixi scripts are outside the initial verified scope.
 
-**Rig projects**
-
-`rig-project` reads the project selected by `rig proj status --json` from the current directory's `rproj.toml`. It accepts only a project that rig reports as current and synchronized, with no status warnings; arf does not create or synchronize the environment. Run `rig proj sync` after changing project dependencies or when rig asks to rebuild the environment. `arf r resolve` reports the verified project wrapper and rig installation name; the installation name is not treated as an exact R version.
-
-For example, add `{ provider = "rig-project" }` to `experimental.r_source_overrides`, or explicitly select it with `arf --r-provider rig-project` or `ARF_R_PROVIDER=rig-project`. Explicit selection is strict: if the current directory is not a synced rig project, arf reports an error instead of choosing another R. `startup.r_source = "rig"` remains the normal rig default selection.
-
-During normal R startup, R reads the project `.Renviron` and rig's `rvenv` package activates the project library. `--no-environ` and `--vanilla` suppress reading the project `.Renviron` for that startup, though environment variables inherited by arf may still affect R. `:restart` resolves the project at the current working directory. `:switch VERSION` explicitly selects an installed rig R version; rig then decides during R startup whether that project's library can be used with the selected version.
-
-This experimental provider has been tested with rig 0.11.0, which has an upstream issue where switching across R minor versions can leave an incompatible project library active after rig warns ([rig issue #450](https://github.com/r-lib/rig/issues/450), fix merged in [rig PR #451](https://github.com/r-lib/rig/pull/451)). Until using a rig release containing the fix and running `rig proj sync`, avoid `:switch` across R major/minor versions. arf does not restrict these switches or synchronize projects automatically. The mismatch was observed with native R and arf on macOS and reproduced on Linux with a minimal rig-source test; Windows has not been independently reproduced.
-
 When resolving file providers, a missing file is silently skipped. An unreadable or invalid value produces a warning and arf moves to the next entry.
 
 When a provider's requested version is not installed, arf prints installation guidance and tries the next provider. Only after all providers fail does it fall back to `startup.r_source`; startup continues rather than aborting. If rig is unavailable or its version list cannot be read, the affected file provider is skipped and later providers are still evaluated. Numeric version selectors use `rig add`, while version ranges use non-command guidance because a range is not an executable `rig add` argument. The warnings are:
@@ -1067,7 +1069,7 @@ Use `--no-r-source-overrides` to disable evaluation of `r_source_overrides`. It 
 
 The first two tiers are explicit CLI and environment selections. Tiers 3 and 4 are settings in the single loaded `arf.toml` (`r_source_overrides` and `startup.r_source`), selected by `--config`, `ARF_CONFIG`, or the platform default (see [Configuration File Location](configuration.md#configuration-file-location)). Project-local files such as `rproject.toml` and `.r-version` are inputs to override providers, not separate arf configuration files. Tiers 5 and 6 describe how arf discovers R after the selected configuration resolves to PATH mode.
 
-For `headless` and `r resolve`, explicit R source flags belong to the subcommand: write `arf headless --r-provider pixi` or `arf r resolve --r-provider pixi`, not `arf --r-provider pixi headless` or `arf --r-provider pixi r resolve`. `ARF_R_HOME`, `ARF_R_VERSION`, and `ARF_R_PROVIDER` need no placement. A CLI selection takes precedence over all three environment variables. If no CLI selection is present and more than one environment variable is set, arf reports a conflict. An explicit Pixi provider requires an already active Pixi environment; an explicit rig-project provider requires a synced project in the current directory. Either request fails instead of selecting another R source.
+For `headless` and `r resolve`, explicit R source flags belong to the subcommand: write `arf headless --r-provider rig-project` or `arf r resolve --r-provider rig-project`, not `arf --r-provider rig-project headless` or `arf --r-provider rig-project r resolve`. `ARF_R_HOME`, `ARF_R_VERSION`, and `ARF_R_PROVIDER` need no placement. A CLI selection takes precedence over all three environment variables. If no CLI selection is present and more than one environment variable is set, arf reports a conflict. An explicit rig-project provider requires a synced project in the current directory; an explicit Pixi provider requires an already active Pixi environment. Either request fails instead of selecting another R source.
 
 | Tier | Source | Evaluation behavior |
 |------|--------|---------------------|

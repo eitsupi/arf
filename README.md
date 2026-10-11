@@ -286,7 +286,7 @@ See [R Help Viewer configuration](docs/configuration.md#experimental-r-help-view
 
 ### R Source Overrides
 
-Select an R version per directory or project with `experimental.r_source_overrides`. **Disabled by default.** It can read a `.r-version` file or [rv](https://a2-ai.github.io/rv-docs/)'s `rproject.toml`; file providers search only the current directory and select versions already installed by rig. The `pixi` provider can instead use R from an externally activated Pixi environment, without rig.
+Select R per directory or project with `experimental.r_source_overrides`. **Disabled by default.** File providers can read a `.r-version` file or [rv](https://a2-ai.github.io/rv-docs/)'s `rproject.toml`; they search only the current directory and select versions already installed by rig. The `rig-project` provider uses the synced rig project in the current directory, and the `pixi` provider uses an externally activated Pixi environment.
 
 ```toml
 [experimental]
@@ -295,6 +295,8 @@ r_source_overrides = [
   { provider = "toml-key", file = "rproject.toml", key = "project.r_version" },
 ]
 ```
+
+For rig projects, configure `r_source_overrides = [{ provider = "rig-project" }]` or select one explicitly with `arf --r-provider rig-project` (or `ARF_R_PROVIDER=rig-project`). The project must already be synced by rig.
 
 For Pixi, configure `r_source_overrides = [{ provider = "pixi" }]` or select it explicitly with `arf --r-provider pixi` (or `ARF_R_PROVIDER=pixi`). Start arf inside the activated environment, such as with `pixi run arf`; arf validates the environment without managing it.
 
