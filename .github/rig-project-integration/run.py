@@ -83,7 +83,6 @@ for path in ("RIG_R_INSTALL_DIR", "RIG_BINARY_DIR", "RIG_DOWNLOAD_DIR", "XDG_CAC
 
 CONFIG = RESULTS / "arf.toml"
 CONFIG.write_text('[history]\nmode = "volatile"\n', encoding="utf-8")
-ENV["R_USER"] = str(USER_HOME)
 
 EXPRESSION = r'''local({
   norm <- function(x) normalizePath(x, winslash = "/", mustWork = FALSE)
@@ -170,6 +169,15 @@ def require(result, name):
         raise RuntimeError(f"{name} failed: {result.stderr.decode(errors='replace')[-4000:]}")
 
 
+def r_process_env(env):
+    child_env = env.copy()
+    child_env["HOME"] = str(USER_HOME)
+    # Windows R prefers R_USER over HOME when expanding `~`.
+    if os.name == "nt":
+        child_env["R_USER"] = str(USER_HOME)
+    return child_env
+
+
 def proof(result, name):
     return proof_text(result.stdout.decode(errors="replace"), name)
 
@@ -200,11 +208,12 @@ def wrapper_path():
 
 def wrapper_rhome():
     wrapper = wrapper_path()
+    child_env = r_process_env(ENV)
     if os.name == "nt":
         command = subprocess.list2cmdline([str(wrapper), "RHOME"])
-        result, record = run("wrapper-rhome", command, shell=True)
+        result, record = run("wrapper-rhome", command, env=child_env, shell=True)
     else:
-        result, record = run("wrapper-rhome", [wrapper, "RHOME"])
+        result, record = run("wrapper-rhome", [wrapper, "RHOME"], env=child_env)
     require(result, "rig R wrapper RHOME")
     candidates = [line.strip() for line in record["stdout"].splitlines() if line.strip()]
     if not candidates:
@@ -346,12 +355,13 @@ def loader_diagnostics(home, native_binary):
 def switch_native_baselines(switch_env):
     homes = {}
     baselines = {}
+    child_env = r_process_env(switch_env)
     for version in ("4.6.1", "4.6.0", "4.5.3"):
         resolved, resolve_record = run(
             f"switch-resolve-{version}",
             [ARF, "r", "resolve", "--with-r-version", version],
             cwd=PROJECT,
-            env=switch_env,
+            env=ENV,
         )
         require(resolved, f"arf resolve R {version}")
         descriptor = json.loads(resolved.stdout)
@@ -364,10 +374,12 @@ def switch_native_baselines(switch_env):
             f"switch-native-{version}",
             [native_binary, "--slave", "--no-save", "-e", EXPRESSION],
             cwd=PROJECT,
-            env=switch_env,
+            env=child_env,
         )
         require(native, f"native R {version} switch baseline")
         native_proof = proof(native, f"native R {version} switch baseline")
+        if native_proof["home"].replace("\\", "/").casefold() != str(USER_HOME.resolve()).replace("\\", "/").casefold():
+            raise RuntimeError(f"native R {version} did not use the isolated HOME: {native_proof['home']}")
         homes[version] = str(home)
         baselines[version] = {
             "resolve": resolve_record,
@@ -411,6 +423,9 @@ def compare_switch_proofs(homes, baselines):
                 errors.append(f"{stage}: R.home() is {actual_home}, expected {expected_home}")
             if observed["cwd"].replace("\\", "/").casefold() != str(PROJECT.resolve()).replace("\\", "/").casefold():
                 errors.append(f"{stage}: restart changed CWD: {observed['cwd']}")
+            isolated_home = str(USER_HOME.resolve()).replace("\\", "/").casefold()
+            if observed["home"].replace("\\", "/").casefold() != isolated_home:
+                errors.append(f"{stage}: R did not use isolated HOME: {observed['home']}")
             if observed["marker"] != MARKER:
                 errors.append(f"{stage}: project .Renviron marker is missing")
             if observed["home_marker"] != "rig-home-renviron-loaded":
@@ -548,15 +563,18 @@ jsonlite = "*"
         "modes": {},
     }
     errors = []
+    r_env = r_process_env(ENV)
     for name, flags in (("normal", []), ("no-environ", ["--no-environ"]), ("vanilla", ["--vanilla"])):
         native, native_record = run(
-            f"native-{name}", [native_binary, "--slave", "--no-save", *flags, "-e", EXPRESSION]
+            f"native-{name}", [native_binary, "--slave", "--no-save", *flags, "-e", EXPRESSION],
+            env=r_env,
         )
         arf, arf_record = run(
             f"arf-{name}",
             [ARF, "--config", CONFIG, "--r-home", home,
              "--no-r-auto-discovery", "--no-r-source-overrides", *flags,
              "-e", EXPRESSION],
+            env=r_env,
         )
         case = {"native": native_record, "arf": arf_record}
         outcomes["modes"][name] = case
@@ -564,6 +582,9 @@ jsonlite = "*"
             require(native, f"native R {name} startup")
             native_proof = proof(native, f"native R {name}")
             case["native_proof"] = native_proof
+            expected_home = str(USER_HOME.resolve()).replace("\\", "/").casefold()
+            if native_proof["home"].replace("\\", "/").casefold() != expected_home:
+                errors.append(f"native {name}: R did not use isolated HOME: {native_proof['home']}")
             expected_reads = "x" if name == "normal" else ""
             if native_proof["renviron_reads"] != expected_reads:
                 errors.append(
@@ -578,6 +599,9 @@ jsonlite = "*"
             require(arf, f"arf embedded R {name} startup")
             arf_proof = proof(arf, f"arf embedded R {name}")
             case["arf_proof"] = arf_proof
+            expected_home = str(USER_HOME.resolve()).replace("\\", "/").casefold()
+            if arf_proof["home"].replace("\\", "/").casefold() != expected_home:
+                errors.append(f"arf {name}: R did not use isolated HOME: {arf_proof['home']}")
             if "native_proof" in case:
                 comparable_native = {
                     key: value for key, value in case["native_proof"].items()

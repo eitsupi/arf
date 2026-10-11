@@ -87,7 +87,7 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
     );
     ensure!(
         user_home.join(".Renviron").is_file(),
-        "dedicated R_USER has no .Renviron"
+        "isolated HOME has no .Renviron"
     );
     fs::create_dir_all(&proof_dir)?;
 
@@ -96,7 +96,7 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
             .cwd(&project)
             .vanilla(false)
             .artifacts(proof_dir.join("tui"))
-            .env("R_USER", user_home.to_string_lossy())
+            .env("HOME", user_home.to_string_lossy())
             .env("DYLD_LIBRARY_PATH", startup_dyld)
             .args([
                 "--with-r-version",
