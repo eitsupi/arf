@@ -268,3 +268,62 @@ fn selected_unloadable_library_never_falls_back_to_system_r() {
         assert!(!stderr.to_lowercase().contains("falling back"), "{stderr}");
     }
 }
+
+#[test]
+fn auto_path_discovery_remains_bounded_after_pixi_probe_rejection() {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let fixture = Fixture::new();
+    std::fs::write(
+        &fixture.config,
+        r"[startup]
+r_source='auto'
+[experimental]
+r_source_overrides=[{type='pixi'}]",
+    )
+    .unwrap();
+    for mode in ["stdout", "stderr", "hang"] {
+        let counter = fixture.root.path().join(format!("{mode}-calls"));
+        let start = Instant::now();
+        let mut child = fixture
+            .command(true)
+            // Isolate PATH to exclude rig and any other R executable.
+            .env("PATH", fixture.binary.parent().unwrap())
+            .env_remove("R_HOME")
+            .env("ARF_TEST_RHOME_MODE", mode)
+            .env("ARF_TEST_RHOME_COUNT", &counter)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(35) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("auto discovery exceeded its probe deadlines: {mode}");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{mode}: {output:?}");
+        assert!(output.stderr.is_empty(), "{mode}: {output:?}");
+        let descriptor: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let diagnostics = descriptor["diagnostics"].as_array().unwrap();
+        let rejected = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["code"] == "r_source_override.pixi_r_unavailable")
+            .expect("Pixi probe must reject this launcher");
+        let reason = if mode == "hang" {
+            "time limit"
+        } else {
+            "output limit"
+        };
+        assert!(rejected["message"].as_str().unwrap().contains(reason));
+        assert_eq!(std::fs::read_to_string(counter).unwrap(), "2", "{mode}");
+    }
+}

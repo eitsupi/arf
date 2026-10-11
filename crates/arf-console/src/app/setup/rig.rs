@@ -23,28 +23,15 @@ pub(super) fn resolve_r_home_from_path(path: &std::path::Path) -> Result<std::pa
     let r_binary = path.join("bin").join("R");
     if r_binary.exists() {
         // Run `bin/R RHOME` to get the actual R_HOME
-        let output = std::process::Command::new(&r_binary)
-            .arg("RHOME")
-            .output()
+        let r_home = arf_libr::probe_r_home(std::process::Command::new(&r_binary))
             .with_context(|| format!("Failed to run {} RHOME", r_binary.display()))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("{} RHOME failed: {}", r_binary.display(), stderr);
-        }
-
-        let r_home = arf_libr::r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
-            .unwrap_or_default();
-        if r_home.is_empty() {
-            anyhow::bail!("{} RHOME returned empty result", r_binary.display());
-        }
 
         log::debug!(
             "Resolved R_HOME from installation prefix: {} -> {}",
             path.display(),
-            r_home
+            r_home.display()
         );
-        return Ok(std::path::PathBuf::from(r_home));
+        return Ok(r_home);
     }
 
     // Assume the path is already R_HOME

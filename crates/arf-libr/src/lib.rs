@@ -6,6 +6,7 @@
 mod error;
 mod functions;
 mod library_selection;
+mod rhome_probe;
 mod types;
 #[cfg(windows)]
 mod windows_loader;
@@ -15,6 +16,7 @@ mod sys;
 // error
 pub use error::{RError, RResult};
 pub use library_selection::select_r_library;
+pub use rhome_probe::{RHomeProbeError, probe_r_home};
 
 // functions
 pub use functions::{RLibrary, init_r_library, r_global_env, r_library, r_nil_value};

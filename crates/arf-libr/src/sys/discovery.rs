@@ -100,11 +100,8 @@ pub fn find_r_library() -> RResult<PathBuf> {
     #[cfg(windows)]
     let r_cmd = "R.exe";
 
-    if let Ok(output) = Command::new(r_cmd).args(["RHOME"]).output()
-        && output.status.success()
-        && let Some(r_home) = r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
-    {
-        let lib_path = r_library_path(Path::new(&r_home));
+    if let Ok(r_home) = crate::probe_r_home(Command::new(r_cmd)) {
+        let lib_path = r_library_path(&r_home);
         if lib_path.exists() {
             return Ok(lib_path);
         }
@@ -175,25 +172,8 @@ pub fn get_r_home() -> RResult<PathBuf> {
     }
 
     // Try to get from R command
-    let output = Command::new("R")
-        .args(["RHOME"])
-        .output()
-        .map_err(|e| RError::LibraryNotFound(format!("Failed to run R RHOME: {}", e)))?;
-
-    if output.status.success() {
-        r_home_from_rhome_output(&String::from_utf8_lossy(&output.stdout))
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                RError::LibraryNotFound(
-                    "R RHOME succeeded but printed no usable path. Is R installed correctly?"
-                        .to_string(),
-                )
-            })
-    } else {
-        Err(RError::LibraryNotFound(
-            "R RHOME failed. Is R installed and in PATH?".to_string(),
-        ))
-    }
+    crate::probe_r_home(Command::new("R"))
+        .map_err(|error| RError::LibraryNotFound(format!("Failed to discover R_HOME: {error}")))
 }
 
 /// Environment variables that R's shell wrapper script exports but that are

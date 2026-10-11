@@ -9,6 +9,7 @@
 ### Changed
 
 - R source overrides now continue to later providers when rig is unavailable or its version list cannot be read, with one final fallback notice.
+- RHOME probes used during source resolution and automatic discovery now have time and output limits.
 - The interactive help browser now searches package help metadata in a background worker, keeping query editing responsive while results are ranked.
 
 ## [0.6.0] - 2026-10-08

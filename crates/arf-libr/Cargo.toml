@@ -11,6 +11,7 @@ libloading.workspace = true
 once_cell.workspace = true
 log.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["process"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
