@@ -46,16 +46,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
-      ARF_RIG_RESULTS: ${{ runner.temp }}/arf-rig-project-integration
       RIG_MODE: user
-      RIG_R_INSTALL_DIR: ${{ runner.temp }}/arf-rig-project-integration/rig-r
-      RIG_BINARY_DIR: ${{ runner.temp }}/arf-rig-project-integration/rig-bin
-      RIG_DOWNLOAD_DIR: ${{ runner.temp }}/arf-rig-project-integration/downloads
-      XDG_CACHE_HOME: ${{ runner.temp }}/arf-rig-project-integration/cache
-      XDG_CONFIG_HOME: ${{ runner.temp }}/arf-rig-project-integration/config
-      XDG_DATA_HOME: ${{ runner.temp }}/arf-rig-project-integration/data
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure isolated paths
+        run: |
+          if command -v python3 >/dev/null; then
+            python3 .github/rig-project-integration/configure_paths.py
+          else
+            python .github/rig-project-integration/configure_paths.py
+          fi
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install released rig 0.11.0
