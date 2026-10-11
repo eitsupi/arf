@@ -216,9 +216,28 @@ def r_library_path(home):
     return home / "lib" / "libR.so"
 
 
+def file_kind(path):
+    header = path.open("rb").read(8)
+    if header.startswith(b"#!"):
+        return "script"
+    if header.startswith(b"MZ"):
+        return "binary:MZ"
+    if header.startswith(b"\x7fELF"):
+        return "binary:ELF"
+    if header[:4] in {
+        b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    }:
+        return "binary:Mach-O"
+    if b"\0" in header:
+        return "binary:unknown"
+    return "text"
+
+
 def loader_diagnostics(home, native_binary):
     library = r_library_path(home)
-    wrapper_candidates = [home / "bin" / "R", native_binary]
+    wrapper_candidates = [home / "bin" / "R", native_binary, wrapper_path()]
     dependency_result = None
     if library.is_file():
         tool = "otool" if sys.platform == "darwin" else "ldd" if os.name != "nt" else None
@@ -257,9 +276,18 @@ def loader_diagnostics(home, native_binary):
             wrapper_details[str(path)] = {"exists": False}
             continue
         try:
+            kind = file_kind(path)
+            if kind.startswith("binary:"):
+                wrapper_details[str(path)] = {
+                    "exists": True,
+                    "kind": kind,
+                    "size_bytes": path.stat().st_size,
+                }
+                continue
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             wrapper_details[str(path)] = {
                 "exists": True,
+                "kind": kind,
                 "relevant_lines": [line.strip() for line in lines if any(key in line for key in relevant)][:80],
                 "path_assignments": {
                     key: assignment_matches(lines, key)
@@ -458,6 +486,11 @@ jsonlite = "*"
                         variant["status"] = "invalid-proof"
                         variant["comparison_error"] = str(error)
             case["arf_native_path_env_variant"] = variant
+            if variant["status"] != "passed":
+                errors.append(
+                    f"{name}: macOS native path environment variant {variant['status']}"
+                    + (f": {variant.get('comparison_error')}" if variant.get("comparison_error") else "")
+                )
 
     wrappers = (".rvenv/bin/R.exe", ".rvenv/bin/Rscript.exe") if os.name == "nt" else (
         ".rvenv/bin/R", ".rvenv/bin/Rscript"
