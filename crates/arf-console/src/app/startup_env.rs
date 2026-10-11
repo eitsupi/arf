@@ -18,6 +18,8 @@ const STARTUP_ENV_VARS: &[&str] = &[
     "R_SHARE_DIR",
     "R_INCLUDE_DIR",
     "R_SYSTEM_ABI",
+    #[cfg(target_os = "macos")]
+    "DYLD_LIBRARY_PATH",
 ];
 /// Carries the startup snapshot across a restart or the `ensure_ld_library_path` re-exec.
 ///
@@ -316,6 +318,21 @@ mod tests {
             deserialize_startup_env(&serialized).expect("deserialization should succeed");
 
         assert_eq!(restored.get("R_LIBS"), Some(&value));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn startup_env_round_trip_preserves_non_utf8_dyld_library_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let value = OsString::from_vec(b"/user/R-\xff/lib".to_vec());
+        let snapshot = HashMap::from([("DYLD_LIBRARY_PATH".to_string(), value.clone())]);
+
+        let serialized = serialize_startup_env(&snapshot).expect("serialization should succeed");
+        let restored =
+            deserialize_startup_env(&serialized).expect("deserialization should succeed");
+
+        assert_eq!(restored.get("DYLD_LIBRARY_PATH"), Some(&value));
     }
 
     #[test]

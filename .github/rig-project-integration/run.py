@@ -1,4 +1,4 @@
-"""Compare rig's project wrapper with arf under the minimal macOS loader setup."""
+"""Compare rig's project wrapper with arf's embedded R startup on macOS."""
 
 import ctypes
 import json
@@ -32,9 +32,7 @@ DIAGNOSTIC_ONLY_FIELDS = {
     "dyld_library_path",
     "dyld_fallback_library_path",
     "dyld_framework_path",
-    "renviron_reads",
 }
-
 ENV = os.environ.copy()
 for key in (
     "R_HOME",
@@ -59,6 +57,9 @@ for key in (
     "DYLD_FRAMEWORK_PATH",
 ):
     ENV.pop(key, None)
+for key in tuple(ENV):
+    if key.startswith("DYLD_"):
+        ENV.pop(key)
 ENV["NO_COLOR"] = "1"
 ENV["RIG_INHERITED_MARKER"] = INHERITED_MARKER
 ENV["RIG_MODE"] = os.environ.get("RIG_MODE", "admin")
@@ -390,6 +391,8 @@ jsonlite = "*"
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
         "version_context": "released rig 0.11.0 user-mode fixture",
+        "arf_startup": "explicit R_HOME and normal embedded startup",
+        "comparison": "native rig wrapper and arf use the same initial environment; raw loader paths are diagnostic",
         "setup": {"init": init_record, "lock": lock_record, "sync": sync_record,
                   "status": status_record,
                   "wrapper_rhome": wrapper_record, "r_home": str(home),
@@ -412,113 +415,75 @@ jsonlite = "*"
         )
         arf, arf_record = run(
             f"arf-{name}",
-            [ARF, "--config", CONFIG, "--r-home", home, "--no-r-auto-discovery",
-             "--no-r-source-overrides", *flags, "-e", EXPRESSION],
+            [ARF, "--config", CONFIG, "--r-home", home,
+             "--no-r-auto-discovery", "--no-r-source-overrides", *flags,
+             "-e", EXPRESSION],
         )
-        case = {"native": native_record, "arf_baseline": arf_record}
+        case = {"native": native_record, "arf": arf_record}
         outcomes["modes"][name] = case
-        expected = None
         try:
             require(native, f"native R {name} startup")
-            expected = proof(native, f"native R {name}")
-            case["native_proof"] = expected
+            native_proof = proof(native, f"native R {name}")
+            case["native_proof"] = native_proof
             expected_reads = "x" if name == "normal" else ""
-            if expected["renviron_reads"] != expected_reads:
+            if native_proof["renviron_reads"] != expected_reads:
                 errors.append(
                     f"native {name}: expected .Renviron read marker {expected_reads!r}, "
-                    f"got {expected['renviron_reads']!r}"
+                    f"got {native_proof['renviron_reads']!r}"
                 )
         except Exception as error:
             case["native_error"] = str(error)
             errors.append(f"native {name}: {error}")
 
-        if expected is not None:
-            if arf.returncode:
-                case["baseline_status"] = "failed-to-initialize"
+        try:
+            require(arf, f"arf embedded R {name} startup")
+            arf_proof = proof(arf, f"arf embedded R {name}")
+            case["arf_proof"] = arf_proof
+            if "native_proof" in case:
+                comparable_native = {
+                    key: value for key, value in case["native_proof"].items()
+                    if key not in DIAGNOSTIC_ONLY_FIELDS
+                }
+                comparable_arf = {
+                    key: value for key, value in arf_proof.items()
+                    if key not in DIAGNOSTIC_ONLY_FIELDS
+                }
+                if comparable_arf != comparable_native:
+                    errors.append(f"{name}: arf embedded R proof differs from native R")
+            expected_reads = "x" if name == "normal" else ""
+            if arf_proof["renviron_reads"] != expected_reads:
+                errors.append(
+                    f"arf {name}: expected .Renviron read marker {expected_reads!r}, "
+                    f"got {arf_proof['renviron_reads']!r}"
+                )
+            if arf_proof["inherited_marker"] != INHERITED_MARKER:
+                errors.append(f"arf {name}: inherited process environment was unexpectedly cleared")
+            project_lib = str((PROJECT / ".rvenv" / "lib").resolve()).replace("\\", "/").casefold()
+            if name == "normal":
+                if arf_proof["marker"] != MARKER:
+                    errors.append(f"normal: .Renviron marker was not loaded: {arf_proof['marker']!r}")
+                if not arf_proof["rvenv"]:
+                    errors.append("normal: rig did not set RVENV")
+                if not any(path.replace("\\", "/").casefold() == project_lib
+                           for path in arf_proof["lib_paths"]):
+                    errors.append(f"normal: project library missing from .libPaths(): {arf_proof['lib_paths']}")
+                if not arf_proof["jsonlite_available"]:
+                    errors.append("normal: project jsonlite package did not load")
+                elif not arf_proof["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                    errors.append(f"normal: jsonlite did not resolve to rig project library: {arf_proof['jsonlite_package']}")
+                elif not arf_proof["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                    errors.append(f"normal: jsonlite DLL did not resolve to rig project library: {arf_proof['jsonlite_dll']}")
             else:
-                try:
-                    baseline = proof(arf, f"arf baseline {name}")
-                    case["arf_baseline_proof"] = baseline
-                    comparable_expected = {key: value for key, value in expected.items()
-                                           if key not in DIAGNOSTIC_ONLY_FIELDS}
-                    comparable_baseline = {key: value for key, value in baseline.items()
-                                           if key not in DIAGNOSTIC_ONLY_FIELDS}
-                    case["baseline_status"] = (
-                        "matched" if comparable_expected == comparable_baseline else "mismatched"
-                    )
-                except Exception as error:
-                    case["baseline_diagnostic_error"] = str(error)
-
-        variant_env = ENV.copy()
-        variant_env.pop("DYLD_FALLBACK_LIBRARY_PATH", None)
-        variant_env["DYLD_LIBRARY_PATH"] = str(home / "lib")
-        variant_result, variant_record = run(
-            f"arf-minimal-dyld-{name}",
-            [ARF, "--config", CONFIG, "--r-home", home, "--no-r-auto-discovery",
-             "--no-r-source-overrides", *flags, "-e", EXPRESSION],
-            env=variant_env,
-        )
-        variant = {
-            "status": "failed-to-initialize" if variant_result.returncode else "invalid-proof",
-            "environment_delta": {"DYLD_LIBRARY_PATH": str(home / "lib")},
-            "arf": variant_record,
-        }
-        if expected is not None and not variant_result.returncode:
-            try:
-                actual = proof(variant_result, f"arf minimal DYLD {name}")
-                variant["arf_proof"] = actual
-                compared_expected = {key: value for key, value in expected.items()
-                                     if key not in DIAGNOSTIC_ONLY_FIELDS}
-                compared_actual = {key: value for key, value in actual.items()
-                                   if key not in DIAGNOSTIC_ONLY_FIELDS}
-                variant["proof_matches_native"] = compared_expected == compared_actual
-                variant["renviron_read_count"] = len(actual["renviron_reads"])
-                if actual["renviron_reads"] != expected_reads:
-                    variant["status"] = "wrong-renviron-read-count"
-                    errors.append(
-                        f"{name}: expected .Renviron read marker {expected_reads!r}, "
-                        f"got {actual['renviron_reads']!r}"
-                    )
-                elif variant["proof_matches_native"]:
-                    variant["status"] = "passed"
-                else:
-                    variant["status"] = "mismatch"
-                    errors.append(f"{name}: minimal DYLD proof differs from native R")
-                if actual["inherited_marker"] != INHERITED_MARKER:
-                    errors.append(f"{name}: inherited process environment was unexpectedly cleared")
-                project_lib = str((PROJECT / ".rvenv" / "lib").resolve()).replace("\\", "/").casefold()
-                if name == "normal":
-                    if actual["marker"] != MARKER:
-                        errors.append(f"normal: .Renviron marker was not loaded: {actual['marker']!r}")
-                    if not actual["rvenv"]:
-                        errors.append("normal: rig did not set RVENV")
-                    if not any(path.replace("\\", "/").casefold() == project_lib
-                               for path in actual["lib_paths"]):
-                        errors.append(f"normal: project library missing from .libPaths(): {actual['lib_paths']}")
-                    if not actual["jsonlite_available"]:
-                        errors.append("normal: project jsonlite package did not load")
-                    elif not actual["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
-                        errors.append(f"normal: jsonlite did not resolve to rig project library: {actual['jsonlite_package']}")
-                    elif not actual["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
-                        errors.append(f"normal: jsonlite DLL did not resolve to rig project library: {actual['jsonlite_dll']}")
-                else:
-                    if actual["marker"] or actual["rvenv"]:
-                        errors.append(f"{name}: rig .Renviron should not activate the project")
-                    if any(path.replace("\\", "/").casefold() == project_lib
-                           for path in actual["lib_paths"]):
-                        errors.append(f"{name}: project library unexpectedly appears in .libPaths()")
-                    if actual["jsonlite_available"] and actual["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
-                        errors.append(f"{name}: jsonlite unexpectedly loaded from project library")
-            except Exception as error:
-                variant["status"] = "invalid-proof"
-                variant["comparison_error"] = str(error)
-                errors.append(f"{name}: {error}")
-        elif expected is None:
-            variant["status"] = "native-proof-unavailable"
-            errors.append(f"{name}: native R proof unavailable")
-        else:
-            errors.append(f"{name}: minimal DYLD startup failed: {variant_record['stderr'][-3000:]}")
-        case["arf_minimal_dyld_variant"] = variant
+                if arf_proof["marker"] or arf_proof["rvenv"]:
+                    errors.append(f"{name}: rig .Renviron should not activate the project")
+                if any(path.replace("\\", "/").casefold() == project_lib
+                       for path in arf_proof["lib_paths"]):
+                    errors.append(f"{name}: project library unexpectedly appears in .libPaths()")
+                if arf_proof["jsonlite_available"] and arf_proof["jsonlite_package"].replace("\\", "/").casefold().startswith(project_lib + "/"):
+                    errors.append(f"{name}: jsonlite unexpectedly loaded from project library")
+        except Exception as error:
+            case["arf_error"] = str(error)
+            errors.append(f"arf embedded R {name}: {error}")
 
     wrappers = (".rvenv/bin/R.exe", ".rvenv/bin/Rscript.exe") if os.name == "nt" else (
         ".rvenv/bin/R", ".rvenv/bin/Rscript"

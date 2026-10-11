@@ -212,7 +212,7 @@ pub(crate) fn run_headless(
         );
     }
 
-    // Ensure LD_LIBRARY_PATH includes R library directory
+    // Prepare the platform loader path for the R library directory.
     #[cfg(unix)]
     let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
         crate::app::setup::forward_loader_target(&resolution)
@@ -220,7 +220,7 @@ pub(crate) fn run_headless(
     #[cfg(not(unix))]
     let loader_result = arf_libr::ensure_ld_library_path();
     if let Err(e) = loader_result {
-        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+        log::warn!("Could not prepare the R library search path: {}", e);
     }
     #[cfg(unix)]
     crate::app::setup::clear_loader_target();
