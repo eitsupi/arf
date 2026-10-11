@@ -1,6 +1,7 @@
 //! Machine-facing R source resolution.
 
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
+pub(crate) use crate::app::explicit_r_source::RSourceOrigin;
 use crate::app::setup::{
     RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
 };
@@ -11,13 +12,6 @@ use anyhow::Result;
 use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
-
-/// The origin of the highest-priority R source option.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum RSourceOrigin {
-    Cli,
-    Environment,
-}
 
 /// A stable diagnostic attached to a resolve descriptor.
 ///
