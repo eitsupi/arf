@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/check-pixi-integration.yml
-      - .github/pixi-r-source/**
+      - .github/pixi-integration/**
       - "**/Cargo.toml"
       - Cargo.lock
       - "**/*pixi*"
@@ -15,7 +15,7 @@ on:
       - main
     paths:
       - .github/workflows/check-pixi-integration.yml
-      - .github/pixi-r-source/**
+      - .github/pixi-integration/**
       - "**/Cargo.toml"
       - Cargo.lock
       - "**/*pixi*"
@@ -46,7 +46,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
         with:
           pixi-version: v0.81.0
-          manifest-path: .github/pixi-r-source/pixi.toml
+          manifest-path: .github/pixi-integration/pixi.toml
           cache: false
           locked: true
       - name: Build production arf and integration tests
@@ -61,17 +61,17 @@ jobs:
         shell: bash
         env:
           ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-default
-        run: pixi run --manifest-path .github/pixi-r-source/pixi.toml --locked --environment default verify
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default verify
       - name: Configure detached named environment
         shell: bash
         env:
           ARF_TEST_DETACHED_PREFIX: ${{ runner.temp }}/arf-pixi-detached
-        run: pixi run --manifest-path .github/pixi-r-source/pixi.toml --locked --environment default python .github/pixi-r-source/configure_detached.py
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default python .github/pixi-integration/configure_detached.py
       - name: Verify detached named activated environment
         shell: bash
         env:
           ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-analysis
-        run: pixi run --manifest-path .github/pixi-r-source/pixi.toml --locked --environment analysis verify
+        run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment analysis verify
       - name: Upload diagnostics and terminal recordings
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
