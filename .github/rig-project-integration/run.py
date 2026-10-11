@@ -652,12 +652,7 @@ def compare_project_b_restart(baselines):
         ):
             observed_value = observed[field]
             clean_value = clean[field]
-            if field == "lib_paths":
-                same = len(observed_value) == len(clean_value) and all(
-                    same_path(actual, expected)
-                    for actual, expected in zip(observed_value, clean_value)
-                )
-            elif not observed_value or not clean_value:
+            if not observed_value or not clean_value:
                 same = observed_value == clean_value
             else:
                 same = same_path(observed_value, clean_value)
