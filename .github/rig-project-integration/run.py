@@ -364,10 +364,10 @@ jsonlite = "*"
     status, status_record = run("rig-project-status", rig_command(mode, "proj", "status", "--json"))
     require(status, "rig proj status")
     status_data = json.loads(status.stdout)
-    if status_data.get("warnings") != []:
-        raise RuntimeError(f"rig project status reported warnings: {status_data.get('warnings')}")
     if not isinstance(status_data, dict):
         raise RuntimeError("rig project status did not return an object")
+    if status_data.get("warnings") != []:
+        raise RuntimeError(f"rig project status reported warnings: {status_data.get('warnings')}")
     if status_data.get("manifest") is None or status_data.get("lock") is None:
         raise RuntimeError("rig project status did not report both manifest and lock")
     status_root = status_data.get("root")
