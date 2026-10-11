@@ -664,9 +664,15 @@ The `--with-r-version` flag temporarily overrides `r_source` and uses rig. It ac
 arf --with-r-version 4.5
 ```
 
+The `--r-provider` flag explicitly selects an already active provider environment. Pixi is currently supported:
+
+```bash
+arf --r-provider pixi
+```
+
 These options are mutually exclusive.
 
-To ask arf which R installation it would use without starting R, run `arf r resolve`. It accepts the same `--r-home`, `--with-r-version`, `--no-r-source-overrides`, and `--config` options as the startup path; see [`arf r resolve`](r-resolve.md) for the machine-facing JSON interface.
+To ask arf which R installation it would use without starting R, run `arf r resolve`. It accepts the same `--r-home`, `--with-r-version`, `--r-provider`, `--no-r-source-overrides`, and `--config` options as the startup path; see [`arf r resolve`](r-resolve.md) for the machine-facing JSON interface.
 
 ### rig Integration
 
