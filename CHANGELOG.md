@@ -8,6 +8,7 @@
 - `--r-provider pixi` and `ARF_R_PROVIDER=pixi` explicitly select R from an active Pixi environment, independently of configured overrides.
 - Resolve and headless JSON report shared provider metadata and selection provenance; explicit Pixi resolution errors include a stable reason code in `error.data`.
 - **Experimental:** The `rig-project` provider selects R from a synced `rig proj` project, and can be chosen explicitly with `--r-provider rig-project` or `ARF_R_PROVIDER=rig-project`.
+- **Experimental limitation:** rig 0.11.0 can leave an incompatible project library active after a cross-minor `:switch` warning ([rig#450](https://github.com/r-lib/rig/issues/450), fixed upstream in [rig#451](https://github.com/r-lib/rig/pull/451)); use a rig release containing the fix and run `rig proj sync` before switching across R major/minor versions.
 
 ### Changed
 
