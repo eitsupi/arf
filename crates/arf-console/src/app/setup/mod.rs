@@ -4,6 +4,11 @@ mod overrides;
 mod pixi;
 mod r_source;
 mod rig;
+#[expect(
+    dead_code,
+    reason = "rig-project resolution is wired in by subsequent provider integration"
+)]
+mod rig_project;
 mod script;
 
 pub(crate) use pixi::PixiFailure;
