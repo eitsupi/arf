@@ -377,7 +377,6 @@ mod tests {
             explicit_request: None,
         };
         report.override_provider = Some("pixi".into());
-        report.file = Some(info.manifest.clone());
         let value = serde_json::to_value(super::descriptor(
             std::path::Path::new("/"),
             &report,
@@ -388,7 +387,6 @@ mod tests {
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["provider"], "pixi");
         assert_eq!(value["selected_by"]["kind"], "provider_request");
-        assert_eq!(value["selected_by"]["requested_provider"], "pixi");
         assert_eq!(value["selected_by"]["source"]["kind"], "configuration_file");
         assert_eq!(value["metadata"]["environment"], "analysis");
         assert_eq!(

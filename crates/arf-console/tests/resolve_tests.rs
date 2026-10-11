@@ -1018,11 +1018,7 @@ fn assert_structured_resolve_error(output: &std::process::Output, code: &str) {
 
 fn assert_selected_by_nullable_fields_are_present(value: &serde_json::Value) {
     let selected_by = value["selected_by"].as_object().unwrap();
-    for field in [
-        "requested_r_home",
-        "requested_version",
-        "requested_provider",
-    ] {
+    for field in ["requested_r_home", "requested_version"] {
         assert!(
             selected_by.contains_key(field),
             "missing selected_by.{field}"

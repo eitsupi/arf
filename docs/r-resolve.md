@@ -32,7 +32,6 @@ arf r resolve
     "kind": "version_request",
     "requested_r_home": null,
     "requested_version": "4.5",
-    "requested_provider": null,
     "source": {
       "kind": "project_file",
       "name": null,
@@ -74,15 +73,15 @@ The `source.kind` values identify the origin of that condition:
 | `configuration_file` | The loaded `arf.toml`, with its path, format, and key (`startup.r_source` or `experimental.r_source_overrides`). |
 | `built_in_default` | arf's built-in default when no configuration file setting applies. |
 
-Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `requested_provider`, `name`, `path`, `format`, and `key` fields remain present in every descriptor. `requested_provider` is the requested provider, whether explicit or configured in `experimental.r_source_overrides`, or `null` when no provider was requested.
+Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `name`, `path`, `format`, and `key` fields remain present in every descriptor. For `provider_request`, the requested provider is the top-level `provider`: a provider request either selects that provider or fails, so there is no separate requested value.
 
 For a selected Pixi environment, `target.r_binary` is the verified PATH executable rather than a path inferred from `R_HOME`. `target.resolved_version` comes from available package metadata and can be `null` even when `resolved` is `true`.
 
-`metadata` is `null` when no provider metadata applies. When present, its `kind` equals `provider`. It describes the selected provider independently of whether it came from an explicit request or a configured override; `selected_by` records only where the request came from.
+`metadata` is `null` when no provider metadata applies. When present, its `kind` equals `provider`. Its kinds and fields may grow, so clients must accept unknown values. It describes the selected provider independently of whether it came from an explicit request or a configured override; `selected_by` records only where the request came from.
 
 Pixi selections include a tagged object with `kind: "pixi"`, the active environment name, manifest, prefix, and verified `r_binary`. The manifest is the `pixi.toml` or `pyproject.toml` reported by the Pixi activation, not a file chosen by arf. The Pixi provider only applies when arf itself runs in an activated environment (for example, `pixi run arf r resolve`); otherwise a CWD Pixi workspace is reported through the `r_source_override.pixi_not_active` diagnostic. A client that starts the selected R should run it through Pixi, such as `pixi run --as-is --executable --manifest-path <manifest> --environment <environment> R`, because launching `target.r_binary` directly skips the environment's activation. `--executable` prevents a Pixi task named `R` from being run instead, and `--as-is` uses the environment arf verified without installing it or updating the lock file.
 
-Rig project selections include `metadata.kind: "rig-project"` with the fields `root`, `manifest`, `r_installation`, and `r_binary`. `target.r_binary` is the verified wrapper. The installation name is not necessarily an exact R version, so `target.resolved_version` is `null` for this provider. Explicit `--r-provider rig-project` or `ARF_R_PROVIDER=rig-project` is recorded in `selected_by.requested_provider` and does not mark a configured override as applied.
+Rig project selections include `metadata.kind: "rig-project"` with the fields `manifest`, `r_installation`, and `r_binary`; the project root is the directory containing `manifest`. `target.r_binary` is the verified wrapper. The installation name is not necessarily an exact R version, so `target.resolved_version` is `null` for this provider. Explicit `--r-provider rig-project` or `ARF_R_PROVIDER=rig-project` is reported as a `provider_request` from the command line or environment and does not mark a configured override as applied.
 
 ## Diagnostics
 

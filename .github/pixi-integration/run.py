@@ -105,11 +105,11 @@ def headless(expression, home, binary, json_mode, expected_descriptor=None, expl
                 assert Path(metadata["r_binary"]).samefile(binary), source
                 if explicit:
                     assert source["state"] == "disabled", source
-                    assert source["provider"] is None and source["metadata"] is None, source
+                    assert source["provider"] is None and "metadata" not in source, source
                     assert info["warnings"] == [], info
                 else:
                     assert source["state"] == "applied" and source["provider"] == "pixi", source
-                    assert source["metadata"] == metadata, (source, metadata)
+                    assert source["file"] is None and "metadata" not in source, source
                     assert source["requested_version"] is None, source
                     assert len(info["warnings"]) == 1, info
                 assert not stderr, stderr
@@ -141,7 +141,6 @@ def main():
     descriptor = json.loads(resolved.stdout)
     assert descriptor["provider"] == "pixi", descriptor
     assert descriptor["selected_by"]["kind"] == "provider_request", descriptor
-    assert descriptor["selected_by"]["requested_provider"] == "pixi", descriptor
     source = descriptor["selected_by"]["source"]
     assert source["kind"] == "configuration_file", source
     assert source["key"] == "experimental.r_source_overrides", source
@@ -173,7 +172,6 @@ cat('PIXI_COMPILED_OK\n')"""
     explicit_descriptor = json.loads(explicit_resolved.stdout)
     assert explicit_descriptor["provider"] == "pixi", explicit_descriptor
     assert explicit_descriptor["selected_by"]["kind"] == "provider_request", explicit_descriptor
-    assert explicit_descriptor["selected_by"]["requested_provider"] == "pixi", explicit_descriptor
     selected_source = explicit_descriptor["selected_by"]["source"]
     assert selected_source["kind"] == "command_line_argument", selected_source
     assert selected_source["name"] == "--r-provider", selected_source
@@ -193,7 +191,6 @@ cat('PIXI_COMPILED_OK\n')"""
     env_descriptor = json.loads(env_resolved.stdout)
     assert env_descriptor["provider"] == "pixi", env_descriptor
     assert env_descriptor["selected_by"]["kind"] == "provider_request", env_descriptor
-    assert env_descriptor["selected_by"]["requested_provider"] == "pixi", env_descriptor
     assert env_descriptor["selected_by"]["source"]["kind"] == "environment_variable", env_descriptor
     assert env_descriptor["selected_by"]["source"]["name"] == "ARF_R_PROVIDER", env_descriptor
     assert env_descriptor["metadata"] == descriptor["metadata"], env_descriptor

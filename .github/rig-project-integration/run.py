@@ -418,7 +418,6 @@ def explicit_rig_project_resolution(source, home, installation_name):
         raise RuntimeError(f"{source} request selected an unexpected provider: {descriptor}")
     if (
         selected_by.get("kind") != "provider_request"
-        or selected_by.get("requested_provider") != "rig-project"
         or selected_by.get("source", {}).get("kind") != expected_source["kind"]
         or selected_by.get("source", {}).get("name") != expected_source["name"]
     ):
@@ -426,7 +425,6 @@ def explicit_rig_project_resolution(source, home, installation_name):
     if metadata.get("kind") != "rig-project" or metadata.get("r_installation") != installation_name:
         raise RuntimeError(f"{source} provider metadata is incorrect: {metadata}")
     for label, actual, expected in (
-        ("metadata root", metadata.get("root"), PROJECT),
         ("metadata manifest", metadata.get("manifest"), PROJECT / "rproj.toml"),
         ("metadata wrapper", metadata.get("r_binary"), wrapper_path()),
         ("target R_HOME", target.get("r_home"), home),

@@ -159,7 +159,6 @@ fn active_pixi_resolve_preserves_the_launcher_outside_home() {
     let descriptor = fixture.descriptor();
     assert_eq!(descriptor["provider"], "pixi");
     assert_eq!(descriptor["selected_by"]["kind"], "provider_request");
-    assert_eq!(descriptor["selected_by"]["requested_provider"], "pixi");
     assert_eq!(
         descriptor["selected_by"]["source"]["kind"],
         "configuration_file"
@@ -248,7 +247,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             descriptor["metadata"]["r_binary"],
             fixture.binary.canonicalize().unwrap().display().to_string()
         );
-        assert_eq!(descriptor["selected_by"]["requested_provider"], "pixi");
         assert_eq!(
             descriptor["target"]["r_binary"],
             fixture.binary.canonicalize().unwrap().display().to_string()
@@ -266,7 +264,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
-              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {
@@ -282,7 +279,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
-              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {

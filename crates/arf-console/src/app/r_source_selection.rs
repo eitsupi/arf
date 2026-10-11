@@ -22,7 +22,6 @@ pub(crate) struct SelectedBy {
     kind: &'static str,
     requested_r_home: Option<String>,
     requested_version: Option<String>,
-    requested_provider: Option<String>,
     source: SelectionSource,
 }
 
@@ -39,7 +38,6 @@ pub(crate) enum RSourceMetadata {
     },
     #[serde(rename = "rig-project")]
     RigProject {
-        root: String,
         manifest: String,
         r_installation: String,
         r_binary: String,
@@ -63,7 +61,6 @@ impl RSourceMetadata {
                 r_binary: display_path(cwd, &info.binary),
             }),
             RSourceStatus::RigProject { info } => Some(Self::RigProject {
-                root: display_path(cwd, &info.root),
                 manifest: display_path(cwd, &info.manifest),
                 r_installation: info.installation_name.clone(),
                 r_binary: display_path(cwd, &info.binary),
@@ -102,33 +99,30 @@ fn selected_by(
     if report.selection_route == RSourceSelectionRoute::Explicit
         && let Some(request) = &report.explicit_request
     {
-        let (kind, requested_r_home, requested_version, requested_provider, cli_name, env_name) =
-            match &request.source {
-                ExplicitRSource::Home(home) => (
-                    "r_home",
-                    Some(display_path(cwd, home)),
-                    None,
-                    None,
-                    "--r-home",
-                    "ARF_R_HOME",
-                ),
-                ExplicitRSource::Version(version) => (
-                    "version_request",
-                    None,
-                    Some(version.clone()),
-                    None,
-                    "--with-r-version",
-                    "ARF_R_VERSION",
-                ),
-                ExplicitRSource::Provider(provider) => (
-                    "provider_request",
-                    None,
-                    None,
-                    Some(provider.as_str().to_owned()),
-                    "--r-provider",
-                    "ARF_R_PROVIDER",
-                ),
-            };
+        let (kind, requested_r_home, requested_version, cli_name, env_name) = match &request.source
+        {
+            ExplicitRSource::Home(home) => (
+                "r_home",
+                Some(display_path(cwd, home)),
+                None,
+                "--r-home",
+                "ARF_R_HOME",
+            ),
+            ExplicitRSource::Version(version) => (
+                "version_request",
+                None,
+                Some(version.clone()),
+                "--with-r-version",
+                "ARF_R_VERSION",
+            ),
+            ExplicitRSource::Provider(_) => (
+                "provider_request",
+                None,
+                None,
+                "--r-provider",
+                "ARF_R_PROVIDER",
+            ),
+        };
         let (source_kind, source_name) = match request.origin {
             RSourceOrigin::Cli => ("command_line_argument", cli_name),
             RSourceOrigin::Environment => ("environment_variable", env_name),
@@ -137,7 +131,6 @@ fn selected_by(
             kind,
             requested_r_home,
             requested_version,
-            requested_provider,
             source: selection_source(source_kind, Some(source_name.to_owned()), None, None, None),
         };
     }
@@ -153,7 +146,6 @@ fn selected_by(
                 kind: "provider_request",
                 requested_r_home: None,
                 requested_version: None,
-                requested_provider: Some(provider(&report.status)),
                 source: selection_source(
                     "configuration_file",
                     None,
@@ -173,7 +165,6 @@ fn selected_by(
             kind: "version_request",
             requested_r_home: None,
             requested_version: report.requested_version.clone(),
-            requested_provider: None,
             source: selection_source(
                 "project_file",
                 None,
@@ -201,7 +192,6 @@ fn selected_by(
         kind: "default",
         requested_r_home: None,
         requested_version: None,
-        requested_provider: None,
         source,
     }
 }
@@ -247,7 +237,7 @@ mod tests {
             r_home: Some("/rig/4.6.1/lib/R".into()),
             selection_route: RSourceSelectionRoute::Override,
             override_provider: Some("rig-project".into()),
-            file: Some("/workspace/rproj.toml".into()),
+            file: None,
             key: None,
             requested_version: None,
             resolved_version: None,
@@ -273,13 +263,11 @@ mod tests {
             "kind": "rig-project",
             "manifest": "/workspace/rproj.toml",
             "r_binary": "/workspace/.rvenv/bin/R",
-            "r_installation": "4.6.1",
-            "root": "/workspace"
+            "r_installation": "4.6.1"
           },
           "provider": "rig-project",
           "selected_by": {
             "kind": "provider_request",
-            "requested_provider": "rig-project",
             "requested_r_home": null,
             "requested_version": null,
             "source": {
@@ -296,7 +284,6 @@ mod tests {
         let mut explicit_report = report;
         explicit_report.selection_route = RSourceSelectionRoute::Explicit;
         explicit_report.override_provider = None;
-        explicit_report.file = None;
         explicit_report.override_state = crate::app::setup::RSourceOverrideState::ShadowedByCli;
         explicit_report.explicit_request =
             Some(crate::app::explicit_r_source::ExplicitRSourceRequest {
@@ -309,10 +296,6 @@ mod tests {
             RSourceSelection::from_report(Path::new("/workspace"), &explicit_report, None);
         assert_eq!(explicit.provider.as_deref(), Some("rig-project"));
         assert_eq!(explicit.selected_by.kind, "provider_request");
-        assert_eq!(
-            explicit.selected_by.requested_provider.as_deref(),
-            Some("rig-project")
-        );
         assert_eq!(
             explicit.selected_by.source.name.as_deref(),
             Some("--r-provider")

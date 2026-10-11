@@ -7,7 +7,7 @@ use crate::app::config_load::{
 use crate::app::explicit_r_source::ExplicitRSourceRequest;
 #[cfg(windows)]
 use crate::app::r_profiles::source_r_profiles;
-use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection};
+use crate::app::r_source_selection::RSourceSelection;
 use crate::app::session_id::create_session_id;
 use crate::app::setup::{
     RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute, setup_r,
@@ -77,11 +77,10 @@ pub(crate) struct HeadlessRSourceOverride {
     key: Option<String>,
     requested_version: Option<String>,
     resolved_version: Option<String>,
-    metadata: Option<RSourceMetadata>,
 }
 
 impl HeadlessRSourceOverride {
-    pub(crate) fn from_report(report: &RSourceResolutionReport, cwd: &std::path::Path) -> Self {
+    pub(crate) fn from_report(report: &RSourceResolutionReport) -> Self {
         let applied = report.selection_route == RSourceSelectionRoute::Override;
         let override_state: RSourceOverrideState = report.override_state;
         Self {
@@ -93,9 +92,6 @@ impl HeadlessRSourceOverride {
             key: applied.then(|| report.key.clone()).flatten(),
             requested_version: applied.then(|| report.requested_version.clone()).flatten(),
             resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
-            metadata: applied
-                .then(|| RSourceMetadata::from_report(report, cwd))
-                .flatten(),
         }
     }
 }
@@ -127,7 +123,7 @@ impl HeadlessInfo {
             history_session_id: session.history_session_id,
             ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
             history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
-            r_source_override: HeadlessRSourceOverride::from_report(resolution, launch_cwd),
+            r_source_override: HeadlessRSourceOverride::from_report(resolution),
             r_source_selection: RSourceSelection::from_report(
                 launch_cwd,
                 resolution,
@@ -538,18 +534,15 @@ mod tests {
             RSourceOverrideState::Disabled,
             RSourceOverrideState::ShadowedByCli,
         ] {
-            let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
-                &report(state),
-                std::path::Path::new("/"),
-            ))
-            .unwrap();
+            let value =
+                serde_json::to_value(HeadlessRSourceOverride::from_report(&report(state))).unwrap();
             assert_eq!(value["state"], state.as_str());
             assert!(value.get("provider").is_some());
             assert!(value.get("file").is_some());
             assert!(value.get("key").is_some());
             assert!(value.get("requested_version").is_some());
             assert!(value.get("resolved_version").is_some());
-            assert_eq!(value["metadata"], serde_json::Value::Null);
+            assert!(value.get("metadata").is_none());
         }
     }
 
@@ -719,25 +712,19 @@ mod tests {
         report.requested_version = Some("4.4".to_string());
         report.resolved_version = Some("4.4.2".to_string());
 
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
-            &report,
-            std::path::Path::new("/"),
-        ))
-        .unwrap();
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
         assert_eq!(value["state"], "applied");
         assert_eq!(value["provider"], "toml-key");
         assert_eq!(value["file"], "rproject.toml");
         assert_eq!(value["key"], "project.r_version");
         assert_eq!(value["requested_version"], "4.4");
         assert_eq!(value["resolved_version"], "4.4.2");
-        assert_eq!(value["metadata"], serde_json::Value::Null);
     }
 
     #[test]
     fn pixi_json_keeps_provider_specific_fields_inside_metadata() {
         let mut report = report(RSourceOverrideState::Applied);
         report.override_provider = Some("pixi".to_owned());
-        report.file = Some("pixi.toml".into());
         report.status = config::RSourceStatus::Pixi {
             info: config::PixiRSourceInfo {
                 manifest: "pixi.toml".into(),
@@ -750,27 +737,16 @@ mod tests {
             },
         };
 
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
-            &report,
-            std::path::Path::new("/"),
-        ))
-        .unwrap();
+        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
         assert_eq!(
             value,
             serde_json::json!({
                 "state": "applied",
                 "provider": "pixi",
-                "file": "pixi.toml",
+                "file": null,
                 "key": null,
                 "requested_version": null,
-                "resolved_version": null,
-                "metadata": {
-                    "kind": "pixi",
-                    "environment": "analysis",
-                    "manifest": "/pixi.toml",
-                    "prefix": "/prefix",
-                    "r_binary": "/R.exe"
-                }
+                "resolved_version": null
             })
         );
 
@@ -790,7 +766,6 @@ mod tests {
               "provider": "pixi",
               "selected_by": {
                 "kind": "provider_request",
-                "requested_provider": "pixi",
                 "requested_r_home": null,
                 "requested_version": null,
                 "source": {
@@ -813,17 +788,10 @@ mod tests {
             ),
             origin: crate::app::explicit_r_source::RSourceOrigin::Cli,
         });
-        let value = serde_json::to_value(HeadlessRSourceOverride::from_report(
-            &report,
-            std::path::Path::new("/"),
-        ))
-        .unwrap();
-        assert_eq!(value["metadata"], serde_json::Value::Null);
         let selection = RSourceSelection::from_report(std::path::Path::new("/"), &report, None);
         let selection_json = serde_json::to_value(selection).unwrap();
         assert_eq!(selection_json["provider"], "pixi");
         assert_eq!(selection_json["selected_by"]["kind"], "provider_request");
-        assert_eq!(selection_json["selected_by"]["requested_provider"], "pixi");
         assert_eq!(selection_json["metadata"], applied_metadata);
     }
 }
