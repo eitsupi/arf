@@ -1,0 +1,83 @@
+name: Check rig project integration
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/check-rig-project-integration.yml
+      - .github/rig-project-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*rig*"
+      - crates/arf-libr/**
+      - crates/arf-console/src/app/**
+      - crates/arf-console/src/repl/**
+      - "!**/*.md"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/check-rig-project-integration.yml
+      - .github/rig-project-integration/**
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - "**/*rig*"
+      - crates/arf-libr/**
+      - crates/arf-console/src/app/**
+      - crates/arf-console/src/repl/**
+      - "!**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      RIG_MODE: user
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure isolated paths
+        run: |
+          rig_root="${RUNNER_TEMP}/arf-rig-project-integration"
+          mkdir -p "${rig_root}"/{rig-r,rig-bin,downloads,cache,config,data}
+          {
+            echo "ARF_RIG_RESULTS=${rig_root}"
+            echo "RIG_R_INSTALL_DIR=${rig_root}/rig-r"
+            echo "RIG_BINARY_DIR=${rig_root}/rig-bin"
+            echo "RIG_DOWNLOAD_DIR=${rig_root}/downloads"
+            echo "XDG_CACHE_HOME=${rig_root}/cache"
+            echo "XDG_CONFIG_HOME=${rig_root}/config"
+            echo "XDG_DATA_HOME=${rig_root}/data"
+          } >> "${GITHUB_ENV}"
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install pinned mise tools
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          working_directory: .github/rig-project-integration
+          version: 2026.4.22
+          install_args: --locked
+      - name: Install isolated R 4.6.1 with rig 0.11.0
+        run: rig add --user --without-fonts 4.6.1
+      - name: Build arf
+        run: cargo build --locked --bin arf
+      - name: Compare the minimal DYLD environment
+        run: python3 .github/rig-project-integration/run.py
+      - name: Upload rig project startup evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rig-project-startup-macos-latest
+          path: ${{ runner.temp }}/arf-rig-project-integration/evidence
+          include-hidden-files: true
+          if-no-files-found: warn
