@@ -9,7 +9,9 @@ use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RPr
 use crate::app::startup_env::decode_os_string;
 #[cfg(any(unix, test))]
 use crate::app::startup_env::encode_os_string;
-use crate::config::{PixiRSourceInfo, RSourceOverride, RSourceStatus, RigProjectRSourceInfo};
+#[cfg(any(unix, test))]
+use crate::config::RSourceStatus;
+use crate::config::{PixiRSourceInfo, RSourceOverride, RigProjectRSourceInfo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -146,6 +148,7 @@ fn serialize_report(report: &RSourceResolutionReport) -> Option<String> {
     Some(serde_json::to_string(&carrier).expect("string-only loader carrier is serializable"))
 }
 
+#[cfg(any(unix, test))]
 fn carrier_route(route: RSourceSelectionRoute) -> Option<CarrierRoute> {
     match route {
         RSourceSelectionRoute::Explicit => Some(CarrierRoute::Explicit),

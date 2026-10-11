@@ -36,7 +36,14 @@ concurrency:
 
 jobs:
   integration:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       RIG_MODE: user
@@ -44,17 +51,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure isolated paths
         run: |
-          rig_root="${RUNNER_TEMP}/arf-rig-project-integration"
-          mkdir -p "${rig_root}"/{rig-r,rig-bin,downloads,cache,config,data}
-          {
-            echo "ARF_RIG_RESULTS=${rig_root}"
-            echo "RIG_R_INSTALL_DIR=${rig_root}/rig-r"
-            echo "RIG_BINARY_DIR=${rig_root}/rig-bin"
-            echo "RIG_DOWNLOAD_DIR=${rig_root}/downloads"
-            echo "XDG_CACHE_HOME=${rig_root}/cache"
-            echo "XDG_CONFIG_HOME=${rig_root}/config"
-            echo "XDG_DATA_HOME=${rig_root}/data"
-          } >> "${GITHUB_ENV}"
+          python_command=python3
+          if ! command -v "${python_command}" >/dev/null; then
+            python_command=python
+          fi
+          "${python_command}" - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "arf-rig-project-integration"
+          paths = {
+              "ARF_RIG_RESULTS": root,
+              "RIG_R_INSTALL_DIR": root / "rig-r",
+              "RIG_BINARY_DIR": root / "rig-bin",
+              "RIG_DOWNLOAD_DIR": root / "downloads",
+              "XDG_CACHE_HOME": root / "cache",
+              "XDG_CONFIG_HOME": root / "config",
+              "XDG_DATA_HOME": root / "data",
+          }
+          for path in paths.values():
+              path.mkdir(parents=True, exist_ok=True)
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              for name, path in paths.items():
+                  stream.write(f"{name}={path}\n")
+          PY
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -67,18 +88,27 @@ jobs:
           install_args: --locked
       - name: Install isolated R versions with rig 0.11.0
         run: |
-          for version in 4.6.1 4.6.0 4.5.3; do
+          versions=(4.6.1)
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            versions+=(4.6.0 4.5.3)
+          fi
+          for version in "${versions[@]}"; do
             rig add --user --without-fonts "${version}"
           done
       - name: Build arf and rig project switch test
         run: cargo build --locked --bin arf --test rig_project_switch_tests
-      - name: Compare startup and rig project version switching
-        run: python3 .github/rig-project-integration/run.py
-      - name: Upload rig project startup and version switch evidence
+      - name: Compare rig wrapper and arf provider startup
+        run: |
+          if command -v python3 >/dev/null; then
+            python3 .github/rig-project-integration/run.py
+          else
+            python .github/rig-project-integration/run.py
+          fi
+      - name: Upload rig project integration evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rig-project-startup-and-switch-macos-latest
+          name: rig-project-integration-${{ matrix.os }}
           path: ${{ runner.temp }}/arf-rig-project-integration/evidence
           include-hidden-files: true
           if-no-files-found: warn
