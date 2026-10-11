@@ -16,6 +16,11 @@
 - RHOME probes used during source resolution and automatic discovery now have time and output limits.
 - The interactive help browser now searches package help metadata in a background worker, keeping query editing responsive while results are ranked.
 
+### Fixed
+
+- Windows embedded R now reads Renviron once during normal startup and skips it for `--no-environ` and `--vanilla`, avoiding repeated environment expansion such as project `R_LIBS_USER`.
+- R wrapper path assignments containing `${R_HOME}` now resolve against the selected R home when deriving `R_DOC_DIR`, `R_SHARE_DIR`, and `R_INCLUDE_DIR`.
+
 ## [0.6.0] - 2026-10-08
 
 ### Added
