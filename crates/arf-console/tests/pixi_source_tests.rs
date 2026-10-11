@@ -158,17 +158,18 @@ fn active_pixi_resolve_preserves_the_launcher_outside_home() {
     let fixture = Fixture::new();
     let descriptor = fixture.descriptor();
     assert_eq!(descriptor["provider"], "pixi");
-    assert_eq!(descriptor["selected_by"]["kind"], "active_environment");
-    assert_eq!(descriptor["selected_by"]["source"]["kind"], "pixi");
-    assert_eq!(descriptor["selected_by"]["source"]["name"], "analysis");
+    assert_eq!(descriptor["selected_by"]["kind"], "provider_request");
+    assert_eq!(
+        descriptor["selected_by"]["source"]["kind"],
+        "configuration_file"
+    );
     assert_eq!(
         descriptor["selected_by"]["source"]["path"],
-        fixture
-            .manifest
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
+        fixture.config.display().to_string()
+    );
+    assert_eq!(
+        descriptor["selected_by"]["source"]["key"],
+        "experimental.r_source_overrides"
     );
     assert_eq!(
         descriptor["target"]["r_binary"],
@@ -180,7 +181,6 @@ fn active_pixi_resolve_preserves_the_launcher_outside_home() {
     );
     assert!(descriptor["target"]["resolved_version"].is_null());
     assert_eq!(descriptor["diagnostics"], serde_json::json!([]));
-    assert_eq!(descriptor["selected_by"]["requested_provider"], Value::Null);
     assert_eq!(descriptor["metadata"]["kind"], "pixi");
     assert_eq!(descriptor["metadata"]["environment"], "analysis");
     assert_eq!(
@@ -247,7 +247,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             descriptor["metadata"]["r_binary"],
             fixture.binary.canonicalize().unwrap().display().to_string()
         );
-        assert_eq!(descriptor["selected_by"]["requested_provider"], "pixi");
         assert_eq!(
             descriptor["target"]["r_binary"],
             fixture.binary.canonicalize().unwrap().display().to_string()
@@ -265,7 +264,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
-              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {
@@ -281,7 +279,6 @@ fn explicit_provider_resolve_reports_request_source_without_configured_override(
             "provider": "pixi",
             "selected_by": {
               "kind": "provider_request",
-              "requested_provider": "pixi",
               "requested_r_home": null,
               "requested_version": null,
               "source": {

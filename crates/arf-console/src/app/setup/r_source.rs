@@ -106,7 +106,6 @@ impl RSourceResolutionReport {
             selection_route,
         );
         report.override_provider = is_override.then(|| "pixi".to_owned());
-        report.file = is_override.then_some(info.manifest);
         report.resolved_version = info.version;
         report.diagnostics = diagnostics;
         report
@@ -127,7 +126,6 @@ impl RSourceResolutionReport {
             selection_route,
         );
         report.override_provider = is_override.then(|| "rig-project".to_owned());
-        report.file = is_override.then_some(info.manifest);
         report.diagnostics = diagnostics;
         report
     }
@@ -622,7 +620,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_pixi_report_retains_target_without_override_metadata() {
+    fn pixi_report_retains_target_without_override_file() {
         let info = crate::config::PixiRSourceInfo {
             manifest: "/workspace/pixi.toml".into(),
             environment: "analysis".to_owned(),
@@ -653,6 +651,16 @@ mod tests {
             assert!(report.file.is_none());
             assert!(report.override_info().is_none());
         }
+
+        // The manifest is provider identity, not a version file read by the override.
+        let report = RSourceResolutionReport::from_pixi(
+            info,
+            Vec::new(),
+            RSourceSelectionRoute::Override,
+            RSourceOverrideState::Applied,
+        );
+        assert_eq!(report.override_provider.as_deref(), Some("pixi"));
+        assert!(report.file.is_none());
     }
 
     #[test]

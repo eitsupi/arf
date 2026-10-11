@@ -11,15 +11,6 @@ pub(crate) enum RProvider {
     RigProject,
 }
 
-impl RProvider {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Pixi => "pixi",
-            Self::RigProject => "rig-project",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RSourceOrigin {
     Cli,
