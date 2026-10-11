@@ -254,10 +254,9 @@ fn descriptor(
         let r_home = normalize_path(cwd, r_home);
         Target {
             r_home: r_home.display().to_string(),
-            r_binary: match &resolution.status {
-                RSourceStatus::Pixi { info } => Some(info.binary.display().to_string()),
-                RSourceStatus::RigProject { info } => Some(info.binary.display().to_string()),
-                _ => find_r_binary(&r_home),
+            r_binary: match resolution.status.verified_target() {
+                Some(target) => Some(target.binary.display().to_string()),
+                None => find_r_binary(&r_home),
             },
             resolved_version: resolved_version(resolution),
         }
@@ -296,17 +295,12 @@ fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
 }
 
 fn resolved_version(resolution: &RSourceResolutionReport) -> Option<String> {
-    if matches!(resolution.status, RSourceStatus::RigProject { .. }) {
-        return None;
-    }
     resolution
         .resolved_version
         .clone()
         .or_else(|| match &resolution.status {
             RSourceStatus::Rig { version, .. } => Some(version.clone()),
-            RSourceStatus::Path | RSourceStatus::ExplicitPath { .. } => None,
-            RSourceStatus::Pixi { info } => info.version.clone(),
-            RSourceStatus::RigProject { .. } => None,
+            _ => None,
         })
 }
 
@@ -358,14 +352,16 @@ mod tests {
             manifest: "/workspace/pixi.toml".into(),
             environment: "analysis".into(),
             prefix: "/prefix".into(),
-            binary: "/prefix/Scripts/R.exe".into(),
-            home: "/prefix/lib/R".into(),
-            library: "/prefix/lib/R/bin/x64/R.dll".into(),
+            target: crate::config::VerifiedRTarget {
+                binary: "/prefix/Scripts/R.exe".into(),
+                home: "/prefix/lib/R".into(),
+                library: "/prefix/lib/R/bin/x64/R.dll".into(),
+            },
             version: None,
         };
         let mut report = super::RSourceResolutionReport {
             status: super::RSourceStatus::Pixi { info: info.clone() },
-            r_home: Some(info.home.clone()),
+            r_home: Some(info.target.home.clone()),
             selection_route: crate::app::setup::RSourceSelectionRoute::Override,
             override_provider: None,
             file: None,
@@ -395,7 +391,7 @@ mod tests {
         );
         assert_eq!(
             value["target"]["r_binary"],
-            info.binary.display().to_string()
+            info.target.binary.display().to_string()
         );
         assert!(value["target"]["resolved_version"].is_null());
         assert!(value["selected_by"]["requested_version"].is_null());

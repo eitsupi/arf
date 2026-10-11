@@ -729,9 +729,11 @@ mod tests {
                 manifest: "pixi.toml".into(),
                 environment: "analysis".to_owned(),
                 prefix: "prefix".into(),
-                binary: "R.exe".into(),
-                home: "home".into(),
-                library: "R.dll".into(),
+                target: crate::config::VerifiedRTarget {
+                    binary: "R.exe".into(),
+                    home: "home".into(),
+                    library: "R.dll".into(),
+                },
                 version: None,
             },
         };

@@ -1,5 +1,6 @@
 //! Normalized explicit R source requests from CLI arguments and environment.
 
+use crate::config::RSourceStatus;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -16,6 +17,17 @@ impl RProvider {
         match self {
             Self::Pixi => "pixi",
             Self::RigProject => "rig-project",
+        }
+    }
+
+    /// Return the provider that selected `status`, if it came from one.
+    pub(crate) fn of_status(status: &RSourceStatus) -> Option<Self> {
+        match status {
+            RSourceStatus::Pixi { .. } => Some(Self::Pixi),
+            RSourceStatus::RigProject { .. } => Some(Self::RigProject),
+            RSourceStatus::Rig { .. }
+            | RSourceStatus::Path
+            | RSourceStatus::ExplicitPath { .. } => None,
         }
     }
 }

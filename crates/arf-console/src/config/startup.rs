@@ -151,6 +151,15 @@ impl RSourceStatus {
         )
     }
 
+    /// Return the R installation verified by an environment provider, if any.
+    pub fn verified_target(&self) -> Option<&VerifiedRTarget> {
+        match self {
+            Self::Pixi { info } => Some(&info.target),
+            Self::RigProject { info } => Some(&info.target),
+            Self::Rig { .. } | Self::Path | Self::ExplicitPath { .. } => None,
+        }
+    }
+
     /// Returns a human-readable description for display.
     pub fn display(&self) -> String {
         match self {
@@ -176,15 +185,24 @@ impl RSourceStatus {
     }
 }
 
+/// R installation verified by an environment provider before it is selected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedRTarget {
+    /// The verified R executable, such as a project wrapper. Starting it may
+    /// also require provider-specific activation, as with Pixi.
+    pub binary: PathBuf,
+    pub home: PathBuf,
+    /// The R shared library loaded by arf.
+    pub library: PathBuf,
+}
+
 /// Identity and verified R target of an externally activated Pixi environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixiRSourceInfo {
     pub manifest: PathBuf,
     pub environment: String,
     pub prefix: PathBuf,
-    pub binary: PathBuf,
-    pub home: PathBuf,
-    pub library: PathBuf,
+    pub target: VerifiedRTarget,
     pub version: Option<String>,
 }
 
@@ -193,9 +211,7 @@ pub struct PixiRSourceInfo {
 pub struct RigProjectRSourceInfo {
     pub root: PathBuf,
     pub manifest: PathBuf,
-    pub binary: PathBuf,
-    pub home: PathBuf,
-    pub library: PathBuf,
+    pub target: VerifiedRTarget,
     /// rig's installation name, which is not necessarily an R release version.
     pub installation_name: String,
 }
