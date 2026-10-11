@@ -188,7 +188,8 @@ impl RSourceStatus {
 /// R installation verified by an environment provider before it is selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedRTarget {
-    /// The executable a client runs to start this R, such as a project wrapper.
+    /// The verified R executable, such as a project wrapper. Starting it may
+    /// also require provider-specific activation, as with Pixi.
     pub binary: PathBuf,
     pub home: PathBuf,
     /// The R shared library loaded by arf.
