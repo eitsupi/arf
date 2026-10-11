@@ -82,6 +82,11 @@ jobs:
           key: rig-project-integration-tests
       - name: Install pinned mise tools
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        # Keep Node's temp directory with isolated mise data; Windows defaults TEMP to C:.
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
         with:
           working_directory: .github/rig-project-integration
           version: 2026.4.22
