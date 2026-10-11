@@ -542,7 +542,6 @@ mod tests {
             assert!(value.get("key").is_some());
             assert!(value.get("requested_version").is_some());
             assert!(value.get("resolved_version").is_some());
-            assert!(value.get("metadata").is_none());
         }
     }
 

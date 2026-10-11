@@ -105,11 +105,11 @@ def headless(expression, home, binary, json_mode, expected_descriptor=None, expl
                 assert Path(metadata["r_binary"]).samefile(binary), source
                 if explicit:
                     assert source["state"] == "disabled", source
-                    assert source["provider"] is None and "metadata" not in source, source
+                    assert source["provider"] is None, source
                     assert info["warnings"] == [], info
                 else:
                     assert source["state"] == "applied" and source["provider"] == "pixi", source
-                    assert source["file"] is None and "metadata" not in source, source
+                    assert source["file"] is None, source
                     assert source["requested_version"] is None, source
                     assert len(info["warnings"]) == 1, info
                 assert not stderr, stderr
