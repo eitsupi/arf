@@ -3,10 +3,9 @@
 use super::pixi::{self, PixiFailure};
 use super::r_source::{RSourceDiagnostic, RSourceResolutionReport, warning};
 use super::rig::{ResolvedRSource, setup_r_via_selected_rig_version};
-use super::rig_project::{
-    RigProjectFailure, RigProjectTarget, resolve_strict as resolve_rig_project,
-};
+use super::rig_project::{RigProjectFailure, resolve_strict as resolve_rig_project};
 use crate::app::explicit_r_source::RProvider;
+use crate::config::RigProjectRSourceInfo;
 use crate::config::{RSourceOverride, RSourceOverrideInfo, RSourceStatus};
 use crate::external;
 use crate::rversion;
@@ -14,12 +13,9 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 pub(super) enum OverrideResolution {
-    PixiApplied {
-        target: Box<crate::config::PixiRSourceInfo>,
-        diagnostics: Vec<RSourceDiagnostic>,
-    },
-    RigProjectApplied {
-        target: Box<RigProjectTarget>,
+    /// An environment provider such as Pixi selected a verified R target.
+    EnvironmentApplied {
+        status: Box<RSourceStatus>,
         diagnostics: Vec<RSourceDiagnostic>,
     },
     Applied {
@@ -72,6 +68,17 @@ enum ProviderKind<'a> {
         file: &'a Path,
         reader: FileReader<'a>,
     },
+}
+
+/// Return the environment provider named by a configured override, if any.
+pub(super) fn configured_provider(source: &RSourceOverride) -> Option<RProvider> {
+    match source {
+        RSourceOverride::Pixi => Some(RProvider::Pixi),
+        RSourceOverride::RigProject => Some(RProvider::RigProject),
+        RSourceOverride::VersionFile { .. }
+        | RSourceOverride::TomlKey { .. }
+        | RSourceOverride::JsonKey { .. } => None,
+    }
 }
 
 /// Borrowed provider metadata used while resolving one configured override.
@@ -339,7 +346,7 @@ fn setup_r_via_overrides_with_environment_providers<FAvailable, FList, FResolve>
     ) -> std::result::Result<crate::config::PixiRSourceInfo, PixiFailure>,
     resolve_rig_project: impl Fn(
         Option<&Path>,
-    ) -> std::result::Result<RigProjectTarget, RigProjectFailure>,
+    ) -> std::result::Result<RigProjectRSourceInfo, RigProjectFailure>,
 ) -> Option<OverrideResolution>
 where
     FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
@@ -366,9 +373,9 @@ where
                     }
                     continue;
                 }
-                Ok(target) => {
-                    return Some(OverrideResolution::PixiApplied {
-                        target: Box::new(target),
+                Ok(info) => {
+                    return Some(OverrideResolution::EnvironmentApplied {
+                        status: Box::new(RSourceStatus::Pixi { info }),
                         diagnostics,
                     });
                 }
@@ -382,9 +389,9 @@ where
                     diagnostics.push(rig_project_failure_diagnostic(&error));
                     continue;
                 }
-                Ok(target) => {
-                    return Some(OverrideResolution::RigProjectApplied {
-                        target: Box::new(target),
+                Ok(info) => {
+                    return Some(OverrideResolution::EnvironmentApplied {
+                        status: Box::new(RSourceStatus::RigProject { info }),
                         diagnostics,
                     });
                 }
@@ -723,9 +730,11 @@ mod r_source_override_tests {
             manifest: "/workspace/pixi.toml".into(),
             environment: "analysis".into(),
             prefix: "/prefix".into(),
-            binary: "/prefix/Scripts/R.exe".into(),
-            home: "/prefix/lib/R".into(),
-            library: "/prefix/lib/R/lib/libR.so".into(),
+            target: crate::config::VerifiedRTarget {
+                binary: "/prefix/Scripts/R.exe".into(),
+                home: "/prefix/lib/R".into(),
+                library: "/prefix/lib/R/lib/libR.so".into(),
+            },
             version: None,
         }
     }
@@ -734,9 +743,11 @@ mod r_source_override_tests {
         crate::config::RigProjectRSourceInfo {
             root: "/workspace".into(),
             manifest: "/workspace/rproj.toml".into(),
-            binary: "/workspace/.rvenv/bin/R".into(),
-            home: "/rig/R-4.6".into(),
-            library: "/rig/R-4.6/lib/libR.so".into(),
+            target: crate::config::VerifiedRTarget {
+                binary: "/workspace/.rvenv/bin/R".into(),
+                home: "/rig/R-4.6".into(),
+                library: "/rig/R-4.6/lib/libR.so".into(),
+            },
             installation_name: "release".into(),
         }
     }
@@ -780,11 +791,15 @@ mod r_source_override_tests {
             )
             .unwrap();
             match (selected, result) {
-                ("pixi", OverrideResolution::PixiApplied { target, .. }) => {
-                    assert_eq!(target.environment, "analysis");
+                ("pixi", OverrideResolution::EnvironmentApplied { status, .. }) => {
+                    assert!(
+                        matches!(*status, RSourceStatus::Pixi { ref info } if info.environment == "analysis")
+                    );
                 }
-                ("rig-project", OverrideResolution::RigProjectApplied { target, .. }) => {
-                    assert_eq!(target.installation_name, "release");
+                ("rig-project", OverrideResolution::EnvironmentApplied { status, .. }) => {
+                    assert!(
+                        matches!(*status, RSourceStatus::RigProject { ref info } if info.installation_name == "release")
+                    );
                 }
                 (_, _) => panic!("provider order selected the wrong environment"),
             }
@@ -826,14 +841,16 @@ mod r_source_override_tests {
                 |_| Ok(pixi_target()),
             )
             .unwrap();
-            let OverrideResolution::PixiApplied {
-                target,
+            let OverrideResolution::EnvironmentApplied {
+                status,
                 diagnostics,
             } = result
             else {
                 panic!("expected Pixi despite rig failure")
             };
-            assert_eq!(target.environment, "analysis");
+            assert!(
+                matches!(*status, RSourceStatus::Pixi { ref info } if info.environment == "analysis")
+            );
             assert_eq!(availability_calls.load(Ordering::SeqCst), 1);
             assert_eq!(list_calls.load(Ordering::SeqCst), usize::from(!unavailable));
             assert_eq!(diagnostics.len(), 2);
@@ -932,7 +949,7 @@ mod r_source_override_tests {
         );
         assert!(matches!(
             result,
-            Some(OverrideResolution::PixiApplied { .. })
+            Some(OverrideResolution::EnvironmentApplied { .. })
         ));
     }
 
@@ -1434,8 +1451,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Applied {
@@ -1501,8 +1517,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Applied {
@@ -1544,8 +1559,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Applied { info, .. } => {
@@ -1594,8 +1608,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Applied {
@@ -1650,8 +1663,7 @@ mod r_source_override_tests {
             .unwrap();
 
             match result {
-                OverrideResolution::PixiApplied { .. }
-                | OverrideResolution::RigProjectApplied { .. } => {
+                OverrideResolution::EnvironmentApplied { .. } => {
                     panic!("unexpected environment target")
                 }
                 OverrideResolution::Applied {
@@ -1690,8 +1702,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Fallback { diagnostics } => {
@@ -1727,8 +1738,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Fallback { diagnostics } => {
@@ -1784,8 +1794,7 @@ mod r_source_override_tests {
             .unwrap();
 
             match result {
-                OverrideResolution::PixiApplied { .. }
-                | OverrideResolution::RigProjectApplied { .. } => {
+                OverrideResolution::EnvironmentApplied { .. } => {
                     panic!("unexpected environment target")
                 }
                 OverrideResolution::Fallback { diagnostics } => {
@@ -1823,8 +1832,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Fallback { diagnostics } => {
@@ -1863,8 +1871,7 @@ mod r_source_override_tests {
         .unwrap();
 
         match result {
-            OverrideResolution::PixiApplied { .. }
-            | OverrideResolution::RigProjectApplied { .. } => {
+            OverrideResolution::EnvironmentApplied { .. } => {
                 panic!("unexpected environment target")
             }
             OverrideResolution::Fallback { diagnostics } => {
@@ -1954,8 +1961,7 @@ mod r_source_override_tests {
                 .unwrap();
 
                 match result {
-                    OverrideResolution::PixiApplied { .. }
-                    | OverrideResolution::RigProjectApplied { .. } => {
+                    OverrideResolution::EnvironmentApplied { .. } => {
                         panic!("unexpected environment target")
                     }
                     OverrideResolution::Applied {

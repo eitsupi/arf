@@ -58,12 +58,12 @@ impl RSourceMetadata {
                 environment: info.environment.clone(),
                 manifest: display_path(cwd, &info.manifest),
                 prefix: display_path(cwd, &info.prefix),
-                r_binary: display_path(cwd, &info.binary),
+                r_binary: display_path(cwd, &info.target.binary),
             }),
             RSourceStatus::RigProject { info } => Some(Self::RigProject {
                 manifest: display_path(cwd, &info.manifest),
                 r_installation: info.installation_name.clone(),
-                r_binary: display_path(cwd, &info.binary),
+                r_binary: display_path(cwd, &info.target.binary),
             }),
             _ => None,
         }
@@ -227,9 +227,11 @@ mod tests {
         let info = crate::config::RigProjectRSourceInfo {
             root: "/workspace".into(),
             manifest: "/workspace/rproj.toml".into(),
-            binary: "/workspace/.rvenv/bin/R".into(),
-            home: "/rig/4.6.1/lib/R".into(),
-            library: "/rig/4.6.1/lib/R/lib/libR.so".into(),
+            target: crate::config::VerifiedRTarget {
+                binary: "/workspace/.rvenv/bin/R".into(),
+                home: "/rig/4.6.1/lib/R".into(),
+                library: "/rig/4.6.1/lib/R/lib/libR.so".into(),
+            },
             installation_name: "4.6.1".into(),
         };
         let report = RSourceResolutionReport {

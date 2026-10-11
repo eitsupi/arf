@@ -2,7 +2,7 @@
 
 mod probe;
 
-use crate::config::PixiRSourceInfo as PixiRTarget;
+use crate::config::{PixiRSourceInfo, VerifiedRTarget};
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -49,7 +49,7 @@ impl std::fmt::Display for PixiFailure {
 
 impl std::error::Error for PixiFailure {}
 
-pub(super) fn resolve_strict(cwd: Option<&Path>) -> Result<PixiRTarget, PixiFailure> {
+pub(super) fn resolve_strict(cwd: Option<&Path>) -> Result<PixiRSourceInfo, PixiFailure> {
     resolve_strict_with(cwd, |key| std::env::var_os(key), probe::r_home)
 }
 
@@ -63,7 +63,7 @@ fn resolve_strict_with(
     cwd: Option<&Path>,
     env: impl Fn(&str) -> Option<OsString>,
     probe: impl Fn(&Path) -> Result<PathBuf, probe::ProbeError>,
-) -> Result<PixiRTarget, PixiFailure> {
+) -> Result<PixiRSourceInfo, PixiFailure> {
     let in_shell = env("PIXI_IN_SHELL");
     let current_manifest = env("PIXI_WORKSPACE_MANIFEST");
     let legacy_manifest = env("PIXI_PROJECT_MANIFEST");
@@ -211,14 +211,16 @@ fn resolve_strict_with(
             path: Some(library),
         });
     }
-    Ok(PixiRTarget {
+    Ok(PixiRSourceInfo {
         version: r_base_version(&prefix),
         manifest,
         environment: environment.to_owned(),
         prefix,
-        binary,
-        home,
-        library,
+        target: VerifiedRTarget {
+            binary,
+            home,
+            library,
+        },
     })
 }
 

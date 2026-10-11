@@ -77,11 +77,11 @@ name = 'active'
         }
     }
 
-    fn resolve(&self) -> Result<PixiRTarget, PixiFailure> {
+    fn resolve(&self) -> Result<PixiRSourceInfo, PixiFailure> {
         self.resolve_in(Some(self.root.path()))
     }
 
-    fn resolve_in(&self, cwd: Option<&Path>) -> Result<PixiRTarget, PixiFailure> {
+    fn resolve_in(&self, cwd: Option<&Path>) -> Result<PixiRSourceInfo, PixiFailure> {
         resolve_strict_with(
             cwd,
             |key| self.env.get(key).cloned(),
@@ -99,7 +99,7 @@ enum FailureKind {
     RUnavailable,
 }
 
-fn rejected(resolution: Result<PixiRTarget, PixiFailure>, expected: FailureKind) {
+fn rejected(resolution: Result<PixiRSourceInfo, PixiFailure>, expected: FailureKind) {
     let Err(error) = resolution else {
         panic!("expected rejected Pixi activation");
     };
@@ -121,19 +121,19 @@ fn active_named_detached_environment_preserves_verified_target_and_marker() {
 name='other'",
     )
     .unwrap();
-    let target = fixture.resolve().expect("expected an applied Pixi target");
-    assert_eq!(target.environment, "analysis");
-    assert_eq!(target.binary, fixture.binary.canonicalize().unwrap());
-    assert_eq!(target.home, fixture.home.canonicalize().unwrap());
+    let info = fixture.resolve().expect("expected an applied Pixi target");
+    assert_eq!(info.environment, "analysis");
+    assert_eq!(info.target.binary, fixture.binary.canonicalize().unwrap());
+    assert_eq!(info.target.home, fixture.home.canonicalize().unwrap());
     assert_eq!(
-        target.library,
+        info.target.library,
         arf_libr::r_library_path(&fixture.home)
             .canonicalize()
             .unwrap()
     );
-    assert_eq!(target.version, None);
+    assert_eq!(info.version, None);
     assert_eq!(std::fs::read(&fixture.marker).unwrap(), before);
-    assert!(!target.binary.starts_with(&target.home));
+    assert!(!info.target.binary.starts_with(&info.target.home));
 }
 
 #[test]

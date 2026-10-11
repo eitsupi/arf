@@ -32,7 +32,7 @@ pub use r::RConfig;
 pub use reprex::{FormatterBackend, ReprexConfig, ReprexFormatter};
 pub use startup::{
     PixiRSourceInfo, RSource, RSourceMode, RSourceOverrideInfo, RSourceStatus, ReprexMode,
-    RigProjectRSourceInfo, StartupConfig,
+    RigProjectRSourceInfo, StartupConfig, VerifiedRTarget,
 };
 
 use schemars::JsonSchema;

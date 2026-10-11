@@ -91,44 +91,30 @@ pub(crate) struct RSourceResolutionReport {
 }
 
 impl RSourceResolutionReport {
-    pub(super) fn from_pixi(
-        info: crate::config::PixiRSourceInfo,
+    /// Build a report for R selected by an environment provider such as Pixi.
+    pub(super) fn from_environment(
+        status: RSourceStatus,
         diagnostics: Vec<RSourceDiagnostic>,
         selection_route: RSourceSelectionRoute,
         override_state: RSourceOverrideState,
     ) -> Self {
+        let provider =
+            RProvider::of_status(&status).expect("an environment provider selected the status");
         let is_override = selection_route == RSourceSelectionRoute::Override;
         debug_assert_eq!(is_override, override_state == RSourceOverrideState::Applied);
-        let mut report = Self::from_status_with_route(
-            RSourceStatus::Pixi { info: info.clone() },
-            Some(info.home),
-            override_state,
-            selection_route,
-        );
-        report.override_provider = is_override.then(|| RProvider::Pixi.as_str().to_owned());
-        report.resolved_version = info.version;
+        let r_home = status.verified_target().map(|target| target.home.clone());
+        let resolved_version = match &status {
+            RSourceStatus::Pixi { info } => info.version.clone(),
+            _ => None,
+        };
+        let mut report =
+            Self::from_status_with_route(status, r_home, override_state, selection_route);
+        report.override_provider = is_override.then(|| provider.as_str().to_owned());
+        report.resolved_version = resolved_version;
         report.diagnostics = diagnostics;
         report
     }
 
-    pub(super) fn from_rig_project(
-        info: crate::config::RigProjectRSourceInfo,
-        diagnostics: Vec<RSourceDiagnostic>,
-        selection_route: RSourceSelectionRoute,
-        override_state: RSourceOverrideState,
-    ) -> Self {
-        let is_override = selection_route == RSourceSelectionRoute::Override;
-        debug_assert_eq!(is_override, override_state == RSourceOverrideState::Applied);
-        let mut report = Self::from_status_with_route(
-            RSourceStatus::RigProject { info: info.clone() },
-            Some(info.home),
-            override_state,
-            selection_route,
-        );
-        report.override_provider = is_override.then(|| RProvider::RigProject.as_str().to_owned());
-        report.diagnostics = diagnostics;
-        report
-    }
     pub(super) fn from_status(
         status: RSourceStatus,
         r_home: Option<PathBuf>,
@@ -271,13 +257,13 @@ pub(crate) fn resolve_r_source(
                 let cwd = base_dir
                     .map(Path::to_path_buf)
                     .or_else(|| std::env::current_dir().ok());
-                let target = resolve_strict(cwd.as_deref()).map_err(|failure| {
+                let info = resolve_strict(cwd.as_deref()).map_err(|failure| {
                     anyhow::Error::new(failure).context(
                         "The requested Pixi R provider is unavailable; run arf through `pixi run` with an R-enabled environment",
                     )
                 })?;
-                return Ok(RSourceResolutionReport::from_pixi(
-                    target,
+                return Ok(RSourceResolutionReport::from_environment(
+                    RSourceStatus::Pixi { info },
                     Vec::new(),
                     RSourceSelectionRoute::Explicit,
                     override_state,
@@ -285,13 +271,13 @@ pub(crate) fn resolve_r_source(
                 .with_explicit_request(request));
             }
             ExplicitRSource::Provider(RProvider::RigProject) => {
-                let target = resolve_rig_project().map_err(|failure| {
+                let info = resolve_rig_project().map_err(|failure| {
                     anyhow::Error::new(failure).context(
                         "The requested rig-project R provider is unavailable; use a synchronized rig project in the current directory",
                     )
                 })?;
-                return Ok(RSourceResolutionReport::from_rig_project(
-                    target,
+                return Ok(RSourceResolutionReport::from_environment(
+                    RSourceStatus::RigProject { info },
                     Vec::new(),
                     RSourceSelectionRoute::Explicit,
                     override_state,
@@ -338,23 +324,12 @@ pub(crate) fn resolve_r_source(
 
     if let Some(result) = setup_r_via_overrides(r_source_overrides, base_dir) {
         match result {
-            OverrideResolution::PixiApplied {
-                target,
+            OverrideResolution::EnvironmentApplied {
+                status,
                 diagnostics,
             } => {
-                return Ok(RSourceResolutionReport::from_pixi(
-                    *target,
-                    diagnostics,
-                    RSourceSelectionRoute::Override,
-                    RSourceOverrideState::Applied,
-                ));
-            }
-            OverrideResolution::RigProjectApplied {
-                target,
-                diagnostics,
-            } => {
-                return Ok(RSourceResolutionReport::from_rig_project(
-                    *target,
+                return Ok(RSourceResolutionReport::from_environment(
+                    *status,
                     diagnostics,
                     RSourceSelectionRoute::Override,
                     RSourceOverrideState::Applied,
@@ -402,14 +377,14 @@ pub(crate) fn apply_r_source(resolution: &RSourceResolutionReport) -> Result<()>
         .context("Resolved R source has no R_HOME")?;
     // SAFETY: This is called single-threaded during startup, before R is initialized.
     unsafe { std::env::set_var("R_HOME", r_home) };
-    match &resolution.status {
-        RSourceStatus::Pixi { info } => {
-            arf_libr::select_r_library(info.library.clone(), Some(info.prefix.clone()))?;
-        }
-        RSourceStatus::RigProject { info } => {
-            arf_libr::select_r_library(info.library.clone(), None)?;
-        }
-        _ => {}
+    if let Some(target) = resolution.status.verified_target() {
+        // Pixi limits Windows DLL search to its environment prefix; other
+        // providers keep R's ordinary search.
+        let dependency_prefix = match &resolution.status {
+            RSourceStatus::Pixi { info } => Some(info.prefix.clone()),
+            _ => None,
+        };
+        arf_libr::select_r_library(target.library.clone(), dependency_prefix)?;
     }
     Ok(())
 }
@@ -625,17 +600,19 @@ mod tests {
             manifest: "/workspace/pixi.toml".into(),
             environment: "analysis".to_owned(),
             prefix: "/prefix".into(),
-            binary: "/prefix/bin/R".into(),
-            home: "/prefix/lib/R".into(),
-            library: "/prefix/lib/R/lib/libR.so".into(),
+            target: crate::config::VerifiedRTarget {
+                binary: "/prefix/bin/R".into(),
+                home: "/prefix/lib/R".into(),
+                library: "/prefix/lib/R/lib/libR.so".into(),
+            },
             version: Some("4.5.1".to_owned()),
         };
         for override_state in [
             RSourceOverrideState::ShadowedByCli,
             RSourceOverrideState::Disabled,
         ] {
-            let report = RSourceResolutionReport::from_pixi(
-                info.clone(),
+            let report = RSourceResolutionReport::from_environment(
+                RSourceStatus::Pixi { info: info.clone() },
                 Vec::new(),
                 RSourceSelectionRoute::Explicit,
                 override_state,
@@ -643,7 +620,7 @@ mod tests {
 
             assert_eq!(report.selection_route, RSourceSelectionRoute::Explicit);
             assert_eq!(report.override_state, override_state);
-            assert_eq!(report.r_home.as_deref(), Some(info.home.as_path()));
+            assert_eq!(report.r_home.as_deref(), Some(info.target.home.as_path()));
             assert!(
                 matches!(report.status, RSourceStatus::Pixi { info: ref target } if target == &info)
             );
@@ -653,8 +630,8 @@ mod tests {
         }
 
         // The manifest is provider identity, not a version file read by the override.
-        let report = RSourceResolutionReport::from_pixi(
-            info,
+        let report = RSourceResolutionReport::from_environment(
+            RSourceStatus::Pixi { info },
             Vec::new(),
             RSourceSelectionRoute::Override,
             RSourceOverrideState::Applied,

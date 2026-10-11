@@ -7,7 +7,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(super) type RigProjectTarget = crate::config::RigProjectRSourceInfo;
+use crate::config::{RigProjectRSourceInfo, VerifiedRTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RigProjectFailure {
@@ -56,7 +56,7 @@ impl fmt::Display for RigProjectFailure {
 
 impl std::error::Error for RigProjectFailure {}
 
-pub(crate) fn resolve_strict() -> Result<RigProjectTarget, RigProjectFailure> {
+pub(crate) fn resolve_strict() -> Result<RigProjectRSourceInfo, RigProjectFailure> {
     let cwd = std::env::current_dir().map_err(|_| RigProjectFailure::ProjectNotFound {
         path: PathBuf::from("."),
     })?;
@@ -67,7 +67,7 @@ fn resolve_strict_at(
     cwd: &Path,
     run_status: impl FnOnce(Command) -> Result<Vec<u8>, StatusCommandFailure>,
     probe: impl FnOnce(Command) -> Result<PathBuf, arf_libr::RHomeProbeError>,
-) -> Result<RigProjectTarget, RigProjectFailure> {
+) -> Result<RigProjectRSourceInfo, RigProjectFailure> {
     let manifest = cwd.join("rproj.toml");
     if !manifest.metadata().is_ok_and(|metadata| metadata.is_file()) {
         return Err(RigProjectFailure::ProjectNotFound { path: manifest });
@@ -159,12 +159,14 @@ fn resolve_strict_at(
         Nullable::Value(sync) => sync.r_version,
         Nullable::Null => unreachable!("validated status has a non-null sync section"),
     };
-    Ok(RigProjectTarget {
+    Ok(RigProjectRSourceInfo {
         root,
         manifest,
-        binary: wrapper,
-        home,
-        library,
+        target: VerifiedRTarget {
+            binary: wrapper,
+            home,
+            library,
+        },
         installation_name,
     })
 }
@@ -385,7 +387,7 @@ mod tests {
     fn resolves_synced_project_and_preserves_the_wrapper_target() {
         let (project, wrapper, home) = make_project();
         let relative_home = PathBuf::from("..").join(home.path().file_name().unwrap());
-        let target = resolve_strict_at(
+        let info = resolve_strict_at(
             project.path(),
             run_with_status(
                 status_json(project.path()),
@@ -406,12 +408,15 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(target.root, project.path().canonicalize().unwrap());
-        assert_eq!(target.manifest, target.root.join("rproj.toml"));
-        assert_eq!(target.binary, wrapper);
-        assert_eq!(target.home, home.path().canonicalize().unwrap());
-        assert_eq!(target.library, arf_libr::r_library_path(&target.home));
-        assert_eq!(target.installation_name, "4.6-arm64");
+        assert_eq!(info.root, project.path().canonicalize().unwrap());
+        assert_eq!(info.manifest, info.root.join("rproj.toml"));
+        assert_eq!(info.target.binary, wrapper);
+        assert_eq!(info.target.home, home.path().canonicalize().unwrap());
+        assert_eq!(
+            info.target.library,
+            arf_libr::r_library_path(&info.target.home)
+        );
+        assert_eq!(info.installation_name, "4.6-arm64");
     }
 
     #[test]
