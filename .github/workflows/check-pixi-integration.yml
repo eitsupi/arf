@@ -26,6 +26,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -43,6 +47,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
         with:
           pixi-version: v0.81.0
@@ -50,25 +56,20 @@ jobs:
           cache: false
           locked: true
       - name: Build production arf and integration tests
-        shell: bash
         run: cargo build --locked --bin arf --tests
       - name: Verify timeout after Pixi probe rejection
-        shell: bash
         run: >-
           cargo test --locked -p arf-console --test pixi_source_tests
           auto_path_discovery_times_out_after_pixi_probe_rejection -- --ignored --exact
       - name: Verify default activated environment
-        shell: bash
         env:
           ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-default
         run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default verify
       - name: Configure detached named environment
-        shell: bash
         env:
           ARF_TEST_DETACHED_PREFIX: ${{ runner.temp }}/arf-pixi-detached
         run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment default python .github/pixi-integration/configure_detached.py
       - name: Verify detached named activated environment
-        shell: bash
         env:
           ARF_PIXI_RESULTS: ${{ runner.temp }}/arf-pixi-analysis
         run: pixi run --manifest-path .github/pixi-integration/pixi.toml --locked --environment analysis verify
