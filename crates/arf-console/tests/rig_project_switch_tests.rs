@@ -22,12 +22,18 @@ fn required_path(value: &Value, key: &str) -> Result<PathBuf> {
     })?))
 }
 
-fn wait_for_restart(terminal: &Terminal, checkpoint: usize, description: &str) -> Result<String> {
+fn wait_for_replacement(
+    terminal: &Terminal,
+    checkpoint: usize,
+    description: &str,
+) -> Result<String> {
     terminal.wait_for(description, |state, line| {
         state.exited.is_none()
             && line.trim_end() == PROMPT
             && terminal.output_since(checkpoint).is_ok_and(|output| {
-                output.contains("Restarting R session...") && output.contains("is ready.")
+                (output.contains("Restarting R session...")
+                    || output.contains("Restarting with R "))
+                    && output.contains("is ready.")
             })
     })?;
     terminal.output_since(checkpoint)
@@ -107,12 +113,12 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
 
             let checkpoint = terminal.checkpoint()?;
             terminal.enter(":restart!")?;
-            wait_for_restart(terminal, checkpoint, "same-root restart")?;
+            wait_for_replacement(terminal, checkpoint, "same-root restart")?;
             capture_proof(terminal, &script, &proof_dir, "restart")?;
 
             let checkpoint = terminal.checkpoint()?;
             terminal.enter(":switch! 4.6.0")?;
-            wait_for_restart(terminal, checkpoint, "same-minor R switch")?;
+            wait_for_replacement(terminal, checkpoint, "same-minor R switch")?;
             capture_proof(terminal, &script, &proof_dir, "switch-same-minor")?;
 
             let checkpoint = terminal.checkpoint()?;
@@ -136,7 +142,7 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
             )?;
             let checkpoint = terminal.checkpoint()?;
             terminal.enter(":switch! 4.5.3")?;
-            let output = wait_for_restart(terminal, checkpoint, "different-minor R switch")?;
+            let output = wait_for_replacement(terminal, checkpoint, "different-minor R switch")?;
             ensure!(
                 output.contains("Project needs R 4.6, this is R 4.5."),
                 "rig did not report the project R minor mismatch: {output}"
@@ -145,7 +151,7 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
 
             let checkpoint = terminal.checkpoint()?;
             terminal.enter(":restart!")?;
-            wait_for_restart(terminal, checkpoint, "restart after different-minor switch")?;
+            wait_for_replacement(terminal, checkpoint, "restart after different-minor switch")?;
             capture_proof(terminal, &script, &proof_dir, "restart-different-minor")?;
             terminal.quit()
         },
