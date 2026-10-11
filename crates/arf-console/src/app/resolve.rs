@@ -3,7 +3,8 @@
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
 pub(crate) use crate::app::explicit_r_source::RSourceOrigin;
 use crate::app::setup::{
-    RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report, resolve_r_source,
+    RSourceDiagnostic, RSourceResolutionReport, RSourceSelectionRoute,
+    resolve_path_r_home_for_report, resolve_r_source,
 };
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use crate::external::rig::RigError;
@@ -290,7 +291,9 @@ fn selected_by(
     r_source_origin: Option<RSourceOrigin>,
     loaded_config: Option<&ConfigLoadProvenance>,
 ) -> SelectedBy {
-    if let Some(r_home) = r_home {
+    if resolution.selection_route == RSourceSelectionRoute::Explicit
+        && let Some(r_home) = r_home
+    {
         let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
             RSourceOrigin::Cli => ("command_line_argument", "--r-home"),
             RSourceOrigin::Environment => ("environment_variable", "ARF_R_HOME"),
@@ -309,7 +312,9 @@ fn selected_by(
         };
     }
 
-    if let Some(r_version) = r_version {
+    if resolution.selection_route == RSourceSelectionRoute::Explicit
+        && let Some(r_version) = r_version
+    {
         let (source_kind, source_name) = match r_source_origin.unwrap_or(RSourceOrigin::Cli) {
             RSourceOrigin::Cli => ("command_line_argument", "--with-r-version"),
             RSourceOrigin::Environment => ("environment_variable", "ARF_R_VERSION"),
@@ -328,7 +333,7 @@ fn selected_by(
         };
     }
 
-    if resolution.override_state == crate::app::setup::RSourceOverrideState::Applied {
+    if resolution.selection_route == RSourceSelectionRoute::Override {
         if let RSourceStatus::Pixi { info } = &resolution.status {
             return SelectedBy {
                 kind: "active_environment",
@@ -343,7 +348,7 @@ fn selected_by(
                 },
             };
         }
-        let format = match resolution.provider.as_deref() {
+        let format = match resolution.override_provider.as_deref() {
             Some("version-file") => Some("text"),
             Some("toml-key") => Some("toml"),
             Some("json-key") => Some("json"),
@@ -479,7 +484,8 @@ mod tests {
         let mut report = super::RSourceResolutionReport {
             status: super::RSourceStatus::Pixi { info: info.clone() },
             r_home: Some(info.home.clone()),
-            provider: None,
+            selection_route: super::RSourceSelectionRoute::Override,
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,
@@ -487,7 +493,7 @@ mod tests {
             diagnostics: Vec::new(),
             override_state: crate::app::setup::RSourceOverrideState::Applied,
         };
-        report.provider = Some("pixi".into());
+        report.override_provider = Some("pixi".into());
         report.file = Some(info.manifest.clone());
         let value = serde_json::to_value(super::descriptor(
             std::path::Path::new("/"),
@@ -524,7 +530,8 @@ mod tests {
         let resolution = RSourceResolutionReport {
             status: RSourceStatus::Path,
             r_home: None,
-            provider: None,
+            selection_route: super::RSourceSelectionRoute::Startup,
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,
@@ -555,7 +562,8 @@ mod tests {
                 override_info: None,
             },
             r_home: Some(Path::new("/opt/R/4.4.1/lib/R").to_owned()),
-            provider: None,
+            selection_route: super::RSourceSelectionRoute::Explicit,
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,

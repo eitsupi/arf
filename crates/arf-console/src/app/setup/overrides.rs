@@ -1,6 +1,6 @@
 //! Directory-level R source overrides.
 
-use super::pixi::{self, PixiResolution};
+use super::pixi::{self, PixiFailure};
 use super::r_source::{RSourceDiagnostic, RSourceResolutionReport, warning};
 use super::rig::{ResolvedRSource, setup_r_via_selected_rig_version};
 use crate::config::{RSourceOverride, RSourceOverrideInfo, RSourceStatus};
@@ -283,7 +283,7 @@ where
         rig_available,
         list_versions,
         resolve_selected_rig_version,
-        pixi::resolve,
+        pixi::resolve_strict,
     )
 }
 
@@ -293,7 +293,9 @@ fn setup_r_via_overrides_with_pixi<FAvailable, FList, FResolve>(
     rig_available: FAvailable,
     list_versions: FList,
     resolve_selected_rig_version: FResolve,
-    resolve_pixi: impl Fn(Option<&Path>) -> PixiResolution,
+    resolve_pixi: impl Fn(
+        Option<&Path>,
+    ) -> std::result::Result<crate::config::PixiRSourceInfo, PixiFailure>,
 ) -> Option<OverrideResolution>
 where
     FAvailable: Fn() -> std::result::Result<(), external::rig::RigError>,
@@ -310,13 +312,17 @@ where
         let provider = ProviderSpec::from(source);
         if matches!(provider.kind, ProviderKind::Pixi) {
             match resolve_pixi(base_dir.as_deref()) {
-                PixiResolution::NoMatch => continue,
-                PixiResolution::Rejected(diagnostic) => {
+                Err(PixiFailure::NotActive {
+                    workspace_manifest: None,
+                }) => continue,
+                Err(error) => {
                     evaluated_provider = true;
-                    diagnostics.push(diagnostic);
+                    if let Some(diagnostic) = pixi_failure_diagnostic(&error) {
+                        diagnostics.push(diagnostic);
+                    }
                     continue;
                 }
-                PixiResolution::Applied(target) => {
+                Ok(target) => {
                     return Some(OverrideResolution::PixiApplied {
                         target: Box::new(target),
                         diagnostics,
@@ -477,6 +483,35 @@ where
     }
 }
 
+fn pixi_failure_diagnostic(error: &PixiFailure) -> Option<RSourceDiagnostic> {
+    match error {
+        PixiFailure::NotActive {
+            workspace_manifest: Some(path),
+        } => Some(warning(
+            "r_source_override.pixi_not_active",
+            "Warning: A Pixi workspace was found, but its environment is not active. Start arf with `pixi run arf`; trying the next R source override.",
+            Some(path.clone()),
+        )),
+        PixiFailure::NotActive {
+            workspace_manifest: None,
+        } => None,
+        PixiFailure::EnvironmentInvalid { reason, .. } => Some(warning(
+            "r_source_override.pixi_environment_invalid",
+            format!(
+                "Warning: The active Pixi environment is invalid: {reason}; trying the next R source override."
+            ),
+            None,
+        )),
+        PixiFailure::RUnavailable { reason, .. } => Some(warning(
+            "r_source_override.pixi_r_unavailable",
+            format!(
+                "Warning: R from the active Pixi environment is unavailable: {reason}; trying the next R source override."
+            ),
+            None,
+        )),
+    }
+}
+
 fn is_bare_filename(file: &Path) -> bool {
     let Some(file) = file.to_str() else {
         return false;
@@ -508,7 +543,9 @@ fn invalid_override_file_warning(provider: &str, file: &Path) -> RSourceDiagnost
 }
 
 pub(super) fn script_override_notice(resolution: &RSourceResolutionReport) -> Option<String> {
-    if let RSourceStatus::Pixi { .. } = resolution.status {
+    if resolution.selection_route == super::r_source::RSourceSelectionRoute::Override
+        && let RSourceStatus::Pixi { .. } = resolution.status
+    {
         return Some(format!(
             "# R source override: {}",
             resolution.status.display()
@@ -621,7 +658,7 @@ mod r_source_override_tests {
                     Err(external::rig::RigError::CommandFailed("list failed".into()))
                 },
                 |_, _| panic!("must not resolve rig after failure"),
-                |_| PixiResolution::Applied(pixi_target()),
+                |_| Ok(pixi_target()),
             )
             .unwrap();
             let OverrideResolution::PixiApplied {
@@ -676,32 +713,57 @@ mod r_source_override_tests {
             |_| panic!("successful file provider must skip Pixi"),
         );
         assert!(matches!(result, Some(OverrideResolution::Applied { .. })));
-        let result = setup_r_via_overrides_with_pixi(
-            &[RSourceOverride::Pixi, file],
-            Some(temp.path()),
-            || Ok(()),
-            || Ok(vec![version.clone()]),
-            resolve,
-            |_| {
-                PixiResolution::Rejected(warning(
-                    "r_source_override.pixi_r_unavailable",
-                    "Pixi R unavailable",
-                    None,
-                ))
+        let failures = [
+            PixiFailure::EnvironmentInvalid {
+                reason: "invalid marker",
+                path: Some("/prefix/conda-meta/pixi".into()),
             },
-        );
-        let Some(OverrideResolution::Applied { diagnostics, .. }) = result else {
-            panic!("expected file provider")
-        };
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].code, "r_source_override.pixi_r_unavailable");
+            PixiFailure::RUnavailable {
+                reason: "R probe timed out",
+                path: Some("/prefix/bin/R".into()),
+            },
+        ];
+        let mut summaries = Vec::new();
+        for failure in failures {
+            let result = setup_r_via_overrides_with_pixi(
+                &[RSourceOverride::Pixi, file.clone()],
+                Some(temp.path()),
+                || Ok(()),
+                || Ok(vec![version.clone()]),
+                resolve,
+                |_| Err(failure.clone()),
+            );
+            let Some(OverrideResolution::Applied { diagnostics, .. }) = result else {
+                panic!("expected file provider")
+            };
+            assert_eq!(diagnostics.len(), 1);
+            summaries.push(serde_json::json!({
+                "code": diagnostics[0].code,
+                "message": diagnostics[0].message,
+                "path": diagnostics[0].path,
+            }));
+        }
+        insta::assert_snapshot!(serde_json::to_string_pretty(&summaries).unwrap(), @r###"
+        [
+          {
+            "code": "r_source_override.pixi_environment_invalid",
+            "message": "Warning: The active Pixi environment is invalid: invalid marker; trying the next R source override.",
+            "path": null
+          },
+          {
+            "code": "r_source_override.pixi_r_unavailable",
+            "message": "Warning: R from the active Pixi environment is unavailable: R probe timed out; trying the next R source override.",
+            "path": null
+          }
+        ]
+        "###);
         let result = setup_r_via_overrides_with_pixi(
             &[RSourceOverride::Pixi],
             Some(temp.path()),
             || panic!("must not query rig"),
             || panic!("must not query rig"),
             resolve,
-            |_| PixiResolution::Applied(pixi_target()),
+            |_| Ok(pixi_target()),
         );
         assert!(matches!(
             result,
@@ -832,7 +894,8 @@ mod r_source_override_tests {
         let report = RSourceResolutionReport {
             status: RSourceStatus::Path,
             r_home: Some(PathBuf::from("/tmp/discovered-r-home")),
-            provider: None,
+            selection_route: super::super::r_source::RSourceSelectionRoute::Startup,
+            override_provider: None,
             file: None,
             key: None,
             requested_version: None,
@@ -925,7 +988,9 @@ mod r_source_override_tests {
             |_, _| panic!("must not query rig"),
             |cwd| {
                 assert!(cwd.is_none());
-                PixiResolution::NoMatch
+                Err(PixiFailure::NotActive {
+                    workspace_manifest: None,
+                })
             },
         );
         assert!(result.is_none());
