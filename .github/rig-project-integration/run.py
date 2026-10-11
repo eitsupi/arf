@@ -716,6 +716,7 @@ jsonlite = "*"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
 
+    # The multi-version TUI harness also checks selected-library DYLD ordering.
     if sys.platform == "darwin":
         unrelated_loader_dir = RESULTS / "dyld-unrelated"
         unrelated_loader_dir.mkdir(parents=True, exist_ok=True)

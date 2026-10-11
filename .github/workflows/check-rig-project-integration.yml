@@ -89,6 +89,8 @@ jobs:
       - name: Install isolated R versions with rig 0.11.0
         run: |
           versions=(4.6.1)
+          # All OSes validate provider startup; keep the full switch proof on macOS to cover DYLD
+          # library precedence without installing three R versions on every runner.
           if [[ "${RUNNER_OS}" == "macOS" ]]; then
             versions+=(4.6.0 4.5.3)
           fi
