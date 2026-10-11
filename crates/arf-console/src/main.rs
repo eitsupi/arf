@@ -366,7 +366,7 @@ fn run() -> Result<()> {
     let r_source_status = resolution.status.clone();
     log::debug!("R source status: {:?}", r_source_status);
 
-    // Ensure LD_LIBRARY_PATH includes R library directory.
+    // Prepare the platform loader path for the R library directory.
     // This may re-exec the current process if the path needs updating.
     // On Unix, the pre-exec hook restores the terminal mode before exec so the
     // replacement process starts with the original mode. If exec fails (rare),
@@ -398,7 +398,7 @@ fn run() -> Result<()> {
                 console_mode::restore_original_input_mode();
             })
         {
-            log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+            log::warn!("Could not prepare the R library search path: {}", e);
             // Drop old guard before calling install(): assignment evaluates the RHS
             // first (capturing and disabling echo), then drops the old guard, which
             // would call restore and re-enable echo. Explicit drop avoids that.
@@ -416,7 +416,7 @@ fn run() -> Result<()> {
     }
     #[cfg(not(unix))]
     if let Err(e) = arf_libr::ensure_ld_library_path() {
-        log::warn!("Could not set LD_LIBRARY_PATH: {}", e);
+        log::warn!("Could not prepare the R library search path: {}", e);
     }
 
     // Report startup diagnostics only after the loader re-exec boundary. If

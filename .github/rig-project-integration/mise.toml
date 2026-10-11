@@ -1,0 +1,10 @@
+[settings]
+lockfile = true
+
+[tools."github:r-lib/rig"]
+version = "0.11.0"
+bin_path = "bin"
+
+[tools."github:r-lib/rig".platforms]
+macos-arm64 = { asset_pattern = "rig-macos-arm64-*.tar.gz" }
+macos-x64 = { asset_pattern = "rig-macos-x86_64-*.tar.gz" }

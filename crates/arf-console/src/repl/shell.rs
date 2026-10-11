@@ -78,6 +78,9 @@ const R_VERSION_ENV_VARS: &[&str] = &[
     "R_HOME",
     // Always removed, whatever its origin; see `ALWAYS_REMOVE_ENV_VARS`.
     "LD_LIBRARY_PATH",
+    #[cfg(target_os = "macos")]
+    // Restored from the startup snapshot before the next R target is selected.
+    "DYLD_LIBRARY_PATH",
     // Read from the old R_HOME/etc/Renviron.
     "R_LIBS_USER",
     "R_LIBS_SITE",
@@ -452,6 +455,43 @@ mod tests {
         assert!(
             cmd.get_envs()
                 .any(|(key, value)| key == OsStr::new(r"LD_LIBRARY_PATH") && value.is_none())
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn build_restart_command_restores_dyld_library_path_from_startup_snapshot() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |var| {
+            (var == "DYLD_LIBRARY_PATH").then(|| OsString::from(r"/user/lib"))
+        });
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
+
+        let restored = cmd
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(r"DYLD_LIBRARY_PATH"))
+            .map(|(_, value)| value);
+        assert_eq!(restored, Some(Some(OsStr::new(r"/user/lib"))));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn build_restart_command_removes_dyld_library_path_absent_from_snapshot() {
+        let changes = env_changes_for_switch(Some(r"4.0"), |_| None);
+        let cmd = build_restart_command(
+            std::path::Path::new(r"arf"),
+            &[],
+            &changes,
+            TEST_STARTUP_ENV_CARRIER,
+        );
+
+        assert!(
+            cmd.get_envs()
+                .any(|(key, value)| key == OsStr::new(r"DYLD_LIBRARY_PATH") && value.is_none())
         );
     }
 

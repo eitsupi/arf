@@ -1,5 +1,7 @@
 use crate::error::{RError, RResult};
 use std::env;
+#[cfg(any(target_os = "macos", all(test, unix)))]
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -308,11 +310,13 @@ fn expand_wrapper_r_home(value: &str, r_home: &Path, expand: bool) -> OsString {
     result
 }
 
-/// Check if LD_LIBRARY_PATH includes the R library directory.
-/// If not, re-execute the current process with the correct LD_LIBRARY_PATH.
+/// Prepare the platform loader path for the R library directory.
+/// Re-execute the current process when the loader path must change.
 ///
-/// This is necessary because LD_LIBRARY_PATH must be set before the process
-/// starts for R packages to find libR.so when loading their shared libraries.
+/// On Linux, this adds the R directory to `LD_LIBRARY_PATH` when absent. On
+/// macOS, it puts the R directory first in `DYLD_LIBRARY_PATH`; this must be
+/// set before the process starts so R's shared-library dependencies can be
+/// found while loading libR.
 ///
 /// Returns Ok(true) if re-exec happened (caller should exit),
 /// Ok(false) if no re-exec needed.
@@ -343,29 +347,44 @@ where
         return Ok(false);
     };
 
-    let lib_dir_str = lib_dir.to_string_lossy();
-    let current = env::var("LD_LIBRARY_PATH").unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    let (loader_var, new_path) = {
+        let current = env::var_os("DYLD_LIBRARY_PATH");
+        let new_path = prepend_unique_loader_path(current.as_deref(), lib_dir)
+            .map_err(|error| RError::LibraryNotFound(error.to_string()))?;
+        let Some(new_path) = new_path else {
+            return Ok(false);
+        };
 
-    // Check if lib_dir is already in LD_LIBRARY_PATH
-    if current.split(':').any(|p| p == lib_dir_str) {
-        return Ok(false);
-    }
-
-    // Need to re-exec with updated LD_LIBRARY_PATH
-    let new_path = if current.is_empty() {
-        lib_dir_str.to_string()
-    } else {
-        format!("{}:{}", lib_dir_str, current)
+        ("DYLD_LIBRARY_PATH", new_path)
     };
 
-    // SAFETY: We're about to exec, so modifying environment is safe
-    unsafe { env::set_var("LD_LIBRARY_PATH", &new_path) };
+    #[cfg(not(target_os = "macos"))]
+    let (loader_var, new_path) = {
+        let lib_dir_str = lib_dir.to_string_lossy();
+        let current = env::var("LD_LIBRARY_PATH").unwrap_or_default();
+
+        // Check if lib_dir is already in LD_LIBRARY_PATH
+        if current.split(':').any(|p| p == lib_dir_str) {
+            return Ok(false);
+        }
+
+        // Need to re-exec with updated LD_LIBRARY_PATH
+        let new_path = if current.is_empty() {
+            OsString::from(lib_dir_str.as_ref())
+        } else {
+            OsString::from(format!("{}:{}", lib_dir_str, current))
+        };
+        ("LD_LIBRARY_PATH", new_path)
+    };
+
+    // SAFETY: We're about to exec, so modifying the environment is safe.
+    unsafe { env::set_var(loader_var, &new_path) };
 
     // Re-execute the current process with the caller's authoritative argv.
     // Preserve OsString arguments so non-UTF-8 values do not get rewritten.
     let exe = env::current_exe().map_err(|e| RError::LibraryNotFound(e.to_string()))?;
-
-    log::info!("Re-executing with LD_LIBRARY_PATH={}", new_path);
+    log::info!("Re-executing with {} configured", loader_var);
 
     pre_exec();
 
@@ -377,7 +396,112 @@ where
     )))
 }
 
+/// Put the selected R library directory first in a native loader search path,
+/// removing later copies while preserving every other entry and its order.
+/// Returns `None` when the current value is already normalized.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn prepend_unique_loader_path(
+    current: Option<&OsStr>,
+    library_dir: &Path,
+) -> Result<Option<OsString>, std::env::JoinPathsError> {
+    let current_paths = current
+        .map(env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+    if current_paths
+        .first()
+        .is_some_and(|path| path == library_dir)
+        && current_paths
+            .iter()
+            .filter(|path| *path == library_dir)
+            .count()
+            == 1
+    {
+        return Ok(None);
+    }
+
+    let mut paths = Vec::with_capacity(current_paths.len() + 1);
+    paths.push(library_dir.to_path_buf());
+    paths.extend(current_paths.into_iter().filter(|path| path != library_dir));
+    env::join_paths(paths).map(Some)
+}
+
 #[cfg(not(unix))]
 pub fn ensure_ld_library_path() -> RResult<bool> {
     Ok(false)
+}
+
+#[cfg(all(test, unix))]
+mod loader_path_tests {
+    use super::prepend_unique_loader_path;
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
+
+    fn joined(paths: &[&str]) -> OsString {
+        std::env::join_paths(paths.iter().map(Path::new)).expect("paths should join")
+    }
+
+    #[test]
+    fn loader_path_is_added_when_unset() {
+        assert_eq!(
+            prepend_unique_loader_path(None, Path::new("/selected/R/lib"))
+                .expect("path should normalize"),
+            Some(OsString::from("/selected/R/lib"))
+        );
+    }
+
+    #[test]
+    fn loader_path_already_first_is_unchanged() {
+        let current = joined(&["/selected/R/lib", "/external/one", "/external/two"]);
+        assert_eq!(
+            prepend_unique_loader_path(Some(&current), Path::new("/selected/R/lib"))
+                .expect("path should normalize"),
+            None
+        );
+    }
+
+    #[test]
+    fn loader_path_moves_selected_r_first_and_removes_its_duplicates() {
+        let current = joined(&[
+            "/old/R/lib",
+            "/external/one",
+            "/selected/R/lib",
+            "/external/two",
+            "/selected/R/lib",
+        ]);
+        let expected = joined(&[
+            "/selected/R/lib",
+            "/old/R/lib",
+            "/external/one",
+            "/external/two",
+        ]);
+
+        let normalized = prepend_unique_loader_path(Some(&current), Path::new("/selected/R/lib"))
+            .expect("path should normalize")
+            .expect("selected R should move first");
+        assert_eq!(normalized, expected);
+
+        assert_eq!(
+            prepend_unique_loader_path(Some(&normalized), Path::new("/selected/R/lib"))
+                .expect("path should normalize"),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loader_path_preserves_non_utf8_selected_directory() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let selected = Path::new(OsStr::from_bytes(b"/selected/R-\xff/lib"));
+        let current = OsString::from_vec(b"/external-\xfe/lib".to_vec());
+        let expected = OsString::from_vec(b"/selected/R-\xff/lib:/external-\xfe/lib".to_vec());
+
+        assert_eq!(
+            prepend_unique_loader_path(Some(&current), selected).expect("path should normalize"),
+            Some(expected)
+        );
+    }
 }
