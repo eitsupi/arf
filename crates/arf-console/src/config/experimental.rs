@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 /// A provider for resolving an R installation.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "kebab-case")]
+#[serde(tag = "provider", rename_all = "kebab-case")]
 pub enum RSourceOverride {
     /// Resolve R using the active pixi environment.
     Pixi,
@@ -712,10 +712,10 @@ shell_semicolon_shortcut = true
         let toml_str = r#"
 [experimental]
 r_source_overrides = [
-  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
-  { type = "json-key", file = "renv.lock", key = "R.Version" },
-  { type = "version-file", file = ".r-version" },
-  { type = "pixi" },
+  { provider = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { provider = "json-key", file = "renv.lock", key = "R.Version" },
+  { provider = "version-file", file = ".r-version" },
+  { provider = "pixi" },
 ]
 "#;
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
@@ -741,14 +741,55 @@ r_source_overrides = [
     }
 
     #[test]
-    fn test_parse_r_source_override_unknown_type_fails() {
+    fn test_parse_r_source_override_unknown_provider_fails() {
         let toml_str = r#"
 [experimental]
-r_source_overrides = [{ type = "unknown-thing" }]
+r_source_overrides = [{ provider = "unknown-thing" }]
 "#;
         let result: Result<crate::config::Config, _> = toml::from_str(toml_str);
-        let error = result.expect_err("unknown R source override types should fail");
+        let error = result.expect_err("unknown R source override providers should fail");
         assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn test_r_source_override_round_trip_uses_provider_tag() {
+        let overrides = vec![
+            RSourceOverride::VersionFile {
+                file: PathBuf::from(".r-version"),
+            },
+            RSourceOverride::TomlKey {
+                file: PathBuf::from("rproject.toml"),
+                key: "project.r_version".to_string(),
+            },
+            RSourceOverride::JsonKey {
+                file: PathBuf::from("renv.lock"),
+                key: "R.Version".to_string(),
+            },
+            RSourceOverride::Pixi,
+        ];
+        let serialized = serde_json::to_string(&overrides).unwrap();
+        let deserialized: Vec<RSourceOverride> = serde_json::from_str(&serialized).unwrap();
+        let snapshot = serde_json::to_string_pretty(&deserialized).unwrap();
+        insta::assert_snapshot!(snapshot, @r###"
+        [
+          {
+            "provider": "version-file",
+            "file": ".r-version"
+          },
+          {
+            "provider": "toml-key",
+            "file": "rproject.toml",
+            "key": "project.r_version"
+          },
+          {
+            "provider": "json-key",
+            "file": "renv.lock",
+            "key": "R.Version"
+          },
+          {
+            "provider": "pixi"
+          }
+        ]"###);
     }
 
     #[test]

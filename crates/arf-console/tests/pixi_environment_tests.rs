@@ -24,7 +24,7 @@ name='other'",
             .config(format!(
                 r"{}
 [experimental]
-r_source_overrides=[{{type='pixi'}}]
+r_source_overrides=[{{provider='pixi'}}]
 ",
                 support::DEFAULT_CONFIG
             ))

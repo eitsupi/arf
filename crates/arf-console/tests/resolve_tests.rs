@@ -246,7 +246,7 @@ fn write_uninstalled_project_override_fixture() -> tempfile::TempDir {
         temp.path().join("arf.toml"),
         r#"[experimental]
 r_source_overrides = [
-  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { provider = "toml-key", file = "rproject.toml", key = "project.r_version" },
 ]
 
 [startup]
@@ -401,7 +401,7 @@ fn resolve_project_file_version_request_reports_json_source() {
         temp.path().join("arf.toml"),
         r#"[experimental]
 r_source_overrides = [
-  { type = "json-key", file = "renv.lock", key = "R.Version" },
+  { provider = "json-key", file = "renv.lock", key = "R.Version" },
 ]
 
 [startup]
@@ -447,7 +447,7 @@ fn resolve_project_file_version_request_reports_text_source() {
     std::fs::write(
         temp.path().join("arf.toml"),
         r#"[experimental]
-r_source_overrides = [{ type = "version-file", file = ".r-version" }]
+r_source_overrides = [{ provider = "version-file", file = ".r-version" }]
 
 [startup]
 r_source = { path = "fallback-r-home" }

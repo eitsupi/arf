@@ -150,7 +150,7 @@ fn invalid_pixi_activation_warns_once_and_starts_without_confirmation() -> anyho
 [startup]
 r_source={{path={home}}}
 [experimental]
-r_source_overrides=[{{type='pixi'}}]
+r_source_overrides=[{{provider='pixi'}}]
 ",
         super::support::DEFAULT_CONFIG
     );

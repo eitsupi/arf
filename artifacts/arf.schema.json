@@ -1980,13 +1980,13 @@
           "description": "Resolve R using the active pixi environment.",
           "type": "object",
           "properties": {
-            "type": {
+            "provider": {
               "type": "string",
               "const": "pixi"
             }
           },
           "required": [
-            "type"
+            "provider"
           ]
         },
         {
@@ -1996,13 +1996,13 @@
             "file": {
               "type": "string"
             },
-            "type": {
+            "provider": {
               "type": "string",
               "const": "version-file"
             }
           },
           "required": [
-            "type",
+            "provider",
             "file"
           ]
         },
@@ -2016,13 +2016,13 @@
             "key": {
               "type": "string"
             },
-            "type": {
+            "provider": {
               "type": "string",
               "const": "toml-key"
             }
           },
           "required": [
-            "type",
+            "provider",
             "file",
             "key"
           ]
@@ -2037,13 +2037,13 @@
             "key": {
               "type": "string"
             },
-            "type": {
+            "provider": {
               "type": "string",
               "const": "json-key"
             }
           },
           "required": [
-            "type",
+            "provider",
             "file",
             "key"
           ]

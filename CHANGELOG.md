@@ -4,10 +4,11 @@
 
 ### Added
 
-- **Experimental:** `{ type = "pixi" }` in `experimental.r_source_overrides` selects R from an externally activated Pixi environment without requiring rig. Resolve reports its environment and verified executable; headless and restart use the same validated R target.
+- **Experimental:** `{ provider = "pixi" }` in `experimental.r_source_overrides` selects R from an externally activated Pixi environment without requiring rig. Resolve reports its environment and verified executable; headless and restart use the same validated R target.
 
 ### Changed
 
+- **Breaking:** `experimental.r_source_overrides` entries now use the `provider` key instead of `type`.
 - Explicit `--r-home` and `--with-r-version` selections now take precedence over either R source environment variable; conflicting environment-only selections are rejected.
 - R source overrides now continue to later providers when rig is unavailable or its version list cannot be read, with one final fallback notice.
 - RHOME probes used during source resolution and automatic discovery now have time and output limits.

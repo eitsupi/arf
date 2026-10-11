@@ -925,25 +925,25 @@ Entries are evaluated in array order, which is the priority order. The first ent
 | Option | Default | Description |
 |--------|---------|-------------|
 | `r_source_overrides` | `[]` (disabled) | Ordered list of R source providers. |
-| `type = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
-| `type = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
-| `type = "json-key"` | — | Reads a string version specification from the dot-separated JSON key in the `file` and `key` fields. |
-| `type = "pixi"` | — | Uses R from an externally activated Pixi environment, without requiring rig. Has no additional fields. |
+| `provider = "version-file"` | — | Reads the first non-empty line as the version specification from the `file` field. |
+| `provider = "toml-key"` | — | Reads a string version specification from the dot-separated TOML key in the `file` and `key` fields. |
+| `provider = "json-key"` | — | Reads a string version specification from the dot-separated JSON key in the `file` and `key` fields. |
+| `provider = "pixi"` | — | Uses R from an externally activated Pixi environment, without requiring rig. Has no additional fields. |
 
 For example, [rv](https://a2-ai.github.io/rv-docs/) stores its R version in `rproject.toml`. This configuration reads the `project.r_version` string and tries to select the matching installed R version:
 
 ```toml
 [experimental]
 r_source_overrides = [
-  { type = "toml-key", file = "rproject.toml", key = "project.r_version" },
+  { provider = "toml-key", file = "rproject.toml", key = "project.r_version" },
 ]
 ```
 
 The other provider forms are:
 
 ```toml
-{ type = "version-file", file = ".r-version" }
-{ type = "pixi" }
+{ provider = "version-file", file = ".r-version" }
+{ provider = "pixi" }
 ```
 
 **File formats read by each provider:**
@@ -982,7 +982,7 @@ With `key = "R.Version"`, arf reads the string under `R.Version`. The value must
 ```toml
 [experimental]
 r_source_overrides = [
-  { type = "json-key", file = "renv.lock", key = "R.Version" },
+  { provider = "json-key", file = "renv.lock", key = "R.Version" },
 ]
 ```
 
@@ -998,7 +998,7 @@ Enable the provider in the loaded `arf.toml`, then start arf through Pixi:
 
 ```toml
 [experimental]
-r_source_overrides = [{ type = "pixi" }]
+r_source_overrides = [{ provider = "pixi" }]
 ```
 
 ```sh

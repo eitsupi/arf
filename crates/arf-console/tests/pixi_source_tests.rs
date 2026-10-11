@@ -85,7 +85,7 @@ name='other'",
         std::fs::write(
             &config,
             r"[experimental]
-r_source_overrides=[{type='pixi'}]",
+r_source_overrides=[{provider='pixi'}]",
         )
         .unwrap();
         Self {
@@ -209,7 +209,7 @@ fn unapplied_pixi_diagnostic_is_json_only_and_fallback_is_reported_once() {
             r"[startup]
 r_source={{path={:?}}}
 [experimental]
-r_source_overrides=[{{type='pixi'}}]",
+r_source_overrides=[{{provider='pixi'}}]",
             fixture.home.display().to_string()
         ),
     )
@@ -290,7 +290,7 @@ fn assert_auto_path_discovery_is_bounded(modes: &[&str]) {
         r"[startup]
 r_source='auto'
 [experimental]
-r_source_overrides=[{type='pixi'}]",
+r_source_overrides=[{provider='pixi'}]",
     )
     .unwrap();
     for &mode in modes {
