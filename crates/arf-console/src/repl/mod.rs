@@ -50,7 +50,7 @@ use crate::editor::keybindings::{
     wrap_edit_mode_with_conditional_rules,
 };
 use crate::editor::validator::RValidator;
-use banner::{format_banner, format_override_line};
+use banner::format_banner;
 use history::finalize_history;
 #[cfg(test)]
 #[allow(unused_imports)]
@@ -237,6 +237,8 @@ pub struct Repl {
     config_file_info: ConfigFileInfo,
     /// How R was resolved at startup (determines if :switch is available).
     r_source_status: RSourceStatus,
+    /// Startup notice for an R source selected by a configured override.
+    override_notice: Option<String>,
     /// R_HOME reported by the running R at startup, if R initialized successfully.
     r_home: Option<std::path::PathBuf>,
     r_initialized: bool,
@@ -255,10 +257,12 @@ impl Repl {
     ///
     /// The `r_source_status` describes how R was resolved at startup,
     /// which determines if features like `:switch` are available.
+    /// `override_notice` is shown at startup when a configured override selected R.
     pub fn new(
         config: Config,
         config_file_info: ConfigFileInfo,
         r_source_status: RSourceStatus,
+        override_notice: Option<String>,
         r_home: Option<std::path::PathBuf>,
         session_id: Option<HistorySessionId>,
     ) -> Result<Self> {
@@ -282,6 +286,7 @@ impl Repl {
             formatter_backend,
             config_file_info,
             r_source_status,
+            override_notice,
             r_home,
             r_initialized,
             prompt_formatter,
@@ -305,7 +310,7 @@ impl Repl {
             let banner = format_banner(
                 &self.config,
                 self.r_initialized,
-                self.r_source_status.override_info(),
+                self.override_notice.as_deref(),
                 self.formatter_backend,
             );
             // Apply color to the "not initialized" warning if present
@@ -324,9 +329,9 @@ impl Repl {
                 print!("{}", banner);
             }
         } else if self.r_initialized
-            && let Some(info) = self.r_source_status.override_info()
+            && let Some(notice) = &self.override_notice
         {
-            eprintln!("{}", format_override_line(info));
+            eprintln!("{notice}");
         }
 
         if self.r_initialized {

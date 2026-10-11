@@ -16,6 +16,7 @@ fn prepared_r_and_shell_histories_are_distinct_stable_owners() {
         },
         RSourceStatus::Path,
         None,
+        None,
         Reedline::create_history_session_id(),
     )
     .unwrap();
@@ -41,6 +42,7 @@ fn history_database_paths_share_the_resolved_location() {
             source: crate::config::ConfigFileSource::Default,
         },
         RSourceStatus::Path,
+        None,
         None,
         Reedline::create_history_session_id(),
     )
@@ -69,6 +71,7 @@ fn volatile_repl_has_no_persistent_history_paths() {
             source: crate::config::ConfigFileSource::Default,
         },
         RSourceStatus::Path,
+        None,
         None,
         Reedline::create_history_session_id(),
     )

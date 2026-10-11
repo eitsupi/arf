@@ -27,43 +27,109 @@ struct FormatterFixture {
 }
 
 static FORMATTER_FIXTURE: OnceLock<std::result::Result<FormatterFixture, String>> = OnceLock::new();
+static RIG_PROJECT_PROBE: OnceLock<std::result::Result<Vec<u8>, String>> = OnceLock::new();
+
+/// Compile a native test fixture from `tests/fixtures/<name>.rs`.
+fn compile_fixture(name: &str) -> std::result::Result<Vec<u8>, String> {
+    let build_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(format!("{name}.rs"));
+    let fixture = build_dir
+        .path()
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(compiler)
+        .arg(fixture_source)
+        .arg("--edition=2024")
+        .arg("-D")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&fixture)
+        .output()
+        .map_err(|error| format!("failed to run rustc for the {name} test fixture: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "failed to compile the {name} test fixture: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    fs::read(fixture).map_err(|error| format!("failed to read the {name} test fixture: {error}"))
+}
 
 fn compiled_formatter_fixture() -> Result<&'static FormatterFixture> {
-    match FORMATTER_FIXTURE.get_or_init(|| {
-        let build_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
-        let fixture_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join("formatter.rs");
-        let fixture = build_dir
-            .path()
-            .join(format!("formatter{}", std::env::consts::EXE_SUFFIX));
-        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-        let output = Command::new(compiler)
-            .arg(fixture_source)
-            .arg("--edition=2024")
-            .arg("-D")
-            .arg("warnings")
-            .arg("-o")
-            .arg(&fixture)
-            .output()
-            .map_err(|error| {
-                format!("failed to run rustc for the formatter test fixture: {error}")
-            })?;
-        if !output.status.success() {
-            return Err(format!(
-                "failed to compile the formatter test fixture: {}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        let bytes = fs::read(fixture)
-            .map_err(|error| format!("failed to read the formatter test fixture: {error}"))?;
-        Ok(FormatterFixture { bytes })
-    }) {
+    match FORMATTER_FIXTURE
+        .get_or_init(|| compile_fixture("formatter").map(|bytes| FormatterFixture { bytes }))
+    {
         Ok(fixture) => Ok(fixture),
         Err(error) => bail!("{error}"),
     }
+}
+
+fn write_executable(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    fs::create_dir_all(
+        path.parent()
+            .context("executable has no parent directory")?,
+    )?;
+    fs::write(path, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Create a synchronized rig project whose fake `rig` and project wrapper
+/// report `r_home`, and return the environment that selects them.
+pub fn build_rig_project_fixture(
+    project: &std::path::Path,
+    r_home: &std::path::Path,
+) -> Result<Vec<(String, String)>> {
+    let probe = match RIG_PROJECT_PROBE.get_or_init(|| compile_fixture("rig_project_probe")) {
+        Ok(bytes) => bytes,
+        Err(error) => bail!("{error}"),
+    };
+    fs::create_dir_all(project)?;
+    let project = project.canonicalize()?;
+    fs::write(project.join("rproj.toml"), "[project]\nname = 'fixture'\n")?;
+    let wrapper = project
+        .join(".rvenv")
+        .join("bin")
+        .join(format!("R{}", std::env::consts::EXE_SUFFIX));
+    write_executable(&wrapper, probe)?;
+    let bin = project.join("fake-bin");
+    write_executable(
+        &bin.join(format!("rig{}", std::env::consts::EXE_SUFFIX)),
+        probe,
+    )?;
+    let status = project.join("rig-status.json");
+    fs::write(
+        &status,
+        serde_json::to_vec(&serde_json::json!({
+            "root": project,
+            "manifest": {"name": "fixture", "version": "0.1.0"},
+            "lock": {"version": 1, "targets": []},
+            "sync": {"r_version": "fixture-r", "up_to_date": true, "reason": null},
+            "warnings": []
+        }))?,
+    )?;
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path =
+        std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&current_path)))?;
+    Ok(vec![
+        ("PATH".to_owned(), path.to_string_lossy().into_owned()),
+        (
+            "ARF_TEST_RIG_R_HOME".to_owned(),
+            r_home.display().to_string(),
+        ),
+        (
+            "ARF_TEST_RIG_STATUS_FILE".to_owned(),
+            status.display().to_string(),
+        ),
+    ])
 }
 
 pub fn build_formatter_fixture_path(

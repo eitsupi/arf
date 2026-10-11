@@ -1,6 +1,6 @@
 //! Startup banner formatting.
 
-use crate::config::{Config, FormatterBackend, RSourceOverrideInfo, ReprexMode};
+use crate::config::{Config, FormatterBackend, ReprexMode};
 use crate::editor::prompt::get_r_version;
 
 /// Format the startup banner.
@@ -15,7 +15,7 @@ use crate::editor::prompt::get_r_version;
 pub fn format_banner(
     config: &Config,
     r_initialized: bool,
-    override_info: Option<&RSourceOverrideInfo>,
+    override_notice: Option<&str>,
     formatter_backend: Option<FormatterBackend>,
 ) -> String {
     let mut lines = Vec::new();
@@ -52,8 +52,8 @@ pub fn format_banner(
         } else {
             lines.push(format!("# R {} is ready.", r_version));
         }
-        if let Some(info) = override_info {
-            lines.push(format_override_line(info));
+        if let Some(notice) = override_notice {
+            lines.push(notice.to_owned());
         }
     } else {
         lines.push("# R is not initialized. Commands will not be evaluated.".to_string());
@@ -63,11 +63,6 @@ pub fn format_banner(
     lines.push(String::new()); // Empty line at the end
 
     lines.join("\n")
-}
-
-/// Format the one-line override notice used when the startup banner is hidden.
-pub(crate) fn format_override_line(info: &RSourceOverrideInfo) -> String {
-    format!("# R source override: {}", info.display())
 }
 
 #[cfg(test)]
@@ -156,35 +151,8 @@ mod tests {
     #[test]
     fn test_banner_includes_r_source_override_line() {
         let config = Config::default();
-        let info = RSourceOverrideInfo {
-            provider: "toml-key".to_string(),
-            file: Some("rproject.toml".into()),
-            key: Some("project.r_version".to_string()),
-            requested_version: "4.4".to_string(),
-            resolved_version: "4.4.2".to_string(),
-        };
-        let banner = format_banner(&config, true, Some(&info), Some(FormatterBackend::Air));
-        assert!(
-            banner.contains(
-                r#"# R source override: toml-key rproject.toml:project.r_version = "4.4""#,
-            )
-        );
-    }
-
-    #[test]
-    fn test_hidden_banner_override_line_is_one_stderr_line() {
-        let info = RSourceOverrideInfo {
-            provider: "version-file".to_string(),
-            file: Some(".r-version".into()),
-            key: None,
-            requested_version: "4.4".to_string(),
-            resolved_version: "4.4.2".to_string(),
-        };
-        let line = format_override_line(&info);
-        assert_eq!(
-            line,
-            r#"# R source override: version-file .r-version = "4.4""#
-        );
-        assert!(!line.contains('\n'));
+        let notice = r#"# R source override: version-file .r-version = "4.4""#;
+        let banner = format_banner(&config, true, Some(notice), Some(FormatterBackend::Air));
+        assert!(banner.contains(&format!("is ready.\n{notice}\n")));
     }
 }

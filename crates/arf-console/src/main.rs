@@ -364,6 +364,7 @@ fn run() -> Result<()> {
         report_startup_diagnostics,
     )?;
     let r_source_status = resolution.status.clone();
+    let override_notice = app::setup::override_notice(&resolution);
     log::debug!("R source status: {:?}", r_source_status);
 
     // Prepare the platform loader path for the R library directory.
@@ -526,6 +527,7 @@ fn run() -> Result<()> {
         config,
         config_file_info,
         r_source_status,
+        override_notice,
         r_home,
         session_id,
     )?;

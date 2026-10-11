@@ -179,3 +179,33 @@ r_source_overrides=[{{provider='pixi'}}]
         },
     )
 }
+
+#[test]
+fn configured_rig_project_override_is_announced_in_the_banner() -> Result<()> {
+    let library = arf_libr::find_r_library()?;
+    let home = arf_libr::r_home_from_library_path(&library).expect("known R library layout");
+    let project = tempfile::tempdir()?;
+    let mut builder = Terminal::builder("rig-project-override-banner")
+        .with_r_source_overrides()
+        .config(format!(
+            r"{}
+[experimental]
+r_source_overrides=[{{provider='rig-project'}}]
+",
+            DEFAULT_CONFIG
+        ))
+        .cwd(project.path())
+        .args(["--no-auto-match"]);
+    for (key, value) in super::support::build_rig_project_fixture(project.path(), &home)? {
+        builder = builder.env(key, value);
+    }
+    run_case_with(builder, |terminal| {
+        terminal.wait_for_first_prompt()?;
+        let output = terminal.output()?;
+        ensure!(
+            output.contains("# R source override: rig project ("),
+            "configured rig-project override must be announced: {output}"
+        );
+        terminal.quit()
+    })
+}

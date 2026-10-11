@@ -192,7 +192,7 @@ impl RSourceResolutionReport {
             r_home: Some(r_home),
             selection_route: RSourceSelectionRoute::Override,
             override_provider: Some(info.provider),
-            file: info.file,
+            file: Some(info.file),
             key: info.key,
             requested_version: Some(info.requested_version),
             resolved_version: Some(info.resolved_version),
@@ -219,7 +219,7 @@ impl RSourceResolutionReport {
     pub(crate) fn override_info(&self) -> Option<RSourceOverrideInfo> {
         Some(RSourceOverrideInfo {
             provider: self.override_provider.clone()?,
-            file: self.file.clone(),
+            file: self.file.clone()?,
             key: self.key.clone(),
             requested_version: self.requested_version.clone()?,
             resolved_version: self.resolved_version.clone()?,

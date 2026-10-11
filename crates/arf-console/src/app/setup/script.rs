@@ -30,7 +30,7 @@ pub(crate) fn run_script(
         config_diagnostics,
         report_startup_diagnostics,
     )?;
-    let override_notice = super::overrides::script_override_notice(&resolution);
+    let override_notice = super::overrides::override_notice(&resolution);
 
     // Prepare the platform loader path for the R library directory.
     #[cfg(unix)]
