@@ -74,7 +74,7 @@ The `source.kind` values identify the origin of that condition:
 | `configuration_file` | The loaded `arf.toml`, with its path, format, and key (`startup.r_source` or `experimental.r_source_overrides`). |
 | `built_in_default` | arf's built-in default when no configuration file setting applies. |
 
-Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `requested_provider`, `name`, `path`, `format`, and `key` fields remain present in every descriptor. `requested_provider` is the explicit provider request, or `null` when none was made.
+Both enum sets may grow, so clients must accept unknown values. The source fields carry the specific name (`--r-home`, `ARF_R_VERSION`, or a file path plus key) so a caller can point the user at the exact thing to change. The nullable `requested_r_home`, `requested_version`, `requested_provider`, `name`, `path`, `format`, and `key` fields remain present in every descriptor. `requested_provider` is the requested provider, whether explicit or configured in `experimental.r_source_overrides`, or `null` when no provider was requested.
 
 For a selected Pixi environment, `target.r_binary` is the verified PATH executable rather than a path inferred from `R_HOME`. `target.resolved_version` comes from available package metadata and can be `null` even when `resolved` is `true`.
 
