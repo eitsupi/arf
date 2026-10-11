@@ -5,6 +5,7 @@ expression: normalize_descriptor(&value)
 {
   "cwd": "<cwd>",
   "diagnostics": [],
+  "metadata": null,
   "provider": "rig",
   "resolved": true,
   "resolver": {
@@ -14,6 +15,7 @@ expression: normalize_descriptor(&value)
   "schema_version": 1,
   "selected_by": {
     "kind": "version_request",
+    "requested_provider": null,
     "requested_r_home": null,
     "requested_version": "4.4.2",
     "source": {

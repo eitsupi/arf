@@ -1,0 +1,210 @@
+//! Shared machine-readable provenance for the selected R source.
+
+use crate::app::explicit_r_source::{ExplicitRSource, RProvider, RSourceOrigin};
+use crate::app::setup::{RSourceResolutionReport, RSourceSelectionRoute};
+use crate::config::{ConfigLoadProvenance, RSourceStatus};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+
+/// Provenance kind is open; clients must accept unknown kinds and fields.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SelectionSource {
+    kind: &'static str,
+    name: Option<String>,
+    path: Option<String>,
+    format: Option<&'static str>,
+    key: Option<String>,
+}
+
+/// Selection condition kind is open; clients must accept unknown kinds/fields.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SelectedBy {
+    kind: &'static str,
+    requested_r_home: Option<String>,
+    requested_version: Option<String>,
+    requested_provider: Option<String>,
+    source: SelectionSource,
+}
+
+/// Provider metadata is a tagged open object; clients must accept unknown
+/// kinds and fields.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum RSourceMetadata {
+    Pixi {
+        environment: String,
+        manifest: String,
+        prefix: String,
+        r_binary: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RSourceSelection {
+    pub(crate) provider: Option<String>,
+    pub(crate) selected_by: SelectedBy,
+    pub(crate) metadata: Option<RSourceMetadata>,
+}
+
+impl RSourceMetadata {
+    pub(crate) fn from_report(report: &RSourceResolutionReport, cwd: &Path) -> Option<Self> {
+        match &report.status {
+            RSourceStatus::Pixi { info } => Some(Self::Pixi {
+                environment: info.environment.clone(),
+                manifest: display_path(cwd, &info.manifest),
+                prefix: display_path(cwd, &info.prefix),
+                r_binary: display_path(cwd, &info.binary),
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl RSourceSelection {
+    pub(crate) fn from_report(
+        cwd: &Path,
+        report: &RSourceResolutionReport,
+        loaded_config: Option<&ConfigLoadProvenance>,
+    ) -> Self {
+        Self {
+            provider: Some(provider(&report.status)),
+            selected_by: selected_by(cwd, report, loaded_config),
+            metadata: RSourceMetadata::from_report(report, cwd),
+        }
+    }
+}
+
+fn selected_by(
+    cwd: &Path,
+    report: &RSourceResolutionReport,
+    loaded_config: Option<&ConfigLoadProvenance>,
+) -> SelectedBy {
+    let selection_source = |kind, name, path, format, key| SelectionSource {
+        kind,
+        name,
+        path,
+        format,
+        key,
+    };
+    if report.selection_route == RSourceSelectionRoute::Explicit
+        && let Some(request) = &report.explicit_request
+    {
+        let (kind, requested_r_home, requested_version, requested_provider, cli_name, env_name) =
+            match &request.source {
+                ExplicitRSource::Home(home) => (
+                    "r_home",
+                    Some(display_path(cwd, home)),
+                    None,
+                    None,
+                    "--r-home",
+                    "ARF_R_HOME",
+                ),
+                ExplicitRSource::Version(version) => (
+                    "version_request",
+                    None,
+                    Some(version.clone()),
+                    None,
+                    "--with-r-version",
+                    "ARF_R_VERSION",
+                ),
+                ExplicitRSource::Provider(RProvider::Pixi) => (
+                    "provider_request",
+                    None,
+                    None,
+                    Some("pixi".to_owned()),
+                    "--r-provider",
+                    "ARF_R_PROVIDER",
+                ),
+            };
+        let (source_kind, source_name) = match request.origin {
+            RSourceOrigin::Cli => ("command_line_argument", cli_name),
+            RSourceOrigin::Environment => ("environment_variable", env_name),
+        };
+        return SelectedBy {
+            kind,
+            requested_r_home,
+            requested_version,
+            requested_provider,
+            source: selection_source(source_kind, Some(source_name.to_owned()), None, None, None),
+        };
+    }
+
+    if report.selection_route == RSourceSelectionRoute::Override {
+        if let RSourceStatus::Pixi { info } = &report.status {
+            return SelectedBy {
+                kind: "active_environment",
+                requested_r_home: None,
+                requested_version: None,
+                requested_provider: None,
+                source: selection_source(
+                    "pixi",
+                    Some(info.environment.clone()),
+                    Some(display_path(cwd, &info.manifest)),
+                    None,
+                    None,
+                ),
+            };
+        }
+        let format = match report.override_provider.as_deref() {
+            Some("version-file") => Some("text"),
+            Some("toml-key") => Some("toml"),
+            Some("json-key") => Some("json"),
+            _ => None,
+        };
+        return SelectedBy {
+            kind: "version_request",
+            requested_r_home: None,
+            requested_version: report.requested_version.clone(),
+            requested_provider: None,
+            source: selection_source(
+                "project_file",
+                None,
+                report.file.as_ref().map(|path| display_path(cwd, path)),
+                format,
+                report.key.clone(),
+            ),
+        };
+    }
+
+    let source = if let Some(loaded_config) = loaded_config
+        && loaded_config.startup_r_source_present
+    {
+        selection_source(
+            "configuration_file",
+            None,
+            Some(display_path(cwd, &loaded_config.path)),
+            Some("toml"),
+            Some("startup.r_source".to_owned()),
+        )
+    } else {
+        selection_source("built_in_default", None, None, None, None)
+    };
+    SelectedBy {
+        kind: "default",
+        requested_r_home: None,
+        requested_version: None,
+        requested_provider: None,
+        source,
+    }
+}
+
+fn display_path(cwd: &Path, path: &Path) -> String {
+    normalize_path(cwd, path).display().to_string()
+}
+
+fn normalize_path(cwd: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn provider(status: &RSourceStatus) -> String {
+    match status {
+        RSourceStatus::Rig { .. } => "rig".to_owned(),
+        RSourceStatus::Path => "path".to_owned(),
+        RSourceStatus::ExplicitPath { .. } => "explicit_path".to_owned(),
+        RSourceStatus::Pixi { .. } => "pixi".to_owned(),
+    }
+}

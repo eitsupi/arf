@@ -1,11 +1,11 @@
 //! Machine-facing R source resolution.
 
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
-pub(crate) use crate::app::explicit_r_source::RSourceOrigin;
-use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest, RProvider};
+use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest};
+use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection};
 use crate::app::setup::{
-    PixiFailure, RSourceDiagnostic, RSourceResolutionReport, RSourceSelectionRoute,
-    resolve_path_r_home_for_report, resolve_r_source,
+    PixiFailure, RSourceDiagnostic, RSourceResolutionReport, resolve_path_r_home_for_report,
+    resolve_r_source,
 };
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use crate::external::rig::RigError;
@@ -35,26 +35,6 @@ struct Target {
     resolved_version: Option<String>,
 }
 
-/// The provenance kind is an open enum. Clients must accept unknown values.
-#[derive(Debug, Serialize)]
-struct SelectionSource {
-    kind: &'static str,
-    name: Option<String>,
-    path: Option<String>,
-    format: Option<&'static str>,
-    key: Option<String>,
-}
-
-/// The selection condition kind is an open enum. Clients must accept unknown
-/// values so arf can add more selection conditions without breaking clients.
-#[derive(Debug, Serialize)]
-struct SelectedBy {
-    kind: &'static str,
-    requested_r_home: Option<String>,
-    requested_version: Option<String>,
-    source: SelectionSource,
-}
-
 #[derive(Debug, Serialize)]
 struct Resolver {
     name: &'static str,
@@ -78,8 +58,9 @@ struct ResolveDescriptor {
     cwd: String,
     target: Option<Target>,
     resolver: Resolver,
-    selected_by: SelectedBy,
+    selected_by: crate::app::r_source_selection::SelectedBy,
     provider: Option<String>,
+    metadata: Option<RSourceMetadata>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -90,6 +71,7 @@ struct ResolveDescriptor {
 pub(crate) struct ResolveCommandError {
     kind: ResolveCommandErrorKind,
     message: String,
+    data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +85,7 @@ impl ResolveCommandError {
         Self {
             kind: ResolveCommandErrorKind::InvalidInvocation,
             message: message.into(),
+            data: None,
         }
     }
 
@@ -110,6 +93,15 @@ impl ResolveCommandError {
         Self {
             kind: ResolveCommandErrorKind::Internal,
             message: message.into(),
+            data: None,
+        }
+    }
+
+    fn invalid_invocation_with_data(message: impl Into<String>, data: serde_json::Value) -> Self {
+        Self {
+            kind: ResolveCommandErrorKind::InvalidInvocation,
+            message: message.into(),
+            data: Some(data),
         }
     }
 
@@ -164,7 +156,7 @@ pub(crate) fn print_error(error: &ResolveCommandError) {
                 code: error.code(),
                 message: error.message(),
                 hint: None,
-                data: None,
+                data: error.data.as_ref(),
             },
         },
         false,
@@ -198,13 +190,7 @@ pub(crate) fn run_resolve(
     .map_err(|error| classify_resolution_error(error, explicit_request))?;
     resolve_path_r_home_for_report(&mut resolution);
 
-    let descriptor = descriptor(
-        &cwd,
-        &resolution,
-        &config_warnings,
-        explicit_request,
-        loaded_config.as_ref(),
-    );
+    let descriptor = descriptor(&cwd, &resolution, &config_warnings, loaded_config.as_ref());
     print_json(&descriptor).map_err(|error| ResolveCommandError::internal(format!("{error:#}")))?;
     Ok(())
 }
@@ -213,8 +199,16 @@ fn classify_resolution_error(
     error: anyhow::Error,
     explicit_request: Option<&ExplicitRSourceRequest>,
 ) -> ResolveCommandError {
-    if error.downcast_ref::<PixiFailure>().is_some() {
-        return ResolveCommandError::invalid_invocation(format!("{error:#}"));
+    if let Some(failure) = error.downcast_ref::<PixiFailure>() {
+        let reason_code = match failure {
+            PixiFailure::NotActive { .. } => "r_provider.pixi_not_active",
+            PixiFailure::EnvironmentInvalid { .. } => "r_provider.pixi_environment_invalid",
+            PixiFailure::RUnavailable { .. } => "r_provider.pixi_r_unavailable",
+        };
+        return ResolveCommandError::invalid_invocation_with_data(
+            format!("{error:#}"),
+            serde_json::json!({ "reason_code": reason_code }),
+        );
     }
     let invalid_invocation = match error.downcast_ref::<RigError>() {
         Some(
@@ -241,7 +235,6 @@ fn descriptor(
     cwd: &Path,
     resolution: &RSourceResolutionReport,
     config_warnings: &[ConfigLoadWarning],
-    explicit_request: Option<&ExplicitRSourceRequest>,
     loaded_config: Option<&ConfigLoadProvenance>,
 ) -> ResolveDescriptor {
     let target = resolution.r_home.as_ref().map(|r_home| {
@@ -257,7 +250,7 @@ fn descriptor(
     });
     let resolved = target.is_some();
 
-    let selected_by = selected_by(cwd, resolution, explicit_request, loaded_config);
+    let selection = RSourceSelection::from_report(cwd, resolution, loaded_config);
     let diagnostics = config_warnings
         .iter()
         .map(config_diagnostic)
@@ -273,128 +266,11 @@ fn descriptor(
             name: "arf",
             version: env!("CARGO_PKG_VERSION"),
         },
-        selected_by,
-        provider: resolved.then(|| provider(&resolution.status)),
+        selected_by: selection.selected_by,
+        provider: resolved.then_some(selection.provider).flatten(),
+        metadata: selection.metadata,
         diagnostics,
     }
-}
-
-fn selected_by(
-    cwd: &Path,
-    resolution: &RSourceResolutionReport,
-    explicit_request: Option<&ExplicitRSourceRequest>,
-    loaded_config: Option<&ConfigLoadProvenance>,
-) -> SelectedBy {
-    if resolution.selection_route == RSourceSelectionRoute::Explicit
-        && let Some(request) = explicit_request
-    {
-        let (kind, requested_r_home, requested_version, cli_name, env_name) = match &request.source
-        {
-            ExplicitRSource::Home(home) => (
-                "r_home",
-                Some(display_path(cwd, home)),
-                None,
-                "--r-home",
-                "ARF_R_HOME",
-            ),
-            ExplicitRSource::Version(version) => (
-                "version_request",
-                None,
-                Some(version.clone()),
-                "--with-r-version",
-                "ARF_R_VERSION",
-            ),
-            ExplicitRSource::Provider(RProvider::Pixi) => (
-                "provider_request",
-                None,
-                None,
-                "--r-provider",
-                "ARF_R_PROVIDER",
-            ),
-        };
-        let (source_kind, source_name) = match request.origin {
-            RSourceOrigin::Cli => ("command_line_argument", cli_name),
-            RSourceOrigin::Environment => ("environment_variable", env_name),
-        };
-        return SelectedBy {
-            kind,
-            requested_r_home,
-            requested_version,
-            source: SelectionSource {
-                kind: source_kind,
-                name: Some(source_name.to_owned()),
-                path: None,
-                format: None,
-                key: None,
-            },
-        };
-    }
-
-    if resolution.selection_route == RSourceSelectionRoute::Override {
-        if let RSourceStatus::Pixi { info } = &resolution.status {
-            return SelectedBy {
-                kind: "active_environment",
-                requested_r_home: None,
-                requested_version: None,
-                source: SelectionSource {
-                    kind: "pixi",
-                    name: Some(info.environment.clone()),
-                    path: Some(display_path(cwd, &info.manifest)),
-                    format: None,
-                    key: None,
-                },
-            };
-        }
-        let format = match resolution.override_provider.as_deref() {
-            Some("version-file") => Some("text"),
-            Some("toml-key") => Some("toml"),
-            Some("json-key") => Some("json"),
-            _ => None,
-        };
-        return SelectedBy {
-            kind: "version_request",
-            requested_r_home: None,
-            requested_version: resolution.requested_version.clone(),
-            source: SelectionSource {
-                kind: "project_file",
-                name: None,
-                path: resolution.file.as_ref().map(|path| display_path(cwd, path)),
-                format,
-                key: resolution.key.clone(),
-            },
-        };
-    }
-
-    let source = if let Some(loaded_config) = loaded_config
-        && loaded_config.startup_r_source_present
-    {
-        SelectionSource {
-            kind: "configuration_file",
-            name: None,
-            path: Some(display_path(cwd, &loaded_config.path)),
-            format: Some("toml"),
-            key: Some("startup.r_source".to_owned()),
-        }
-    } else {
-        SelectionSource {
-            kind: "built_in_default",
-            name: None,
-            path: None,
-            format: None,
-            key: None,
-        }
-    };
-
-    SelectedBy {
-        kind: "default",
-        requested_r_home: None,
-        requested_version: None,
-        source,
-    }
-}
-
-fn display_path(cwd: &Path, path: &Path) -> String {
-    normalize_path(cwd, path).display().to_string()
 }
 
 fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
@@ -402,15 +278,6 @@ fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
         path.to_owned()
     } else {
         cwd.join(path)
-    }
-}
-
-fn provider(status: &RSourceStatus) -> String {
-    match status {
-        RSourceStatus::Rig { .. } => "rig".to_owned(),
-        RSourceStatus::Path => "path".to_owned(),
-        RSourceStatus::ExplicitPath { .. } => "explicit_path".to_owned(),
-        RSourceStatus::Pixi { .. } => "pixi".to_owned(),
     }
 }
 
@@ -481,7 +348,7 @@ mod tests {
         let mut report = super::RSourceResolutionReport {
             status: super::RSourceStatus::Pixi { info: info.clone() },
             r_home: Some(info.home.clone()),
-            selection_route: super::RSourceSelectionRoute::Override,
+            selection_route: crate::app::setup::RSourceSelectionRoute::Override,
             override_provider: None,
             file: None,
             key: None,
@@ -489,6 +356,7 @@ mod tests {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state: crate::app::setup::RSourceOverrideState::Applied,
+            explicit_request: None,
         };
         report.override_provider = Some("pixi".into());
         report.file = Some(info.manifest.clone());
@@ -496,7 +364,6 @@ mod tests {
             std::path::Path::new("/"),
             &report,
             &[],
-            None,
             None,
         ))
         .unwrap();
@@ -518,6 +385,7 @@ mod tests {
         assert!(!report.status.rig_enabled());
     }
     use super::*;
+    use crate::app::explicit_r_source::RSourceOrigin;
     use crate::app::setup::RSourceOverrideState;
 
     #[test]
@@ -525,7 +393,7 @@ mod tests {
         let resolution = RSourceResolutionReport {
             status: RSourceStatus::Path,
             r_home: None,
-            selection_route: super::RSourceSelectionRoute::Startup,
+            selection_route: crate::app::setup::RSourceSelectionRoute::Startup,
             override_provider: None,
             file: None,
             key: None,
@@ -533,15 +401,10 @@ mod tests {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state: RSourceOverrideState::NotConfigured,
+            explicit_request: None,
         };
-        let value = serde_json::to_value(descriptor(
-            Path::new("/project"),
-            &resolution,
-            &[],
-            None,
-            None,
-        ))
-        .unwrap();
+        let value = serde_json::to_value(descriptor(Path::new("/project"), &resolution, &[], None))
+            .unwrap();
 
         assert_eq!(value["resolved"], false);
         assert!(value["target"].is_null());
@@ -555,7 +418,7 @@ mod tests {
                 override_info: None,
             },
             r_home: Some(Path::new("/opt/R/4.4.1/lib/R").to_owned()),
-            selection_route: super::RSourceSelectionRoute::Explicit,
+            selection_route: crate::app::setup::RSourceSelectionRoute::Explicit,
             override_provider: None,
             file: None,
             key: None,
@@ -563,18 +426,13 @@ mod tests {
             resolved_version: None,
             diagnostics: Vec::new(),
             override_state: RSourceOverrideState::ShadowedByCli,
-        };
-        let value = serde_json::to_value(descriptor(
-            Path::new("/project"),
-            &resolution,
-            &[],
-            Some(&ExplicitRSourceRequest {
+            explicit_request: Some(ExplicitRSourceRequest {
                 source: ExplicitRSource::Version("4.4.1".to_owned()),
                 origin: RSourceOrigin::Cli,
             }),
-            None,
-        ))
-        .unwrap();
+        };
+        let value = serde_json::to_value(descriptor(Path::new("/project"), &resolution, &[], None))
+            .unwrap();
 
         assert_eq!(value["selected_by"]["kind"], "version_request");
         assert_eq!(

@@ -204,18 +204,21 @@ pub(crate) fn load_config_or_warn(config_path: Option<&std::path::PathBuf>) -> C
 pub(crate) fn load_config_collecting_warnings(
     config_path: Option<&std::path::PathBuf>,
     warnings: &mut Vec<String>,
-) -> Config {
-    let result = if let Some(path) = config_path {
-        load_config_from_path(path)
+) -> (Config, Option<ConfigLoadProvenance>) {
+    let path = config_path.cloned().or_else(config_file_path);
+    let result = if config_path.is_none() && path.as_ref().is_some_and(|path| !path.exists()) {
+        Ok((Config::default(), None))
+    } else if let Some(path) = path.as_deref() {
+        load_config_from_path_with_provenance(path)
     } else {
-        load_config()
+        Ok((Config::default(), None))
     };
     match result {
-        Ok(mut config) => {
+        Ok((mut config, provenance)) => {
             if let Some(warning) = config.history_migration_warning.take() {
                 warnings.push(warning);
             }
-            config
+            (config, provenance)
         }
         Err(e) => {
             let (path_display, source_msg) = match &e {
@@ -232,7 +235,7 @@ pub(crate) fn load_config_collecting_warnings(
             warnings.push(format!(
                 "Failed to load config from {path_display}: {source_msg}. Using default configuration."
             ));
-            Config::default()
+            (Config::default(), None)
         }
     }
 }
@@ -400,7 +403,7 @@ Warning: Failed to load config from <CONFIG>: experimental.r_source_overrides en
         let path = temp.path().join("arf.toml");
         std::fs::write(&path, "[history]\ndisabled = true\n").unwrap();
         let mut warnings = Vec::new();
-        let config = load_config_collecting_warnings(Some(&path), &mut warnings);
+        let (config, _) = load_config_collecting_warnings(Some(&path), &mut warnings);
 
         assert!(matches!(
             config.history.mode,
