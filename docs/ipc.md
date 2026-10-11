@@ -44,7 +44,8 @@ The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`.
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
 | `--r-home <PATH>` | Explicit R_HOME path |
-| `--no-r-source-overrides` | Disable directory-level R source overrides |
+| `--r-provider pixi` | Explicitly select R from the active Pixi environment |
+| `--no-r-source-overrides` | Disable the configured R source override provider chain |
 | `--vanilla` | Start R without init files |
 
 ### PID file lifecycle (interactive and headless)

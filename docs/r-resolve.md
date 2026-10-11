@@ -109,6 +109,6 @@ Resolution mirrors normal startup rather than being stricter. A configuration fi
 
 Exit codes match `arf ipc`: `0` means success, including `resolved: false`; `2` means invalid invocation; and `4` means internal failure.
 
-Errors raised after the arguments parse successfully are JSON on stderr, in the same shape used by `arf ipc`. Argument-parsing failures — an unknown flag, a missing value, or `--r-home` combined with `--with-r-version` — are reported by the argument parser as plain text and also exit `2`, so a client that needs to distinguish them must tolerate a non-JSON stderr at that exit code.
+Errors raised after the arguments parse successfully are JSON on stderr, in the same shape used by `arf ipc`. Argument-parsing failures — an unknown flag, a missing value, or mutually exclusive explicit R source flags combined — are reported by the argument parser as plain text and also exit `2`, so a client that needs to distinguish them must tolerate a non-JSON stderr at that exit code.
 
 An explicit Pixi request that cannot be satisfied exits `2` with `error.code: "INVALID_PARAMS"`. Its `error.data.reason_code` distinguishes `r_provider.pixi_not_active`, `r_provider.pixi_environment_invalid`, and `r_provider.pixi_r_unavailable`.

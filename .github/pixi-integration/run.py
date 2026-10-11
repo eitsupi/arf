@@ -53,12 +53,15 @@ def require(result, name):
         raise RuntimeError(f"{name} failed: {result.stderr.decode(errors='replace')[-4000:]}")
 
 
-def headless(expression, home, binary, json_mode):
-    name = "headless-json" if json_mode else "headless-text"
+def headless(expression, home, binary, json_mode, expected_descriptor=None, explicit=False):
+    name = "headless-explicit-json" if explicit else ("headless-json" if json_mode else "headless-text")
     with tempfile.TemporaryDirectory() as temporary:
         env = ENV | {"ARF_IPC_SESSIONS_DIR": str(Path(temporary) / "sessions")}
-        args = [ARF, "headless", "--config", CONFIG, "--no-r-auto-discovery", "--vanilla",
+        config = EXPLICIT_CONFIG if explicit else CONFIG
+        args = [ARF, "headless", "--config", config, "--no-r-auto-discovery", "--vanilla",
                 "--ipc-eval-unrestricted"] + (["--json"] if json_mode else [])
+        if explicit:
+            args.extend(["--no-r-source-overrides", "--r-provider", "pixi"])
         process = subprocess.Popen([str(arg) for arg in args], cwd=WORK, env=env,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE)
@@ -88,13 +91,27 @@ def headless(expression, home, binary, json_mode):
                 info = json.loads(stdout)
                 assert Path(info["r_home"]).samefile(home), info
                 source = info["r_source_override"]
-                assert source["state"] == "applied" and source["provider"] == "pixi", source
-                metadata = source["metadata"]
+                selection = info["r_source_selection"]
+                assert selection["provider"] == "pixi", selection
+                assert expected_descriptor is not None
+                assert selection == {
+                    "provider": expected_descriptor["provider"],
+                    "selected_by": expected_descriptor["selected_by"],
+                    "metadata": expected_descriptor["metadata"],
+                }, selection
+                metadata = selection["metadata"]
                 assert metadata["kind"] == "pixi", metadata
                 assert metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
                 assert Path(metadata["r_binary"]).samefile(binary), source
-                assert source["requested_version"] is None, source
-                assert len(info["warnings"]) == 1, info
+                if explicit:
+                    assert source["state"] == "disabled", source
+                    assert source["provider"] is None and source["metadata"] is None, source
+                    assert info["warnings"] == [], info
+                else:
+                    assert source["state"] == "applied" and source["provider"] == "pixi", source
+                    assert source["metadata"] == metadata, (source, metadata)
+                    assert source["requested_version"] is None, source
+                    assert len(info["warnings"]) == 1, info
                 assert not stderr, stderr
             else:
                 assert stderr.count(b"Warning:") == 1, stderr
@@ -132,6 +149,12 @@ def main():
     assert Path(source["path"]).samefile(manifest), source
     assert Path(descriptor["target"]["r_binary"]).samefile(binary), descriptor
     assert Path(descriptor["target"]["r_home"]).samefile(home), descriptor
+    assert descriptor["selected_by"]["requested_provider"] is None, descriptor
+    metadata = descriptor["metadata"]
+    assert metadata["kind"] == "pixi" and metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
+    assert Path(metadata["manifest"]).samefile(manifest), metadata
+    assert Path(metadata["prefix"]).samefile(prefix), metadata
+    assert Path(metadata["r_binary"]).samefile(binary), metadata
     assert len(descriptor["diagnostics"]) == 1, descriptor
     assert descriptor["diagnostics"][0]["code"] != "r_source_override.fallback", descriptor
     expression = r"""stopifnot(normalizePath(R.home()) == normalizePath(Sys.getenv('ARF_TEST_PIXI_R_HOME')));
@@ -149,12 +172,33 @@ cat('PIXI_COMPILED_OK\n')"""
     explicit_descriptor = json.loads(explicit_resolved.stdout)
     assert explicit_descriptor["provider"] == "pixi", explicit_descriptor
     assert explicit_descriptor["selected_by"]["kind"] == "provider_request", explicit_descriptor
+    assert explicit_descriptor["selected_by"]["requested_provider"] == "pixi", explicit_descriptor
     selected_source = explicit_descriptor["selected_by"]["source"]
     assert selected_source["kind"] == "command_line_argument", selected_source
     assert selected_source["name"] == "--r-provider", selected_source
     assert Path(explicit_descriptor["target"]["r_binary"]).samefile(binary), explicit_descriptor
     assert Path(explicit_descriptor["target"]["r_home"]).samefile(home), explicit_descriptor
+    assert explicit_descriptor["metadata"] == descriptor["metadata"], explicit_descriptor
     assert explicit_descriptor["diagnostics"] == [], explicit_descriptor
+
+    env_request = ENV | {"ARF_R_PROVIDER": "pixi"}
+    env_resolved = run(
+        "environment-resolve",
+        [ARF, "r", "resolve", "--config", EXPLICIT_CONFIG, "--no-r-source-overrides"],
+        env=env_request,
+    )
+    require(env_resolved, "environment Pixi resolve")
+    assert not env_resolved.stderr, env_resolved.stderr
+    env_descriptor = json.loads(env_resolved.stdout)
+    assert env_descriptor["provider"] == "pixi", env_descriptor
+    assert env_descriptor["selected_by"]["kind"] == "provider_request", env_descriptor
+    assert env_descriptor["selected_by"]["requested_provider"] == "pixi", env_descriptor
+    assert env_descriptor["selected_by"]["source"]["kind"] == "environment_variable", env_descriptor
+    assert env_descriptor["selected_by"]["source"]["name"] == "ARF_R_PROVIDER", env_descriptor
+    assert env_descriptor["metadata"] == descriptor["metadata"], env_descriptor
+    assert Path(env_descriptor["target"]["r_binary"]).samefile(binary), env_descriptor
+    assert Path(env_descriptor["target"]["r_home"]).samefile(home), env_descriptor
+    assert env_descriptor["diagnostics"] == [], env_descriptor
 
     clean = ENV.copy()
     clean.pop("R_HOME")
@@ -185,8 +229,9 @@ cat('PIXI_COMPILED_OK\n')"""
     script = RESULTS / "compiled.R"
     script.write_text(expression)
     require(run("script", [ARF, "--config", CONFIG, "--vanilla", "--no-r-auto-discovery", "-f", script]), "script")
-    headless(expression, home, binary, True)
-    headless(expression, home, binary, False)
+    headless(expression, home, binary, True, descriptor)
+    headless(expression, home, binary, False, descriptor)
+    headless(expression, home, binary, True, explicit_descriptor, explicit=True)
     require(run("restart", ["cargo", "test", "--locked", "--test", "pixi_environment_tests",
                             "--", "--ignored", "--nocapture"], cwd=ROOT, timeout=180), "compiled packages and restart")
     summary = {"result": "passed", "platform": platform.platform(), "machine": platform.machine(),
