@@ -478,7 +478,7 @@ fn send_request_inner(
 
     #[cfg(unix)]
     {
-        use std::io::Write;
+        use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
 
         let http_request = format!(
@@ -495,9 +495,15 @@ fn send_request_inner(
         let mut stream = UnixStream::connect(socket_path)
             .with_context(|| format!("Failed to connect to {socket_path}"))?;
         stream.set_read_timeout(Some(timeout))?;
+        // The server reads the request by Content-Length, so no half-close is
+        // needed. A half-close could also race with the server closing after
+        // its response, which macOS reports as ENOTCONN.
         stream.write_all(http_request.as_bytes())?;
 
-        parse_http_response(&finish_unix_request(&mut stream)?)
+        let mut response_buf = Vec::new();
+        stream.read_to_end(&mut response_buf)?;
+
+        parse_http_response(&response_buf)
     }
 
     #[cfg(windows)]
@@ -532,24 +538,6 @@ fn send_request_inner(
     }
 }
 
-/// Half-close a written Unix socket request and read the whole response.
-#[cfg(unix)]
-fn finish_unix_request(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-
-    // The server reads the request by Content-Length, so it can respond and
-    // close before this half-close. macOS then reports ENOTCONN although the
-    // response is still buffered; an empty or partial response still fails
-    // to parse.
-    match stream.shutdown(std::net::Shutdown::Write) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
-        result => result?,
-    }
-    let mut response_buf = Vec::new();
-    stream.read_to_end(&mut response_buf)?;
-    Ok(response_buf)
-}
-
 /// Parse an HTTP response and extract the JSON body.
 fn parse_http_response(data: &[u8]) -> Result<JsonRpcResponse> {
     let text = String::from_utf8_lossy(data);
@@ -561,24 +549,4 @@ fn parse_http_response(data: &[u8]) -> Result<JsonRpcResponse> {
     };
 
     serde_json::from_str(body).context("Failed to parse JSON-RPC response")
-}
-
-#[cfg(all(test, unix))]
-mod unix_request_tests {
-    use std::io::Write;
-    use std::os::unix::net::UnixStream;
-
-    #[test]
-    fn response_is_read_after_server_closes_first() {
-        // The server reads the request by Content-Length and may respond and
-        // close before the client half-closes its side.
-        let (mut client, mut server) = UnixStream::pair().unwrap();
-        server.write_all(b"RESPONSE").unwrap();
-        drop(server);
-
-        assert_eq!(
-            super::finish_unix_request(&mut client).unwrap(),
-            b"RESPONSE"
-        );
-    }
 }
