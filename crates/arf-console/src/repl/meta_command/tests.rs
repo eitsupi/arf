@@ -1,4 +1,7 @@
+use super::directory::{dir_command_hint, meta_cd, meta_popd, meta_pushd};
+use super::history::dedup_history_stores;
 use super::*;
+use crate::config::ReprexMode;
 use crate::editor::prompt::PromptFormatter;
 use crate::history::HistoryFailureDetail;
 use crate::repl::reprex::ReprexRuntime;
@@ -20,26 +23,9 @@ fn call_meta(
     _shell_history_path: &Option<PathBuf>,
     status: &RSourceStatus,
 ) -> Option<MetaCommandResult> {
-    let mut dir_stack = Vec::new();
     let mut reprex =
         ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
-    process_meta_command(
-        input,
-        config,
-        &mut reprex,
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        status,
-        &mut dir_stack,
-        None,
-        None,
-    )
+    call_meta_with_runtime(input, config, &mut reprex, status)
 }
 
 fn call_meta_with_runtime(
@@ -49,23 +35,31 @@ fn call_meta_with_runtime(
     status: &RSourceStatus,
 ) -> Option<MetaCommandResult> {
     let mut dir_stack = Vec::new();
-    process_meta_command(
-        input,
-        config,
+    call_meta_with_dir_stack(input, config, reprex, status, &mut dir_stack)
+}
+
+fn call_meta_with_dir_stack(
+    input: &str,
+    config: &mut PromptRuntimeConfig,
+    reprex: &mut ReprexRuntime,
+    status: &RSourceStatus,
+    dir_stack: &mut Vec<PathBuf>,
+) -> Option<MetaCommandResult> {
+    let unavailable_history = HistoryRuntime::Unavailable {
+        failure: HistoryFailureDetail::test_memory(),
+        previous_failure: None,
+    };
+    let mut ctx = MetaCommandContext {
+        prompt_config: config,
         reprex,
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        status,
-        &mut dir_stack,
-        None,
-        None,
-    )
+        r_history: &unavailable_history,
+        shell_history: &unavailable_history,
+        r_source_status: status,
+        dir_stack,
+        history_session_id: None,
+        r_home: None,
+    };
+    process_meta_command(input, &mut ctx)
 }
 
 #[test]
@@ -381,22 +375,12 @@ fn test_process_meta_command_cd() {
     let status = default_r_source_status();
     let mut dir_stack = Vec::new();
 
-    let result = process_meta_command(
+    let result = call_meta_with_dir_stack(
         &format!(":cd {}", tmp.path().display()),
         &mut config,
         &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
         &status,
         &mut dir_stack,
-        None,
-        None,
     );
     assert!(matches!(result, Some(MetaCommandResult::Handled)));
 }
@@ -410,42 +394,22 @@ fn test_process_meta_command_pushd_popd() {
     let status = default_r_source_status();
     let mut dir_stack = Vec::new();
 
-    let result = process_meta_command(
+    let result = call_meta_with_dir_stack(
         &format!(":pushd {}", tmp.path().display()),
         &mut config,
         &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
         &status,
         &mut dir_stack,
-        None,
-        None,
     );
     assert!(matches!(result, Some(MetaCommandResult::Handled)));
     assert_eq!(dir_stack.len(), 1);
 
-    let result = process_meta_command(
+    let result = call_meta_with_dir_stack(
         ":popd",
         &mut config,
         &mut ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air),
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
-        &HistoryRuntime::Unavailable {
-            failure: HistoryFailureDetail::test_memory(),
-            previous_failure: None,
-        },
         &status,
         &mut dir_stack,
-        None,
-        None,
     );
     assert!(matches!(result, Some(MetaCommandResult::Handled)));
     assert!(dir_stack.is_empty());

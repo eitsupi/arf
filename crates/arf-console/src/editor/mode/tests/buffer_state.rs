@@ -1,4 +1,5 @@
-use super::super::*;
+use super::super::state::EditorState;
+use reedline::{EditCommand, ReedlineEvent};
 
 #[test]
 fn test_reset_clears_buffer() {

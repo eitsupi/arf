@@ -10,6 +10,16 @@ pub enum HistorySaveOutcome {
     Failed,
 }
 
+impl HistorySaveOutcome {
+    /// The ID of the saved row, or `None` when the save failed.
+    pub fn saved_id(self) -> Option<HistoryItemId> {
+        match self {
+            Self::Saved(id) => Some(id),
+            Self::Failed => None,
+        }
+    }
+}
+
 /// Shared receipt through which arf can observe an adapter save result.
 #[derive(Clone)]
 pub struct HistorySaveReceipt {
@@ -49,5 +59,13 @@ mod tests {
 
         assert_eq!(receipt.take(), Some(outcome));
         assert_eq!(receipt.take(), None);
+    }
+
+    #[test]
+    fn saved_id_is_present_only_for_a_saved_outcome() {
+        let id = reedline::HistoryItemId::new(7);
+
+        assert_eq!(HistorySaveOutcome::Saved(id).saved_id(), Some(id));
+        assert_eq!(HistorySaveOutcome::Failed.saved_id(), None);
     }
 }

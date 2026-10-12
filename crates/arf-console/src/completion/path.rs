@@ -5,6 +5,7 @@
 //! better UX and performance.
 
 use crate::fuzzy::fuzzy_match;
+use reedline::{Span, Suggestion};
 use std::path::Path;
 
 /// Normalize path separators to forward slashes.
@@ -242,6 +243,36 @@ pub fn complete_path(
     completions.append(&mut hidden_completions);
 
     completions
+}
+
+/// Convert path completions to reedline Suggestions.
+pub(super) fn path_to_suggestions(
+    partial: &str,
+    pos: usize,
+    span_start: usize,
+    options: &PathCompletionOptions,
+) -> Vec<Suggestion> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    complete_path(partial, &cwd, options)
+        .into_iter()
+        .map(|c| Suggestion {
+            value: c.path,
+            display_override: None,
+            description: if c.is_dir {
+                Some("directory".to_string())
+            } else {
+                None
+            },
+            extra: None,
+            span: Span {
+                start: span_start,
+                end: pos,
+            },
+            append_whitespace: false,
+            style: None,
+            match_indices: c.match_indices,
+        })
+        .collect()
 }
 
 #[cfg(test)]

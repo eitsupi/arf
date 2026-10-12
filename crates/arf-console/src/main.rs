@@ -13,6 +13,7 @@ mod highlighter;
 mod history;
 mod ipc;
 mod logging;
+mod meta_command_catalog;
 mod output;
 mod pager;
 mod pid_file;

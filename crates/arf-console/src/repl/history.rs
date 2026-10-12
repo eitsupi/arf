@@ -110,7 +110,7 @@ mod tests {
         HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, ReedlineHistoryAdapter,
         VolatileHistoryReason,
     };
-    use crate::repl::meta_command::process_meta_command;
+    use crate::repl::meta_command::{MetaCommandContext, process_meta_command};
     use crate::repl::reprex::ReprexRuntime;
     use crate::repl::state::{PendingHistoryContext, PromptRuntimeConfig};
     use reedline::{
@@ -318,10 +318,7 @@ mod tests {
         finalize_history(Some(&runtime), outcome, false);
         let pending_history_context = PendingHistoryContext::Command {
             store: Some(store.clone()),
-            history_id: match outcome {
-                Some(HistorySaveOutcome::Saved(id)) => Some(id),
-                _ => None,
-            },
+            history_id: outcome.and_then(HistorySaveOutcome::saved_id),
         };
         if let PendingHistoryContext::Command {
             store: Some(store),
@@ -392,28 +389,30 @@ mod tests {
             )
             .build();
             let mut dir_stack = Vec::new();
-            process_meta_command(
-                input,
-                &mut prompt,
-                &mut ReprexRuntime::new(
-                    crate::config::ReprexMode::Off,
-                    "#> ",
-                    crate::config::FormatterBackend::Air,
-                ),
-                &HistoryRuntime::Unavailable {
-                    failure: HistoryFailureDetail::test_memory(),
-                    previous_failure: None,
-                },
-                &HistoryRuntime::Unavailable {
-                    failure: HistoryFailureDetail::test_memory(),
-                    previous_failure: None,
-                },
-                &RSourceStatus::Path,
-                &mut dir_stack,
-                None,
-                None,
-            )
-            .is_some()
+            let r_history = HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            };
+            let shell_history = HistoryRuntime::Unavailable {
+                failure: HistoryFailureDetail::test_memory(),
+                previous_failure: None,
+            };
+            let mut reprex = ReprexRuntime::new(
+                crate::config::ReprexMode::Off,
+                "#> ",
+                crate::config::FormatterBackend::Air,
+            );
+            let mut ctx = MetaCommandContext {
+                prompt_config: &mut prompt,
+                reprex: &mut reprex,
+                r_history: &r_history,
+                shell_history: &shell_history,
+                r_source_status: &RSourceStatus::Path,
+                dir_stack: &mut dir_stack,
+                history_session_id: None,
+                r_home: None,
+            };
+            process_meta_command(input, &mut ctx).is_some()
         }
 
         let temp_dir = tempfile::tempdir().unwrap();

@@ -1,4 +1,7 @@
-use super::super::*;
+use super::super::conditions::{BufferEmpty, KeyCondition};
+use super::super::state::EditorState;
+use super::super::{BufferKnownEmpty, CursorAtBegin};
+use reedline::{EditCommand, ReedlineEvent};
 
 #[test]
 fn test_editor_state_initial() {

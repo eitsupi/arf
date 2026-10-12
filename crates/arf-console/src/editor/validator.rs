@@ -1,6 +1,7 @@
 //! R expression validator using tree-sitter.
 
 use crate::editor::mode::EditorStateRef;
+use crate::r_parser::parse_r;
 use reedline::{ValidationResult, Validator};
 
 /// Validator for R expressions using tree-sitter.
@@ -31,14 +32,6 @@ impl RValidator {
     /// Check whether an R expression is complete without synchronizing editor state.
     pub fn is_complete(&self, line: &str) -> bool {
         matches!(self.validate(line), ValidationResult::Complete)
-    }
-
-    fn create_parser() -> tree_sitter::Parser {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_r::LANGUAGE.into())
-            .expect("Failed to load R grammar");
-        parser
     }
 
     /// Check if the syntax tree indicates an incomplete expression.
@@ -216,8 +209,7 @@ impl Validator for RValidator {
         let source = line.as_bytes();
 
         // Parse with tree-sitter (doesn't call R, avoids re-entrancy)
-        let mut parser = Self::create_parser();
-        let tree = match parser.parse(source, None) {
+        let tree = match parse_r(line) {
             Some(tree) => tree,
             None => {
                 debug_log(&format!(

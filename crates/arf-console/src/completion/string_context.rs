@@ -4,8 +4,8 @@
 //! is inside a string literal, and provides Rust-native path completion for
 //! paths typed inside strings.
 
-use super::path::{PathCompletionOptions, complete_path};
-use reedline::{Span, Suggestion};
+use super::path::{PathCompletionOptions, path_to_suggestions};
+use reedline::Suggestion;
 use std::cell::RefCell;
 use tree_sitter::{Parser, Tree};
 
@@ -254,36 +254,6 @@ pub fn detect_string_context(line: &str, cursor_pos: usize) -> Option<StringCont
     }
 
     None
-}
-
-/// Convert path completions to reedline Suggestions.
-pub(super) fn path_to_suggestions(
-    partial: &str,
-    pos: usize,
-    span_start: usize,
-    options: &PathCompletionOptions,
-) -> Vec<Suggestion> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    complete_path(partial, &cwd, options)
-        .into_iter()
-        .map(|c| Suggestion {
-            value: c.path,
-            display_override: None,
-            description: if c.is_dir {
-                Some("directory".to_string())
-            } else {
-                None
-            },
-            extra: None,
-            span: Span {
-                start: span_start,
-                end: pos,
-            },
-            append_whitespace: false,
-            style: None,
-            match_indices: c.match_indices,
-        })
-        .collect()
 }
 
 /// Complete paths using Rust-native path completion.
