@@ -1,5 +1,5 @@
 use super::support::{PROMPT, Terminal, build_formatter_fixture_path, run_case, run_case_with};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 
 #[test]
 fn menu_prompt_is_distinct_until_selection() -> Result<()> {
@@ -108,33 +108,67 @@ continuation = "CONT> "
 fn identical_r_prompts_warn_once_per_transition() -> Result<()> {
     const WARNING: &str = r#"# [arf] Warning: options("prompt") and options("continue") are identical; arf cannot distinguish top-level and continuation prompts."#;
 
-    run_case("identical-r-prompts", &["--no-auto-match"], |terminal| {
+    const DISTINCT: &str = "options(prompt = '> ', continue = '+ ')";
+
+    // Count warning rows on the emulated screen. Windows ConPTY can interleave
+    // terminal mode sequences with the warning in the raw recording, so the
+    // stream may not contain the warning as one substring. The session stays
+    // short enough that no row scrolls away, and the terminal is wide enough
+    // that the warning occupies a single row.
+    fn warning_rows(text: &str) -> Vec<usize> {
+        text.lines()
+            .enumerate()
+            .filter(|(_, line)| line.trim_end() == WARNING)
+            .map(|(row, _)| row)
+            .collect()
+    }
+
+    let builder = Terminal::builder("identical-r-prompts")
+        .args(["--no-auto-match"])
+        .cols(160);
+    run_case_with(builder, |terminal| {
+        terminal.wait_for_first_prompt()?;
         terminal.enter("options(prompt = '> ', continue = '> ')")?;
         terminal.wait_for("first ambiguity warning", |state, line| {
-            state.text.contains("# [arf] Warning: options") && line.trim_end() == "+"
+            !warning_rows(&state.text).is_empty() && line.trim_end() == "+"
         })?;
-        let first = terminal.output()?;
-        ensure!(first.matches(WARNING).count() == 1);
+        let state = terminal.state()?;
+        ensure!(
+            warning_rows(&state.text).len() == 1,
+            "expected one identical prompt warning: {}",
+            state.text
+        );
 
-        let persistent = terminal.checkpoint()?;
         terminal.enter("1 + 1")?;
         terminal.wait_for("ambiguous prompt persists", |state, line| {
             state.text.contains("[1] 2") && line.trim_end() == "+"
         })?;
+        let state = terminal.state()?;
         ensure!(
-            !terminal.output_since(persistent)?.contains(WARNING),
-            "identical prompt warning repeated without a transition"
+            warning_rows(&state.text).len() == 1,
+            "identical prompt warning repeated without a transition: {}",
+            state.text
         );
 
-        terminal.enter("options(prompt = '> ', continue = '+ ')")?;
+        terminal.enter(DISTINCT)?;
         terminal.wait_for_prompt(None, PROMPT)?;
-        let distinct = terminal.checkpoint()?;
         terminal.enter("options(prompt = '> ', continue = '> ')")?;
         terminal.wait_for("second ambiguity warning", |state, line| {
-            state.text.contains("# [arf] Warning: options") && line.trim_end() == "+"
+            warning_rows(&state.text).len() > 1 && line.trim_end() == "+"
         })?;
-        ensure!(terminal.output_since(distinct)?.matches(WARNING).count() == 1);
-        Ok(())
+        let state = terminal.state()?;
+        let warnings = warning_rows(&state.text);
+        let transition = state
+            .text
+            .lines()
+            .position(|line| line.trim_end().ends_with(DISTINCT))
+            .context("distinct prompt transition is missing from the screen")?;
+        ensure!(
+            matches!(warnings[..], [first, second] if first < transition && transition < second),
+            "expected one warning before and one after the distinct prompt transition: {}",
+            state.text
+        );
+        terminal.quit()
     })
 }
 
