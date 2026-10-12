@@ -32,18 +32,7 @@ pub(crate) fn run_script(
     )?;
     let override_notice = super::overrides::override_notice(&resolution);
 
-    // Prepare the platform loader path for the R library directory.
-    #[cfg(unix)]
-    let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
-        super::forward_loader_target(&resolution)
-    });
-    #[cfg(not(unix))]
-    let loader_result = arf_libr::ensure_ld_library_path();
-    if let Err(e) = loader_result {
-        log::warn!("Could not prepare the R library search path: {}", e);
-    }
-    #[cfg(unix)]
-    super::clear_loader_target();
+    super::prepare_loader_path(&resolution);
 
     report_startup_diagnostics(config_diagnostics);
     resolution.emit_diagnostics();

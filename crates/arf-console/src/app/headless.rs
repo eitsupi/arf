@@ -208,18 +208,7 @@ pub(crate) fn run_headless(
         );
     }
 
-    // Prepare the platform loader path for the R library directory.
-    #[cfg(unix)]
-    let loader_result = arf_libr::ensure_ld_library_path_with_pre_exec(|| {
-        crate::app::setup::forward_loader_target(&resolution)
-    });
-    #[cfg(not(unix))]
-    let loader_result = arf_libr::ensure_ld_library_path();
-    if let Err(e) = loader_result {
-        log::warn!("Could not prepare the R library search path: {}", e);
-    }
-    #[cfg(unix)]
-    crate::app::setup::clear_loader_target();
+    crate::app::setup::prepare_loader_path(&resolution);
 
     if !json {
         report_startup_diagnostics(config_diagnostics);

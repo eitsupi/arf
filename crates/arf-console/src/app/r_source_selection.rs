@@ -1,6 +1,8 @@
 //! Shared machine-readable provenance for the selected R source.
 
-use crate::app::explicit_r_source::{ExplicitRSource, RProvider, RSourceOrigin};
+use crate::app::explicit_r_source::{
+    ExplicitRSource, ExplicitRSourceRequest, RProvider, RSourceOrigin,
+};
 use crate::app::setup::{RSourceResolutionReport, RSourceSelectionRoute};
 use crate::config::{ConfigLoadProvenance, RSourceStatus};
 use serde::Serialize;
@@ -84,97 +86,121 @@ impl RSourceSelection {
     }
 }
 
-fn selected_by(
-    cwd: &Path,
-    report: &RSourceResolutionReport,
-    loaded_config: Option<&ConfigLoadProvenance>,
-) -> SelectedBy {
-    let selection_source = |kind, name, path, format, key| SelectionSource {
+fn selection_source(
+    kind: &'static str,
+    name: Option<String>,
+    path: Option<String>,
+    format: Option<&'static str>,
+    key: Option<String>,
+) -> SelectionSource {
+    SelectionSource {
         kind,
         name,
         path,
         format,
         key,
-    };
+    }
+}
+
+fn selected_by(
+    cwd: &Path,
+    report: &RSourceResolutionReport,
+    loaded_config: Option<&ConfigLoadProvenance>,
+) -> SelectedBy {
     if report.selection_route == RSourceSelectionRoute::Explicit
         && let Some(request) = &report.explicit_request
     {
-        let (kind, requested_r_home, requested_version, cli_name, env_name) = match &request.source
-        {
-            ExplicitRSource::Home(home) => (
-                "r_home",
-                Some(display_path(cwd, home)),
-                None,
-                "--r-home",
-                "ARF_R_HOME",
-            ),
-            ExplicitRSource::Version(version) => (
-                "version_request",
-                None,
-                Some(version.clone()),
-                "--with-r-version",
-                "ARF_R_VERSION",
-            ),
-            ExplicitRSource::Provider(_) => (
-                "provider_request",
-                None,
-                None,
-                "--r-provider",
-                "ARF_R_PROVIDER",
-            ),
-        };
-        let (source_kind, source_name) = match request.origin {
-            RSourceOrigin::Cli => ("command_line_argument", cli_name),
-            RSourceOrigin::Environment => ("environment_variable", env_name),
-        };
-        return SelectedBy {
-            kind,
-            requested_r_home,
-            requested_version,
-            source: selection_source(source_kind, Some(source_name.to_owned()), None, None, None),
-        };
+        return explicit_selected_by(cwd, request);
     }
 
     if report.selection_route == RSourceSelectionRoute::Override {
-        if matches!(
-            report.status,
-            RSourceStatus::Pixi { .. } | RSourceStatus::RigProject { .. }
-        ) {
-            // The provider's identity is reported in `metadata`; the source
-            // records where the provider request was configured.
-            return SelectedBy {
-                kind: "provider_request",
-                requested_r_home: None,
-                requested_version: None,
-                source: selection_source(
-                    "configuration_file",
-                    None,
-                    loaded_config.map(|config| display_path(cwd, &config.path)),
-                    Some("toml"),
-                    Some("experimental.r_source_overrides".to_owned()),
-                ),
-            };
-        }
-        let format = match report.override_provider.as_deref() {
-            Some("version-file") => Some("text"),
-            Some("toml-key") => Some("toml"),
-            Some("json-key") => Some("json"),
-            _ => None,
-        };
+        return override_selected_by(cwd, report, loaded_config);
+    }
+
+    default_selected_by(cwd, loaded_config)
+}
+
+fn explicit_selected_by(cwd: &Path, request: &ExplicitRSourceRequest) -> SelectedBy {
+    let (kind, requested_r_home, requested_version, cli_name, env_name) = match &request.source {
+        ExplicitRSource::Home(home) => (
+            "r_home",
+            Some(display_path(cwd, home)),
+            None,
+            "--r-home",
+            "ARF_R_HOME",
+        ),
+        ExplicitRSource::Version(version) => (
+            "version_request",
+            None,
+            Some(version.clone()),
+            "--with-r-version",
+            "ARF_R_VERSION",
+        ),
+        ExplicitRSource::Provider(_) => (
+            "provider_request",
+            None,
+            None,
+            "--r-provider",
+            "ARF_R_PROVIDER",
+        ),
+    };
+    let (source_kind, source_name) = match request.origin {
+        RSourceOrigin::Cli => ("command_line_argument", cli_name),
+        RSourceOrigin::Environment => ("environment_variable", env_name),
+    };
+    SelectedBy {
+        kind,
+        requested_r_home,
+        requested_version,
+        source: selection_source(source_kind, Some(source_name.to_owned()), None, None, None),
+    }
+}
+
+fn override_selected_by(
+    cwd: &Path,
+    report: &RSourceResolutionReport,
+    loaded_config: Option<&ConfigLoadProvenance>,
+) -> SelectedBy {
+    if matches!(
+        report.status,
+        RSourceStatus::Pixi { .. } | RSourceStatus::RigProject { .. }
+    ) {
+        // The provider's identity is reported in `metadata`; the source
+        // records where the provider request was configured.
         return SelectedBy {
-            kind: "version_request",
+            kind: "provider_request",
             requested_r_home: None,
-            requested_version: report.requested_version.clone(),
+            requested_version: None,
             source: selection_source(
-                "project_file",
+                "configuration_file",
                 None,
-                report.file.as_ref().map(|path| display_path(cwd, path)),
-                format,
-                report.key.clone(),
+                loaded_config.map(|config| display_path(cwd, &config.path)),
+                Some("toml"),
+                Some("experimental.r_source_overrides".to_owned()),
             ),
         };
     }
+    let format = match report.override_provider.as_deref() {
+        Some("version-file") => Some("text"),
+        Some("toml-key") => Some("toml"),
+        Some("json-key") => Some("json"),
+        _ => None,
+    };
+    SelectedBy {
+        kind: "version_request",
+        requested_r_home: None,
+        requested_version: report.requested_version.clone(),
+        source: selection_source(
+            "project_file",
+            None,
+            report.file.as_ref().map(|path| display_path(cwd, path)),
+            format,
+            report.key.clone(),
+        ),
+    }
+}
 
+fn default_selected_by(cwd: &Path, loaded_config: Option<&ConfigLoadProvenance>) -> SelectedBy {
     let source = if let Some(loaded_config) = loaded_config
         && loaded_config.startup_r_source_present
     {
@@ -200,7 +226,7 @@ fn display_path(cwd: &Path, path: &Path) -> String {
     normalize_path(cwd, path).display().to_string()
 }
 
-fn normalize_path(cwd: &Path, path: &Path) -> PathBuf {
+pub(crate) fn normalize_path(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_owned()
     } else {

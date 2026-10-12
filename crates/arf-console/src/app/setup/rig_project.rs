@@ -7,6 +7,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::executable::{R_EXECUTABLE, is_executable};
 use crate::config::{RigProjectRSourceInfo, VerifiedRTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +51,19 @@ impl fmt::Display for RigProjectFailure {
             Self::RUnavailable { reason, .. } => {
                 write!(f, "the synchronized rig project R is unavailable: {reason}")
             }
+        }
+    }
+}
+
+impl RigProjectFailure {
+    /// Stable identifier of the failure kind; consumers add their own prefix.
+    pub(crate) fn code_suffix(&self) -> &'static str {
+        match self {
+            Self::ProjectNotFound { .. } => "rig_project_not_found",
+            Self::StatusUnavailable { .. } => "rig_project_unavailable",
+            Self::StatusInvalid { .. } => "rig_project_status_invalid",
+            Self::NotSynced { .. } => "rig_project_not_synced",
+            Self::RUnavailable { .. } => "rig_project_r_unavailable",
         }
     }
 }
@@ -115,7 +129,7 @@ fn resolve_strict_at(
         })?;
     validate_status(&status, &root)?;
 
-    if !is_executable_file(&wrapper) {
+    if !is_executable(&wrapper) {
         return Err(RigProjectFailure::RUnavailable {
             reason: "the project R wrapper is missing or not executable",
             path: Some(wrapper),
@@ -266,29 +280,7 @@ fn probe_wrapper(command: Command) -> Result<PathBuf, arf_libr::RHomeProbeError>
 }
 
 fn rig_wrapper_path(root: &Path) -> PathBuf {
-    #[cfg(windows)]
-    const R_EXECUTABLE: &str = "R.exe";
-    #[cfg(not(windows))]
-    const R_EXECUTABLE: &str = "R";
     root.join(".rvenv").join("bin").join(R_EXECUTABLE)
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = path.metadata() else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -583,6 +583,27 @@ mod tests {
     }
 
     #[test]
+    fn toml_key_does_not_search_parent_directories() {
+        let _cwd_lock = crate::test_utils::lock_cwd();
+        let parent = tempfile::tempdir().unwrap();
+        let child = parent.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(
+            parent.path().join("rproject.toml"),
+            "[project]\nr_version = \"4.4\"\n",
+        )
+        .unwrap();
+        std::env::set_current_dir(&child).unwrap();
+
+        let result = read_toml_key(Path::new("rproject.toml"), "project.r_version");
+
+        assert!(matches!(
+            result,
+            Err(TomlKeyError::Read(error)) if error.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    #[test]
     fn json_key_reads_nested_string() {
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), r#"{"R":{"Version":"4.4"}}"#).unwrap();
