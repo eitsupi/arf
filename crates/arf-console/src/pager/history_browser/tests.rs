@@ -1,3 +1,5 @@
+use super::filter::HistoryFilter;
+use super::render::{calculate_layout, flatten_multiline};
 use super::*;
 use rusqlite::Connection;
 

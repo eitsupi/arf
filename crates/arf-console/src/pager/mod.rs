@@ -9,9 +9,12 @@ mod help_content;
 mod help_session;
 pub mod history_browser;
 pub mod history_schema;
+mod lines_content;
 pub(crate) mod markdown;
 pub mod session_info;
+mod size;
 pub(crate) mod style_convert;
+mod terminal;
 pub(crate) mod text_utils;
 
 pub use changelog::display_changelog;
@@ -19,27 +22,20 @@ pub(crate) use help::display_prepared_help_request;
 pub use help::run_help_browser;
 pub use history_browser::{HistoryBrowserResult, HistoryDbMode, run_history_browser};
 pub use session_info::display_session_info;
-
-use base64::{Engine, engine::general_purpose};
-use crossterm::{
-    Command, ExecutableCommand, cursor,
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseEventKind,
-    },
-    queue,
-    terminal::{
-        self, BeginSynchronizedUpdate, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
-        LeaveAlternateScreen,
-    },
+pub(crate) use size::{
+    MinimumSize, check_terminal_too_small, render_size_warning_if_too_small, visible_result_rows,
+    visible_result_rows_for,
 };
+pub use terminal::{copy_to_clipboard, with_alternate_screen};
+
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color as RatColor, Style as RatStyle};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use std::io::{self, Write};
+use std::io;
 use std::time::{Duration, Instant};
 
 /// Result of handling a key event in the pager.
@@ -61,41 +57,6 @@ pub(crate) const SCROLL_INTERVAL_MS: u64 = 150;
 
 /// Pause duration at the start of scroll animation (in ms).
 pub(crate) const SCROLL_PAUSE_MS: u64 = 1000;
-
-/// RAII guard that restores terminal state on drop, ensuring cleanup even on panic.
-struct AlternateScreenGuard;
-
-impl Drop for AlternateScreenGuard {
-    fn drop(&mut self) {
-        let _ = terminal::disable_raw_mode();
-        let mut stdout = io::stdout();
-        let _ = stdout.execute(DisableMouseCapture);
-        let _ = stdout.execute(cursor::Show);
-        let _ = stdout.execute(LeaveAlternateScreen);
-    }
-}
-
-/// Run a closure inside an alternate screen with mouse capture and raw mode.
-///
-/// Handles setup (`EnterAlternateScreen`, `EnableMouseCapture`,
-/// `enable_raw_mode`) and guaranteed teardown via an RAII drop guard,
-/// ensuring the terminal is restored even if the closure panics.
-pub fn with_alternate_screen<R, F>(f: F) -> io::Result<R>
-where
-    F: FnOnce() -> io::Result<R>,
-{
-    // Create the guard *before* setup so that any failure mid-setup still
-    // tears down whatever was already enabled (the individual restore calls
-    // are no-ops / harmless when the corresponding setup never ran).
-    let mut stdout = io::stdout();
-    stdout.execute(EnterAlternateScreen)?;
-    let _guard = AlternateScreenGuard;
-
-    stdout.execute(EnableMouseCapture)?;
-    terminal::enable_raw_mode()?;
-
-    f()
-}
 
 /// Manages text scroll animation state for long items in a list view.
 ///
@@ -234,7 +195,7 @@ fn run_inner<C: PagerContent>(content: &mut C, config: &PagerConfig) -> io::Resu
     terminal.hide_cursor()?;
     let mut scroll_offset = 0;
     let mut needs_redraw = true;
-    let (_, initial_rows) = terminal::size().unwrap_or((80, 24));
+    let (_, initial_rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut term_height = initial_rows as usize;
 
     loop {
@@ -452,139 +413,6 @@ fn clamp_scroll_offset(requested: usize, line_count: usize, height: usize) -> us
     requested.min(max_scroll_offset_with_height(line_count, height))
 }
 
-/// OSC 52 clipboard command for copying text via terminal escape sequence.
-///
-/// Reference: <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands>
-/// Based on television's implementation: refs/television/television/utils/clipboard.rs
-struct SetClipboard {
-    content: String,
-}
-
-impl SetClipboard {
-    fn new(content: &str) -> Self {
-        Self {
-            content: general_purpose::STANDARD.encode(content.as_bytes()),
-        }
-    }
-}
-
-impl Command for SetClipboard {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1b]52;c;{}\x1b\\", self.content)
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        // OSC 52 is ANSI-based, no WinAPI implementation needed.
-        // Modern Windows terminals support ANSI sequences.
-        Ok(())
-    }
-}
-
-/// Copy text to clipboard using OSC 52 escape sequence.
-///
-/// This uses the terminal's OSC 52 support to copy text to the system clipboard.
-/// Most modern terminals support this (iTerm2, kitty, WezTerm, Windows Terminal, etc.).
-pub fn copy_to_clipboard(text: &str) -> io::Result<()> {
-    use std::io::BufWriter;
-    let mut writer = BufWriter::new(io::stderr());
-    crossterm::execute!(writer, SetClipboard::new(text))
-}
-
-/// Minimum terminal size requirements for a browser UI.
-pub(crate) struct MinimumSize {
-    pub cols: u16,
-    pub rows: u16,
-}
-
-/// Render a "terminal too small" warning screen.
-///
-/// This is a shared utility for browser UIs that require a minimum terminal size.
-/// It fills the alternate screen with a centered message asking the user to resize.
-///
-/// Accepts the current terminal size to avoid a redundant `terminal::size()` call
-/// (the caller already obtained the size for its check).
-pub(crate) fn render_size_warning(
-    stdout: &mut io::Stdout,
-    cols: u16,
-    rows: u16,
-    min: &MinimumSize,
-) -> io::Result<()> {
-    let width = cols as usize;
-    let height = rows as usize;
-
-    let title = "Terminal too small";
-    let current_line = format!("Current:  {}x{}", cols, rows);
-    let minimum_line = format!("Minimum:  {}x{}", min.cols, min.rows);
-
-    let messages = [
-        title,
-        "",
-        &current_line,
-        &minimum_line,
-        "",
-        "Please resize your terminal.",
-        "",
-        "Press q or Esc to exit.",
-    ];
-
-    queue!(
-        stdout,
-        BeginSynchronizedUpdate,
-        cursor::MoveTo(0, 0),
-        cursor::Hide
-    )?;
-
-    // Center vertically
-    let start_row = height.saturating_sub(messages.len()) / 2;
-
-    for row in 0..height {
-        queue!(stdout, terminal::Clear(ClearType::CurrentLine))?;
-        if row >= start_row && row < start_row + messages.len() {
-            let msg = messages[row - start_row];
-            let msg_width = text_utils::display_width(msg);
-            let padding = width.saturating_sub(msg_width) / 2;
-            if msg == title {
-                write!(
-                    stdout,
-                    "\r{}{}",
-                    " ".repeat(padding),
-                    crossterm::style::Stylize::bold(crossterm::style::Stylize::yellow(msg))
-                )?;
-            } else {
-                write!(stdout, "\r{}{}", " ".repeat(padding), msg)?;
-            }
-        }
-        // Move to the next line (except for the last row to avoid scrolling)
-        if row + 1 < height {
-            write!(stdout, "\r\n")?;
-        }
-    }
-
-    queue!(stdout, EndSynchronizedUpdate)?;
-    stdout.flush()?;
-    Ok(())
-}
-
-/// Check whether the terminal meets minimum size requirements.
-///
-/// Returns `Some((cols, rows))` if the terminal is too small, `None` if it meets
-/// the requirements. The returned size can be passed to [`render_size_warning`]
-/// to avoid a redundant `terminal::size()` call.
-pub(crate) fn check_terminal_too_small(min: &MinimumSize) -> Option<(u16, u16)> {
-    let (cols, rows) = terminal::size().unwrap_or((80, 24));
-    if is_below_minimum(cols, rows, min) {
-        Some((cols, rows))
-    } else {
-        None
-    }
-}
-
-/// Pure comparison for minimum size check (testable without a real terminal).
-fn is_below_minimum(cols: u16, rows: u16, min: &MinimumSize) -> bool {
-    cols < min.cols || rows < min.rows
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,23 +424,5 @@ mod tests {
         assert_eq!(clamp_scroll_offset(20, 5, 24), 0);
         assert_eq!(clamp_scroll_offset(1, 0, 24), 0);
         assert_eq!(clamp_scroll_offset(78, 100, 50), 52);
-    }
-
-    #[test]
-    fn test_is_below_minimum() {
-        let min = MinimumSize { cols: 70, rows: 10 };
-        for (cols, rows, expected) in [
-            (80, 24, false),
-            (70, 10, false), // exact boundary
-            (69, 24, true),  // columns too small
-            (80, 9, true),   // rows too small
-            (40, 5, true),   // both too small
-        ] {
-            assert_eq!(
-                is_below_minimum(cols, rows, &min),
-                expected,
-                "{cols}x{rows}"
-            );
-        }
     }
 }

@@ -1,7 +1,8 @@
 //! Display the arf changelog in the built-in Markdown pager.
 
+use super::lines_content::{LineStyler, LinesContent};
 use super::markdown::render_markdown;
-use super::{PagerConfig, PagerContent, run};
+use super::{PagerConfig, run};
 use crossterm::terminal;
 use ratatui::text::Line;
 use std::io;
@@ -21,10 +22,11 @@ fn display_changelog_inner() -> io::Result<()> {
     let (cols, _) = terminal::size().unwrap_or((80, 24));
     let width = cols as usize;
 
-    let mut content = ChangelogContent {
-        lines: ChangelogContent::render_with_width(width),
-        last_width: width,
-    };
+    let mut content = LinesContent::new(
+        ChangelogStyler::render_with_width(width),
+        ChangelogStyler { last_width: width },
+        None,
+    );
 
     let config = PagerConfig {
         title: "Changelog",
@@ -35,29 +37,27 @@ fn display_changelog_inner() -> io::Result<()> {
     run(&mut content, &config)
 }
 
-struct ChangelogContent {
-    lines: Vec<Line<'static>>,
+/// Re-renders the Markdown changelog when the terminal width changes.
+struct ChangelogStyler {
     last_width: usize,
 }
 
-impl ChangelogContent {
+impl ChangelogStyler {
     fn render_with_width(width: usize) -> Vec<Line<'static>> {
         render_markdown(CHANGELOG_SOURCE, None, Some(width))
     }
 }
 
-impl PagerContent for ChangelogContent {
-    fn line_count(&self) -> usize {
-        self.lines.len()
+impl LineStyler for ChangelogStyler {
+    type Line = Line<'static>;
+
+    fn style_line(&self, lines: &[Line<'static>], index: usize) -> Line<'static> {
+        lines.get(index).cloned().unwrap_or_default()
     }
 
-    fn render_line(&self, index: usize, _width: usize) -> Line<'static> {
-        self.lines.get(index).cloned().unwrap_or_default()
-    }
-
-    fn on_resize(&mut self, width: usize, _height: usize) {
+    fn on_resize(&mut self, lines: &mut Vec<Line<'static>>, width: usize, _height: usize) {
         if width != self.last_width {
-            self.lines = ChangelogContent::render_with_width(width);
+            *lines = Self::render_with_width(width);
             self.last_width = width;
         }
     }
