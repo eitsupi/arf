@@ -62,12 +62,12 @@ pub(crate) struct RSourceDiagnostic {
 }
 
 pub(super) fn warning(
-    code: &'static str,
+    code: impl Into<String>,
     message: impl Into<String>,
     path: Option<PathBuf>,
 ) -> RSourceDiagnostic {
     RSourceDiagnostic {
-        code: code.to_owned(),
+        code: code.into(),
         severity: "warning",
         message: message.into(),
         path,
@@ -247,70 +247,7 @@ pub(crate) fn resolve_r_source(
 ) -> Result<RSourceResolutionReport> {
     // Explicit selections take precedence over every configured source.
     if let Some(request) = explicit_request {
-        let override_state = if no_r_source_overrides {
-            RSourceOverrideState::Disabled
-        } else {
-            RSourceOverrideState::ShadowedByCli
-        };
-        match &request.source {
-            ExplicitRSource::Provider(RProvider::Pixi) => {
-                let info = resolve_strict(base_dir).map_err(|failure| {
-                    anyhow::Error::new(failure).context(
-                        "The requested Pixi R provider is unavailable; run arf through `pixi run` with an R-enabled environment",
-                    )
-                })?;
-                return Ok(RSourceResolutionReport::from_environment(
-                    RSourceStatus::Pixi { info },
-                    Vec::new(),
-                    RSourceSelectionRoute::Explicit,
-                    override_state,
-                )
-                .with_explicit_request(request));
-            }
-            ExplicitRSource::Provider(RProvider::RigProject) => {
-                let info = resolve_rig_project(base_dir).map_err(|failure| {
-                    anyhow::Error::new(failure).context(
-                        "The requested rig-project R provider is unavailable; use a synchronized rig project in the current directory",
-                    )
-                })?;
-                return Ok(RSourceResolutionReport::from_environment(
-                    RSourceStatus::RigProject { info },
-                    Vec::new(),
-                    RSourceSelectionRoute::Explicit,
-                    override_state,
-                )
-                .with_explicit_request(request));
-            }
-            ExplicitRSource::Home(path) => {
-                if !path.exists() {
-                    anyhow::bail!(
-                        "R_HOME path does not exist: {}\n\
-                         Check your --r-home argument.",
-                        path.display()
-                    );
-                }
-                let r_home = resolve_r_home_from_path(path)?;
-                log::info!("Using R from --r-home: {}", r_home.display());
-                return Ok(RSourceResolutionReport::from_explicit_status(
-                    RSourceStatus::ExplicitPath {
-                        path: r_home.clone(),
-                    },
-                    Some(r_home),
-                    override_state,
-                )
-                .with_explicit_request(request));
-            }
-            ExplicitRSource::Version(version) => {
-                return setup_r_via_rig(version).map(|resolved| {
-                    RSourceResolutionReport::from_explicit_status(
-                        resolved.status,
-                        resolved.r_home,
-                        override_state,
-                    )
-                    .with_explicit_request(request)
-                });
-            }
-        }
+        return resolve_explicit(request, base_dir, no_r_source_overrides);
     }
 
     // With no explicit request, disabling overrides skips only the configured
@@ -360,6 +297,76 @@ pub(crate) fn resolve_r_source(
         RSourceOverrideState::NoMatch
     };
     setup_r_fallback(r_source, override_state)
+}
+
+/// Resolve an R source requested explicitly by the CLI or environment.
+fn resolve_explicit(
+    request: &ExplicitRSourceRequest,
+    base_dir: Option<&Path>,
+    no_r_source_overrides: bool,
+) -> Result<RSourceResolutionReport> {
+    let override_state = if no_r_source_overrides {
+        RSourceOverrideState::Disabled
+    } else {
+        RSourceOverrideState::ShadowedByCli
+    };
+    match &request.source {
+        ExplicitRSource::Provider(RProvider::Pixi) => {
+            let info = resolve_strict(base_dir).map_err(|failure| {
+                anyhow::Error::new(failure).context(
+                    "The requested Pixi R provider is unavailable; run arf through `pixi run` with an R-enabled environment",
+                )
+            })?;
+            Ok(RSourceResolutionReport::from_environment(
+                RSourceStatus::Pixi { info },
+                Vec::new(),
+                RSourceSelectionRoute::Explicit,
+                override_state,
+            )
+            .with_explicit_request(request))
+        }
+        ExplicitRSource::Provider(RProvider::RigProject) => {
+            let info = resolve_rig_project(base_dir).map_err(|failure| {
+                anyhow::Error::new(failure).context(
+                    "The requested rig-project R provider is unavailable; use a synchronized rig project in the current directory",
+                )
+            })?;
+            Ok(RSourceResolutionReport::from_environment(
+                RSourceStatus::RigProject { info },
+                Vec::new(),
+                RSourceSelectionRoute::Explicit,
+                override_state,
+            )
+            .with_explicit_request(request))
+        }
+        ExplicitRSource::Home(path) => {
+            if !path.exists() {
+                anyhow::bail!(
+                    "R_HOME path does not exist: {}\n\
+                     Check your --r-home argument.",
+                    path.display()
+                );
+            }
+            let r_home = resolve_r_home_from_path(path)?;
+            log::info!("Using R from --r-home: {}", r_home.display());
+            Ok(RSourceResolutionReport::from_explicit_status(
+                RSourceStatus::ExplicitPath {
+                    path: r_home.clone(),
+                },
+                Some(r_home),
+                override_state,
+            )
+            .with_explicit_request(request))
+        }
+        ExplicitRSource::Version(version) => setup_r_via_rig(version).map(|resolved| {
+            RSourceResolutionReport::from_explicit_status(
+                resolved.status,
+                resolved.r_home,
+                override_state,
+            )
+            .with_explicit_request(request)
+        }),
+    }
 }
 
 /// Apply a resolved R source to the process environment during startup.
@@ -435,95 +442,9 @@ where
         Fn(&str) -> std::result::Result<external::rig::ResolvedVersion, external::rig::RigError>,
 {
     let resolved = match r_source {
-        RSource::Mode(RSourceMode::Auto) => {
-            // Auto mode: try rig if available, otherwise use PATH
-            if rig_available().is_ok() {
-                match resolve_version("default") {
-                    Ok(resolved) => {
-                        log::info!("Using rig default R version: {}", resolved.version);
-                        ResolvedRSource {
-                            status: RSourceStatus::Rig {
-                                version: resolved.version,
-                                override_info: None,
-                            },
-                            r_home: Some(PathBuf::from(resolved.r_home)),
-                        }
-                    }
-                    Err(e) => {
-                        log::debug!("Could not get rig default version: {}", e);
-                        log::info!("Using R from PATH");
-                        ResolvedRSource {
-                            // Do not discover or assign R_HOME here. R will discover it
-                            // during initialization, preserving PATH-mode startup behavior.
-                            status: RSourceStatus::Path,
-                            r_home: None,
-                        }
-                    }
-                }
-            } else {
-                log::info!("Using R from PATH (rig not available)");
-                ResolvedRSource {
-                    // Do not discover or assign R_HOME here. R will discover it
-                    // during initialization, preserving PATH-mode startup behavior.
-                    status: RSourceStatus::Path,
-                    r_home: None,
-                }
-            }
-        }
-        RSource::Mode(RSourceMode::Rig) => {
-            // Rig mode: require rig
-            match rig_available() {
-                Ok(()) => {}
-                Err(external::rig::RigError::NotInstalled) => {
-                    anyhow::bail!(
-                        r#"r_source = "rig" but rig is not installed.
-Install rig from https://github.com/r-lib/rig or use "auto"."#
-                    );
-                }
-                Err(external::rig::RigError::CommandFailed(reason)) => {
-                    anyhow::bail!(
-                        r#"r_source = "rig" but rig is installed and could not be run: {reason}.
-Fix the rig installation or use "auto"."#
-                    );
-                }
-                Err(error) => {
-                    anyhow::bail!(
-                        r#"r_source = "rig" but rig availability could not be checked: {error}.
-Fix the rig installation or use "auto"."#
-                    );
-                }
-            }
-            match resolve_version("default") {
-                Ok(resolved) => {
-                    log::info!("Using rig default R version: {}", resolved.version);
-                    ResolvedRSource {
-                        status: RSourceStatus::Rig {
-                            version: resolved.version,
-                            override_info: None,
-                        },
-                        r_home: Some(PathBuf::from(resolved.r_home)),
-                    }
-                }
-                Err(e) => {
-                    anyhow::bail!("Failed to get rig default R version: {}", e);
-                }
-            }
-        }
-        RSource::Path { path } => {
-            // Explicit path mode
-            if !path.exists() {
-                anyhow::bail!(
-                    "R_HOME path does not exist: {}\n\
-                     Check your r_source configuration.",
-                    path.display()
-                );
-            }
-            log::info!("Using R from explicit path: {}", path.display());
-            ResolvedRSource {
-                status: RSourceStatus::ExplicitPath { path: path.clone() },
-                r_home: Some(path.clone()),
-            }
-        }
+        RSource::Mode(RSourceMode::Auto) => resolve_auto_mode(&rig_available, &resolve_version),
+        RSource::Mode(RSourceMode::Rig) => resolve_rig_mode(&rig_available, &resolve_version)?,
+        RSource::Path { path } => resolve_explicit_path(path)?,
     };
 
     Ok(RSourceResolutionReport::from_status(
@@ -531,6 +452,111 @@ Fix the rig installation or use "auto"."#
         resolved.r_home,
         override_state,
     ))
+}
+
+/// Report PATH-mode R without discovering or assigning R_HOME. R discovers it
+/// during initialization, preserving PATH-mode startup behavior.
+fn path_source() -> ResolvedRSource {
+    ResolvedRSource {
+        status: RSourceStatus::Path,
+        r_home: None,
+    }
+}
+
+/// Auto mode: try rig if available, otherwise use PATH.
+fn resolve_auto_mode(
+    rig_available: &impl Fn() -> std::result::Result<(), external::rig::RigError>,
+    resolve_version: &impl Fn(
+        &str,
+    ) -> std::result::Result<
+        external::rig::ResolvedVersion,
+        external::rig::RigError,
+    >,
+) -> ResolvedRSource {
+    if rig_available().is_err() {
+        log::info!("Using R from PATH (rig not available)");
+        return path_source();
+    }
+    match resolve_rig_default(resolve_version) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            log::debug!("Could not get rig default version: {}", e);
+            log::info!("Using R from PATH");
+            path_source()
+        }
+    }
+}
+
+/// Rig mode: require rig and its default R version.
+fn resolve_rig_mode(
+    rig_available: &impl Fn() -> std::result::Result<(), external::rig::RigError>,
+    resolve_version: &impl Fn(
+        &str,
+    ) -> std::result::Result<
+        external::rig::ResolvedVersion,
+        external::rig::RigError,
+    >,
+) -> Result<ResolvedRSource> {
+    match rig_available() {
+        Ok(()) => {}
+        Err(external::rig::RigError::NotInstalled) => {
+            anyhow::bail!(
+                r#"r_source = "rig" but rig is not installed.
+Install rig from https://github.com/r-lib/rig or use "auto"."#
+            );
+        }
+        Err(external::rig::RigError::CommandFailed(reason)) => {
+            anyhow::bail!(
+                r#"r_source = "rig" but rig is installed and could not be run: {reason}.
+Fix the rig installation or use "auto"."#
+            );
+        }
+        Err(error) => {
+            anyhow::bail!(
+                r#"r_source = "rig" but rig availability could not be checked: {error}.
+Fix the rig installation or use "auto"."#
+            );
+        }
+    }
+    resolve_rig_default(resolve_version)
+        .map_err(|e| anyhow::anyhow!("Failed to get rig default R version: {}", e))
+}
+
+fn resolve_rig_default(
+    resolve_version: &impl Fn(
+        &str,
+    ) -> std::result::Result<
+        external::rig::ResolvedVersion,
+        external::rig::RigError,
+    >,
+) -> std::result::Result<ResolvedRSource, external::rig::RigError> {
+    let resolved = resolve_version("default")?;
+    log::info!("Using rig default R version: {}", resolved.version);
+    Ok(ResolvedRSource {
+        status: RSourceStatus::Rig {
+            version: resolved.version,
+            override_info: None,
+        },
+        r_home: Some(PathBuf::from(resolved.r_home)),
+    })
+}
+
+/// Explicit path mode.
+fn resolve_explicit_path(path: &Path) -> Result<ResolvedRSource> {
+    if !path.exists() {
+        anyhow::bail!(
+            "R_HOME path does not exist: {}\n\
+             Check your r_source configuration.",
+            path.display()
+        );
+    }
+    log::info!("Using R from explicit path: {}", path.display());
+    Ok(ResolvedRSource {
+        status: RSourceStatus::ExplicitPath {
+            path: path.to_path_buf(),
+        },
+        r_home: Some(path.to_path_buf()),
+    })
 }
 
 fn resolve_path_r_home_with<F>(find_r_library: F) -> Result<PathBuf>
@@ -588,131 +614,4 @@ pub(super) fn resolve_path_r_home_for_report_with<F>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pixi_report_retains_target_without_override_file() {
-        let info = crate::config::PixiRSourceInfo {
-            manifest: "/workspace/pixi.toml".into(),
-            environment: "analysis".to_owned(),
-            prefix: "/prefix".into(),
-            target: crate::config::VerifiedRTarget {
-                binary: "/prefix/bin/R".into(),
-                home: "/prefix/lib/R".into(),
-                library: "/prefix/lib/R/lib/libR.so".into(),
-            },
-            version: Some("4.5.1".to_owned()),
-        };
-        for override_state in [
-            RSourceOverrideState::ShadowedByCli,
-            RSourceOverrideState::Disabled,
-        ] {
-            let report = RSourceResolutionReport::from_environment(
-                RSourceStatus::Pixi { info: info.clone() },
-                Vec::new(),
-                RSourceSelectionRoute::Explicit,
-                override_state,
-            );
-
-            assert_eq!(report.selection_route, RSourceSelectionRoute::Explicit);
-            assert_eq!(report.override_state, override_state);
-            assert_eq!(report.r_home.as_deref(), Some(info.target.home.as_path()));
-            assert!(
-                matches!(report.status, RSourceStatus::Pixi { info: ref target } if target == &info)
-            );
-            assert!(report.override_provider.is_none());
-            assert!(report.file.is_none());
-            assert!(report.override_info().is_none());
-        }
-
-        // The manifest is provider identity, not a version file read by the override.
-        let report = RSourceResolutionReport::from_environment(
-            RSourceStatus::Pixi { info },
-            Vec::new(),
-            RSourceSelectionRoute::Override,
-            RSourceOverrideState::Applied,
-        );
-        assert_eq!(report.override_provider.as_deref(), Some("pixi"));
-        assert!(report.file.is_none());
-    }
-
-    #[test]
-    fn fallback_explicit_path_is_masked_only_for_human_output() {
-        let _guard = crate::test_utils::lock_env();
-        let home = dirs::home_dir().expect("test requires a home directory");
-        let path = home.join("arf-fallback-R");
-        let mut report = RSourceResolutionReport::from_status(
-            RSourceStatus::ExplicitPath { path: path.clone() },
-            Some(path.clone()),
-            RSourceOverrideState::Failed,
-        );
-        report
-            .diagnostics
-            .push(warning("r_source_override.fallback", "fallback", None));
-        finalize_fallback_diagnostic(&mut report);
-        let diagnostic = &report.diagnostics[0];
-        assert_eq!(diagnostic.path.as_ref(), Some(&path));
-        assert!(diagnostic.message.contains(&path.display().to_string()));
-        let human = display_message(diagnostic);
-        assert!(human.contains("path (~"), "{human}");
-        assert!(!human.contains(&home.display().to_string()), "{human}");
-    }
-
-    #[test]
-    fn display_message_masks_its_own_path_and_leaves_pathless_messages_unchanged() {
-        // display_message reads HOME indirectly through dirs::home_dir and mask_home_path.
-        let _guard = crate::test_utils::lock_env();
-        let home = dirs::home_dir().expect("test requires a home directory");
-        let path = home.join("arf").join("broken.toml");
-        let diagnostic = RSourceDiagnostic {
-            code: "config.parse_failed".to_owned(),
-            severity: "warning",
-            message: format!(
-                r#"Failed to load config from {}: TOML parse error"#,
-                path.display()
-            ),
-            path: Some(path.clone()),
-        };
-        let pathless = RSourceDiagnostic {
-            code: "r_discovery.failed".to_owned(),
-            severity: "warning",
-            message: r#"R automatic discovery failed."#.to_owned(),
-            path: None,
-        };
-
-        // Assert the masking took effect rather than comparing against
-        // `mask_home_path` again, which would also pass if it stopped masking.
-        let masked = display_message(&diagnostic);
-        assert!(
-            masked.starts_with("Failed to load config from ~"),
-            "{masked}"
-        );
-        assert!(!masked.contains(&home.display().to_string()), "{masked}");
-        assert!(
-            masked.ends_with("broken.toml: TOML parse error"),
-            "{masked}"
-        );
-
-        assert_eq!(display_message(&pathless), pathless.message);
-    }
-
-    #[test]
-    fn explicit_rig_mode_reports_command_failure_without_install_guidance() {
-        let result = setup_r_fallback_with(
-            &RSource::Mode(RSourceMode::Rig),
-            RSourceOverrideState::NotConfigured,
-            || {
-                Err(external::rig::RigError::CommandFailed(
-                    "permission denied".to_string(),
-                ))
-            },
-            |_| panic!("rig's default version should not be resolved"),
-        );
-
-        let error = result.expect_err("rig command failure should reject explicit rig mode");
-        let message = error.to_string();
-        assert!(message.contains("permission denied"));
-        assert!(!message.contains("Install rig"));
-    }
-}
+mod tests;

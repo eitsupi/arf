@@ -18,7 +18,7 @@ mod pager;
 mod pid_file;
 pub(crate) mod r_parser;
 mod repl;
-pub mod rversion;
+mod rversion;
 mod traps;
 
 #[cfg(test)]
@@ -393,12 +393,11 @@ fn run() -> Result<()> {
             // its number in the environment solely across this loader exec.
             unsafe { std::env::set_var(pid_file::RESTART_PID_FD_ENV, fd) };
         }
-        if let Err(e) =
-            arf_libr::ensure_ld_library_path_with_pre_exec_and_args(&normalized_args(), || {
-                app::setup::forward_loader_target(&resolution);
-                console_mode::restore_original_input_mode();
-            })
-        {
+        if let Err(e) = app::setup::prepare_loader_path_with_args(
+            &resolution,
+            &normalized_args(),
+            console_mode::restore_original_input_mode,
+        ) {
             log::warn!("Could not prepare the R library search path: {}", e);
             // Drop old guard before calling install(): assignment evaluates the RHS
             // first (capturing and disabling echo), then drops the old guard, which
@@ -411,14 +410,11 @@ fn run() -> Result<()> {
         //
         // SAFETY: same single-threaded, pre-R-init context as above.
         unsafe { std::env::remove_var(STARTUP_ENV_CARRIER) };
-        app::setup::clear_loader_target();
         unsafe { std::env::remove_var(pid_file::RESTART_PID_FD_ENV) };
         pid_file::finish_loader_reexec();
     }
     #[cfg(not(unix))]
-    if let Err(e) = arf_libr::ensure_ld_library_path() {
-        log::warn!("Could not prepare the R library search path: {}", e);
-    }
+    app::setup::prepare_loader_path(&resolution);
 
     // Report startup diagnostics only after the loader re-exec boundary. If
     // ensure_ld_library_path replaced this process, only the replacement
