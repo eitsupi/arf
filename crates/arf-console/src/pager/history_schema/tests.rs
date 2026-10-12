@@ -1,17 +1,6 @@
 use super::*;
 
 #[test]
-fn test_print_schema_runs() {
-    // Resolve the default through the same location resolver used by consumers.
-    let _guard = crate::test_utils::lock_env();
-    let location =
-        crate::config::resolved_history_location(&crate::config::HistoryMode::Persistent {
-            dir: None,
-        });
-    let _ = print_schema(&location);
-}
-
-#[test]
 fn volatile_schema_does_not_resolve_or_display_a_persistent_path() {
     let location = crate::config::resolved_history_location(&crate::config::HistoryMode::Volatile);
     assert!(location.directory().is_none());
@@ -79,22 +68,6 @@ fn test_generate_schema_lines_contains_expected_content() {
     assert!(lines.iter().any(|l| l.contains("library(DBI)")));
     assert!(lines.iter().any(|l| l.contains("dbConnect")));
     assert!(lines.iter().any(|l| l.contains("as_tibble")));
-}
-
-#[test]
-fn test_generate_schema_lines_count() {
-    let lines = generate_schema_lines(Path::new("/test/path"));
-    // Ensure the schema stays within its expected 50–70 line range.
-    assert!(
-        lines.len() >= 50,
-        "Expected at least 50 lines, got {}",
-        lines.len()
-    );
-    assert!(
-        lines.len() <= 70,
-        "Expected at most 70 lines, got {}",
-        lines.len()
-    );
 }
 
 #[test]

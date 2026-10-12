@@ -142,3 +142,60 @@ fn test_session_returns_arf_only_in_various_states() {
         let _ = take_pending_ipc_operation();
     }
 }
+
+/// Tests that the session metadata passed to `set_session_meta` is reflected
+/// in `SessionResult`, both as typed fields and in the JSON representation.
+// Protects the process-global `SESSION_META` session-metadata cache.
+#[test]
+#[serial]
+fn test_session_result_reflects_session_meta() {
+    // Every optional field set.
+    let session_id: i64 = 1_700_000_000_000_000_000;
+    set_session_meta(
+        "/tmp/test.sock".to_string(),
+        "2026-01-01T00:00:00+00:00".to_string(),
+        Some("/opt/R/4.4.1/lib/R".to_string()),
+        Some("/tmp/arf.log".to_string()),
+        Some(session_id),
+        session::SessionType::Interactive,
+    );
+    let result = collect_session_result(false, "test");
+    assert_eq!(result.log_file.as_deref(), Some("/tmp/arf.log"));
+    assert_eq!(result.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
+    assert_eq!(result.history_session_id, Some(session_id));
+    assert_eq!(
+        result.ipc_policy.silent,
+        crate::ipc::policy::SilentPolicy::Restricted {
+            allowed_functions: Vec::new()
+        }
+    );
+
+    let json = serde_json::to_value(&result).unwrap();
+    assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
+    assert_eq!(json["log_file"], "/tmp/arf.log");
+    assert_eq!(json["history_session_id"], session_id);
+    assert_eq!(json["ipc_policy"]["silent"]["mode"], "restricted");
+
+    // Every optional field unset: the JSON fields are still present, as null.
+    set_session_meta(
+        "/tmp/test.sock".to_string(),
+        "2026-01-01T00:00:00+00:00".to_string(),
+        None,
+        None,
+        None,
+        session::SessionType::Interactive,
+    );
+    let result = collect_session_result(false, "test");
+    assert_eq!(result.log_file, None);
+    assert_eq!(result.r_home, None);
+    assert_eq!(result.history_session_id, None);
+
+    let json = serde_json::to_value(&result).unwrap();
+    for field in ["log_file", "r_home", "history_session_id"] {
+        assert!(
+            json.get(field).is_some(),
+            "{field} field should always be present in JSON"
+        );
+        assert!(json[field].is_null(), "{field} should be null when not set");
+    }
+}

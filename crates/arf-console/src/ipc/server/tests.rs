@@ -12,6 +12,15 @@ fn test_extract_body_raw_json() {
     assert_eq!(extract_body(raw), br#"{"jsonrpc":"2.0"}"#);
 }
 
+/// Drop guard that resets global IPC state on scope exit (including panics).
+struct Guard;
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        super::super::set_in_alternate_mode(false);
+    }
+}
+
 /// Tests that dispatch_request rejects both evaluate and user_input
 /// in alternate mode.
 // Protects the process-global `IN_ALTERNATE_MODE` atomic.
@@ -19,14 +28,6 @@ fn test_extract_body_raw_json() {
 #[serial_test::serial]
 async fn test_dispatch_rejects_in_alternate_mode() {
     use super::super::protocol::R_NOT_AT_PROMPT;
-
-    /// Drop guard that resets global IPC state on scope exit (including panics).
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            super::super::set_in_alternate_mode(false);
-        }
-    }
 
     super::super::set_in_alternate_mode(true);
     let _guard = Guard;
@@ -63,14 +64,6 @@ async fn test_dispatch_rejects_in_alternate_mode() {
 #[serial_test::serial]
 async fn test_session_returns_arf_only_in_alternate_mode() {
     use super::super::protocol::SessionResult;
-
-    /// Drop guard that resets global IPC state on scope exit (including panics).
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            super::super::set_in_alternate_mode(false);
-        }
-    }
 
     super::super::set_in_alternate_mode(true);
     let _guard = Guard;
@@ -121,14 +114,6 @@ async fn test_session_returns_arf_only_in_alternate_mode() {
 async fn test_session_fallback_on_channel_failure() {
     use super::super::protocol::SessionResult;
 
-    /// Drop guard that resets global IPC state on scope exit (including panics).
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            super::super::set_in_alternate_mode(false);
-        }
-    }
-
     super::super::set_in_alternate_mode(false);
     let _guard = Guard;
 
@@ -157,133 +142,6 @@ async fn test_session_fallback_on_channel_failure() {
     assert!(
         result.r_unavailable_reason.is_some(),
         "should have r_unavailable_reason"
-    );
-}
-
-/// Tests that `log_file` in `SessionResult` reflects what was passed to `set_session_meta`.
-// Protects the process-global `SESSION_META` session-metadata cache.
-#[test]
-#[serial_test::serial]
-fn test_session_result_includes_log_file() {
-    // With log_file set
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        Some("/opt/R/4.4.1/lib/R".to_string()),
-        Some("/tmp/arf.log".to_string()),
-        None,
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.log_file.as_deref(), Some("/tmp/arf.log"));
-
-    // Without log_file
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        None,
-        None,
-        None,
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.log_file, None);
-
-    // Verify JSON serialization always includes the field
-    let json = serde_json::to_value(&result).unwrap();
-    assert!(
-        json.get("log_file").is_some(),
-        "log_file field should always be present in JSON"
-    );
-    assert!(
-        json["log_file"].is_null(),
-        "log_file should be null when not configured"
-    );
-}
-
-/// Tests that `r_home` in `SessionResult` reflects what was passed to
-/// `set_session_meta`.
-// Protects the process-global `SESSION_META` session-metadata cache.
-#[test]
-#[serial_test::serial]
-fn test_session_result_includes_r_home() {
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        Some("/opt/R/4.4.1/lib/R".to_string()),
-        None,
-        None,
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.r_home.as_deref(), Some("/opt/R/4.4.1/lib/R"));
-
-    let json = serde_json::to_value(&result).unwrap();
-    assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
-
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        None,
-        None,
-        None,
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.r_home, None);
-
-    let json = serde_json::to_value(&result).unwrap();
-    assert!(json.get("r_home").is_some());
-    assert!(json["r_home"].is_null());
-}
-
-/// Tests that `history_session_id` in `SessionResult` reflects what was passed to
-/// `set_session_meta`.
-// Protects the process-global `SESSION_META` session-metadata cache.
-#[test]
-#[serial_test::serial]
-fn test_session_result_includes_history_session_id() {
-    // With history_session_id set
-    let session_id: i64 = 1_700_000_000_000_000_000;
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        None,
-        None,
-        Some(session_id),
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.history_session_id, Some(session_id));
-    assert_eq!(
-        result.ipc_policy.silent,
-        crate::ipc::policy::SilentPolicy::Restricted {
-            allowed_functions: Vec::new()
-        }
-    );
-
-    // Verify JSON serialization includes the value
-    let json = serde_json::to_value(&result).unwrap();
-    assert_eq!(json["history_session_id"], session_id);
-    assert_eq!(json["ipc_policy"]["silent"]["mode"], "restricted");
-
-    // Without history_session_id (history initialization unavailable)
-    super::super::set_session_meta(
-        "/tmp/test.sock".to_string(),
-        "2026-01-01T00:00:00+00:00".to_string(),
-        None,
-        None,
-        None,
-        SessionType::Interactive,
-    );
-    let result = super::super::collect_session_result(false, "test");
-    assert_eq!(result.history_session_id, None);
-
-    // Verify JSON serialization shows null
-    let json = serde_json::to_value(&result).unwrap();
-    assert!(
-        json["history_session_id"].is_null(),
-        "history_session_id should be null when not set"
     );
 }
 

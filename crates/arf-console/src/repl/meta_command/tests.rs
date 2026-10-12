@@ -113,75 +113,38 @@ fn test_process_meta_command_reprex_explicit_mode() {
 }
 
 #[test]
-fn test_process_meta_command_commands() {
+fn test_process_meta_command_dispatch() {
+    type Expect = fn(&Option<MetaCommandResult>) -> bool;
+    let cases: [(&str, Expect); 9] = [
+        (":commands", |r| {
+            matches!(r, Some(MetaCommandResult::Handled))
+        }),
+        (":cmds", |r| matches!(r, Some(MetaCommandResult::Handled))),
+        (":info", |r| {
+            matches!(r, Some(MetaCommandResult::ShowSessionInfo))
+        }),
+        (":session", |r| {
+            matches!(r, Some(MetaCommandResult::ShowSessionInfo))
+        }),
+        (":quit", |r| matches!(r, Some(MetaCommandResult::Exit))),
+        (":exit", |r| matches!(r, Some(MetaCommandResult::Exit))),
+        (":unknown", |r| {
+            matches!(r, Some(MetaCommandResult::Unknown(_)))
+        }),
+        (":", |r| matches!(r, Some(MetaCommandResult::Handled))),
+        ("  :reprex  ", |r| {
+            matches!(r, Some(MetaCommandResult::Handled))
+        }),
+    ];
+
     // create_test_prompt_config reads SHELL through PromptFormatter::new.
     let _guard = crate::test_utils::lock_env();
     let mut config = create_test_prompt_config();
     let status = default_r_source_status();
-    let result = call_meta(":commands", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Handled)));
-
-    // Test alias
-    let result = call_meta(":cmds", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Handled)));
-}
-
-#[test]
-fn test_process_meta_command_info() {
-    // create_test_prompt_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut config = create_test_prompt_config();
-    let status = default_r_source_status();
-    let result = call_meta(":info", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::ShowSessionInfo)));
-
-    // Test alias
-    let result = call_meta(":session", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::ShowSessionInfo)));
-}
-
-#[test]
-fn test_process_meta_command_quit() {
-    // create_test_prompt_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut config = create_test_prompt_config();
-    let status = default_r_source_status();
-    let result = call_meta(":quit", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Exit)));
-
-    let result = call_meta(":exit", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Exit)));
-}
-
-#[test]
-fn test_process_meta_command_unknown() {
-    // create_test_prompt_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut config = create_test_prompt_config();
-    let status = default_r_source_status();
-    let result = call_meta(":unknown", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Unknown(_))));
-}
-
-#[test]
-fn test_process_meta_command_empty_colon() {
-    // create_test_prompt_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut config = create_test_prompt_config();
-    let status = default_r_source_status();
-    let result = call_meta(":", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Handled)));
-}
-
-#[test]
-fn test_process_meta_command_with_whitespace() {
-    // create_test_prompt_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut config = create_test_prompt_config();
-    let status = default_r_source_status();
-    let result = call_meta("  :reprex  ", &mut config, &None, &None, &status);
-    assert!(matches!(result, Some(MetaCommandResult::Handled)));
-    // Bare commands do not change the independent runtime state.
+    for (input, expected) in cases {
+        let result = call_meta(input, &mut config, &None, &None, &status);
+        assert!(expected(&result), "unexpected result for {input:?}");
+    }
 }
 
 #[test]
@@ -491,29 +454,23 @@ fn test_process_meta_command_pushd_popd() {
 // --- dir_command_hint tests ---
 
 #[test]
-fn test_dir_command_hint_cd() {
-    assert!(dir_command_hint("cd /tmp").unwrap().contains(":cd"));
-}
-
-#[test]
-fn test_dir_command_hint_pushd() {
-    assert!(dir_command_hint("pushd /tmp").unwrap().contains(":pushd"));
-}
-
-#[test]
-fn test_dir_command_hint_popd() {
-    assert!(dir_command_hint("popd").unwrap().contains(":popd"));
-}
-
-#[test]
-fn test_dir_command_hint_other() {
-    assert!(dir_command_hint("ls -la").is_none());
-    assert!(dir_command_hint("echo cd").is_none());
-}
-
-#[test]
-fn test_dir_command_hint_empty() {
-    assert!(dir_command_hint("").is_none());
+fn test_dir_command_hint() {
+    for (input, expected) in [
+        ("cd /tmp", Some(":cd")),
+        ("pushd /tmp", Some(":pushd")),
+        ("popd", Some(":popd")),
+        ("ls -la", None),
+        ("echo cd", None),
+        ("", None),
+    ] {
+        match (dir_command_hint(input), expected) {
+            (Some(hint), Some(command)) => {
+                assert!(hint.contains(command), "hint for {input:?}: {hint}")
+            }
+            (None, None) => {}
+            (hint, expected) => panic!("hint for {input:?}: {hint:?}, expected {expected:?}"),
+        }
+    }
 }
 
 // --- Force (!) option tests ---

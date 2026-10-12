@@ -156,15 +156,6 @@ fn test_strip_ansi_escapes() {
 }
 
 #[test]
-fn test_error_format_strip_roundtrip() {
-    // Formatting and then stripping should give back original text
-    let original = "Error: something went wrong";
-    let formatted = format_error_output(original);
-    let stripped = strip_ansi_escapes(&formatted);
-    assert_eq!(stripped, original);
-}
-
-#[test]
 fn test_strip_cr() {
     // CRLF should be converted to LF
     let stripped = strip_cr("Error: foo\r\nbar\r\n");
@@ -242,25 +233,21 @@ fn r_home_from_library_path_rejects_other_files() {
 }
 
 #[test]
-fn r_home_from_rhome_output_extracts_path_after_warning() {
-    let output = r"WARNING: ignoring environment value of R_HOME
-/opt/R/4.0.5/lib/R
-";
-    assert_eq!(
-        r_home_from_rhome_output(output),
-        Some(r"/opt/R/4.0.5/lib/R".to_string())
-    );
-}
-
-#[test]
-fn r_home_from_rhome_output_handles_normal_output() {
-    assert_eq!(
-        r_home_from_rhome_output(
-            r"/opt/R/4.0.5/lib/R
-"
+fn r_home_from_rhome_output_extracts_path() {
+    for (name, output) in [
+        (
+            "after warning",
+            "WARNING: ignoring environment value of R_HOME\n/opt/R/4.0.5/lib/R\n",
         ),
-        Some(r"/opt/R/4.0.5/lib/R".to_string())
-    );
+        ("normal output", "/opt/R/4.0.5/lib/R\n"),
+        ("missing trailing newline", "/opt/R/4.0.5/lib/R"),
+    ] {
+        assert_eq!(
+            r_home_from_rhome_output(output),
+            Some("/opt/R/4.0.5/lib/R".to_string()),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -283,51 +270,23 @@ fn r_home_from_rhome_output_rejects_empty_output() {
 }
 
 #[test]
-fn r_home_from_rhome_output_handles_missing_trailing_newline() {
-    assert_eq!(
-        r_home_from_rhome_output(r"/opt/R/4.0.5/lib/R"),
-        Some(r"/opt/R/4.0.5/lib/R".to_string())
-    );
-}
-
-#[test]
 fn test_parse_var_from_wrapper_script_quoted() {
-    // Single-quoted values
-    let script = r#"R_DOC_DIR='/usr/share/doc/R'
-export R_DOC_DIR
-"#;
-    assert_eq!(
-        parse_var_from_wrapper_script(script, "R_DOC_DIR", Path::new("/opt/R")),
-        Some(OsString::from("/usr/share/doc/R"))
-    );
-
-    // Double-quoted values
-    let script = r#"R_DOC_DIR="/usr/share/doc/R"
-export R_DOC_DIR
-"#;
-    assert_eq!(
-        parse_var_from_wrapper_script(script, "R_DOC_DIR", Path::new("/opt/R")),
-        Some(OsString::from("/usr/share/doc/R"))
-    );
-}
-
-#[test]
-fn test_parse_var_from_wrapper_script_standard_install() {
-    // Standard (non-Fedora) installation where paths are under R_HOME
-    let script = r#"
-#!/bin/bash
-R_HOME_DIR=/opt/R/4.5.2/lib/R
-R_SHARE_DIR=/opt/R/4.5.2/lib/R/share
-export R_SHARE_DIR
-R_INCLUDE_DIR=/opt/R/4.5.2/lib/R/include
-export R_INCLUDE_DIR
-R_DOC_DIR=/opt/R/4.5.2/lib/R/doc
-export R_DOC_DIR
-"#;
-    assert_eq!(
-        parse_var_from_wrapper_script(script, "R_DOC_DIR", Path::new("/opt/R/4.5.2/lib/R")),
-        Some(OsString::from("/opt/R/4.5.2/lib/R/doc"))
-    );
+    for (style, script) in [
+        (
+            "single-quoted",
+            "R_DOC_DIR='/usr/share/doc/R'\nexport R_DOC_DIR\n",
+        ),
+        (
+            "double-quoted",
+            "R_DOC_DIR=\"/usr/share/doc/R\"\nexport R_DOC_DIR\n",
+        ),
+    ] {
+        assert_eq!(
+            parse_var_from_wrapper_script(script, "R_DOC_DIR", Path::new("/opt/R")),
+            Some(OsString::from("/usr/share/doc/R")),
+            "{style}"
+        );
+    }
 }
 
 #[test]

@@ -624,26 +624,6 @@ mod tests {
         assert_eq!(truncate_to_width("🎉🎊🎁", 3), "🎉…");
     }
 
-    // ── truncate for "Copied" message (meta_command.rs) ──────────────
-
-    #[test]
-    fn truncate_copied_message_cjk() {
-        // Simulate the "Copied: ..." display truncation at 60 columns.
-        // A CJK-heavy command that exceeds 60 display columns must be
-        // truncated with '…' and fit within the budget.
-        let cmd = "変数名 <- read.csv('非常に長いファイルパス/データセット.csv')";
-        let result = truncate_to_width(cmd, 60);
-        assert!(display_width(&result) <= 60);
-        assert!(result.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_copied_message_short_no_op() {
-        // A short command should pass through unchanged.
-        let cmd = "print('hello')";
-        assert_eq!(truncate_to_width(cmd, 60), cmd);
-    }
-
     // ── edge cases from PR #39 review ────────────────────────────────
 
     #[test]

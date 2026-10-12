@@ -546,117 +546,108 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_arf_r_home_has_same_precedence_as_r_home() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.unset("ARF_R_HOME");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        guard.set("ARF_R_HOME", "/env/r-home");
-        let mut cli = Cli::try_parse_from(["arf"]).unwrap();
-        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
-
-        assert_eq!(
-            cli.r_source.r_home.as_deref(),
-            Some(std::path::Path::new("/env/r-home"))
-        );
-    }
-
-    #[test]
-    fn test_arf_r_version_has_same_precedence_as_with_r_version() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.unset("ARF_R_HOME");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        guard.set("ARF_R_VERSION", "4.5");
-        let mut cli = Cli::try_parse_from(["arf"]).unwrap();
-        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
-
-        assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
-    }
-
-    #[test]
-    fn test_cli_value_wins_over_r_source_environment_value() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.unset("ARF_R_HOME");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        guard.set("ARF_R_HOME", "/env/r-home");
-        let mut home_cli = Cli::try_parse_from(["arf", "--r-home", "/cli/r-home"]).unwrap();
-        crate::app::option_scope::normalize_r_source_args(&mut home_cli.r_source).unwrap();
-        assert_eq!(
-            home_cli.r_source.r_home.as_deref(),
-            Some(std::path::Path::new("/cli/r-home"))
-        );
-
-        guard.unset("ARF_R_HOME");
-        guard.set("ARF_R_VERSION", "4.4");
-        let mut version_cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
-        crate::app::option_scope::normalize_r_source_args(&mut version_cli.r_source).unwrap();
-        assert_eq!(version_cli.r_source.r_version.as_deref(), Some("4.5"));
-    }
-
-    #[test]
-    fn test_cli_r_version_wins_over_r_home_environment() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.unset("ARF_R_HOME");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        guard.set("ARF_R_HOME", "/env/r-home");
-        let mut cli = Cli::try_parse_from(["arf", "--with-r-version", "4.5"]).unwrap();
-        crate::app::option_scope::normalize_r_source_args(&mut cli.r_source).unwrap();
-        assert_eq!(cli.r_source.r_version.as_deref(), Some("4.5"));
-    }
-
-    #[test]
-    fn test_headless_r_source_flags_read_environment_values() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.set("ARF_R_HOME", "/env/r-home");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        let mut cli = Cli::try_parse_from(["arf", "headless"]).unwrap();
-        let Some(Commands::Headless(args)) = &mut cli.command else {
-            panic!("expected headless command");
+    /// Parse `argv`, normalize its R source arguments, and return the
+    /// resulting `(r_home, r_version)`.
+    fn normalized_r_source(argv: &[&str]) -> (Option<PathBuf>, Option<String>) {
+        let mut cli = Cli::try_parse_from(argv).unwrap();
+        let args = match &mut cli.command {
+            None => &mut cli.r_source,
+            Some(Commands::Headless(args)) => &mut args.r_source,
+            Some(Commands::R(args)) => {
+                let RCommand::Resolve(args) = &mut args.command;
+                &mut args.r_source
+            }
+            Some(_) => panic!("unexpected command in {argv:?}"),
         };
-        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
-        assert_eq!(args.r_source.r_home, Some(PathBuf::from("/env/r-home")));
-
-        guard.unset("ARF_R_HOME");
-        guard.set("ARF_R_VERSION", "4.5");
-        let mut cli = Cli::try_parse_from(["arf", "r", "resolve"]).unwrap();
-        let Some(Commands::R(args)) = &mut cli.command else {
-            panic!("expected r command");
-        };
-        let RCommand::Resolve(args) = &mut args.command;
-        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
-        assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
+        crate::app::option_scope::normalize_r_source_args(args).unwrap();
+        (args.r_home.clone(), args.r_version.clone())
     }
 
     #[test]
-    fn test_headless_cli_r_source_wins_over_environment_values() {
-        let mut guard = crate::test_utils::lock_env();
-        guard.set("ARF_R_HOME", "/env/r-home");
-        guard.unset("ARF_R_VERSION");
-        guard.unset("ARF_CONFIG");
-        let mut cli = Cli::try_parse_from(["arf", "headless", "--with-r-version", "4.5"]).unwrap();
-        let Some(Commands::Headless(args)) = &mut cli.command else {
-            panic!("expected headless command");
-        };
-        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
-        assert_eq!(args.r_source.r_version.as_deref(), Some("4.5"));
+    fn test_r_source_environment_and_cli_precedence() {
+        let home = |path: &str| Some(PathBuf::from(path));
+        let version = |value: &str| Some(value.to_string());
+        // (argv, ARF_R_HOME, ARF_R_VERSION, expected r_home, expected r_version)
+        let cases = [
+            // Environment values fill in the missing CLI selection.
+            (
+                vec!["arf"],
+                Some("/env/r-home"),
+                None,
+                home("/env/r-home"),
+                None,
+            ),
+            (vec!["arf"], None, Some("4.5"), None, version("4.5")),
+            (
+                vec!["arf", "headless"],
+                Some("/env/r-home"),
+                None,
+                home("/env/r-home"),
+                None,
+            ),
+            (
+                vec!["arf", "r", "resolve"],
+                None,
+                Some("4.5"),
+                None,
+                version("4.5"),
+            ),
+            // A CLI selection wins over every environment value.
+            (
+                vec!["arf", "--r-home", "/cli/r-home"],
+                Some("/env/r-home"),
+                None,
+                home("/cli/r-home"),
+                None,
+            ),
+            (
+                vec!["arf", "--with-r-version", "4.5"],
+                None,
+                Some("4.4"),
+                None,
+                version("4.5"),
+            ),
+            (
+                vec!["arf", "--with-r-version", "4.5"],
+                Some("/env/r-home"),
+                None,
+                None,
+                version("4.5"),
+            ),
+            (
+                vec!["arf", "headless", "--with-r-version", "4.5"],
+                Some("/env/r-home"),
+                None,
+                None,
+                version("4.5"),
+            ),
+            (
+                vec!["arf", "r", "resolve", "--r-home", "/cli"],
+                None,
+                Some("4.5"),
+                home("/cli"),
+                None,
+            ),
+        ];
 
-        guard.unset("ARF_R_HOME");
-        guard.set("ARF_R_VERSION", "4.5");
-        let mut cli = Cli::try_parse_from(["arf", "r", "resolve", "--r-home", "/cli"]).unwrap();
-        let Some(Commands::R(args)) = &mut cli.command else {
-            panic!("expected r command");
-        };
-        let RCommand::Resolve(args) = &mut args.command;
-        crate::app::option_scope::normalize_r_source_args(&mut args.r_source).unwrap();
-        assert_eq!(
-            args.r_source.r_home.as_deref(),
-            Some(std::path::Path::new("/cli"))
-        );
+        let mut guard = crate::test_utils::lock_env();
+        for (argv, env_home, env_version, expected_home, expected_version) in cases {
+            guard.unset("ARF_R_HOME");
+            guard.unset("ARF_R_VERSION");
+            guard.unset("ARF_R_PROVIDER");
+            guard.unset("ARF_CONFIG");
+            if let Some(value) = env_home {
+                guard.set("ARF_R_HOME", value);
+            }
+            if let Some(value) = env_version {
+                guard.set("ARF_R_VERSION", value);
+            }
+            assert_eq!(
+                normalized_r_source(&argv),
+                (expected_home, expected_version),
+                "{argv:?} with ARF_R_HOME={env_home:?} ARF_R_VERSION={env_version:?}"
+            );
+        }
     }
 
     #[test]

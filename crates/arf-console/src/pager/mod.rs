@@ -599,27 +599,20 @@ mod tests {
     }
 
     #[test]
-    fn test_is_below_minimum_both_ok() {
+    fn test_is_below_minimum() {
         let min = MinimumSize { cols: 70, rows: 10 };
-        assert!(!is_below_minimum(80, 24, &min));
-        assert!(!is_below_minimum(70, 10, &min)); // exact boundary
-    }
-
-    #[test]
-    fn test_is_below_minimum_cols_too_small() {
-        let min = MinimumSize { cols: 70, rows: 10 };
-        assert!(is_below_minimum(69, 24, &min));
-    }
-
-    #[test]
-    fn test_is_below_minimum_rows_too_small() {
-        let min = MinimumSize { cols: 70, rows: 10 };
-        assert!(is_below_minimum(80, 9, &min));
-    }
-
-    #[test]
-    fn test_is_below_minimum_both_too_small() {
-        let min = MinimumSize { cols: 70, rows: 10 };
-        assert!(is_below_minimum(40, 5, &min));
+        for (cols, rows, expected) in [
+            (80, 24, false),
+            (70, 10, false), // exact boundary
+            (69, 24, true),  // columns too small
+            (80, 9, true),   // rows too small
+            (40, 5, true),   // both too small
+        ] {
+            assert_eq!(
+                is_below_minimum(cols, rows, &min),
+                expected,
+                "{cols}x{rows}"
+            );
+        }
     }
 }

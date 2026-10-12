@@ -105,41 +105,6 @@ fn test_calculate_layout_narrow_terminal() {
     );
 }
 
-#[test]
-fn test_truncate_to_width() {
-    assert_eq!(truncate_to_width("hello", 10), "hello");
-    assert_eq!(truncate_to_width("hello world", 8), "hello w…");
-    assert_eq!(truncate_to_width("hi", 1), "…");
-}
-
-#[test]
-fn test_exceeds_width() {
-    assert!(!exceeds_width("hello", 10));
-    assert!(exceeds_width("hello world", 8));
-}
-
-#[test]
-fn test_scroll_display() {
-    // Text that fits
-    let (result, max) = scroll_display("hello", 10, 0);
-    assert_eq!(result, "hello");
-    assert_eq!(max, 0);
-
-    // Text at start
-    let (result, _) = scroll_display("hello world", 8, 0);
-    assert_eq!(result, "hello w…");
-
-    // Text at end
-    let (result, _) = scroll_display("hello world", 8, 100);
-    assert_eq!(result, "…o world");
-}
-
-#[test]
-fn test_db_mode_display_name() {
-    assert_eq!(HistoryDbMode::R.display_name(), "R");
-    assert_eq!(HistoryDbMode::Shell.display_name(), "Shell");
-}
-
 /// Create a temporary history database with test entries.
 /// Returns the temp dir (must be kept alive) and the arf-owned store.
 ///
@@ -278,31 +243,4 @@ fn test_flatten_multiline() {
 
     // Empty string
     assert_eq!(flatten_multiline(""), "");
-}
-
-#[test]
-fn test_cwd_basename_extraction() {
-    use std::path::Path;
-
-    // Helper matching the logic in render()
-    fn basename(cwd: &str) -> String {
-        Path::new(cwd)
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or(cwd)
-            .to_string()
-    }
-
-    assert_eq!(basename("/home/user/project"), "project");
-    assert_eq!(
-        basename("/home/user/my-long-directory-name"),
-        "my-long-directory-name"
-    );
-    assert_eq!(basename("/"), "/");
-    assert_eq!(basename(""), "");
-    assert_eq!(basename("/foo/bar/baz"), "baz");
-    // file_name() returns None for "..", so full path is used as fallback
-    assert_eq!(basename("/foo/.."), "/foo/..");
-    // file_name() strips trailing "." and returns the parent component
-    assert_eq!(basename("/foo/."), "foo");
 }

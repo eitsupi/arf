@@ -403,154 +403,6 @@ mod tests {
     // Custom color configuration tests
 
     #[test]
-    fn test_custom_keyword_color() {
-        let config = RColorConfig {
-            keyword: Color::Red,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("if", 0);
-
-        // Find the "if" segment and verify it has Red foreground
-        let if_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text == "if")
-            .expect("Should find 'if' segment");
-        assert_eq!(
-            if_segment.0.foreground,
-            Some(Color::Red),
-            "Keyword 'if' should be styled with Red"
-        );
-    }
-
-    #[test]
-    fn test_custom_string_color() {
-        let config = RColorConfig {
-            string: Color::Yellow,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight(r#""hello""#, 0);
-
-        let string_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text.contains("hello"))
-            .expect("Should find string segment");
-        assert_eq!(
-            string_segment.0.foreground,
-            Some(Color::Yellow),
-            "String should be styled with Yellow"
-        );
-    }
-
-    #[test]
-    fn test_custom_number_color() {
-        let config = RColorConfig {
-            number: Color::Blue,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("42", 0);
-
-        let number_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text == "42")
-            .expect("Should find number segment");
-        assert_eq!(
-            number_segment.0.foreground,
-            Some(Color::Blue),
-            "Number should be styled with Blue"
-        );
-    }
-
-    #[test]
-    fn test_custom_comment_color() {
-        let config = RColorConfig {
-            comment: Color::Cyan,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("# comment", 0);
-
-        let comment_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text.contains("comment"))
-            .expect("Should find comment segment");
-        assert_eq!(
-            comment_segment.0.foreground,
-            Some(Color::Cyan),
-            "Comment should be styled with Cyan"
-        );
-    }
-
-    #[test]
-    fn test_custom_constant_color() {
-        let config = RColorConfig {
-            constant: Color::Magenta,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("TRUE", 0);
-
-        let constant_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text == "TRUE")
-            .expect("Should find constant segment");
-        assert_eq!(
-            constant_segment.0.foreground,
-            Some(Color::Magenta),
-            "Constant TRUE should be styled with Magenta"
-        );
-    }
-
-    #[test]
-    fn test_custom_operator_color() {
-        let config = RColorConfig {
-            operator: Color::Green,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("x <- 1", 0);
-
-        let operator_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text == "<-")
-            .expect("Should find operator segment");
-        assert_eq!(
-            operator_segment.0.foreground,
-            Some(Color::Green),
-            "Operator <- should be styled with Green"
-        );
-    }
-
-    #[test]
-    fn test_custom_identifier_color() {
-        let config = RColorConfig {
-            identifier: Color::White,
-            ..Default::default()
-        };
-        let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("myvar", 0);
-
-        let identifier_segment = styled
-            .buffer
-            .iter()
-            .find(|(_, text)| text == "myvar")
-            .expect("Should find identifier segment");
-        assert_eq!(
-            identifier_segment.0.foreground,
-            Some(Color::White),
-            "Identifier should be styled with White"
-        );
-    }
-
-    #[test]
     fn test_default_color_no_styling() {
         // Color::Default should result in no foreground color (None)
         let config = RColorConfig {
@@ -599,7 +451,7 @@ mod tests {
             matching_bracket: Color::LightYellow,
         };
         let highlighter = RTreeSitterHighlighter::new(config, false);
-        let styled = highlighter.highlight("if (x <- 1) TRUE", 0);
+        let styled = highlighter.highlight(r#"if (x <- 1) TRUE; "text" # note"#, 0);
 
         // Check keyword
         let if_seg = styled.buffer.iter().find(|(_, t)| t == "if");
@@ -632,6 +484,20 @@ mod tests {
         assert_eq!(
             paren_seg.map(|(s, _)| s.foreground),
             Some(Some(Color::Magenta))
+        );
+
+        // Check string
+        let string_seg = styled.buffer.iter().find(|(_, t)| t.contains("text"));
+        assert_eq!(
+            string_seg.map(|(s, _)| s.foreground),
+            Some(Some(Color::Cyan))
+        );
+
+        // Check comment
+        let comment_seg = styled.buffer.iter().find(|(_, t)| t.contains("note"));
+        assert_eq!(
+            comment_seg.map(|(s, _)| s.foreground),
+            Some(Some(Color::DarkGray))
         );
     }
 

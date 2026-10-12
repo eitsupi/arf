@@ -572,23 +572,51 @@ mod tests {
     }
 
     #[test]
-    fn test_meta_command_completer_empty_colon() {
+    fn test_meta_command_completer_lists_all_commands() {
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completion_suggestions(&mut completer, ":", 1);
-        assert!(!suggestions.is_empty());
-        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
-        assert!(values.contains(&"shell"));
-        assert!(values.contains(&"r"));
-        assert!(values.contains(&"system"));
-        assert!(values.contains(&"reprex"));
-        assert!(values.contains(&"commands"));
-        assert!(values.contains(&"cmds"));
-        assert!(values.contains(&"restart"));
-        assert!(values.contains(&"restart!"));
-        assert!(values.contains(&"switch"));
-        assert!(values.contains(&"switch!"));
-        assert!(values.contains(&"quit"));
-        assert!(values.contains(&"exit"));
+        // With no partial input there is nothing to highlight.
+        for suggestion in &suggestions {
+            assert_eq!(
+                suggestion.match_indices, None,
+                "`:` with no partial input should have match_indices: None"
+            );
+        }
+        let listing: Vec<String> = suggestions
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} append_whitespace={} description={:?}",
+                    s.value,
+                    s.append_whitespace,
+                    s.description.as_deref().unwrap_or_default()
+                )
+            })
+            .collect();
+        insta::assert_snapshot!(listing.join("\n"), @r#"
+        h append_whitespace=false description="Search R help (alias)"
+        r append_whitespace=false description="Return to R mode"
+        cd append_whitespace=true description="Change working directory"
+        ipc append_whitespace=true description="IPC server and send-policy management"
+        help append_whitespace=false description="Search R help"
+        info append_whitespace=false description="Show session information"
+        cmds append_whitespace=false description="Show available commands (alias)"
+        popd append_whitespace=false description="Pop directory from stack"
+        quit append_whitespace=false description="Quit arf"
+        exit append_whitespace=false description="Quit arf"
+        shell append_whitespace=false description="Enter shell mode"
+        pushd append_whitespace=true description="Push directory and change to it"
+        system append_whitespace=true description="Execute system command"
+        reprex append_whitespace=true description="Set reprex mode (on, off, or format)"
+        switch append_whitespace=true description="Restart with different R version (requires rig)"
+        session append_whitespace=false description="Show session information (alias)"
+        restart append_whitespace=false description="Restart R session"
+        switch! append_whitespace=true description="Restart with different R version, skip confirmation (requires rig)"
+        history append_whitespace=true description="Manage command history"
+        commands append_whitespace=false description="Show available commands"
+        restart! append_whitespace=false description="Restart R session (skip confirmation)"
+        changelog append_whitespace=false description="Show arf changelog"
+        "#);
     }
 
     #[test]
@@ -597,6 +625,8 @@ mod tests {
         let suggestions = completion_suggestions(&mut completer, ":rep", 4);
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].value, "reprex");
+        // The matched prefix is highlighted.
+        assert_eq!(suggestions[0].match_indices, Some(vec![0, 1, 2]));
     }
 
     #[test]
@@ -620,15 +650,6 @@ mod tests {
         let mut completer = MetaCommandCompleter::new();
         let suggestions = completion_suggestions(&mut completer, "print(x)", 8);
         assert!(suggestions.is_empty());
-    }
-
-    #[test]
-    fn test_meta_command_completer_has_descriptions() {
-        let mut completer = MetaCommandCompleter::new();
-        let suggestions = completion_suggestions(&mut completer, ":", 1);
-        let reprex = suggestions.iter().find(|s| s.value == "reprex").unwrap();
-        assert!(reprex.description.is_some());
-        assert!(reprex.description.as_ref().unwrap().contains("reprex"));
     }
 
     #[test]
@@ -710,53 +731,6 @@ mod tests {
             system.append_whitespace,
             "`:system` should append whitespace because it takes an argument"
         );
-    }
-
-    #[test]
-    fn test_meta_command_no_append_whitespace_for_commands_without_arguments() {
-        // Commands that don't take arguments should have append_whitespace: false
-        let mut completer = MetaCommandCompleter::new();
-
-        let suggestions = completion_suggestions(&mut completer, ":", 1);
-
-        // Commands without arguments
-        for cmd_name in &["shell", "r", "commands", "cmds", "restart", "quit", "exit"] {
-            if let Some(cmd) = suggestions.iter().find(|s| s.value == *cmd_name) {
-                assert!(
-                    !cmd.append_whitespace,
-                    "`:{}` should NOT append whitespace because it takes no argument",
-                    cmd_name
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_meta_command_match_indices_for_partial_command() {
-        // When typing a partial command, match_indices should highlight the matched prefix
-        let mut completer = MetaCommandCompleter::new();
-
-        // Typing ":rep" should match "reprex" and highlight positions 0,1,2
-        let suggestions = completion_suggestions(&mut completer, ":rep", 4);
-        assert_eq!(suggestions.len(), 1);
-        let reprex = &suggestions[0];
-        assert_eq!(reprex.value, "reprex");
-        assert_eq!(reprex.match_indices, Some(vec![0, 1, 2]));
-    }
-
-    #[test]
-    fn test_meta_command_match_indices_none_for_empty_input() {
-        // When just ":" is typed, no prefix to highlight
-        let mut completer = MetaCommandCompleter::new();
-
-        let suggestions = completion_suggestions(&mut completer, ":", 1);
-        assert!(!suggestions.is_empty());
-        for suggestion in &suggestions {
-            assert_eq!(
-                suggestion.match_indices, None,
-                "`:` with no partial input should have match_indices: None"
-            );
-        }
     }
 
     #[test]
@@ -842,24 +816,6 @@ mod tests {
             suggestions.is_empty(),
             "`:xyz` should not match any command"
         );
-    }
-
-    #[test]
-    fn test_meta_command_help_no_append_whitespace() {
-        // :help and :h should NOT append whitespace after completion
-        // because they open an interactive help browser (no argument needed)
-        let mut completer = MetaCommandCompleter::new();
-
-        let suggestions = completion_suggestions(&mut completer, ":hel", 4);
-        let help = suggestions.iter().find(|s| s.value == "help").unwrap();
-        assert!(
-            !help.append_whitespace,
-            "`:help` should NOT append whitespace"
-        );
-
-        let suggestions = completion_suggestions(&mut completer, ":h", 2);
-        let h = suggestions.iter().find(|s| s.value == "h").unwrap();
-        assert!(!h.append_whitespace, "`:h` should NOT append whitespace");
     }
 
     // --- cd/pushd/popd completion tests ---

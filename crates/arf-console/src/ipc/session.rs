@@ -287,8 +287,6 @@ mod tests {
         info.r_home = Some("/opt/R/4.4.1/lib/R".to_string());
         let json = serde_json::to_value(&info).unwrap();
 
-        assert_eq!(json["session_type"], "headless");
-        assert_eq!(json["r_home"], "/opt/R/4.4.1/lib/R");
         insta::assert_snapshot!(serde_json::to_string_pretty(&json).unwrap(), @r###"
 {
   "cwd": "/tmp",
@@ -308,30 +306,23 @@ mod tests {
     }
 
     #[test]
-    fn session_type_is_required_in_session_files() {
-        let json = serde_json::json!({
+    fn session_type_is_required_and_must_not_be_null() {
+        let base = serde_json::json!({
             "pid": 12345,
             "socket_path": "/tmp/arf.sock",
             "r_version": "4.4.1",
             "cwd": "/tmp",
             "started_at": "2026-01-01T00:00:00+00:00",
         });
+        let mut with_null = base.clone();
+        with_null["session_type"] = serde_json::Value::Null;
 
-        assert!(serde_json::from_value::<SessionInfo>(json).is_err());
-    }
-
-    #[test]
-    fn null_session_type_is_rejected() {
-        let json = serde_json::json!({
-            "pid": 12345,
-            "socket_path": "/tmp/arf.sock",
-            "r_version": "4.4.1",
-            "cwd": "/tmp",
-            "started_at": "2026-01-01T00:00:00+00:00",
-            "session_type": null,
-        });
-
-        assert!(serde_json::from_value::<SessionInfo>(json).is_err());
+        for (label, json) in [("missing", base), ("null", with_null)] {
+            assert!(
+                serde_json::from_value::<SessionInfo>(json).is_err(),
+                "{label} session_type must be rejected"
+            );
+        }
     }
 
     #[test]

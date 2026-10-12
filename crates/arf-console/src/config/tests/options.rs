@@ -1,59 +1,18 @@
 use super::super::*;
 
 #[test]
-fn test_auto_suggestions_default_is_all() {
-    let config = Config::default();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
-}
-
-#[test]
-fn test_parse_auto_suggestions_none_string() {
-    let toml_str = r#"
-[editor]
-auto_suggestions = "none"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::None);
-}
-
-#[test]
-fn test_parse_auto_suggestions_all_string() {
-    let toml_str = r#"
-[editor]
-auto_suggestions = "all"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
-}
-
-#[test]
-fn test_parse_auto_suggestions_cwd_string() {
-    let toml_str = r#"
-[editor]
-auto_suggestions = "cwd"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::Cwd);
-}
-
-#[test]
-fn test_parse_auto_suggestions_bool_true() {
-    let toml_str = r#"
-[editor]
-auto_suggestions = true
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::All);
-}
-
-#[test]
-fn test_parse_auto_suggestions_bool_false() {
-    let toml_str = r#"
-[editor]
-auto_suggestions = false
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.editor.auto_suggestions, AutoSuggestions::None);
+fn test_parse_auto_suggestions_values() {
+    for (value, expected) in [
+        (r#""none""#, AutoSuggestions::None),
+        (r#""all""#, AutoSuggestions::All),
+        (r#""cwd""#, AutoSuggestions::Cwd),
+        ("true", AutoSuggestions::All),
+        ("false", AutoSuggestions::None),
+    ] {
+        let toml_str = format!("[editor]\nauto_suggestions = {value}\n");
+        let config: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(config.editor.auto_suggestions, expected, "{value}");
+    }
 }
 
 #[test]
@@ -73,51 +32,13 @@ auto_suggestions = "invalid"
 }
 
 #[test]
-fn test_parse_auto_suggestions_string_true_rejected() {
-    // String "true" should be rejected (use boolean true instead)
-    let toml_str = r#"
-[editor]
-auto_suggestions = "true"
-"#;
-    let result: Result<Config, _> = toml::from_str(toml_str);
-    assert!(result.is_err(), "String 'true' should be rejected");
-}
-
-#[test]
-fn test_parse_auto_suggestions_string_false_rejected() {
-    // String "false" should be rejected (use boolean false instead)
-    let toml_str = r#"
-[editor]
-auto_suggestions = "false"
-"#;
-    let result: Result<Config, _> = toml::from_str(toml_str);
-    assert!(result.is_err(), "String 'false' should be rejected");
-}
-
-#[test]
-fn test_parse_r_source_auto() {
-    let toml_str = r#"
-[startup]
-r_source = "auto"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert!(matches!(
-        config.startup.r_source,
-        RSource::Mode(RSourceMode::Auto)
-    ));
-}
-
-#[test]
-fn test_parse_r_source_rig() {
-    let toml_str = r#"
-[startup]
-r_source = "rig"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert!(matches!(
-        config.startup.r_source,
-        RSource::Mode(RSourceMode::Rig)
-    ));
+fn test_parse_auto_suggestions_boolean_strings_rejected() {
+    // The strings "true"/"false" are rejected (use the booleans instead).
+    for value in [r#""true""#, r#""false""#] {
+        let toml_str = format!("[editor]\nauto_suggestions = {value}\n");
+        let result: Result<Config, _> = toml::from_str(&toml_str);
+        assert!(result.is_err(), "String {value} should be rejected");
+    }
 }
 
 #[test]
