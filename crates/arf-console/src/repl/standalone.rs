@@ -1,4 +1,6 @@
+use super::editor_setup::build_edit_mode;
 use super::*;
+use crossterm::terminal::{self, ClearType};
 
 impl Repl {
     /// Run without R (standalone mode).
@@ -23,42 +25,8 @@ impl Repl {
 
         // Set up edit mode with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode {
-            EditorMode::Vi => {
-                let mut insert_keybindings = default_vi_insert_keybindings();
-                add_common_keybindings(&mut insert_keybindings);
-                if self.config.experimental.shell_semicolon_shortcut {
-                    add_shell_semicolon_keybinding(&mut insert_keybindings);
-                }
-                add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
-                let vi = Vi::new(
-                    insert_keybindings,
-                    default_vi_normal_keybindings(),
-                    default_vi_visual_keybindings(),
-                );
-                line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
-                    vi,
-                    editor_state.clone(),
-                    self.config.experimental.completion_min_chars,
-                    self.config.experimental.shell_semicolon_shortcut,
-                ))
-            }
-            EditorMode::Emacs => {
-                let mut keybindings = default_emacs_keybindings();
-                add_common_keybindings(&mut keybindings);
-                if self.config.experimental.shell_semicolon_shortcut {
-                    add_shell_semicolon_keybinding(&mut keybindings);
-                }
-                add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
-                let emacs = Emacs::new(keybindings);
-                line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
-                    emacs,
-                    editor_state.clone(),
-                    self.config.experimental.completion_min_chars,
-                    self.config.experimental.shell_semicolon_shortcut,
-                ))
-            }
-        };
+        line_editor =
+            line_editor.with_edit_mode(build_edit_mode(&self.config, editor_state.clone()));
 
         let highlighter = CombinedHighlighter::new(
             self.config.colors.clone(),
@@ -157,17 +125,17 @@ impl Repl {
 
                     // Process meta commands even when R is not initialized
                     // This allows :switch, :quit, :shell, etc. to work
-                    if let Some(result) = process_meta_command(
-                        &line,
-                        &mut prompt_config,
-                        &mut standalone_reprex,
-                        &history_handle,
-                        &shell_history_handle,
-                        &self.r_source_status,
-                        &mut dir_stack,
+                    let mut meta_ctx = MetaCommandContext {
+                        prompt_config: &mut prompt_config,
+                        reprex: &mut standalone_reprex,
+                        r_history: &history_handle,
+                        shell_history: &shell_history_handle,
+                        r_source_status: &self.r_source_status,
+                        dir_stack: &mut dir_stack,
                         history_session_id,
-                        self.r_home.as_deref(),
-                    ) {
+                        r_home: self.r_home.as_deref(),
+                    };
+                    if let Some(result) = process_meta_command(&line, &mut meta_ctx) {
                         finalize_history(Some(&history_handle), save_outcome, true);
                         // Clear duration so the previous R command's time
                         // does not persist in the prompt after a meta command.

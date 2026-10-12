@@ -1,4 +1,5 @@
-use super::super::*;
+use super::super::new_editor_state_ref;
+use reedline::{EditCommand, ReedlineEvent};
 
 // ===== Tests for tree-sitter word navigation =====
 
