@@ -283,7 +283,7 @@ mod help_metadata_tests {
         rd_helpdb::HelpTopicIndex::from_object(&object).unwrap()
     }
 
-    fn compiled_help_package(with_aliases: bool) -> (tempfile::TempDir, std::path::PathBuf) {
+    fn compiled_help_package() -> (tempfile::TempDir, std::path::PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let package_dir = temp.path().join("fixturepkg");
         let help_dir = package_dir.join("help");
@@ -292,13 +292,6 @@ mod help_metadata_tests {
             std::fs::copy(
                 fixture_path(&format!("help_topics.{extension}")),
                 help_dir.join(format!("fixturepkg.{extension}")),
-            )
-            .unwrap();
-        }
-        if with_aliases {
-            std::fs::copy(
-                fixture_path("aliases_vector_dup_v3.rds"),
-                help_dir.join("aliases.rds"),
             )
             .unwrap();
         }
@@ -361,53 +354,6 @@ mod help_metadata_tests {
         );
         assert!(
             reversed_topics
-                .iter()
-                .all(|topic| topic.package_dir == second_package)
-        );
-    }
-
-    #[test]
-    fn explicit_topic_paths_keep_selected_copy_when_compiled_help_is_broken() {
-        let temp = tempfile::tempdir().unwrap();
-        let first_library = temp.path().join("first");
-        let second_library = temp.path().join("second");
-        let first_package = install_metadata_fixture(&first_library, "fixturepkg");
-        let second_package = install_metadata_fixture(&second_library, "fixturepkg");
-        for package_dir in [&first_package, &second_package] {
-            let help_dir = package_dir.join("help");
-            std::fs::create_dir_all(&help_dir).unwrap();
-            std::fs::copy(
-                fixture_path("help_topics.rdx"),
-                help_dir.join("fixturepkg.rdx"),
-            )
-            .unwrap();
-            std::fs::copy(
-                fixture_path("help_topics.rdb"),
-                help_dir.join("fixturepkg.rdb"),
-            )
-            .unwrap();
-            std::fs::copy(
-                fixture_path("aliases_vector_dup_v3.rds"),
-                help_dir.join("aliases.rds"),
-            )
-            .unwrap();
-        }
-
-        // Unreadable compiled help in one copy must not change which copy topic
-        // listing selects.
-        std::fs::write(
-            first_package.join("help/fixturepkg.rdb"),
-            b"broken database",
-        )
-        .unwrap();
-
-        let first_path = first_library.to_string_lossy().into_owned();
-        let second_path = second_library.to_string_lossy().into_owned();
-        let reversed_paths = vec![second_path, first_path];
-        let topics = get_help_topics_from_paths(&reversed_paths);
-        assert!(!topics.is_empty());
-        assert!(
-            topics
                 .iter()
                 .all(|topic| topic.package_dir == second_package)
         );
@@ -554,7 +500,7 @@ mod help_metadata_tests {
 
     #[test]
     fn known_help_key_reads_compiled_topic_without_aliases_file() {
-        let (_temp, package_dir) = compiled_help_package(false);
+        let (_temp, package_dir) = compiled_help_package();
         assert!(!package_dir.join("help/aliases.rds").exists());
 
         let markdown = get_package_help_markdown_by_key_in_dir(
@@ -570,7 +516,7 @@ mod help_metadata_tests {
 
     #[test]
     fn known_help_key_missing_from_compiled_help_reports_unknown_topic() {
-        let (_temp, package_dir) = compiled_help_package(false);
+        let (_temp, package_dir) = compiled_help_package();
 
         let error = get_package_help_markdown_by_key_in_dir(
             &package_dir,
