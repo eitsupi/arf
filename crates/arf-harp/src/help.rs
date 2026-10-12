@@ -210,63 +210,10 @@ fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
 #[cfg(test)]
 mod help_metadata_tests {
     use super::{
-        HarpError, HarpResult, get_help_topics_from_paths, get_package_help_markdown_by_key_in_dir,
-        open_package_help_db, package_help_markdown_from_db, project_help_topic_entry,
-        read_package_topics, vignette_topic,
+        HarpError, get_help_topics_from_paths, get_package_help_markdown_by_key_in_dir,
+        project_help_topic_entry, read_package_topics, vignette_topic,
     };
-    use crate::lib_paths::installed_package_dir;
     use rd_helpdb::VignetteEntry;
-
-    /// Get package help as Markdown using explicit library paths.
-    ///
-    /// `topic` is an alias-or-exact-key input: aliases are resolved first using
-    /// the compiled help database's last-wins alias index, then the input is
-    /// used as an exact key if it is not an alias. The first installed copy of
-    /// `package` in `paths` is selected.
-    fn get_package_help_markdown_from_paths(
-        topic: &str,
-        package: &str,
-        paths: &[String],
-    ) -> HarpResult<String> {
-        let package_dir =
-            installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
-                package: package.to_string(),
-            })?;
-        get_package_help_markdown_in_dir(topic, package, &package_dir)
-    }
-
-    fn get_package_help_markdown_in_dir(
-        topic: &str,
-        package: &str,
-        package_dir: &std::path::Path,
-    ) -> HarpResult<String> {
-        let db = open_package_help_db(package_dir, package, topic, topic)?;
-        let resolved = db
-            .resolve_alias(topic)
-            .map_err(|source| HarpError::HelpDatabase {
-                package: package.to_string(),
-                topic: topic.to_string(),
-                key: topic.to_string(),
-                source: Box::new(source),
-            })?;
-        let key = resolved.unwrap_or(topic).to_string();
-        package_help_markdown_from_db(&db, topic, &key, package)
-    }
-
-    /// Get package help as Markdown with a known help key and explicit library
-    /// paths.
-    fn get_package_help_markdown_by_key_from_paths(
-        display_topic: &str,
-        help_key: &str,
-        package: &str,
-        paths: &[String],
-    ) -> HarpResult<String> {
-        let package_dir =
-            installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
-                package: package.to_string(),
-            })?;
-        get_package_help_markdown_by_key_in_dir(&package_dir, display_topic, help_key, package)
-    }
 
     fn fixture_path(name: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -372,24 +319,10 @@ mod help_metadata_tests {
     }
 
     #[test]
-    fn explicit_paths_list_topics_and_read_package_help_without_r() {
+    fn explicit_paths_list_topics_without_r() {
         let temp = tempfile::tempdir().unwrap();
         let library = temp.path().join("library");
         let package_dir = install_metadata_fixture(&library, "fixturepkg");
-        let help_dir = package_dir.join("help");
-        std::fs::create_dir_all(&help_dir).unwrap();
-        for extension in ["rdx", "rdb"] {
-            std::fs::copy(
-                fixture_path(&format!("help_topics.{extension}")),
-                help_dir.join(format!("fixturepkg.{extension}")),
-            )
-            .unwrap();
-        }
-        std::fs::copy(
-            fixture_path("aliases_vector_dup_v3.rds"),
-            help_dir.join("aliases.rds"),
-        )
-        .unwrap();
 
         let paths = vec![library.to_string_lossy().into_owned()];
         let topics = get_help_topics_from_paths(&paths);
@@ -398,22 +331,6 @@ mod help_metadata_tests {
                 && topic.package_dir == package_dir
                 && topic.topic == "first"
         }));
-
-        let by_alias = get_package_help_markdown_from_paths("shared", "fixturepkg", &paths)
-            .expect_err("fixture alias should resolve to its intentionally missing key");
-        assert!(matches!(
-            by_alias,
-            crate::error::HarpError::HelpDatabase { key, .. } if key == "second-topic"
-        ));
-
-        let by_key = get_package_help_markdown_by_key_from_paths(
-            "display-name",
-            "first-topic",
-            "fixturepkg",
-            &paths,
-        )
-        .expect("explicit paths should locate package and read a known key");
-        assert!(!by_key.is_empty());
     }
 
     #[test]
@@ -450,7 +367,7 @@ mod help_metadata_tests {
     }
 
     #[test]
-    fn explicit_package_help_paths_keep_first_copy_without_fallback() {
+    fn explicit_topic_paths_keep_selected_copy_when_compiled_help_is_broken() {
         let temp = tempfile::tempdir().unwrap();
         let first_library = temp.path().join("first");
         let second_library = temp.path().join("second");
@@ -476,8 +393,8 @@ mod help_metadata_tests {
             .unwrap();
         }
 
-        // An installed package with unreadable compiled help must remain the
-        // selected copy; lookup must not silently fall through to another library.
+        // Unreadable compiled help in one copy must not change which copy topic
+        // listing selects.
         std::fs::write(
             first_package.join("help/fixturepkg.rdb"),
             b"broken database",
@@ -486,15 +403,6 @@ mod help_metadata_tests {
 
         let first_path = first_library.to_string_lossy().into_owned();
         let second_path = second_library.to_string_lossy().into_owned();
-        let ordered_paths = vec![first_path.clone(), second_path.clone()];
-        let error =
-            get_package_help_markdown_from_paths("first-topic", "fixturepkg", &ordered_paths)
-                .expect_err("lookup should fail in the selected first copy");
-        assert!(matches!(
-            error,
-            crate::error::HarpError::HelpDatabase { .. }
-        ));
-
         let reversed_paths = vec![second_path, first_path];
         let topics = get_help_topics_from_paths(&reversed_paths);
         assert!(!topics.is_empty());
@@ -503,30 +411,6 @@ mod help_metadata_tests {
                 .iter()
                 .all(|topic| topic.package_dir == second_package)
         );
-
-        let generic =
-            get_package_help_markdown_from_paths("first-topic", "fixturepkg", &reversed_paths)
-                .expect("generic alias-or-key lookup should succeed in the selected copy");
-        let by_key = get_package_help_markdown_by_key_from_paths(
-            "first-topic",
-            "first-topic",
-            "fixturepkg",
-            &reversed_paths,
-        )
-        .expect("known-key lookup should succeed in the selected copy");
-        assert_eq!(generic, by_key);
-
-        let missing = get_package_help_markdown_from_paths(
-            "first-topic",
-            "definitely_missing_package",
-            &reversed_paths,
-        )
-        .expect_err("unknown package should return PackageNotFound");
-        assert!(matches!(
-            missing,
-            crate::error::HarpError::PackageNotFound { package }
-                if package == "definitely_missing_package"
-        ));
     }
 
     #[test]
@@ -685,29 +569,23 @@ mod help_metadata_tests {
     }
 
     #[test]
-    fn generic_lookup_keeps_alias_first_and_exact_key_fallback_semantics() {
-        let (_temp, package_dir) = compiled_help_package(true);
+    fn known_help_key_missing_from_compiled_help_reports_unknown_topic() {
+        let (_temp, package_dir) = compiled_help_package(false);
 
-        let alias_error = get_package_help_markdown_in_dir("shared", "fixturepkg", &package_dir)
-            .expect_err("alias lookup should take precedence over treating input as a key");
+        let error = get_package_help_markdown_by_key_in_dir(
+            &package_dir,
+            "display-only-name",
+            "second-topic",
+            "fixturepkg",
+        )
+        .expect_err("a key absent from the compiled help database should fail");
+
         assert!(matches!(
-            alias_error,
-            crate::error::HarpError::HelpDatabase { key, source, .. }
+            error,
+            HarpError::HelpDatabase { key, source, .. }
                 if key == "second-topic"
                     && matches!(*source, rd_helpdb::Error::UnknownTopic { ref topic } if topic == "second-topic")
         ));
-
-        let exact_result =
-            get_package_help_markdown_in_dir("first-topic", "fixturepkg", &package_dir)
-                .expect("non-alias input should fall back to its exact key");
-        let direct_exact = get_package_help_markdown_by_key_in_dir(
-            &package_dir,
-            "first-topic",
-            "first-topic",
-            "fixturepkg",
-        )
-        .expect("exact key should load directly");
-        assert_eq!(exact_result, direct_exact);
     }
 
     fn object_names(attributes: &rd_rds::Attributes) -> Vec<rd_rds::RStr> {
