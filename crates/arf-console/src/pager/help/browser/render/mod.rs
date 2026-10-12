@@ -8,7 +8,7 @@ use super::HelpBrowser;
 use crate::pager::text_utils::{
     display_width, exceeds_width, pad_to_width, scroll_display, truncate_to_width,
 };
-use crate::pager::{check_terminal_too_small, render_size_warning};
+use crate::pager::{self, render_size_warning_if_too_small};
 use crossterm::{
     ExecutableCommand, cursor, queue,
     style::Stylize,
@@ -29,14 +29,15 @@ pub(super) fn calculate_layout(cols: usize) -> (usize, usize) {
 /// Calculate the number of visible result rows based on terminal height.
 /// Layout: header(1) + filter(1) + separator(1) + results(N) + separator(1) + footer(1)
 pub(super) fn visible_result_rows() -> usize {
-    let (_, rows) = terminal::size().unwrap_or((80, 24));
-    visible_result_rows_for(rows as usize)
+    pager::visible_result_rows(CHROME_ROWS)
 }
 
 pub(super) fn visible_result_rows_for(rows: usize) -> usize {
-    // Reserve 5 lines for UI chrome (header, filter, 2 separators, footer)
-    rows.saturating_sub(5).max(3)
+    pager::visible_result_rows_for(rows, CHROME_ROWS)
 }
+
+/// Lines reserved for UI chrome (header, filter, 2 separators, footer).
+const CHROME_ROWS: usize = 5;
 
 impl HelpBrowser {
     /// Update the text scroll animation state.
@@ -45,8 +46,8 @@ impl HelpBrowser {
     }
 
     pub(super) fn render(&self, stdout: &mut io::Stdout) -> io::Result<()> {
-        if let Some((cols, rows)) = check_terminal_too_small(&MIN_SIZE) {
-            return render_size_warning(stdout, cols, rows, &MIN_SIZE);
+        if render_size_warning_if_too_small(stdout, &MIN_SIZE)? {
+            return Ok(());
         }
         let (cols, rows) = terminal::size().unwrap_or((80, 24));
         self.render_to(stdout, cols as usize, rows as usize)

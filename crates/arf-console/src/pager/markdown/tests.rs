@@ -1,3 +1,4 @@
+use super::table::distribute_column_widths;
 use super::*;
 use ratatui::style::Color;
 
