@@ -103,42 +103,25 @@ mod tests {
     }
 
     #[test]
-    fn test_is_atomic_node_string() {
-        assert!(is_atomic_node("string"));
-    }
-
-    #[test]
-    fn test_is_atomic_node_comment() {
-        assert!(is_atomic_node("comment"));
-    }
-
-    #[test]
-    fn test_is_atomic_node_numbers() {
-        assert!(is_atomic_node("integer"));
-        assert!(is_atomic_node("float"));
-        assert!(is_atomic_node("complex"));
-    }
-
-    #[test]
-    fn test_is_atomic_node_constants() {
-        assert!(is_atomic_node("true"));
-        assert!(is_atomic_node("false"));
-        assert!(is_atomic_node("null"));
-        assert!(is_atomic_node("na"));
-    }
-
-    #[test]
-    fn test_is_atomic_node_special() {
-        assert!(is_atomic_node("special"));
-        assert!(is_atomic_node("dots"));
-        assert!(is_atomic_node("dot_dot_i"));
-    }
-
-    #[test]
-    fn test_is_atomic_node_non_atomic() {
-        assert!(!is_atomic_node("identifier"));
-        assert!(!is_atomic_node("program"));
-        assert!(!is_atomic_node("call"));
-        assert!(!is_atomic_node("binary_operator"));
+    fn test_is_atomic_node() {
+        for kind in [
+            "string",
+            "comment",
+            "integer",
+            "float",
+            "complex",
+            "true",
+            "false",
+            "null",
+            "na",
+            "special",
+            "dots",
+            "dot_dot_i",
+        ] {
+            assert!(is_atomic_node(kind), "{kind} should be atomic");
+        }
+        for kind in ["identifier", "program", "call", "binary_operator"] {
+            assert!(!is_atomic_node(kind), "{kind} should not be atomic");
+        }
     }
 }

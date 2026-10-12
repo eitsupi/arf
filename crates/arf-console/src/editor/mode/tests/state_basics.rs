@@ -10,53 +10,6 @@ fn test_editor_state_initial() {
 }
 
 #[test]
-fn test_editor_state_insert_char() {
-    let mut state = EditorState::new();
-
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::InsertChar('a')]));
-    assert_eq!(state.cursor_pos, 1);
-    assert_eq!(state.buffer_len, 1);
-    assert!(!state.cursor_at_begin());
-    assert!(!state.is_empty());
-
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::InsertChar('b')]));
-    assert_eq!(state.cursor_pos, 2);
-    assert_eq!(state.buffer_len, 2);
-}
-
-#[test]
-fn test_editor_state_insert_string() {
-    let mut state = EditorState::new();
-
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::InsertString(
-        "hello".to_string(),
-    )]));
-    assert_eq!(state.cursor_pos, 5);
-    assert_eq!(state.buffer_len, 5);
-}
-
-#[test]
-fn test_editor_state_backspace() {
-    let mut state = EditorState::new();
-
-    // Insert some text
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::InsertString(
-        "abc".to_string(),
-    )]));
-    assert_eq!(state.cursor_pos, 3);
-
-    // Backspace
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::Backspace]));
-    assert_eq!(state.cursor_pos, 2);
-    assert_eq!(state.buffer_len, 2);
-
-    // Backspace at beginning should be no-op
-    state.cursor_pos = 0;
-    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::Backspace]));
-    assert_eq!(state.cursor_pos, 0);
-}
-
-#[test]
 fn test_editor_state_move() {
     let mut state = EditorState::new();
     state.buffer_len = 5;

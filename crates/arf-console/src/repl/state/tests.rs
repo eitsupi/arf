@@ -48,17 +48,6 @@ fn test_prompt_runtime_config_set_reprex_mode() {
 }
 
 #[test]
-fn test_prompt_runtime_config_set_reprex_with_comment() {
-    // create_test_config reads SHELL through PromptFormatter::new.
-    let _guard = crate::test_utils::lock_env();
-    let mut runtime =
-        ReprexRuntime::new(ReprexMode::Off, "#> ", crate::config::FormatterBackend::Air);
-
-    runtime.set_mode(ReprexMode::On);
-    assert!(runtime.is_enabled());
-}
-
-#[test]
 fn test_prompt_runtime_config_shell_mode_prompt() {
     // create_test_config reads SHELL through PromptFormatter::new.
     let _guard = crate::test_utils::lock_env();

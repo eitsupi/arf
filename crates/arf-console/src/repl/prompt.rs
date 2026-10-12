@@ -190,38 +190,38 @@ mod tests {
     }
 
     #[test]
-    fn test_rprompt_with_mode_indicator_prefix() {
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_mode_indicator(Some("[reprex] ".to_string()), ModeIndicatorPosition::Prefix);
-        assert_eq!(prompt.render_prompt_left(), "[reprex] r> ");
-        assert_eq!(prompt.render_prompt_right(), "");
-        assert_eq!(prompt.render_prompt_multiline_indicator(), "+  ");
-    }
-
-    #[test]
-    fn test_rprompt_with_mode_indicator_suffix() {
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_mode_indicator(Some("[reprex]".to_string()), ModeIndicatorPosition::Suffix);
-        assert_eq!(prompt.render_prompt_left(), "r> ");
-        assert_eq!(prompt.render_prompt_right(), "[reprex]");
-        assert_eq!(prompt.render_prompt_multiline_indicator(), "+  ");
-    }
-
-    #[test]
-    fn test_rprompt_with_mode_indicator_none() {
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_mode_indicator(Some("[reprex] ".to_string()), ModeIndicatorPosition::None);
-        // Even with indicator text, position=None should hide it
-        assert_eq!(prompt.render_prompt_left(), "r> ");
-        assert_eq!(prompt.render_prompt_right(), "");
-    }
-
-    #[test]
-    fn test_rprompt_with_none_indicator_text() {
-        let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
-            .with_mode_indicator(None, ModeIndicatorPosition::Prefix);
-        assert_eq!(prompt.render_prompt_left(), "r> ");
-        assert_eq!(prompt.render_prompt_right(), "");
+    fn test_rprompt_with_mode_indicator() {
+        for (indicator, position, left, right) in [
+            (
+                Some("[reprex] "),
+                ModeIndicatorPosition::Prefix,
+                "[reprex] r> ",
+                "",
+            ),
+            (
+                Some("[reprex]"),
+                ModeIndicatorPosition::Suffix,
+                "r> ",
+                "[reprex]",
+            ),
+            // Even with indicator text, position=None hides it.
+            (Some("[reprex] "), ModeIndicatorPosition::None, "r> ", ""),
+            (None, ModeIndicatorPosition::Prefix, "r> ", ""),
+        ] {
+            let prompt = RPrompt::new("r> ".to_string(), "+  ".to_string())
+                .with_mode_indicator(indicator.map(str::to_string), position);
+            assert_eq!(
+                prompt.render_prompt_left(),
+                left,
+                "{indicator:?} {position:?}"
+            );
+            assert_eq!(
+                prompt.render_prompt_right(),
+                right,
+                "{indicator:?} {position:?}"
+            );
+            assert_eq!(prompt.render_prompt_multiline_indicator(), "+  ");
+        }
     }
 
     /// Helper to create a prompt with custom vi symbols and no vi colors (Default).

@@ -93,16 +93,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_is_empty_json() {
-        assert_eq!(
-            serde_json::to_string(&HistoryExtraInfo::default()).unwrap(),
-            "{}"
-        );
-    }
-
-    #[test]
     fn typed_accessors_use_compact_representations() {
         let mut info = HistoryExtraInfo::default();
+        assert_eq!(serde_json::to_string(&info).unwrap(), "{}");
         assert_eq!(info.meta_command(), None);
         info.set_meta_command(true);
         assert_eq!(info.meta_command(), Some(true));

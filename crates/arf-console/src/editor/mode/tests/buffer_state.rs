@@ -24,6 +24,8 @@ fn test_insert_char_updates_buffer() {
     assert_eq!(state.buffer, "a");
     assert_eq!(state.cursor_pos, 1);
     assert_eq!(state.buffer_len, 1);
+    assert!(!state.cursor_at_begin());
+    assert!(!state.is_empty());
 
     state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::InsertChar('b')]));
     assert_eq!(state.buffer, "ab");
@@ -65,6 +67,13 @@ fn test_backspace_updates_buffer() {
     state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::Backspace]));
     assert_eq!(state.buffer, "ab");
     assert_eq!(state.cursor_pos, 2);
+    assert_eq!(state.buffer_len, 2);
+
+    // Backspace at the beginning is a no-op.
+    state.cursor_pos = 0;
+    state.update_from_event(&ReedlineEvent::Edit(vec![EditCommand::Backspace]));
+    assert_eq!(state.buffer, "ab");
+    assert_eq!(state.cursor_pos, 0);
     assert_eq!(state.buffer_len, 2);
 }
 

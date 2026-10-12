@@ -468,32 +468,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_spinner_config_default() {
-        let config = SpinnerConfig::default();
-        assert!(config.frames.is_empty()); // Disabled by default
-        assert_eq!(config.color, Color::Cyan);
-    }
-
-    #[test]
-    fn test_spinner_config_disabled() {
-        let config = SpinnerConfig {
-            frames: String::new(),
-            color: Color::Default,
-        };
-        assert!(config.frames.is_empty());
-    }
-
-    #[test]
-    fn test_spinner_config_custom_frames() {
-        let config = SpinnerConfig {
-            frames: "|/-\\".to_string(),
-            color: Color::Green,
-        };
-        assert_eq!(config.frames, "|/-\\");
-        assert_eq!(config.color, Color::Green);
-    }
-
-    #[test]
     fn test_experimental_config_default() {
         let config = ExperimentalConfig::default();
         assert!(!config.history_forget.enabled);
@@ -550,16 +524,6 @@ frames = ""
 "#;
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
         assert!(config.experimental.prompt_spinner.frames.is_empty());
-    }
-
-    #[test]
-    fn test_r_completion_default() {
-        let config = RCompletionConfig::default();
-        assert!(!config.fuzzy);
-        assert_eq!(
-            config.package_functions,
-            vec!["library".to_string(), "require".to_string()]
-        );
     }
 
     #[test]
@@ -678,12 +642,6 @@ fuzzy = true
     }
 
     #[test]
-    fn test_shell_completion_default() {
-        let config = ShellCompletionConfig::default();
-        assert!(!config.command_names);
-    }
-
-    #[test]
     fn test_parse_shell_completion() {
         let toml_str = r#"
 [experimental.shell_completion]
@@ -691,12 +649,6 @@ command_names = true
 "#;
         let config: crate::config::Config = toml::from_str(toml_str).unwrap();
         assert!(config.experimental.shell_completion.command_names);
-    }
-
-    #[test]
-    fn test_shell_semicolon_shortcut_default() {
-        let config = ExperimentalConfig::default();
-        assert!(!config.shell_semicolon_shortcut);
     }
 
     #[test]
