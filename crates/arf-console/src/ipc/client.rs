@@ -495,8 +495,10 @@ fn send_request_inner(
         let mut stream = UnixStream::connect(socket_path)
             .with_context(|| format!("Failed to connect to {socket_path}"))?;
         stream.set_read_timeout(Some(timeout))?;
+        // The server reads the request by Content-Length, so no half-close is
+        // needed. A half-close could also race with the server closing after
+        // its response, which macOS reports as ENOTCONN.
         stream.write_all(http_request.as_bytes())?;
-        stream.shutdown(std::net::Shutdown::Write)?;
 
         let mut response_buf = Vec::new();
         stream.read_to_end(&mut response_buf)?;

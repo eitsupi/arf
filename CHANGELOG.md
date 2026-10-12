@@ -5,6 +5,7 @@
 ### Fixed
 
 - On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).
+- On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
 
 ## [0.7.0-alpha.1] - 2026-10-11
 
