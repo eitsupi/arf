@@ -777,5 +777,4 @@ fn extract_r_code_block(lines: &[String]) -> String {
 }
 
 #[cfg(test)]
-#[path = "history_schema/tests.rs"]
 mod tests;

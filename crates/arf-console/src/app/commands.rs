@@ -443,7 +443,7 @@ fn should_parse_unified_import(
 }
 
 #[cfg(test)]
-mod history_artifact_import_tests {
+mod tests {
     use super::*;
     use crate::history::artifact::{HistoryArtifact, HistoryKind};
 
