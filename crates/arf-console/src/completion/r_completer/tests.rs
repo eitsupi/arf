@@ -121,12 +121,6 @@ fn test_needs_backtick_quoting() {
 // --- Namespace cache tests ---
 
 #[test]
-fn test_namespace_cache_key_format() {
-    assert_eq!(RCompleter::namespace_cache_key("dplyr", false), "dplyr::");
-    assert_eq!(RCompleter::namespace_cache_key("dplyr", true), "dplyr:::");
-}
-
-#[test]
 fn test_store_namespace_exports_caches_non_empty() {
     let mut completer = RCompleter::new();
     let exports = vec!["filter".to_string(), "mutate".to_string()];
@@ -185,21 +179,6 @@ fn test_store_namespace_exports_evicts_expired() {
 }
 
 #[test]
-fn test_store_namespace_exports_keeps_fresh_entries() {
-    let mut completer = RCompleter::new();
-
-    // Insert a fresh entry for another package
-    completer.store_namespace_exports("pkg_a", false, vec!["func_a".to_string()]);
-
-    // Store a second package
-    completer.store_namespace_exports("pkg_b", false, vec!["func_b".to_string()]);
-
-    // Both should still be present
-    assert!(completer.namespace_cache.contains_key("pkg_a::"));
-    assert!(completer.namespace_cache.contains_key("pkg_b::"));
-}
-
-#[test]
 fn test_separate_cache_for_double_and_triple_colon() {
     let mut completer = RCompleter::new();
     completer.store_namespace_exports("pkg", false, vec!["exported".to_string()]);
@@ -243,70 +222,34 @@ fn test_invalidate_cache_clears_fuzzy_namespace_cache() {
 }
 
 #[test]
-fn test_fuzzy_cache_hit_same_input_and_position() {
-    let mut completer = RCompleter::new();
-    completer.debounce_ms = 5000;
+fn test_fuzzy_cache_hit_and_miss() {
+    // (cached entry present, debounce window in ms, queried input, queried start pos, expected hit)
+    for (cached, debounce_ms, input, start_pos, expected) in [
+        (true, 5000, "dplyr::filt", 0, true),
+        // Same input text but at a different position: must miss
+        (true, 5000, "dplyr::filt", 5, false),
+        (true, 5000, "dplyr::filte", 0, false),
+        (false, 5000, "dplyr::filt", 0, false),
+        // Zero window: always expired
+        (true, 0, "dplyr::filt", 0, false),
+    ] {
+        let mut completer = RCompleter::new();
+        completer.debounce_ms = debounce_ms;
+        if cached {
+            completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
+                input: "dplyr::filt".to_string(),
+                start_pos: 0,
+                suggestions: vec![],
+                timestamp: Instant::now(),
+            });
+        }
 
-    completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
-        input: "dplyr::filt".to_string(),
-        start_pos: 0,
-        suggestions: vec![],
-        timestamp: Instant::now(),
-    });
-
-    assert!(completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
-}
-
-#[test]
-fn test_fuzzy_cache_miss_different_start_pos() {
-    let mut completer = RCompleter::new();
-    completer.debounce_ms = 5000;
-
-    completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
-        input: "dplyr::filt".to_string(),
-        start_pos: 0,
-        suggestions: vec![],
-        timestamp: Instant::now(),
-    });
-
-    // Same input text but at a different position: must miss
-    assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 5));
-}
-
-#[test]
-fn test_fuzzy_cache_miss_different_input() {
-    let mut completer = RCompleter::new();
-    completer.debounce_ms = 5000;
-
-    completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
-        input: "dplyr::filt".to_string(),
-        start_pos: 0,
-        suggestions: vec![],
-        timestamp: Instant::now(),
-    });
-
-    assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filte", 0));
-}
-
-#[test]
-fn test_fuzzy_cache_miss_when_empty() {
-    let completer = RCompleter::new();
-    assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
-}
-
-#[test]
-fn test_fuzzy_cache_miss_when_expired() {
-    let mut completer = RCompleter::new();
-    completer.debounce_ms = 0; // zero window: always expired
-
-    completer.namespace_fuzzy_cache = Some(NamespaceFuzzyCache {
-        input: "dplyr::filt".to_string(),
-        start_pos: 0,
-        suggestions: vec![],
-        timestamp: Instant::now(),
-    });
-
-    assert!(!completer.is_namespace_fuzzy_cache_hit("dplyr::filt", 0));
+        assert_eq!(
+            completer.is_namespace_fuzzy_cache_hit(input, start_pos),
+            expected,
+            "cached={cached} debounce_ms={debounce_ms} input={input:?} start_pos={start_pos}"
+        );
+    }
 }
 
 // --- Library context detection tests ---

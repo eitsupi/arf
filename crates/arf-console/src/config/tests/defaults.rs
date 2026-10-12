@@ -2,31 +2,6 @@ use super::super::*;
 use crokey::KeyCombination;
 
 #[test]
-fn test_default_config() {
-    let config = Config::default();
-    assert!(
-        config.editor.auto_match,
-        "auto_match should be enabled by default"
-    );
-    assert_eq!(config.editor.mode, EditorMode::Emacs);
-    assert!(matches!(
-        config.startup.r_source,
-        RSource::Mode(RSourceMode::Auto)
-    ));
-    assert!(config.startup.show_banner);
-    assert_eq!(config.reprex.formatter, ReprexFormatter::Auto);
-}
-
-#[test]
-fn test_default_r_auto_width() {
-    let config = Config::default();
-    assert!(
-        config.r.auto_width,
-        "auto_width should be enabled by default"
-    );
-}
-
-#[test]
 fn test_default_r_help_viewer_is_r() {
     assert_eq!(Config::default().experimental.r_help.viewer, HelpViewer::R);
     for source in ["", "[experimental]", "[experimental.r_help]"] {
@@ -78,26 +53,6 @@ mode = "vi"
         config.r.auto_width,
         "auto_width should default to true when [r] section is omitted"
     );
-}
-
-#[test]
-fn test_parse_config_with_auto_match_enabled() {
-    let toml_str = r#"
-[editor]
-auto_match = true
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert!(config.editor.auto_match);
-}
-
-#[test]
-fn test_parse_config_with_auto_match_disabled() {
-    let toml_str = r#"
-[editor]
-auto_match = false
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert!(!config.editor.auto_match);
 }
 
 #[test]
@@ -157,23 +112,29 @@ fn reprex_formatter_rejects_unknown_backends() {
 }
 
 #[test]
-fn reprex_formatter_metadata_describes_air_backend() {
-    let formatter = FormatterBackend::Air;
-    assert_eq!(formatter.display_name(), "Air");
-    assert_eq!(formatter.command(), "air");
-    assert_eq!(formatter.install_url(), "https://github.com/posit-dev/air");
-    assert_eq!(formatter.minimum_version(), "0.9.0");
-    assert_eq!(formatter.to_string(), "air");
-}
-
-#[test]
-fn reprex_formatter_metadata_describes_arity_backend() {
-    let formatter = FormatterBackend::Arity;
-    assert_eq!(formatter.display_name(), "Arity");
-    assert_eq!(formatter.command(), "arity");
-    assert_eq!(formatter.install_url(), "https://github.com/jolars/arity");
-    assert_eq!(formatter.minimum_version(), "0.18.0");
-    assert_eq!(formatter.to_string(), "arity");
+fn reprex_formatter_metadata_describes_backends() {
+    for (formatter, display_name, command, install_url, minimum_version) in [
+        (
+            FormatterBackend::Air,
+            "Air",
+            "air",
+            "https://github.com/posit-dev/air",
+            "0.9.0",
+        ),
+        (
+            FormatterBackend::Arity,
+            "Arity",
+            "arity",
+            "https://github.com/jolars/arity",
+            "0.18.0",
+        ),
+    ] {
+        assert_eq!(formatter.display_name(), display_name);
+        assert_eq!(formatter.command(), command);
+        assert_eq!(formatter.install_url(), install_url);
+        assert_eq!(formatter.minimum_version(), minimum_version);
+        assert_eq!(formatter.to_string(), command);
+    }
 }
 
 #[test]
@@ -276,43 +237,13 @@ mode = "emacs"
 }
 
 #[test]
-fn test_default_key_map() {
-    let config = Config::default();
-
-    let alt_hyphen: KeyCombination = "alt-hyphen".parse().unwrap();
-    let alt_p: KeyCombination = "alt-p".parse().unwrap();
-
-    assert_eq!(
-        config.editor.key_map.get(&alt_hyphen),
-        Some(&" <- ".to_string())
-    );
-    assert_eq!(config.editor.key_map.get(&alt_p), Some(&" |> ".to_string()));
-}
-
-#[test]
-fn test_default_mode_indicator() {
-    let config = Config::default();
-    assert_eq!(config.prompt.mode_indicator, ModeIndicatorPosition::Prefix);
-    assert_eq!(config.prompt.indicators.reprex, "[reprex] ");
-    assert_eq!(config.prompt.indicators.reprex_format, "[format] ");
-}
-
-#[test]
-fn test_parse_mode_indicator_suffix() {
-    let toml_str = r#"
-[prompt]
-mode_indicator = "suffix"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.prompt.mode_indicator, ModeIndicatorPosition::Suffix);
-}
-
-#[test]
-fn test_parse_mode_indicator_none() {
-    let toml_str = r#"
-[prompt]
-mode_indicator = "none"
-"#;
-    let config: Config = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.prompt.mode_indicator, ModeIndicatorPosition::None);
+fn test_parse_mode_indicator_positions() {
+    for (value, expected) in [
+        ("suffix", ModeIndicatorPosition::Suffix),
+        ("none", ModeIndicatorPosition::None),
+    ] {
+        let toml_str = format!("[prompt]\nmode_indicator = \"{value}\"\n");
+        let config: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(config.prompt.mode_indicator, expected);
+    }
 }

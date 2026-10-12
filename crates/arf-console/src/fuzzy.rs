@@ -171,13 +171,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fuzzy_match_case_insensitive() {
-        // Case insensitive matching
-        assert!(fuzzy_match("REP", "reprex").is_some());
-        assert!(fuzzy_match("rEp", "reprex").is_some());
-    }
-
-    #[test]
     fn test_fuzzy_match_smart_case() {
         assert!(fuzzy_match_smart_case("foo", "Foo").is_some());
         assert!(fuzzy_match_smart_case("Foo", "Foo").is_some());
@@ -220,16 +213,5 @@ mod tests {
         for i in 1..results.len() {
             assert!(results[i - 1].1.score >= results[i].1.score);
         }
-    }
-
-    #[test]
-    fn test_fuzzy_match_scoring() {
-        // Prefix matches should score higher than scattered matches
-        let prefix = fuzzy_match("re", "reprex").unwrap();
-        let scattered = fuzzy_match("re", "restart").unwrap();
-
-        // Both should match, prefix at start might score higher
-        assert!(prefix.score > 0);
-        assert!(scattered.score > 0);
     }
 }

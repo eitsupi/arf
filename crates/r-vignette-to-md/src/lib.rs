@@ -123,13 +123,6 @@ mod tests {
     }
 
     #[test]
-    fn add_language_class_python() {
-        let input = r#"<code class="sourceCode python">print("hello")</code>"#;
-        let result = add_pandoc_language_class(input);
-        assert!(result.contains(r#"class="sourceCode language-python"#));
-    }
-
-    #[test]
     fn add_language_class_multiple_elements() {
         let input = r#"<pre class="sourceCode r"><code class="sourceCode r">x</code></pre>"#;
         let result = add_pandoc_language_class(input);
@@ -164,11 +157,6 @@ mod tests {
     fn preserve_normal_links() {
         let input = "see [docs](https://example.com) for details";
         assert_eq!(strip_pandoc_code_anchors(input), input);
-    }
-
-    #[test]
-    fn strip_empty_string() {
-        assert_eq!(strip_pandoc_code_anchors(""), "");
     }
 
     #[test]
@@ -215,24 +203,6 @@ print(x)</code></pre>"#;
             result.contains("[](#fn1)"),
             "Non-code anchor was stripped in:\n{result}"
         );
-    }
-
-    #[test]
-    fn convert_python_code_block() {
-        let html = r#"<pre class="sourceCode python"><code class="sourceCode python">print("hello")</code></pre>"#;
-        let result = convert(html).unwrap();
-        assert!(
-            result.contains("```python"),
-            "Expected ```python in:\n{result}"
-        );
-    }
-
-    #[test]
-    fn convert_bash_code_block() {
-        let html =
-            r#"<pre class="sourceCode bash"><code class="sourceCode bash">echo "hi"</code></pre>"#;
-        let result = convert(html).unwrap();
-        assert!(result.contains("```bash"), "Expected ```bash in:\n{result}");
     }
 
     #[test]

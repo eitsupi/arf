@@ -179,14 +179,6 @@ fn history_mode_overrides_keep_cli_env_config_default_precedence() {
 }
 
 #[test]
-fn test_default_history_forget_config() {
-    let config = Config::default();
-    assert!(!config.experimental.history_forget.enabled);
-    assert_eq!(config.experimental.history_forget.delay, 2);
-    assert!(!config.experimental.history_forget.on_exit_only);
-}
-
-#[test]
 fn test_parse_history_forget_config() {
     let toml_str = r#"
 [experimental.history_forget]

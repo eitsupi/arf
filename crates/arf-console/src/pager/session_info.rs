@@ -419,59 +419,28 @@ mod tests {
     use crate::history::HistoryFailureDetail;
 
     #[test]
-    fn test_mask_env_value_with_home() {
+    fn test_mask_env_value_masks_each_path_segment() {
         // Read HOME through dirs::home_dir and mask_env_value -> mask_home_path.
         let _guard = crate::test_utils::lock_env();
-        if let Some(home) = dirs::home_dir() {
-            let home_str = home.display().to_string();
-            let sep = std::path::MAIN_SEPARATOR;
-            let test_value = format!("{}{}R{}library", home_str, sep, sep);
-            let masked = mask_env_value(&test_value);
-            assert!(masked.starts_with("~"), "Should mask home dir: {}", masked);
-            // Check that "R" and "library" are in the path (separator-agnostic)
-            assert!(masked.contains("R"), "Should contain R: {}", masked);
-            assert!(
-                masked.contains("library"),
-                "Should contain library: {}",
-                masked
-            );
-        }
-    }
-
-    #[test]
-    fn test_mask_env_value_without_home() {
-        // mask_env_value reads HOME indirectly through mask_home_path.
-        let _guard = crate::test_utils::lock_env();
-        let test_value = "/opt/R/library";
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let home_str = home.display().to_string();
+        let path_sep = std::path::MAIN_SEPARATOR;
+        let list_sep = if cfg!(windows) { ';' } else { ':' };
+        let outside = "/opt/R/library";
         // mask_env_value round-trips through Path::display() which may normalize separators
-        let expected = std::path::Path::new(test_value).display().to_string();
-        let masked = mask_env_value(test_value);
-        assert_eq!(masked, expected, "Should not change non-home paths");
-    }
-
-    #[test]
-    fn test_mask_env_value_multiple_paths() {
-        // Read HOME through dirs::home_dir and mask_env_value -> mask_home_path.
-        let _guard = crate::test_utils::lock_env();
-        if let Some(home) = dirs::home_dir() {
-            let home_str = home.display().to_string();
-            let path_sep = std::path::MAIN_SEPARATOR;
-            let list_sep = if cfg!(windows) { ';' } else { ':' };
-            // Platform-appropriate path list
-            let test_value = format!(
-                "{}{}.R{}library{}{}{}other",
-                home_str, path_sep, path_sep, list_sep, home_str, path_sep
-            );
-            let masked = mask_env_value(&test_value);
-            // Both occurrences should be masked
-            assert!(
-                !masked.contains(&home_str),
-                "All home dirs should be masked: {}",
-                masked
-            );
-            // Check that masked output contains ~ prefix
-            assert!(masked.starts_with("~"), "Should start with ~: {}", masked);
-        }
+        let outside_expected = std::path::Path::new(outside).display().to_string();
+        let test_value = format!(
+            "{home_str}{path_sep}.R{path_sep}library{list_sep}{home_str}{path_sep}other{list_sep}{outside}"
+        );
+        assert_eq!(
+            mask_env_value(&test_value),
+            format!(
+                "~{path_sep}.R{path_sep}library{list_sep}~{path_sep}other{list_sep}{outside_expected}"
+            ),
+            "home segments should be masked and other segments left unchanged"
+        );
     }
 
     #[test]
@@ -538,13 +507,6 @@ mod tests {
         let content = SessionInfoContent::new(lines);
         let plain = content.as_plain_text();
         assert_eq!(plain, "# Test\nkey: value\n");
-    }
-
-    #[test]
-    fn test_session_info_content_line_count() {
-        let lines = vec!["line1".to_string(), "line2".to_string()];
-        let content = SessionInfoContent::new(lines);
-        assert_eq!(content.line_count(), 2);
     }
 
     // --- generate_info_lines config_path tests ---

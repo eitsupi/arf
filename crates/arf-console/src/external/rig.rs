@@ -338,12 +338,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_rig_available() {
-        // Just check it doesn't panic - result depends on environment
-        let _ = rig_available();
-    }
-
-    #[test]
     fn test_parse_rig_json() {
         let json = r#"[
             {

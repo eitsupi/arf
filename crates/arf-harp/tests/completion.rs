@@ -122,3 +122,37 @@ fn test_installed_packages_include_base_packages() {
         );
     });
 }
+
+#[test]
+fn test_check_if_functions_classifies_names() {
+    with_r!(test_check_if_functions_classifies_names, {
+        let names = vec![
+            "print",
+            "sum",
+            "mean",
+            "c",
+            "TRUE",
+            "FALSE",
+            "NA",
+            "NULL",
+            "base::print",
+            "base::sum",
+            "stats::lm",
+            "nonexistent_xyz",
+        ];
+        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
+        assert_eq!(
+            result,
+            vec![
+                true, true, true, true, // base functions
+                false, false, false, false, // non-function constants
+                true, true, true,  // namespace-qualified functions
+                false, // unknown name
+            ]
+        );
+
+        let empty: Vec<&str> = vec![];
+        let result = arf_harp::completion::check_if_functions(&empty).expect("should succeed");
+        assert!(result.is_empty(), "Empty input should return empty result");
+    });
+}

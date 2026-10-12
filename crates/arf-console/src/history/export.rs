@@ -357,6 +357,16 @@ mod tests {
         }
     }
 
+    /// Names of leftover export temp files in `dir`.
+    fn export_temp_files(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("arf-export-tmp"))
+            .collect()
+    }
+
     #[test]
     fn test_export_history_basic() {
         let temp_dir = TempDir::new().unwrap();
@@ -374,6 +384,10 @@ mod tests {
         assert_eq!(result.r_exported, 2);
         assert_eq!(result.shell_exported, 2);
         assert!(output_path.exists());
+        assert!(
+            export_temp_files(temp_dir.path()).is_empty(),
+            "Temp files should be cleaned up"
+        );
 
         // Verify exported content
         let db = rusqlite::Connection::open(&output_path).unwrap();
@@ -478,35 +492,6 @@ mod tests {
     }
 
     #[test]
-    fn test_export_no_temp_file_left_on_success() {
-        let temp_dir = TempDir::new().unwrap();
-        let r_path = temp_dir.path().join("r.db");
-        let output_path = temp_dir.path().join("export.db");
-
-        create_test_history(&r_path, &["test"]);
-
-        export_history(
-            &r_path,
-            &temp_dir.path().join("none.db"),
-            &output_path,
-            "r",
-            "shell",
-        )
-        .unwrap();
-
-        // Output file should exist, no temp files should remain
-        assert!(output_path.exists());
-
-        // Check that no temp files (with pattern arf-export-tmp-*) remain
-        let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains("arf-export-tmp"))
-            .collect();
-        assert!(entries.is_empty(), "Temp files should be cleaned up");
-    }
-
-    #[test]
     fn test_export_rejects_same_table_names() {
         let temp_dir = TempDir::new().unwrap();
         let r_path = temp_dir.path().join("r.db");
@@ -558,81 +543,37 @@ mod tests {
 
     #[test]
     fn test_export_cleans_up_temp_file_on_failure() {
-        let temp_dir = TempDir::new().unwrap();
-        // Point to a corrupted/invalid database file.
         // The export flow is:
         // 1. export_history creates temp file path
         // 2. export_to_file opens output temp file (SQLite creates it)
-        // 3. export_to_file tries to open source r.db -> FAILS here because invalid
-        // 4. export_history catches error and removes temp file
-        let invalid_db_path = temp_dir.path().join("invalid.db");
-        std::fs::write(&invalid_db_path, "not a valid sqlite database").unwrap();
+        // 3. export_to_file opens a source database, which fails when it is invalid
+        // 4. export_history catches the error and removes the temp file
+        for (valid_r_history, label) in [
+            // Failure while opening the R source database.
+            (false, "open failure"),
+            // Failure during the shell copy, after the R history was copied.
+            (true, "copy failure"),
+        ] {
+            let temp_dir = TempDir::new().unwrap();
+            let r_path = temp_dir.path().join("r.db");
+            let shell_path = temp_dir.path().join("shell.db");
+            if valid_r_history {
+                create_test_history(&r_path, &["test1", "test2"]);
+                std::fs::write(&shell_path, "not a valid sqlite database").unwrap();
+            } else {
+                std::fs::write(&r_path, "not a valid sqlite database").unwrap();
+            }
+            let output_path = temp_dir.path().join("export.db");
 
-        let output_path = temp_dir.path().join("export.db");
+            let result = export_history(&r_path, &shell_path, &output_path, "r", "shell");
 
-        // Export should fail because the source database is invalid
-        let result = export_history(
-            &invalid_db_path,
-            &temp_dir.path().join("none.db"),
-            &output_path,
-            "r",
-            "shell",
-        );
-
-        assert!(result.is_err());
-
-        // No output file should exist
-        assert!(!output_path.exists());
-
-        // No temp files should remain (cleanup should have removed the temp file
-        // that was created by SQLite before the source database open failed)
-        let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains("arf-export-tmp"))
-            .collect();
-        assert!(
-            entries.is_empty(),
-            "Temp files should be cleaned up on failure"
-        );
-    }
-
-    #[test]
-    fn test_export_cleans_up_temp_file_on_copy_failure() {
-        // This test verifies cleanup when failure occurs DURING data copy,
-        // not just during database open. This ensures the temp file was
-        // definitely created and contains partial data before cleanup.
-        let temp_dir = TempDir::new().unwrap();
-
-        // Create a valid source database
-        let r_path = temp_dir.path().join("r.db");
-        create_test_history(&r_path, &["test1", "test2"]);
-
-        // Create a shell database file that exists but is invalid
-        // This causes failure during shell history copy (after R history succeeds)
-        let shell_path = temp_dir.path().join("shell.db");
-        std::fs::write(&shell_path, "not a valid sqlite database").unwrap();
-
-        let output_path = temp_dir.path().join("export.db");
-
-        // Export should fail when trying to open the invalid shell database
-        let result = export_history(&r_path, &shell_path, &output_path, "r", "shell");
-
-        assert!(result.is_err());
-
-        // No output file should exist
-        assert!(!output_path.exists());
-
-        // No temp files should remain
-        let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains("arf-export-tmp"))
-            .collect();
-        assert!(
-            entries.is_empty(),
-            "Temp files should be cleaned up on copy failure"
-        );
+            assert!(result.is_err(), "{label}");
+            assert!(!output_path.exists(), "{label}");
+            assert!(
+                export_temp_files(temp_dir.path()).is_empty(),
+                "Temp files should be cleaned up on {label}"
+            );
+        }
     }
 
     #[test]
@@ -663,18 +604,8 @@ mod tests {
 
             assert!(format!("{error:#}").contains(expected_error));
             assert!(!output_path.exists());
-            let temp_files: Vec<_> = std::fs::read_dir(temp_dir.path())
-                .unwrap()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .contains("arf-export-tmp")
-                })
-                .collect();
             assert!(
-                temp_files.is_empty(),
+                export_temp_files(temp_dir.path()).is_empty(),
                 "export temp file leaked for {artifact}"
             );
         }

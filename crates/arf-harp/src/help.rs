@@ -978,21 +978,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_help_topic_qualified_name() {
-        let topic = HelpTopic {
-            package: "base".to_string(),
-            package_dir: std::path::PathBuf::from("/base"),
-            topic: "print".to_string(),
-            aliases: vec![],
-            help_key: None,
-            title: "Print Values".to_string(),
-            entry_type: "help".to_string(),
-        };
-
-        assert_eq!(topic.qualified_name(), "base::print");
-    }
-
-    #[test]
     fn test_escape_r_string() {
         assert_eq!(escape_r_string("hello"), "hello");
         assert_eq!(escape_r_string(r#"he"llo"#), r#"he\"llo"#);

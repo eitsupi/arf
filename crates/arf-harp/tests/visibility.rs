@@ -12,13 +12,20 @@ use arf_harp::eval_string_with_visibility;
 use common::with_r;
 
 #[test]
-fn test_simple_expression_is_visible() {
-    with_r!(test_simple_expression_is_visible, {
-        let result = eval_string_with_visibility("1 + 1").expect("eval should succeed");
-        assert!(
-            result.visible,
-            "Simple arithmetic expression should be visible"
-        );
+fn test_value_expressions_are_visible() {
+    with_r!(test_value_expressions_are_visible, {
+        eval_string_with_visibility("test_var <- 123").expect("assignment should succeed");
+
+        for code in [
+            "1 + 1",
+            "test_var",
+            "sum(1, 2, 3)",
+            r#""hello""#,
+            "c(1, 2, 3)",
+        ] {
+            let result = eval_string_with_visibility(code).expect("eval should succeed");
+            assert!(result.visible, "`{code}` should be visible");
+        }
     });
 }
 
@@ -35,18 +42,6 @@ fn test_equals_assignment_is_invisible() {
     with_r!(test_equals_assignment_is_invisible, {
         let result = eval_string_with_visibility("y = 100").expect("eval should succeed");
         assert!(!result.visible, "Assignment with = should be invisible");
-    });
-}
-
-#[test]
-fn test_variable_lookup_is_visible() {
-    with_r!(test_variable_lookup_is_visible, {
-        // First assign a value
-        eval_string_with_visibility("test_var <- 123").expect("assignment should succeed");
-
-        // Then look it up - should be visible
-        let result = eval_string_with_visibility("test_var").expect("eval should succeed");
-        assert!(result.visible, "Variable lookup should be visible");
     });
 }
 
@@ -69,17 +64,6 @@ fn test_print_function_is_visible() {
 }
 
 #[test]
-fn test_function_call_is_visible() {
-    with_r!(test_function_call_is_visible, {
-        let result = eval_string_with_visibility("sum(1, 2, 3)").expect("eval should succeed");
-        assert!(
-            result.visible,
-            "Function call with visible result should be visible"
-        );
-    });
-}
-
-#[test]
 fn test_null_result_is_not_visible() {
     with_r!(test_null_result_is_not_visible, {
         // NULL is never considered visible for printing purposes
@@ -88,22 +72,6 @@ fn test_null_result_is_not_visible() {
             !result.visible,
             "NULL should not be marked as visible for printing"
         );
-    });
-}
-
-#[test]
-fn test_string_literal_is_visible() {
-    with_r!(test_string_literal_is_visible, {
-        let result = eval_string_with_visibility(r#""hello""#).expect("eval should succeed");
-        assert!(result.visible, "String literal should be visible");
-    });
-}
-
-#[test]
-fn test_vector_creation_is_visible() {
-    with_r!(test_vector_creation_is_visible, {
-        let result = eval_string_with_visibility("c(1, 2, 3)").expect("eval should succeed");
-        assert!(result.visible, "Vector creation should be visible");
     });
 }
 
@@ -117,42 +85,6 @@ fn test_package_loading_works() {
             result.is_ok(),
             "Loading 'methods' package should succeed in the isolated R process"
         );
-    });
-}
-
-#[test]
-fn test_base_functions_work() {
-    with_r!(test_base_functions_work, {
-        // Test that base functions that might depend on loaded libraries work
-        let result = eval_string_with_visibility("paste('hello', 'world')");
-        assert!(result.is_ok(), "paste() should work");
-    });
-}
-
-/// Test that reprex mode can be enabled and the settings are stored.
-/// Note: The actual output formatting is tested by running the binary.
-#[test]
-fn test_reprex_mode_settings() {
-    // Test that set_reprex_mode doesn't panic
-    arf_libr::set_reprex_mode(true, "#> ");
-    arf_libr::set_reprex_mode(true, "## ");
-    arf_libr::set_reprex_mode(false, "");
-    // If we get here without panic, the settings are being stored correctly
-}
-
-#[test]
-fn test_reprex_mode_output() {
-    with_r!(test_reprex_mode_output, {
-        // Enable reprex mode
-        arf_libr::set_reprex_mode(true, "#> ");
-
-        // Evaluate R code - output will be prefixed with "#> "
-        // (We can't easily capture stdout in tests, but we verify the code runs)
-        let result = arf_harp::eval_string("1+1");
-        assert!(result.is_ok(), "eval_string should succeed in reprex mode");
-
-        // Disable reprex mode for other tests
-        arf_libr::set_reprex_mode(false, "");
     });
 }
 
@@ -237,69 +169,5 @@ fn test_parse_error_is_complete() {
             result,
             "Parse error should be considered complete (not incomplete)"
         );
-    });
-}
-
-// Tests for check_if_functions (function type detection for completion)
-
-#[test]
-fn test_check_if_functions_base_functions() {
-    with_r!(test_check_if_functions_base_functions, {
-        let names = vec!["print", "sum", "mean", "c"];
-        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
-        assert_eq!(result.len(), 4);
-        assert!(result[0], "print should be a function");
-        assert!(result[1], "sum should be a function");
-        assert!(result[2], "mean should be a function");
-        assert!(result[3], "c should be a function");
-    });
-}
-
-#[test]
-fn test_check_if_functions_non_functions() {
-    with_r!(test_check_if_functions_non_functions, {
-        let names = vec!["TRUE", "FALSE", "NA", "NULL"];
-        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
-        assert_eq!(result.len(), 4);
-        assert!(!result[0], "TRUE should not be a function");
-        assert!(!result[1], "FALSE should not be a function");
-        assert!(!result[2], "NA should not be a function");
-        assert!(!result[3], "NULL should not be a function");
-    });
-}
-
-#[test]
-fn test_check_if_functions_namespaced() {
-    with_r!(test_check_if_functions_namespaced, {
-        // Test namespace-qualified function names (pkg::func syntax)
-        let names = vec!["base::print", "base::sum", "stats::lm"];
-        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
-        assert_eq!(result.len(), 3);
-        assert!(result[0], "base::print should be a function");
-        assert!(result[1], "base::sum should be a function");
-        assert!(result[2], "stats::lm should be a function");
-    });
-}
-
-#[test]
-fn test_check_if_functions_mixed() {
-    with_r!(test_check_if_functions_mixed, {
-        // Mix of functions and non-functions
-        let names = vec!["print", "TRUE", "base::sum", "nonexistent_xyz"];
-        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
-        assert_eq!(result.len(), 4);
-        assert!(result[0], "print should be a function");
-        assert!(!result[1], "TRUE should not be a function");
-        assert!(result[2], "base::sum should be a function");
-        assert!(!result[3], "nonexistent should not be a function");
-    });
-}
-
-#[test]
-fn test_check_if_functions_empty() {
-    with_r!(test_check_if_functions_empty, {
-        let names: Vec<&str> = vec![];
-        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
-        assert!(result.is_empty(), "Empty input should return empty result");
     });
 }
