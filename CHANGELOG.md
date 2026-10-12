@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically.
+
 ## [0.7.0-alpha.1] - 2026-10-11
 
 ### Added
