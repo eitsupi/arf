@@ -4,18 +4,35 @@ use super::*;
 // Script Execution Mode Tests (-e flag)
 // ============================================================================
 
-/// Test basic R evaluation with -e flag.
+/// Test plain `-e` evaluation: a single expression, multi-line code with
+/// state, and a function definition, run as one script.
 #[test]
-fn test_eval_basic() {
+fn test_eval_expression_variants() {
     let output = sanitized_arf_command()
-        .args(["-e", "1 + 1"])
+        .args([
+            "-e",
+            "1 + 1\nx <- 5\nx * 2\nf <- function(x) { x + 1 }\nf(10)",
+        ])
         .output()
         .expect("Failed to run arf -e");
 
-    assert!(output.status.success(), "arf -e should succeed");
+    assert!(
+        output.status.success(),
+        "arf -e should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("[1] 2"), "Should output [1] 2: {}", stdout);
+    for (case, expected) in [
+        ("single expression", "[1] 2"),
+        ("multiple expressions share state", "[1] 10"),
+        ("function definition and call", "[1] 11"),
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "{case}: should output {expected:?}: {stdout}"
+        );
+    }
 }
 
 /// Test that a mismatched R_HOME does not prevent startup or evaluation.
@@ -39,42 +56,6 @@ fn test_eval_with_mismatched_r_home() {
     assert!(
         stdout.contains("[1] 2"),
         "R should evaluate an expression with a mismatched R_HOME: {}",
-        stdout
-    );
-}
-
-/// Test multiple expressions with -e flag.
-#[test]
-fn test_eval_multiple_expressions() {
-    let output = sanitized_arf_command()
-        .args(["-e", "x <- 5\nx * 2"])
-        .output()
-        .expect("Failed to run arf -e");
-
-    assert!(output.status.success(), "arf -e should succeed");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("[1] 10"),
-        "Should output [1] 10: {}",
-        stdout
-    );
-}
-
-/// Test function definition and call with -e flag.
-#[test]
-fn test_eval_function() {
-    let output = sanitized_arf_command()
-        .args(["-e", "f <- function(x) { x + 1 }\nf(10)"])
-        .output()
-        .expect("Failed to run arf -e");
-
-    assert!(output.status.success(), "arf -e should succeed");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("[1] 11"),
-        "Function should return 11: {}",
         stdout
     );
 }
@@ -162,32 +143,6 @@ fn test_eval_pipe_error() {
     );
 }
 
-/// Test reprex mode with -e flag.
-/// Verifies that source code is echoed before output in reprex format.
-#[test]
-fn test_eval_reprex_mode() {
-    let output = sanitized_arf_command()
-        .args(["--reprex", "on", "-e", "1 + 1"])
-        .output()
-        .expect("Failed to run arf --reprex -e");
-
-    assert!(output.status.success(), "arf --reprex -e should succeed");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check that source code is echoed
-    assert!(
-        stdout.contains("1 + 1"),
-        "Output should echo source code: {}",
-        stdout
-    );
-    // Check that result is prefixed with #>
-    assert!(
-        stdout.contains("#> [1] 2"),
-        "Output should be prefixed with #>: {}",
-        stdout
-    );
-}
-
 /// Test custom reprex comment prefix via config file.
 /// Verifies that source code is echoed and output uses custom comment prefix.
 #[test]
@@ -234,53 +189,37 @@ comment = "## "
     );
 }
 
-/// Test reprex mode with cat() output.
-/// cat() writes to stdout without trailing newline, which should still be captured.
+/// Test reprex mode with `-e`: source is echoed, results are prefixed with `#>`,
+/// and `cat()` output is prefixed both with and without a trailing newline.
 #[test]
-fn test_eval_reprex_cat_output() {
+fn test_eval_reprex_mode() {
     let output = sanitized_arf_command()
-        .args(["--reprex", "on", "-e", r#"cat("hello")"#])
+        .args([
+            "--reprex",
+            "on",
+            "-e",
+            "1 + 1\ncat(\"hello\\n\")\ncat(\"tail\")",
+        ])
         .output()
-        .expect("Failed to run arf --reprex -e cat()");
+        .expect("Failed to run arf --reprex -e");
 
     assert!(
         output.status.success(),
-        "arf --reprex -e cat() should succeed"
+        "arf --reprex -e should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check that source code is echoed
-    assert!(
-        stdout.contains(r#"cat("hello")"#),
-        "Output should echo source code: {}",
-        stdout
-    );
-    // Check that cat() output is captured with reprex comment prefix
-    assert!(
-        stdout.contains("#> hello"),
-        "cat() output should be prefixed with #>: {}",
-        stdout
-    );
-}
-
-/// Test reprex mode with cat() output that includes newline.
-#[test]
-fn test_eval_reprex_cat_with_newline() {
-    let output = sanitized_arf_command()
-        .args(["--reprex", "on", "-e", r#"cat("hello\n")"#])
-        .output()
-        .expect("Failed to run arf --reprex -e cat() with newline");
-
-    assert!(
-        output.status.success(),
-        "arf --reprex -e cat() with newline should succeed"
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check that cat() output with newline is captured
-    assert!(
-        stdout.contains("#> hello"),
-        "cat() output with newline should be prefixed with #>: {}",
-        stdout
-    );
+    for (case, expected) in [
+        ("source is echoed", "1 + 1"),
+        ("cat() source is echoed", r#"cat("tail")"#),
+        ("value is prefixed", "#> [1] 2"),
+        ("cat() output with newline is prefixed", "#> hello"),
+        ("cat() output without newline is captured", "#> tail"),
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "{case}: output should contain {expected:?}: {stdout}"
+        );
+    }
 }
