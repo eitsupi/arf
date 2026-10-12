@@ -103,11 +103,11 @@ pub fn approve_user_input(
             continue;
         }
         match crossterm::event::read() {
-            Ok(crossterm::event::Event::Key(key)) => {
-                use crossterm::event::{KeyCode, KeyModifiers};
-                let approved = matches!(key.code, KeyCode::Char('y' | 'Y'))
-                    && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
-                    && !reply.is_closed();
+            Ok(event) => {
+                let Some(approved) = approval_answer(&event) else {
+                    continue;
+                };
+                let approved = approved && !reply.is_closed();
 
                 // Consume the rest of the answer before raw mode is released;
                 // otherwise characters such as Enter can reach reedline.
@@ -118,12 +118,28 @@ pub fn approve_user_input(
                 }
                 return finish(approved);
             }
-            Ok(_) => continue,
             Err(error) => {
                 log::debug!("IPC send approval input failed: {error}");
                 return finish(false);
             }
         }
+    }
+}
+
+/// Interpret one terminal event as an answer to the approval prompt.
+///
+/// Only key presses answer. Windows reports key releases, and the release of
+/// the Enter that submitted the previous command can still be queued when the
+/// prompt appears; treating it as an answer would decline the request before
+/// the user sees it.
+fn approval_answer(event: &crossterm::event::Event) -> Option<bool> {
+    use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => Some(
+            matches!(key.code, KeyCode::Char('y' | 'Y'))
+                && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT),
+        ),
+        _ => None,
     }
 }
 
@@ -220,5 +236,50 @@ next"#,
         assert!(!display.contains('\r'));
         assert!(!display.contains('\0'));
         assert!(!display.contains('\x1b'));
+    }
+}
+
+#[cfg(test)]
+mod approval_answer_tests {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+    fn key(code: KeyCode, modifiers: KeyModifiers, kind: KeyEventKind) -> Event {
+        Event::Key(KeyEvent::new_with_kind(code, modifiers, kind))
+    }
+
+    #[test]
+    fn key_presses_answer_the_prompt() {
+        let press = KeyEventKind::Press;
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Char('y'), KeyModifiers::NONE, press)),
+            Some(true)
+        );
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Char('Y'), KeyModifiers::SHIFT, press)),
+            Some(true)
+        );
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Enter, KeyModifiers::NONE, press)),
+            Some(false)
+        );
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Char('d'), KeyModifiers::CONTROL, press)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn key_releases_do_not_answer_the_prompt() {
+        // A queued release of the Enter that submitted the previous command
+        // must not decline the request.
+        let release = KeyEventKind::Release;
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Enter, KeyModifiers::NONE, release)),
+            None
+        );
+        assert_eq!(
+            super::approval_answer(&key(KeyCode::Char('y'), KeyModifiers::NONE, release)),
+            None
+        );
     }
 }
