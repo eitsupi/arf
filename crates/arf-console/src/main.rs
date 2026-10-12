@@ -19,6 +19,7 @@ mod pid_file;
 pub(crate) mod r_parser;
 mod repl;
 mod rversion;
+mod sync;
 mod traps;
 
 #[cfg(test)]
@@ -548,6 +549,7 @@ fn run() -> Result<()> {
         match ipc::start_server(
             ipc_bind,
             repl.r_home_for_ipc(),
+            ipc::read_r_version(),
             None,
             repl.history_session_id_raw(),
             ipc::session::SessionType::Interactive,

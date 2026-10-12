@@ -7,10 +7,12 @@ pub(crate) mod artifact;
 pub mod export;
 pub mod import;
 mod metadata;
+mod query;
 mod reedline_adapter;
 mod store;
 
 pub use metadata::HistoryExtraInfo;
+pub(crate) use query::{HistoryQuery, parse_since};
 pub use reedline_adapter::ReedlineHistoryAdapter;
 #[allow(unused_imports)]
 pub use store::{

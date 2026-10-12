@@ -310,6 +310,7 @@ fn start_ipc_server(
     let session = ipc::start_server(
         bind,
         r_home_str,
+        ipc::read_r_version(),
         log_file_str,
         session_id_raw,
         SessionType::Headless,

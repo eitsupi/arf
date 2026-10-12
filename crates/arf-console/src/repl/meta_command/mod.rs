@@ -259,6 +259,7 @@ pub fn process_meta_command(
                 "start" => match crate::ipc::start_server(
                     None,
                     r_home.map(|path| path.display().to_string()),
+                    crate::ipc::read_r_version(),
                     None,
                     history_session_id,
                     crate::ipc::session::SessionType::Interactive,

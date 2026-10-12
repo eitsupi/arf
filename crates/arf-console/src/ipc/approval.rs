@@ -171,10 +171,11 @@ pub(crate) fn user_input_display(code: &str) -> String {
 }
 
 pub fn reject_user_input_not_approved(reply: tokio::sync::oneshot::Sender<protocol::IpcResponse>) {
-    let _ = reply.send(protocol::IpcResponse::error(
+    super::pending::reply_error(
+        reply,
         protocol::INPUT_NOT_APPROVED,
-        "IPC send was not approved".to_string(),
-    ));
+        "IPC send was not approved",
+    );
 }
 
 #[cfg(test)]

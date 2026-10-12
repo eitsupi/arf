@@ -138,6 +138,7 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
+    use crate::sync::LockRecover;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -156,10 +157,7 @@ mod imp {
 
     impl ConsoleModeGuard {
         pub(crate) fn install() -> Self {
-            let mut original = match ORIGINAL_TERMIOS.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
-            };
+            let mut original = ORIGINAL_TERMIOS.lock_recover();
 
             if original.is_none() {
                 let mut mode: libc::termios = unsafe { std::mem::zeroed() };
@@ -204,10 +202,7 @@ mod imp {
             return Ok(());
         }
 
-        let original = match ORIGINAL_TERMIOS.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let original = ORIGINAL_TERMIOS.lock_recover();
 
         let Some(mode) = original.as_ref() else {
             STARTUP_RESTORE_PENDING.store(false, Ordering::Release);
@@ -252,10 +247,7 @@ mod imp {
     }
 
     pub(crate) fn restore_original_input_mode() {
-        let mut original = match ORIGINAL_TERMIOS.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut original = ORIGINAL_TERMIOS.lock_recover();
 
         let Some(mode) = original.as_ref() else {
             return;

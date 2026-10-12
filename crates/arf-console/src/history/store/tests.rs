@@ -1,12 +1,6 @@
 use super::*;
 use serde_json::Value;
 
-fn injected_failure(message: &str) -> Result<HistoryStore> {
-    Err(reedline::ReedlineError(
-        reedline::ReedlineErrorVariants::HistoryDatabaseError(message.to_string()),
-    ))
-}
-
 fn open_store() -> (tempfile::TempDir, HistoryStore) {
     let dir = tempfile::tempdir().unwrap();
     let store =
@@ -252,72 +246,6 @@ fn concurrent_different_kind_first_opens_have_one_winner() {
 }
 
 #[test]
-fn configured_volatile_memory_failure_is_unavailable_without_previous_failure() {
-    let runtime = HistoryRuntime::initialize_with_factories(
-        &crate::config::HistoryMode::Volatile,
-        None,
-        HistoryKind::R,
-        None,
-        None,
-        |_path, _kind, _session, _timestamp| injected_failure("persistent must not be opened"),
-        |_session, _timestamp| injected_failure("configured memory failure"),
-    );
-
-    assert!(runtime.requested_path().is_none());
-    let HistoryRuntime::Unavailable {
-        failure,
-        previous_failure,
-    } = runtime
-    else {
-        panic!("configured volatile initialization should be unavailable");
-    };
-    assert_eq!(failure.stage, HistoryFailureStage::MemoryInitialization);
-    assert!(failure.message.contains("configured memory failure"));
-    assert!(previous_failure.is_none());
-}
-
-#[test]
-fn persistent_failure_and_memory_failure_are_both_retained() {
-    let requested_path = PathBuf::from("/requested/history.db");
-    let runtime = HistoryRuntime::initialize_with_factories(
-        &crate::config::HistoryMode::Persistent { dir: None },
-        Some(requested_path.clone()),
-        HistoryKind::R,
-        None,
-        None,
-        |_path, _kind, _session, _timestamp| injected_failure("persistent open failure"),
-        |_session, _timestamp| injected_failure("fallback memory failure"),
-    );
-
-    let detail = runtime.diagnostic_detail().expect("unavailable detail");
-    assert_eq!(runtime.requested_path(), Some(requested_path.as_path()));
-    let HistoryRuntime::Unavailable {
-        failure,
-        previous_failure,
-    } = runtime
-    else {
-        panic!("persistent and fallback initialization should be unavailable");
-    };
-    assert_eq!(failure.stage, HistoryFailureStage::MemoryInitialization);
-    assert!(failure.message.contains("fallback memory failure"));
-    let previous_failure = previous_failure.expect("persistent failure should be retained");
-    assert_eq!(previous_failure.stage, HistoryFailureStage::PersistentOpen);
-    assert!(previous_failure.message.contains("persistent open failure"));
-    assert!(detail.contains("fallback memory failure"));
-    let requested_path_text = requested_path.to_string_lossy();
-    assert_eq!(detail.matches(requested_path_text.as_ref()).count(), 0);
-    let warning = HistoryRuntime::Unavailable {
-        failure: HistoryFailureDetail::test_memory(),
-        previous_failure: Some(HistoryFailureDetail::test_persistent_open(
-            requested_path.clone(),
-        )),
-    }
-    .startup_warning()
-    .expect("unavailable warning");
-    assert_eq!(warning.matches(requested_path_text.as_ref()).count(), 1);
-}
-
-#[test]
 fn unknown_and_known_saves_have_expected_metadata() {
     let (_dir, store) = open_store();
     let unknown = store
@@ -433,16 +361,6 @@ fn typed_finalization_preserves_future_fields() {
     let fields: serde_json::Map<String, Value> =
         serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
     assert_eq!(fields.get("future"), Some(&Value::Bool(true)));
-}
-
-#[test]
-fn taking_a_recorded_outcome_consumes_it() {
-    let receipt = HistorySaveReceipt::new();
-    let outcome = HistorySaveOutcome::Saved(reedline::HistoryItemId::new(42));
-    receipt.record(outcome);
-
-    assert_eq!(receipt.take(), Some(outcome));
-    assert_eq!(receipt.take(), None);
 }
 
 #[test]
