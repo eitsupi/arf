@@ -474,5 +474,4 @@ pub mod schema {
 }
 
 #[cfg(test)]
-#[path = "tests/mod.rs"]
 mod tests;

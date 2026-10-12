@@ -79,3 +79,6 @@ impl Repl {
         self.history_location.database_path("shell.db")
     }
 }
+
+#[cfg(test)]
+mod tests;
