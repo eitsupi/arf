@@ -152,6 +152,7 @@ pub fn sanitized_arf_command() -> Command {
     for variable in [
         "ARF_R_HOME",
         "ARF_R_VERSION",
+        "ARF_R_PROVIDER",
         "ARF_HISTORY_DIR",
         "ARF_CONFIG",
     ] {
