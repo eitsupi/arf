@@ -2,7 +2,9 @@
 
 mod common;
 
-use arf_harp::{call_dot_first, call_dot_first_sys, eval_string, eval_string_in_base};
+use arf_harp::{
+    call_dot_first, call_dot_first_sys, escape_r_string, eval_string, eval_string_in_base,
+};
 use common::with_r;
 
 #[test]
@@ -93,14 +95,6 @@ impl Drop for LibPathsRestore {
             eprintln!("Failed to restore R library paths: {error}");
         }
     }
-}
-
-fn escape_r_string(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', r#"\""#)
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
 }
 
 #[test]

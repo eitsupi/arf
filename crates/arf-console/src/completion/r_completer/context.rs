@@ -60,7 +60,7 @@ pub(super) struct LibraryContext {
 /// - A `)` in a string *before* the target `(` is never reached, since the scan
 ///   stops at the nearest unmatched `(`.
 ///
-/// The same approach is used in `arf-harp/src/completion.rs`.
+/// The same approach is used in `arf-harp/src/completion/context.rs`.
 pub(super) fn detect_library_context(
     line: &str,
     cursor_pos: usize,

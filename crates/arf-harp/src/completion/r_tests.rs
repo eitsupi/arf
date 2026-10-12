@@ -5,12 +5,12 @@
 //! `cargo test -p arf-harp --lib completion::r_tests -- --ignored --nocapture`
 //! No Cargo feature is required. Each test runs in a fresh child process.
 
-use super::r_ffi::r_evaluation_count;
 use super::static_formals::{StaticFormalsResult, lookup_with_policy, production_candidates};
 use super::{
     StaticFormalsMode, StaticFormalsPolicy, check_if_functions, get_completions_with_policy,
     get_r_completions, get_token,
 };
+use crate::ffi::r_evaluation_count;
 use crate::lib_paths;
 use crate::test_support::with_r_in_subprocess;
 

@@ -245,7 +245,7 @@ pub(super) fn set_r_path_vars_from_wrapper(r_home: &Path) {
 /// and expands known `$R_HOME` references in unquoted or double-quoted values.
 /// Single-quoted values and unsupported shell expressions are preserved
 /// literally. Returns `None` if the variable is not found or the value is empty.
-pub(super) fn parse_var_from_wrapper_script(
+fn parse_var_from_wrapper_script(
     script_content: &str,
     var_name: &str,
     r_home: &Path,
@@ -513,3 +513,6 @@ mod loader_path_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

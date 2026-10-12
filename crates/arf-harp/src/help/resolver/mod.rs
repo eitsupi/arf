@@ -1,6 +1,7 @@
 //! Static cross-reference resolution for one help viewer session.
 
-use super::{HelpTarget, HelpTopic, open_package_help_db, package_help_markdown_from_db};
+use super::markdown::{open_package_help_db, package_help_markdown_from_db};
+use super::{HelpTarget, HelpTopic};
 use crate::error::{HarpError, HarpResult};
 use crate::help_bridge::PreparedHelpPage;
 use crate::lib_paths::{installed_package_dir, installed_package_dirs};
