@@ -12,8 +12,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 mod sponge;
-#[cfg(test)]
-mod sponge_tests;
 
 pub use sponge::SpongeQueue;
 
@@ -557,5 +555,4 @@ impl PromptRuntimeConfigBuilder {
 }
 
 #[cfg(test)]
-#[path = "state/tests.rs"]
 mod tests;

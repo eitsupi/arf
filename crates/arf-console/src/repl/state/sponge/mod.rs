@@ -71,3 +71,6 @@ impl SpongeQueue {
         self.queue.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests;

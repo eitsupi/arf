@@ -740,5 +740,4 @@ fn sqlite_error(error: rusqlite::Error) -> reedline::ReedlineError {
 }
 
 #[cfg(test)]
-#[path = "store/tests.rs"]
 mod tests;

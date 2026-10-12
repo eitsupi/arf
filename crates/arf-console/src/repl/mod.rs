@@ -4,8 +4,6 @@ mod banner;
 mod editor_setup;
 pub(super) mod history;
 mod history_runtime;
-#[cfg(test)]
-mod history_runtime_tests;
 mod meta_command;
 mod pager_ui;
 mod prompt;

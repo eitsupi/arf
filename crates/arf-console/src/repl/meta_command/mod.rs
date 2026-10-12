@@ -521,5 +521,4 @@ pub(crate) fn dir_command_hint(shell_cmd: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-#[path = "meta_command/tests.rs"]
 mod tests;
