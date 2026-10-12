@@ -32,7 +32,6 @@ base64.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 schemars.workspace = true
-regex.workspace = true
 once_cell.workspace = true
 nucleo-matcher.workspace = true
 gethostname.workspace = true
@@ -58,7 +57,6 @@ embed-resource = "3"
 
 [dev-dependencies]
 insta.workspace = true
-regex.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
 tui-test-rs.workspace = true

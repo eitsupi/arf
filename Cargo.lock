@@ -150,7 +150,6 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "reedline",
- "regex",
  "rusqlite",
  "schemars",
  "semver",
