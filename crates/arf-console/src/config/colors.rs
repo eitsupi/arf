@@ -76,7 +76,7 @@ pub fn make_color_schema(description: &str, default: Option<&str>) -> schemars::
     schema
 }
 
-// Re-export the macro for use in sibling modules (e.g., experimental.rs).
+// Re-export the macro for use in sibling modules (e.g., experimental/prompt.rs).
 pub(crate) use color_prop;
 
 /// Color configuration for syntax highlighting.

@@ -2,7 +2,7 @@
 
 use crate::app::config_load::{ConfigLoadWarning, load_config_collecting_diagnostics};
 use crate::app::explicit_r_source::{ExplicitRSource, ExplicitRSourceRequest};
-use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection};
+use crate::app::r_source_selection::{RSourceMetadata, RSourceSelection, normalize_path};
 use crate::app::setup::{
     PixiFailure, RSourceDiagnostic, RSourceResolutionReport, RigProjectFailure,
     resolve_path_r_home_for_report, resolve_r_source,
@@ -199,28 +199,18 @@ fn classify_resolution_error(
     error: anyhow::Error,
     explicit_request: Option<&ExplicitRSourceRequest>,
 ) -> ResolveCommandError {
-    if let Some(failure) = error.downcast_ref::<PixiFailure>() {
-        let reason_code = match failure {
-            PixiFailure::NotActive { .. } => "r_provider.pixi_not_active",
-            PixiFailure::EnvironmentInvalid { .. } => "r_provider.pixi_environment_invalid",
-            PixiFailure::RUnavailable { .. } => "r_provider.pixi_r_unavailable",
-        };
+    let reason_code_suffix = error
+        .downcast_ref::<PixiFailure>()
+        .map(PixiFailure::code_suffix)
+        .or_else(|| {
+            error
+                .downcast_ref::<RigProjectFailure>()
+                .map(RigProjectFailure::code_suffix)
+        });
+    if let Some(suffix) = reason_code_suffix {
         return ResolveCommandError::invalid_invocation_with_data(
             format!("{error:#}"),
-            serde_json::json!({ "reason_code": reason_code }),
-        );
-    }
-    if let Some(failure) = error.downcast_ref::<RigProjectFailure>() {
-        let reason_code = match failure {
-            RigProjectFailure::ProjectNotFound { .. } => "r_provider.rig_project_not_found",
-            RigProjectFailure::StatusUnavailable { .. } => "r_provider.rig_project_unavailable",
-            RigProjectFailure::StatusInvalid { .. } => "r_provider.rig_project_status_invalid",
-            RigProjectFailure::NotSynced { .. } => "r_provider.rig_project_not_synced",
-            RigProjectFailure::RUnavailable { .. } => "r_provider.rig_project_r_unavailable",
-        };
-        return ResolveCommandError::invalid_invocation_with_data(
-            format!("{error:#}"),
-            serde_json::json!({ "reason_code": reason_code }),
+            serde_json::json!({ "reason_code": format!("r_provider.{suffix}") }),
         );
     }
     let invalid_invocation = match error.downcast_ref::<RigError>() {
@@ -283,14 +273,6 @@ fn descriptor(
         provider: resolved.then_some(selection.provider).flatten(),
         metadata: selection.metadata,
         diagnostics,
-    }
-}
-
-fn normalize_path(cwd: &Path, path: &Path) -> std::path::PathBuf {
-    if path.is_absolute() {
-        path.to_owned()
-    } else {
-        cwd.join(path)
     }
 }
 

@@ -2,6 +2,7 @@
 
 mod probe;
 
+use super::executable::{R_EXECUTABLE, is_executable};
 use crate::config::{PixiRSourceInfo, VerifiedRTarget};
 use serde::Deserialize;
 use std::ffi::OsString;
@@ -47,6 +48,17 @@ impl std::fmt::Display for PixiFailure {
     }
 }
 
+impl PixiFailure {
+    /// Stable identifier of the failure kind; consumers add their own prefix.
+    pub(crate) fn code_suffix(&self) -> &'static str {
+        match self {
+            Self::NotActive { .. } => "pixi_not_active",
+            Self::EnvironmentInvalid { .. } => "pixi_environment_invalid",
+            Self::RUnavailable { .. } => "pixi_r_unavailable",
+        }
+    }
+}
+
 impl std::error::Error for PixiFailure {}
 
 pub(super) fn resolve_strict(cwd: Option<&Path>) -> Result<PixiRSourceInfo, PixiFailure> {
@@ -64,6 +76,28 @@ fn resolve_strict_with(
     env: impl Fn(&str) -> Option<OsString>,
     probe: impl Fn(&Path) -> Result<PathBuf, probe::ProbeError>,
 ) -> Result<PixiRSourceInfo, PixiFailure> {
+    let activation = verify_activation(cwd, &env)?;
+    let target = verify_r_target(&activation.prefix, &env, probe)?;
+    Ok(PixiRSourceInfo {
+        version: r_base_version(&activation.prefix),
+        manifest: activation.manifest,
+        environment: activation.environment,
+        prefix: activation.prefix,
+        target,
+    })
+}
+
+/// The identity of an activated Pixi environment, verified on disk.
+struct Activation {
+    manifest: PathBuf,
+    environment: String,
+    prefix: PathBuf,
+}
+
+fn verify_activation(
+    cwd: Option<&Path>,
+    env: &impl Fn(&str) -> Option<OsString>,
+) -> Result<Activation, PixiFailure> {
     let in_shell = env("PIXI_IN_SHELL");
     let current_manifest = env("PIXI_WORKSPACE_MANIFEST");
     let legacy_manifest = env("PIXI_PROJECT_MANIFEST");
@@ -159,7 +193,18 @@ fn resolve_strict_with(
             path: Some(marker_path),
         });
     }
+    Ok(Activation {
+        manifest,
+        environment: environment.to_owned(),
+        prefix,
+    })
+}
 
+fn verify_r_target(
+    prefix: &Path,
+    env: &impl Fn(&str) -> Option<OsString>,
+    probe: impl Fn(&Path) -> Result<PathBuf, probe::ProbeError>,
+) -> Result<VerifiedRTarget, PixiFailure> {
     let Some(binary) = env("PATH").as_deref().and_then(first_r_on_path) else {
         return Err(PixiFailure::RUnavailable {
             reason: "PATH contains no executable R",
@@ -172,7 +217,7 @@ fn resolve_strict_with(
             path: Some(binary),
         });
     };
-    if !binary.starts_with(&prefix) {
+    if !binary.starts_with(prefix) {
         return Err(PixiFailure::RUnavailable {
             reason: "the first R on PATH is outside the Pixi prefix",
             path: Some(binary),
@@ -193,7 +238,7 @@ fn resolve_strict_with(
             path: Some(home),
         });
     };
-    if !home.is_dir() || !home.starts_with(&prefix) {
+    if !home.is_dir() || !home.starts_with(prefix) {
         return Err(PixiFailure::RUnavailable {
             reason: "R_HOME is outside the Pixi prefix or not a directory",
             path: Some(home),
@@ -205,51 +250,23 @@ fn resolve_strict_with(
             path: Some(arf_libr::r_library_path(&home)),
         });
     };
-    if !library.is_file() || !library.starts_with(&prefix) {
+    if !library.is_file() || !library.starts_with(prefix) {
         return Err(PixiFailure::RUnavailable {
             reason: "the R shared library is outside the Pixi prefix or not a file",
             path: Some(library),
         });
     }
-    Ok(PixiRSourceInfo {
-        version: r_base_version(&prefix),
-        manifest,
-        environment: environment.to_owned(),
-        prefix,
-        target: VerifiedRTarget {
-            binary,
-            home,
-            library,
-        },
+    Ok(VerifiedRTarget {
+        binary,
+        home,
+        library,
     })
 }
 
 fn first_r_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
-    #[cfg(windows)]
-    const R: &str = "R.exe";
-    #[cfg(not(windows))]
-    const R: &str = "R";
     std::env::split_paths(path)
-        .map(|directory| directory.join(R))
+        .map(|directory| directory.join(R_EXECUTABLE))
         .find(|path| is_executable(path))
-}
-
-fn is_executable(path: &Path) -> bool {
-    let Ok(metadata) = path.metadata() else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
 }
 
 /// CWD discovery is guidance only. Package-only and malformed manifests do
