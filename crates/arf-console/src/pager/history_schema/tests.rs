@@ -1,4 +1,8 @@
-use super::*;
+use super::lines::{extract_r_code_block, format_r_path, generate_schema_lines};
+use super::print_schema;
+use super::style::*;
+use ratatui::style::{Color as RatColor, Modifier, Style as RatStyle};
+use std::path::Path;
 
 #[test]
 fn volatile_schema_does_not_resolve_or_display_a_persistent_path() {
