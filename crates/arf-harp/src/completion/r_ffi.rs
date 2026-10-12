@@ -1,20 +1,11 @@
 //! R FFI used by completion.
 
 use crate::error::{HarpError, HarpResult};
+use crate::escape_r_string;
+use crate::ffi::{EvalPayload, eval_callback};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use std::ffi::CString;
-
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-#[cfg(test)]
-static R_EVALUATION_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-pub(super) fn r_evaluation_count() -> usize {
-    R_EVALUATION_COUNT.load(Ordering::Relaxed)
-}
 
 /// Get the names from a package's namespace.
 ///
@@ -278,26 +269,6 @@ pub fn get_token(line: &str, cursor_pos: usize) -> HarpResult<String> {
     }
 }
 
-/// Payload for R_ToplevelExec callback.
-struct EvalPayload {
-    expr: SEXP,
-    env: SEXP,
-    result: Option<SEXP>,
-}
-
-/// Callback for R_ToplevelExec - evaluates the expression.
-unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
-    let data = unsafe { &mut *(payload as *mut EvalPayload) };
-    let lib = match r_library() {
-        Ok(lib) => lib,
-        Err(_) => return,
-    };
-    #[cfg(test)]
-    R_EVALUATION_COUNT.fetch_add(1, Ordering::Relaxed);
-    let result = unsafe { (lib.rf_eval)(data.expr, data.env) };
-    data.result = Some(result);
-}
-
 /// Extract a character vector to Vec<String>.
 unsafe fn extract_string_vector(sexp: SEXP) -> HarpResult<Vec<String>> {
     let lib = r_library()?;
@@ -345,15 +316,6 @@ unsafe fn extract_single_string(sexp: SEXP) -> HarpResult<String> {
             Err(_) => Ok(String::new()),
         }
     }
-}
-
-/// Escape a string for use in R code.
-fn escape_r_string(s: &str) -> String {
-    s.replace('\\', r"\\")
-        .replace('"', r#"\""#)
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 /// Check if the given names are functions in R.
@@ -481,18 +443,5 @@ unsafe fn extract_logical_vector(sexp: SEXP, expected_len: usize) -> HarpResult<
         }
 
         Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_escape_r_string() {
-        assert_eq!(escape_r_string("hello"), "hello");
-        assert_eq!(escape_r_string(r#"he"llo"#), r#"he\"llo"#);
-        assert_eq!(escape_r_string("he\\llo"), "he\\\\llo");
-        assert_eq!(escape_r_string("line1\nline2"), "line1\\nline2");
     }
 }

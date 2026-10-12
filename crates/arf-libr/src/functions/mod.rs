@@ -1,5 +1,7 @@
 //! R function bindings loaded at runtime.
 
+mod loader;
+
 use crate::error::{RError, RResult};
 use crate::types::*;
 use libloading::{Library, Symbol};
@@ -9,11 +11,6 @@ use std::path::Path;
 
 /// Global R library instance.
 static R_LIBRARY: OnceCell<RLibrary> = OnceCell::new();
-
-/// Preloaded supporting DLLs on Windows.
-/// These are kept loaded so R packages can find them via the "Loaded-module list".
-#[cfg(windows)]
-static PRELOADED_DLLS: OnceCell<Vec<Library>> = OnceCell::new();
 
 /// Container for the loaded R library and function pointers.
 pub struct RLibrary {
@@ -214,57 +211,7 @@ impl RLibrary {
     /// searches the "Loaded-module list" when resolving DLL dependencies.
     pub fn load(library_path: &Path) -> RResult<Self> {
         unsafe {
-            #[cfg(unix)]
-            let library = {
-                use libloading::os::unix::Library as UnixLibrary;
-                // RTLD_LAZY = 0x1, RTLD_GLOBAL = 0x100
-                const RTLD_LAZY: libc::c_int = 0x1;
-                const RTLD_GLOBAL: libc::c_int = 0x100;
-                let unix_lib = UnixLibrary::open(Some(library_path), RTLD_LAZY | RTLD_GLOBAL)
-                    .map_err(|e| RError::LibraryNotFound(e.to_string()))?;
-                Library::from(unix_lib)
-            };
-
-            #[cfg(windows)]
-            let library = {
-                // Preload supporting DLLs before loading R.dll.
-                // These must be loaded first so they're in the "Loaded-module list"
-                // when R packages (like stats) try to resolve their dependencies.
-                // See: https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
-                crate::windows_loader::configure(library_path)?;
-                let dll_dir = library_path.parent().ok_or_else(|| {
-                    RError::LibraryNotFound("Cannot determine R DLL directory".to_string())
-                })?;
-
-                let _ = PRELOADED_DLLS.get_or_init(|| {
-                    let support_dlls = ["Rblas.dll", "Riconv.dll", "Rlapack.dll", "Rgraphapp.dll"];
-                    let mut loaded = Vec::new();
-
-                    for dll_name in &support_dlls {
-                        let dll_path = dll_dir.join(dll_name);
-                        if dll_path.exists() {
-                            match crate::windows_loader::open(&dll_path) {
-                                Ok(lib) => {
-                                    log::info!("[WINDOWS] Preloaded {}", dll_name);
-                                    loaded.push(Library::from(lib));
-                                }
-                                Err(e) => {
-                                    log::warn!("[WINDOWS] Failed to preload {}: {:?}", dll_name, e);
-                                }
-                            }
-                        } else {
-                            log::debug!("[WINDOWS] {} not found at {:?}", dll_name, dll_path);
-                        }
-                    }
-
-                    loaded
-                });
-
-                // Now load R.dll with the same flags
-                let win_lib = crate::windows_loader::open(library_path)
-                    .map_err(|e| RError::LibraryNotFound(e.to_string()))?;
-                Library::from(win_lib)
-            };
+            let library = loader::open_library(library_path)?;
 
             macro_rules! load_symbol {
                 ($name:ident, $sym:expr) => {

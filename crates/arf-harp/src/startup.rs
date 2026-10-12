@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use arf_libr::{RLibrary, SEXP, SexpType, r_library, r_nil_value};
 
 use crate::error::{HarpError, HarpResult};
+use crate::ffi::install_symbol;
 use crate::protect::RProtect;
 
 /// Override `.Platform$GUI` to `"arf-console"` in `baseenv()`.
@@ -227,16 +228,6 @@ unsafe fn is_callable_function(val: SEXP, lib: &RLibrary) -> bool {
     t == SexpType::ClosSxp as std::os::raw::c_int
         || t == SexpType::BuiltinSxp as std::os::raw::c_int
         || t == SexpType::SpecialSxp as std::os::raw::c_int
-}
-
-/// Install (intern) an R symbol by name.
-unsafe fn install_symbol(name: &str) -> HarpResult<SEXP> {
-    let lib = r_library()?;
-    let name_cstring = CString::new(name).map_err(|_| HarpError::TypeMismatch {
-        expected: "valid UTF-8".to_string(),
-        actual: "string with null byte".to_string(),
-    })?;
-    unsafe { Ok((lib.rf_install)(name_cstring.as_ptr())) }
 }
 
 /// Call `.First()` if it is defined as a function in `.GlobalEnv`.

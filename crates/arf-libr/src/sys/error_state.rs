@@ -355,7 +355,9 @@ fn reset_r_error_state() {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_had_error_value;
+    use super::{
+        CommandOutcome, command_outcome, reset_command_error_state, valid_had_error_value,
+    };
 
     #[test]
     fn malformed_error_values_are_unavailable() {
@@ -364,5 +366,19 @@ mod tests {
         assert_eq!(valid_had_error_value(None), None);
         assert_eq!(valid_had_error_value(Some(-1)), None);
         assert_eq!(valid_had_error_value(Some(2)), None);
+    }
+
+    /// Test command error state tracking.
+    #[test]
+    fn test_command_error_state() {
+        // Reset to known state first
+        reset_command_error_state();
+
+        // Without the safe binding-inspection API, command outcomes are unavailable.
+        assert_eq!(command_outcome(), CommandOutcome::Unavailable);
+
+        // Resetting leaves tracking unavailable without R support.
+        reset_command_error_state();
+        assert_eq!(command_outcome(), CommandOutcome::Unavailable);
     }
 }

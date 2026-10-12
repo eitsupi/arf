@@ -1,240 +1,19 @@
 use crate::error::RResult;
-use crate::functions::{init_r_library, r_library};
 use std::env;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::sync::atomic::Ordering;
 
-use super::discovery::{
-    find_r_library, get_r_home, r_home_from_library_path, r_library_path,
-    set_r_path_vars_from_wrapper,
-};
-#[cfg(windows)]
-use super::interrupt::R_DEFERRED_INTERRUPT_FLAG;
-use super::interrupt::R_INTERRUPT_FLAG;
-#[cfg(windows)]
-use super::output::decode_windows_native;
-use super::output::r_write_console_ex;
-use super::r_read_console;
-
-/// Initialize R with default settings.
-///
-/// # Safety
-/// This function initializes R's global state and must only be called once.
-pub unsafe fn initialize_r() -> RResult<()> {
-    // Use default arguments
-    // Note: --interactive is only needed on Unix; Windows uses Rstart.r_interactive
-    #[cfg(unix)]
-    let args = &["--quiet", "--no-save", "--no-restore-data", "--interactive"];
-    #[cfg(windows)]
-    let args = &["--quiet", "--no-save", "--no-restore-data"];
-
-    // SAFETY: We're forwarding to initialize_r_with_args which handles the unsafe operations
-    unsafe { initialize_r_with_args(args) }
-}
-
-/// Initialize R with custom arguments.
-///
-/// The `r_args` parameter should contain R command-line arguments like
-/// `["--quiet", "--no-save", "--no-restore"]`.
-///
-/// # Safety
-/// This function initializes R's global state and must only be called once.
-pub unsafe fn initialize_r_with_args(r_args: &[&str]) -> RResult<()> {
-    // SAFETY: This function has the same initialization contract as its caller.
-    unsafe { initialize_r_with_args_impl(r_args, false) }
-}
-
-/// Initialize R with an unbounded C-stack policy for tests.
-///
-/// Use this only from an isolated test process. An unbounded C-stack policy
-/// can let runaway recursion exhaust the process stack. This is public only so
-/// downstream test crates can use it.
-///
-/// # Safety
-/// This function initializes R's global state and must only be called once.
-#[doc(hidden)]
-pub unsafe fn initialize_r_for_tests() -> RResult<()> {
-    // Use default arguments
-    // Note: --interactive is only needed on Unix; Windows uses Rstart.r_interactive
-    #[cfg(unix)]
-    let args = &["--quiet", "--no-save", "--no-restore-data", "--interactive"];
-    #[cfg(windows)]
-    let args = &["--quiet", "--no-save", "--no-restore-data"];
-
-    // SAFETY: This function has the same initialization contract as its caller.
-    unsafe { initialize_r_with_args_for_tests(args) }
-}
-
-/// Initialize R with custom arguments and an unbounded C-stack policy for tests.
-///
-/// Use this only from an isolated test process. An unbounded C-stack policy
-/// can let runaway recursion exhaust the process stack.
-///
-/// # Safety
-/// This function initializes R's global state and must only be called once.
-unsafe fn initialize_r_with_args_for_tests(r_args: &[&str]) -> RResult<()> {
-    // SAFETY: This function has the same initialization contract as its caller.
-    unsafe { initialize_r_with_args_impl(r_args, true) }
-}
-
-unsafe fn initialize_r_with_args_impl(r_args: &[&str], disable_cstack_check: bool) -> RResult<()> {
-    // Enable color output for R packages (cli, crayon, etc.)
-    // Embedded R doesn't have a TTY, so we force color output via environment variables.
-    // SAFETY: We're in single-threaded initialization before R starts
-    unsafe {
-        // CLICOLOR_FORCE=1 forces color output even without a TTY
-        if env::var("NO_COLOR").is_err() && env::var("CLICOLOR_FORCE").is_err() {
-            env::set_var("CLICOLOR_FORCE", "1");
-        }
-        // COLORTERM indicates color support level
-        if env::var("COLORTERM").is_err() {
-            env::set_var("COLORTERM", "truecolor");
-        }
-    }
-
-    // Find and load R library
-    let lib_path = find_r_library()?;
-    init_r_library(&lib_path)?;
-
-    // R may have found the library through PATH after an invalid R_HOME was
-    // inherited from the environment. Make R_HOME match the library we are
-    // about to initialize so R can load its system Renviron and base package.
-    let r_home_is_valid = env::var_os("R_HOME")
-        .is_some_and(|r_home| r_library_path(std::path::Path::new(&r_home)).exists());
-    if !r_home_is_valid && let Some(r_home) = r_home_from_library_path(&lib_path) {
-        // SAFETY: We're in single-threaded initialization
-        unsafe { env::set_var("R_HOME", &r_home) };
-    }
-
-    // NOTE: R_LIBS_SITE is intentionally NOT set here. R handles it via
-    // Renviron (defaulting to R_HOME/site-library when unset) and .Library
-    // (R_HOME/library) is always included regardless. See GitHub issue #86.
-
-    // Set R_DOC_DIR, R_SHARE_DIR, R_INCLUDE_DIR if not already set.
-    // These are normally exported by R's shell wrapper script ($R_HOME/bin/R),
-    // which is bypassed when embedding R. On distributions where these paths
-    // differ from the default $R_HOME/<component> (e.g., Fedora/RHEL), this
-    // causes R.home("doc") etc. to return non-existent paths.
-    // SAFETY: We're in single-threaded initialization
-    if let Ok(r_home) = get_r_home() {
-        set_r_path_vars_from_wrapper(&r_home);
-    }
-
-    let lib = r_library()?;
-
-    // Platform-specific initialization
-    #[cfg(unix)]
-    unsafe {
-        initialize_r_unix(lib, r_args, disable_cstack_check)?;
-    }
-
-    #[cfg(windows)]
-    unsafe {
-        initialize_r_windows(lib, r_args, disable_cstack_check)?;
-    }
-
-    Ok(())
-}
-
-/// Unix-specific R initialization.
-#[cfg(unix)]
-unsafe fn initialize_r_unix(
-    lib: &crate::functions::RLibrary,
-    r_args: &[&str],
-    disable_cstack_check: bool,
-) -> RResult<()> {
-    normalize_empty_r_profile_user();
-
-    unsafe {
-        // Set R_running_as_main_program before initialization (like ark does)
-        if !lib.r_running_as_main_program.is_null() {
-            *lib.r_running_as_main_program = 1;
-        }
-
-        // Disable R's signal handlers before initialization.
-        // With R_SignalHandlers = 0, setup_Rmainloop skips init_signal_handlers()
-        // entirely: no SIGINT handler, but also no SIGSEGV/SIGILL/SIGBUS crash
-        // handlers or SIGUSR1/SIGUSR2 save-and-quit handlers, which are
-        // undesirable for an embedded frontend. The REPL installs its own
-        // Ctrl+C handler (see repl/mod.rs) that sets R_interrupts_pending,
-        // replicating R's standard handleInterrupt behavior.
-        if !lib.r_signalhandlers.is_null() {
-            *lib.r_signalhandlers = 0;
-        }
-
-        // Store the interrupt flag pointer for use by the Ctrl+C handler
-        if !lib.r_interrupts_pending.is_null() {
-            R_INTERRUPT_FLAG.store(lib.r_interrupts_pending, Ordering::Release);
-        }
-
-        // Prepare arguments for R initialization
-        let mut args: Vec<CString> = vec![CString::new("arf").unwrap()];
-        for arg in r_args {
-            if let Ok(cstr) = CString::new(*arg) {
-                args.push(cstr);
-            }
-        }
-        let arg_ptrs: Vec<*const c_char> = args.iter().map(|s| s.as_ptr()).collect();
-
-        // Initialize R
-        (lib.rf_initialize_r)(args.len() as c_int, arg_ptrs.as_ptr());
-
-        // Mark R as interactive
-        if !lib.r_interactive.is_null() {
-            *lib.r_interactive = 1;
-        }
-
-        // Disable stack checking only for legacy tests that need deep recursion.
-        if disable_cstack_check && !lib.r_cstacklimit.is_null() {
-            *lib.r_cstacklimit = usize::MAX;
-        }
-
-        // Redirect console output (set file pointers to NULL so callbacks are used)
-        if !lib.r_consolefile.is_null() {
-            *lib.r_consolefile = std::ptr::null_mut();
-        }
-        if !lib.r_outputfile.is_null() {
-            *lib.r_outputfile = std::ptr::null_mut();
-        }
-
-        // Disable default console write
-        if !lib.ptr_r_writeconsole.is_null() {
-            *lib.ptr_r_writeconsole = None;
-        }
-
-        // Set our console write callback
-        if !lib.ptr_r_writeconsoleex.is_null() {
-            *lib.ptr_r_writeconsoleex = Some(r_write_console_ex);
-        }
-
-        // Setup R main loop (but don't run it)
-        (lib.setup_rmainloop)();
-    }
-
-    Ok(())
-}
-
-/// Unset an empty `R_PROFILE_USER` so R uses its normal user-profile search.
-///
-/// Some R terminal integrations set `R_PROFILE_USER` to a wrapper script on
-/// startup, then reset it to `""` after the script runs. An exec-based restart
-/// inherits that value, and R treats it as an explicit instruction to skip user
-/// profiles instead of falling back to `.Rprofile`.
-#[cfg(unix)]
-fn normalize_empty_r_profile_user() {
-    if env::var("R_PROFILE_USER").as_deref() == Ok("") {
-        // SAFETY: R initialization is single-threaded.
-        unsafe { env::remove_var("R_PROFILE_USER") };
-    }
-}
+use crate::sys::discovery::get_r_home;
+use crate::sys::interrupt::{R_DEFERRED_INTERRUPT_FLAG, R_INTERRUPT_FLAG};
+use crate::sys::output::{decode_windows_native, r_write_console_ex};
+use crate::sys::read_console::r_read_console;
 
 /// Enable virtual terminal processing on Windows.
 ///
 /// This is required for ANSI escape sequences (colors) to work in the Windows console.
 /// Without this, escape codes like `\x1b[31m` (red) are printed literally instead
 /// of being interpreted as formatting.
-#[cfg(windows)]
 fn enable_windows_virtual_terminal() {
     use std::os::windows::io::AsRawHandle;
 
@@ -271,8 +50,7 @@ fn enable_windows_virtual_terminal() {
 /// On Windows, R uses a params-based approach instead of global function pointers.
 /// We need to create an Rstart struct, set callbacks on it, then call R_SetParams.
 /// This follows the ark pattern for Windows R initialization.
-#[cfg(windows)]
-unsafe fn initialize_r_windows(
+pub(super) unsafe fn initialize_r_windows(
     lib: &crate::functions::RLibrary,
     r_args: &[&str],
     disable_cstack_check: bool,
@@ -472,7 +250,6 @@ unsafe fn initialize_r_windows(
     Ok(())
 }
 
-#[cfg(windows)]
 fn windows_r_home_path(path: &std::path::Path) -> std::path::PathBuf {
     use std::path::{Component, PathBuf, Prefix};
 
@@ -489,7 +266,7 @@ fn windows_r_home_path(path: &std::path::Path) -> std::path::PathBuf {
     native
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod windows_path_tests {
     use super::windows_r_home_path;
     use std::path::Path;
@@ -528,7 +305,6 @@ mod windows_path_tests {
 /// `getRUser()` stores its result in a static buffer inside R.dll
 /// (`UserRHome`), so the returned pointer is valid for the lifetime of the
 /// process and does not need to be freed by the caller.
-#[cfg(windows)]
 fn get_r_user_home(lib: &crate::functions::RLibrary) -> String {
     let r_user = unsafe { (lib.get_r_user)() };
 
@@ -561,13 +337,11 @@ fn get_r_user_home(lib: &crate::functions::RLibrary) -> String {
 }
 
 /// Windows callback for ProcessEvents (no-op).
-#[cfg(windows)]
 extern "C" fn r_callback() {
     // Do nothing
 }
 
 /// Windows callback for ShowMessage.
-#[cfg(windows)]
 extern "C" fn r_show_message(msg: *const c_char) {
     if !msg.is_null()
         && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str()
@@ -578,7 +352,6 @@ extern "C" fn r_show_message(msg: *const c_char) {
 
 /// Windows callback for YesNoCancel.
 /// Returns 1 for Yes, -1 for No, 0 for Cancel.
-#[cfg(windows)]
 extern "C" fn r_yes_no_cancel(question: *const c_char) -> c_int {
     // This is used during R's CleanUp when SA_SAVEASK is used.
     // We return -1 (No) to avoid saving.
@@ -591,13 +364,11 @@ extern "C" fn r_yes_no_cancel(question: *const c_char) -> c_int {
 }
 
 /// Windows callback for Busy indicator.
-#[cfg(windows)]
 extern "C" fn r_busy(_which: c_int) {
     // Do nothing - we don't have a busy indicator
 }
 
 /// Windows callback for Suicide (fatal error).
-#[cfg(windows)]
 extern "C" fn r_suicide(msg: *const c_char) {
     if !msg.is_null()
         && let Ok(s) = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str()
@@ -606,47 +377,4 @@ extern "C" fn r_suicide(msg: *const c_char) {
         eprintln!("R fatal error: {}", s);
     }
     std::process::exit(1);
-}
-
-/// Run R's main event loop.
-///
-/// This calls R's `run_Rmainloop()` which never returns normally.
-/// It will continuously call the ReadConsole callback to get user input.
-///
-/// # Safety
-/// R must be initialized before calling this function.
-pub unsafe fn run_r_mainloop() {
-    log::info!("run_r_mainloop: entering");
-
-    let lib = match r_library() {
-        Ok(lib) => lib,
-        Err(e) => {
-            log::error!("run_r_mainloop: failed to get r_library: {:?}", e);
-            return;
-        }
-    };
-
-    // Set up our ReadConsole callback (Unix only - Windows sets it in R_SetParams)
-    #[cfg(unix)]
-    unsafe {
-        if !lib.ptr_r_readconsole.is_null() {
-            *lib.ptr_r_readconsole = Some(r_read_console);
-        }
-    }
-
-    // Check R_Interactive value before running mainloop
-    unsafe {
-        if !lib.r_interactive.is_null() {
-            log::info!("run_r_mainloop: R_Interactive = {}", *lib.r_interactive);
-        }
-    }
-
-    log::info!("run_r_mainloop: calling run_Rmainloop");
-
-    // Run R's main loop - this doesn't return
-    unsafe {
-        (lib.run_rmainloop)();
-    }
-
-    log::info!("run_r_mainloop: run_Rmainloop returned (unexpected)");
 }

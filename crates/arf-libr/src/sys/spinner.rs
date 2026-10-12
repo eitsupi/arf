@@ -22,8 +22,7 @@ pub(super) struct SpinnerThread {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
-pub(super) static SPINNER_THREAD: std::sync::Mutex<Option<SpinnerThread>> =
-    std::sync::Mutex::new(None);
+static SPINNER_THREAD: std::sync::Mutex<Option<SpinnerThread>> = std::sync::Mutex::new(None);
 
 /// Configure the spinner animation frames.
 ///
@@ -164,5 +163,74 @@ pub fn stop_spinner() {
         // Clear the spinner from the display
         print!("\r\x1b[K");
         let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_spinner_active() -> bool {
+        SPINNER_THREAD
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Combined spinner test to avoid race conditions from parallel tests sharing global state.
+    /// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
+    #[test]
+    fn test_spinner_lifecycle() {
+        // Verify the spinner lock isn't poisoned from a previous panic.
+        // We release immediately since start_spinner/stop_spinner need to acquire it.
+        drop(SPINNER_THREAD.lock().unwrap());
+
+        // Reset to known state first
+        stop_spinner();
+        set_spinner_frames("");
+
+        // Test 1: Initial state should be inactive
+        assert!(!is_spinner_active());
+
+        // Test 2: Spinner disabled with empty frames
+        set_spinner_frames("");
+        start_spinner();
+        assert!(!is_spinner_active()); // Should not be active when frames are empty
+
+        // Test 3: Basic start/stop
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+
+        // Test 4: With color
+        set_spinner_frames("⠋⠙⠹");
+        set_spinner_color("\x1b[36m"); // Cyan
+        start_spinner();
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+
+        // Test 5: Double start (should be no-op)
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        assert!(is_spinner_active());
+        start_spinner(); // Second start should be a no-op
+        assert!(is_spinner_active());
+        stop_spinner();
+        assert!(!is_spinner_active());
+
+        // Test 6: Double stop (should be no-op)
+        set_spinner_frames("⠋⠙⠹");
+        start_spinner();
+        stop_spinner();
+        assert!(!is_spinner_active());
+        stop_spinner(); // Second stop should be a no-op
+        assert!(!is_spinner_active());
+
+        // Cleanup
+        set_spinner_frames("");
+        set_spinner_color("");
     }
 }

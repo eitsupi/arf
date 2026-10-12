@@ -5,11 +5,13 @@
 
 pub mod completion;
 mod error;
+mod ffi;
 pub mod help;
 pub mod help_bridge;
 pub mod lib_paths;
 mod object;
 mod protect;
+mod r_string;
 mod routines;
 pub mod startup;
 
@@ -19,6 +21,7 @@ mod test_support;
 pub use error::*;
 pub use object::*;
 pub use protect::*;
+pub use r_string::escape_r_string;
 #[cfg(windows)]
 pub use startup::override_platform_gui;
 pub use startup::{

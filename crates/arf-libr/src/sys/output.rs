@@ -186,7 +186,7 @@ const ANSI_RESET: &str = "\x1b[0m";
 ///
 /// Wraps the input string in ANSI escape codes to display it in red.
 /// This matches the behavior of radian's stderr_format.
-pub(super) fn format_error_output(s: &str) -> String {
+fn format_error_output(s: &str) -> String {
     format!("{}{}{}", ANSI_RED, s, ANSI_RESET)
 }
 
@@ -194,7 +194,7 @@ pub(super) fn format_error_output(s: &str) -> String {
 ///
 /// ANSI escapes start with ESC (0x1B) followed by '[' and end with a letter.
 /// Examples: \x1b[31m (red), \x1b[0m (reset), \x1b[2K (clear line)
-pub(super) fn strip_ansi_escapes(s: &str) -> String {
+fn strip_ansi_escapes(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
@@ -230,7 +230,7 @@ pub(super) fn strip_ansi_escapes(s: &str) -> String {
 ///
 /// Returns a `Cow<str>` to avoid allocation when no CR characters are present.
 #[cfg(any(windows, test))]
-pub(super) fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
+fn strip_cr(s: &str) -> std::borrow::Cow<'_, str> {
     if s.contains('\r') {
         std::borrow::Cow::Owned(s.replace('\r', ""))
     } else {
@@ -435,5 +435,70 @@ pub fn flush_reprex_buffer() {
         println!("{}{}", settings.comment, settings.line_buffer);
         settings.line_buffer.clear();
         settings.had_output = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_error_output() {
+        // Basic error message
+        let formatted = format_error_output("Error: foo");
+        assert_eq!(formatted, "\x1b[31mError: foo\x1b[0m");
+
+        // Empty string
+        let formatted = format_error_output("");
+        assert_eq!(formatted, "\x1b[31m\x1b[0m");
+
+        // Multiline error
+        let formatted = format_error_output("Error in x:\n  undefined");
+        assert_eq!(formatted, "\x1b[31mError in x:\n  undefined\x1b[0m");
+    }
+
+    #[test]
+    fn test_strip_ansi_escapes() {
+        // Strip red color codes
+        let stripped = strip_ansi_escapes("\x1b[31mError: foo\x1b[0m");
+        assert_eq!(stripped, "Error: foo");
+
+        // Strip multiple color codes
+        let stripped = strip_ansi_escapes("\x1b[1m\x1b[31mBold Red\x1b[0m");
+        assert_eq!(stripped, "Bold Red");
+
+        // No escape codes
+        let stripped = strip_ansi_escapes("plain text");
+        assert_eq!(stripped, "plain text");
+
+        // Complex sequence (cursor movement)
+        let stripped = strip_ansi_escapes("before\x1b[2Kafter");
+        assert_eq!(stripped, "beforeafter");
+    }
+
+    #[test]
+    fn test_strip_cr() {
+        // CRLF should be converted to LF
+        let stripped = strip_cr("Error: foo\r\nbar\r\n");
+        assert_eq!(stripped, "Error: foo\nbar\n");
+
+        // Text without CR should be unchanged (and borrowed, not owned)
+        let input = "Error: foo\nbar\n";
+        let stripped = strip_cr(input);
+        assert_eq!(stripped, input);
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
+
+        // Standalone CR should also be stripped
+        let stripped = strip_cr("Error: \"{\r\" の)");
+        assert_eq!(stripped, r#"Error: "{" の)"#);
+
+        // Mixed line endings: all CR should be removed
+        let stripped = strip_cr("line1\r\nline2\nline3\r");
+        assert_eq!(stripped, "line1\nline2\nline3");
+
+        // Empty string
+        let stripped = strip_cr("");
+        assert_eq!(stripped, "");
+        assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
     }
 }

@@ -1,185 +1,4 @@
 use super::*;
-use std::ffi::OsString;
-use std::path::Path;
-
-fn is_spinner_active() -> bool {
-    SPINNER_THREAD
-        .lock()
-        .map(|guard| guard.is_some())
-        .unwrap_or(false)
-}
-
-#[test]
-fn prompt_info_detects_ambiguity_without_changing_exact_classification() {
-    let info = prompt_info_from_options("same> ", Some("same> "), Some("same> "));
-
-    assert!(info.is_continuation);
-    assert!(info.options_are_ambiguous);
-}
-
-#[test]
-fn prompt_info_matches_only_the_current_continuation_option() {
-    let info = prompt_info_from_options("... ", Some("> "), Some("... "));
-
-    assert!(info.is_continuation);
-    assert!(!info.options_are_ambiguous);
-
-    let main_prompt = prompt_info_from_options("> ", Some("> "), Some("... "));
-    assert!(!main_prompt.is_continuation);
-    assert!(!main_prompt.options_are_ambiguous);
-}
-
-#[test]
-fn prompt_info_uses_default_continuation_only_when_option_is_unavailable() {
-    let fallback = prompt_info_from_options("+ ", Some("> "), None);
-    let custom = prompt_info_from_options("+ ", Some("> "), Some("... "));
-
-    assert!(fallback.is_continuation);
-    assert!(!fallback.options_are_ambiguous);
-    assert!(!custom.is_continuation);
-}
-
-#[test]
-fn prompt_info_does_not_mark_malformed_options_as_ambiguous() {
-    let missing_main = prompt_info_from_options("+ ", None, Some("+ "));
-    let missing_continue = prompt_info_from_options("+ ", Some("+ "), None);
-
-    assert!(!missing_main.options_are_ambiguous);
-    assert!(!missing_continue.options_are_ambiguous);
-}
-
-/// Combined spinner test to avoid race conditions from parallel tests sharing global state.
-/// Tests spinner lifecycle: config, start, stop, double-start, double-stop, and color.
-#[test]
-fn test_spinner_lifecycle() {
-    // Verify the spinner lock isn't poisoned from a previous panic.
-    // We release immediately since start_spinner/stop_spinner need to acquire it.
-    drop(SPINNER_THREAD.lock().unwrap());
-
-    // Reset to known state first
-    stop_spinner();
-    set_spinner_frames("");
-
-    // Test 1: Initial state should be inactive
-    assert!(!is_spinner_active());
-
-    // Test 2: Spinner disabled with empty frames
-    set_spinner_frames("");
-    start_spinner();
-    assert!(!is_spinner_active()); // Should not be active when frames are empty
-
-    // Test 3: Basic start/stop
-    set_spinner_frames("⠋⠙⠹");
-    start_spinner();
-    assert!(is_spinner_active());
-    stop_spinner();
-    assert!(!is_spinner_active());
-
-    // Test 4: With color
-    set_spinner_frames("⠋⠙⠹");
-    set_spinner_color("\x1b[36m"); // Cyan
-    start_spinner();
-    assert!(is_spinner_active());
-    stop_spinner();
-    assert!(!is_spinner_active());
-
-    // Test 5: Double start (should be no-op)
-    set_spinner_frames("⠋⠙⠹");
-    start_spinner();
-    assert!(is_spinner_active());
-    start_spinner(); // Second start should be a no-op
-    assert!(is_spinner_active());
-    stop_spinner();
-    assert!(!is_spinner_active());
-
-    // Test 6: Double stop (should be no-op)
-    set_spinner_frames("⠋⠙⠹");
-    start_spinner();
-    stop_spinner();
-    assert!(!is_spinner_active());
-    stop_spinner(); // Second stop should be a no-op
-    assert!(!is_spinner_active());
-
-    // Cleanup
-    set_spinner_frames("");
-    set_spinner_color("");
-}
-
-/// Test command error state tracking.
-#[test]
-fn test_command_error_state() {
-    use super::CommandOutcome;
-
-    // Reset to known state first
-    reset_command_error_state();
-
-    // Without the safe binding-inspection API, command outcomes are unavailable.
-    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
-
-    // Resetting leaves tracking unavailable without R support.
-    reset_command_error_state();
-    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
-}
-
-#[test]
-fn test_format_error_output() {
-    // Basic error message
-    let formatted = format_error_output("Error: foo");
-    assert_eq!(formatted, "\x1b[31mError: foo\x1b[0m");
-
-    // Empty string
-    let formatted = format_error_output("");
-    assert_eq!(formatted, "\x1b[31m\x1b[0m");
-
-    // Multiline error
-    let formatted = format_error_output("Error in x:\n  undefined");
-    assert_eq!(formatted, "\x1b[31mError in x:\n  undefined\x1b[0m");
-}
-
-#[test]
-fn test_strip_ansi_escapes() {
-    // Strip red color codes
-    let stripped = strip_ansi_escapes("\x1b[31mError: foo\x1b[0m");
-    assert_eq!(stripped, "Error: foo");
-
-    // Strip multiple color codes
-    let stripped = strip_ansi_escapes("\x1b[1m\x1b[31mBold Red\x1b[0m");
-    assert_eq!(stripped, "Bold Red");
-
-    // No escape codes
-    let stripped = strip_ansi_escapes("plain text");
-    assert_eq!(stripped, "plain text");
-
-    // Complex sequence (cursor movement)
-    let stripped = strip_ansi_escapes("before\x1b[2Kafter");
-    assert_eq!(stripped, "beforeafter");
-}
-
-#[test]
-fn test_strip_cr() {
-    // CRLF should be converted to LF
-    let stripped = strip_cr("Error: foo\r\nbar\r\n");
-    assert_eq!(stripped, "Error: foo\nbar\n");
-
-    // Text without CR should be unchanged (and borrowed, not owned)
-    let input = "Error: foo\nbar\n";
-    let stripped = strip_cr(input);
-    assert_eq!(stripped, input);
-    assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
-
-    // Standalone CR should also be stripped
-    let stripped = strip_cr("Error: \"{\r\" の)");
-    assert_eq!(stripped, r#"Error: "{" の)"#);
-
-    // Mixed line endings: all CR should be removed
-    let stripped = strip_cr("line1\r\nline2\nline3\r");
-    assert_eq!(stripped, "line1\nline2\nline3");
-
-    // Empty string
-    let stripped = strip_cr("");
-    assert_eq!(stripped, "");
-    assert!(matches!(stripped, std::borrow::Cow::Borrowed(_)));
-}
 
 #[test]
 fn test_parse_var_from_wrapper_script() {
@@ -378,7 +197,7 @@ R_DOC_DIR=/usr/share/doc/R
 
 #[test]
 fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
-    let _env_guard = super::test_utils::RDocDirGuard::new("/custom/doc");
+    let _env_guard = crate::sys::test_utils::RDocDirGuard::new("/custom/doc");
 
     // Create a temp dir with a fake wrapper script (auto-cleaned on drop)
     let tmp = tempfile::tempdir().unwrap();
@@ -401,7 +220,7 @@ fn test_set_r_path_vars_from_wrapper_skips_existing_env() {
 fn set_r_path_vars_from_wrapper_preserves_non_utf8_existing_env() {
     use std::os::unix::ffi::OsStringExt;
 
-    let _env_guard = super::test_utils::RDocDirGuard::new("temporary");
+    let _env_guard = crate::sys::test_utils::RDocDirGuard::new("temporary");
     let existing = OsString::from_vec(b"/custom/doc-\xff".to_vec());
     // SAFETY: RDocDirGuard holds the environment test mutex and restores the original value.
     unsafe { std::env::set_var("R_DOC_DIR", &existing) };
