@@ -537,7 +537,14 @@ fn send_request_inner(
 fn finish_unix_request(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
 
-    stream.shutdown(std::net::Shutdown::Write)?;
+    // The server reads the request by Content-Length, so it can respond and
+    // close before this half-close. macOS then reports ENOTCONN although the
+    // response is still buffered; an empty or partial response still fails
+    // to parse.
+    match stream.shutdown(std::net::Shutdown::Write) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
+        result => result?,
+    }
     let mut response_buf = Vec::new();
     stream.read_to_end(&mut response_buf)?;
     Ok(response_buf)

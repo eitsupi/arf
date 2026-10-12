@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
+
 ## [0.7.0-alpha.1] - 2026-10-11
 
 ### Added
