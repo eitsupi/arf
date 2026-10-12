@@ -5,8 +5,11 @@
 //! These cases verify interactive screen and prompt behavior, plus the raw
 //! JSON-RPC transport shape in the `ipc` module.
 
+#[path = "../common/mod.rs"]
+mod common;
 mod config;
 mod history;
+mod history_status;
 mod input;
 mod ipc;
 mod output;

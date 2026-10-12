@@ -1,6 +1,7 @@
+mod common;
+
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const CHILD_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -83,23 +84,17 @@ cat("overflow-caught-and-continued\n")
     }
 
     let mut child = command.spawn().expect("start product R process");
-    let started = Instant::now();
-    loop {
-        if child.try_wait().expect("poll product R process").is_some() {
-            break;
-        }
-        if started.elapsed() >= CHILD_TIMEOUT {
-            child.kill().expect("kill timed-out product R process");
-            let output = child
-                .wait_with_output()
-                .expect("collect timed-out product R process output");
-            panic!(
-                "product R process exceeded {CHILD_TIMEOUT:?}; stdout={}, stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        thread::sleep(Duration::from_millis(50));
+    let exited = common::wait_for_child_exit(&mut child, CHILD_TIMEOUT, Duration::from_millis(50))
+        .expect("poll product R process");
+    if !exited {
+        let output = child
+            .wait_with_output()
+            .expect("collect timed-out product R process output");
+        panic!(
+            "product R process exceeded {CHILD_TIMEOUT:?}; stdout={}, stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let output = child

@@ -1,5 +1,5 @@
 use super::support::*;
-use std::process::Command;
+use crate::common::sanitized_arf_command;
 
 #[cfg(windows)]
 #[test]
@@ -99,7 +99,7 @@ fn test_interactive_only_top_level_flags_before_headless_rejected() {
         ),
     ];
     for (flag, expected) in cases {
-        let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+        let output = sanitized_arf_command()
             .args([flag, "headless"])
             .output()
             .unwrap_or_else(|e| panic!("{flag}: failed to run arf: {e}"));

@@ -1,5 +1,7 @@
 //! CLI contracts for strict rig-project selection using native fake commands.
 
+mod common;
+
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,24 +10,7 @@ use std::sync::OnceLock;
 fn probe_bytes() -> &'static [u8] {
     static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
     BYTES.get_or_init(|| {
-        let directory = tempfile::tempdir().unwrap();
-        let binary = directory
-            .path()
-            .join(format!("rig-project-probe{}", std::env::consts::EXE_SUFFIX));
-        let source =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rig_project_probe.rs");
-        let output = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
-            .arg(source)
-            .args(["--edition=2024", "-D", "warnings", "-o"])
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        std::fs::read(binary).unwrap()
+        common::compile_fixture("rig_project_probe").unwrap_or_else(|error| panic!("{error}"))
     })
 }
 
@@ -50,23 +35,11 @@ impl Fixture {
         let wrapper = root_path
             .join(".rvenv/bin")
             .join(if cfg!(windows) { "R.exe" } else { "R" });
-        std::fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
-        std::fs::write(&wrapper, probe_bytes()).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        common::write_executable(&wrapper, probe_bytes()).unwrap();
 
         let bin = root_path.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
         let fake_rig = bin.join(format!("rig{}", std::env::consts::EXE_SUFFIX));
-        std::fs::write(&fake_rig, probe_bytes()).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&fake_rig, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        common::write_executable(&fake_rig, probe_bytes()).unwrap();
 
         let home = root_path.join("r-installation");
         let library = arf_libr::r_library_path(&home);

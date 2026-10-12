@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/rig.rs
 expression: normalize_descriptor(&value)
 ---
 {
@@ -16,13 +16,13 @@ expression: normalize_descriptor(&value)
   "selected_by": {
     "kind": "version_request",
     "requested_r_home": null,
-    "requested_version": "4.4.2",
+    "requested_version": "my-proj",
     "source": {
-      "format": "text",
+      "format": null,
       "key": null,
-      "kind": "project_file",
-      "name": null,
-      "path": "<source-path>"
+      "kind": "command_line_argument",
+      "name": "--with-r-version",
+      "path": null
     }
   },
   "target": {

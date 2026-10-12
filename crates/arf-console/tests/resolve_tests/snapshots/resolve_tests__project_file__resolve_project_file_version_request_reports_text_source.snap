@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/project_file.rs
 expression: normalize_descriptor(&value)
 ---
 {
@@ -18,8 +18,8 @@ expression: normalize_descriptor(&value)
     "requested_r_home": null,
     "requested_version": "4.4.2",
     "source": {
-      "format": "toml",
-      "key": "project.r_version",
+      "format": "text",
+      "key": null,
       "kind": "project_file",
       "name": null,
       "path": "<source-path>"

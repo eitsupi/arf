@@ -1,10 +1,17 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/descriptor.rs
 expression: normalize_descriptor(&value)
 ---
 {
   "cwd": "<cwd>",
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "code": "config.parse_failed",
+      "message": "Failed to load config from <path>: TOML parse error at line 1, column 5\n  |\n1 | not valid = [toml\n  |     ^\nkey with no value, expected `=`\n. Using default configuration.",
+      "path": "<diagnostic-path>",
+      "severity": "warning"
+    }
+  ],
   "metadata": null,
   "provider": "explicit_path",
   "resolved": true,

@@ -1,3 +1,5 @@
+#[path = "../common/mod.rs"]
+mod common;
 mod error_codes;
 mod eval;
 mod history;

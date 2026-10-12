@@ -1,7 +1,8 @@
 //! Real Pixi regressions run only by the dedicated integration workflow.
 #![allow(dead_code)]
 
-#[path = "tui_tests/support.rs"]
+mod common;
+#[path = "tui_tests/support/mod.rs"]
 mod support;
 
 use anyhow::{Context, Result, ensure};

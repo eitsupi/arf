@@ -1,12 +1,11 @@
-use super::support::{DEFAULT_CONFIG, PROMPT, Terminal, run_case_with, wait_for_path_absent};
+use super::support::{
+    DEFAULT_CONFIG, POLL_INTERVAL, PROMPT, Terminal, WAIT, run_case_with, wait_for_path_absent,
+};
+use crate::common::try_poll_until;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::{Duration, Instant};
-
-const WAIT: Duration = Duration::from_secs(30);
 
 #[cfg(unix)]
 fn custom_bind_path(root: &Path) -> String {
@@ -37,8 +36,8 @@ fn wait_for_replacement(
     bind_path: &str,
     changed_cwd: &str,
 ) -> Result<(u32, PathBuf, Value)> {
-    let started = Instant::now();
-    loop {
+    let mut last_state = None;
+    let replacement = try_poll_until(WAIT, POLL_INTERVAL, || {
         let state = terminal.state()?;
         let line = terminal.screen_line(state.cursor.y, state.cols)?;
         let output = terminal.output_since(checkpoint)?;
@@ -54,15 +53,14 @@ fn wait_for_replacement(
                 && json["socket_path"] == bind_path
                 && json["cwd"] == changed_cwd
             {
-                return Ok((pid, metadata, json));
+                return Ok(Some((pid, metadata, json)));
             }
         }
-        ensure!(
-            started.elapsed() < WAIT,
-            "timed out waiting for replacement readiness: {state:?}"
-        );
-        thread::sleep(Duration::from_millis(25));
-    }
+        last_state = Some(state);
+        Ok(None)
+    })?;
+    replacement
+        .with_context(|| format!("timed out waiting for replacement readiness: {last_state:?}"))
 }
 
 #[test]

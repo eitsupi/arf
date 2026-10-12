@@ -1,4 +1,5 @@
 use super::support::*;
+use crate::common::poll_until;
 use std::path::{Path, PathBuf};
 
 /// Locate a directory holding a real `R` executable but no `rig`.
@@ -35,15 +36,16 @@ fn test_headless_json_reports_runtime_r_home_in_path_mode() {
         HeadlessProcess::spawn_with_args_and_env(&["--json"], &[("PATH", restricted_path)])
             .expect("Failed to spawn headless in PATH mode");
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while process.stdout_output().trim().is_empty() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "Timed out waiting for JSON on stdout. stderr: {}",
-            process.stderr_output()
-        );
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    assert!(
+        poll_until(
+            std::time::Duration::from_secs(15),
+            std::time::Duration::from_millis(50),
+            || (!process.stdout_output().trim().is_empty()).then_some(())
+        )
+        .is_some(),
+        "Timed out waiting for JSON on stdout. stderr: {}",
+        process.stderr_output()
+    );
 
     let stdout = process.stdout_output();
     let json: serde_json::Value = serde_json::from_str(stdout.trim())
