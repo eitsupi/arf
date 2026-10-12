@@ -947,21 +947,23 @@ impl HistoryBrowser {
 
         // Footer line 2: keybindings or feedback message
         stdout.execute(terminal::Clear(ClearType::CurrentLine))?;
+        // The footer is the last screen row; a trailing newline would scroll
+        // the whole frame up and push the header off the screen.
         if self.show_delete_dialog {
             let dialog_msg = format!(
                 "  Delete {} selected entries? (Enter=confirm, Esc=cancel)",
                 selected_count
             );
-            println!("\r{}", pad_to_width(&dialog_msg, width).yellow().bold());
+            print!("\r{}", pad_to_width(&dialog_msg, width).yellow().bold());
         } else if let Some(ref msg) = self.feedback_message {
-            println!("\r{}", pad_to_width(&format!("  {}", msg), width));
+            print!("\r{}", pad_to_width(&format!("  {}", msg), width));
         } else {
             let footer = if self.filter_active {
                 "  Enter confirm | Esc clear | ↑↓/PgUp/PgDn navigate | Tab select"
             } else {
                 "  / filter | Space/Tab select | d delete | y copy | Enter copy+exit | q exit"
             };
-            println!("\r{}", pad_to_width(footer, width).dark_grey());
+            print!("\r{}", pad_to_width(footer, width).dark_grey());
         }
 
         queue!(stdout, EndSynchronizedUpdate)?;

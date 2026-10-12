@@ -156,7 +156,9 @@ impl HelpBrowser {
         // Build plain text first, pad it, then apply style.
         // pad_to_width is not ANSI-aware, so styling must come after padding.
         let footer_plain = "  ↑↓ navigate Tab/Enter select Esc exit";
-        writeln!(
+        // The footer is the last screen row; a trailing newline would scroll
+        // the whole frame up and push the header off the screen.
+        write!(
             stdout,
             "\r{}",
             pad_to_width(footer_plain, width).dark_grey()
