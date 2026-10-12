@@ -61,13 +61,12 @@ fn reprex_paste_strips_output_lines() -> Result<()> {
         &["--no-auto-match", "--no-completion"],
         |terminal| {
             terminal.enter(":reprex on")?;
-            terminal.wait_for("reprex mode enabled", |state, _| {
-                state.text.contains("Reprex: on")
-            })?;
+            terminal.wait_for_prompt(Some("# [arf] Reprex: on"), "[reprex] ARF>")?;
             terminal.enter(":reprex format")?;
-            terminal.wait_for("reprex format enabled", |state, _| {
-                state.text.contains("Reprex: format")
-            })?;
+            // Paste only once the next prompt is drawn. On Windows, input that
+            // arrives before the line editor enables bracketed paste loses
+            // its paste markers, so each pasted line would be submitted alone.
+            terminal.wait_for_prompt(Some("# [arf] Reprex: format"), "[format] ARF>")?;
 
             terminal.write(
                 "\x1b[200~x <- 42\n#> STALE_OUTPUT_42\nx + 1\n#> STALE_OUTPUT_43\x1b[201~\r",
