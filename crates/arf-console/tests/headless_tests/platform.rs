@@ -84,30 +84,31 @@ fn test_system_works() {
     );
 }
 
-/// Test that an interactive-only top-level `--slave` flag is rejected before
-/// the headless subcommand instead of being silently ignored.
+/// Interactive-only top-level flags are rejected before the headless
+/// subcommand instead of being silently ignored.
 #[test]
-fn test_top_level_slave_before_headless_rejected() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["--slave", "headless"])
-        .output()
-        .expect("Failed to run arf with --slave");
+fn test_interactive_only_top_level_flags_before_headless_rejected() {
+    let cases = [
+        (
+            "--slave",
+            "'--slave' is not used by the 'headless' subcommand",
+        ),
+        (
+            "--no-echo",
+            "'--no-echo' is not used by the 'headless' subcommand",
+        ),
+    ];
+    for (flag, expected) in cases {
+        let output = Command::new(env!("CARGO_BIN_EXE_arf"))
+            .args([flag, "headless"])
+            .output()
+            .unwrap_or_else(|e| panic!("{flag}: failed to run arf: {e}"));
 
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("'--slave' is not used by the 'headless' subcommand"));
-}
-
-/// Test that an interactive-only top-level `--no-echo` flag is rejected before
-/// the headless subcommand instead of being silently ignored.
-#[test]
-fn test_top_level_no_echo_before_headless_rejected() {
-    let output = Command::new(env!("CARGO_BIN_EXE_arf"))
-        .args(["--no-echo", "headless"])
-        .output()
-        .expect("Failed to run arf with --no-echo");
-
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("'--no-echo' is not used by the 'headless' subcommand"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{flag}: {stderr}");
+        assert!(
+            stderr.contains(expected),
+            "{flag}: stderr should contain {expected:?}: {stderr}"
+        );
+    }
 }

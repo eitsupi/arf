@@ -15,28 +15,6 @@ fn sanitized_arf_command() -> Command {
     command
 }
 
-fn assert_top_level_scope_error(args: &[&str], expected: &[&str]) {
-    let output = sanitized_arf_command()
-        .args(args)
-        .output()
-        .expect("Failed to run arf");
-
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "scope errors should use clap's exit code: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    for text in expected {
-        assert!(
-            stderr.contains(text),
-            "scope error should contain {text:?}: {stderr}"
-        );
-    }
-}
-
 fn config_with_deprecated_history_and_missing_r() -> (NamedTempFile, tempfile::TempDir) {
     let missing_r = tempfile::tempdir().expect("Failed to create temp directory");
     let missing_r_home = missing_r.path().join("missing-r-home");

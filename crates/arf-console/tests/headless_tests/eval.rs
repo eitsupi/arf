@@ -27,22 +27,47 @@ fn test_headless_starts_and_ipc_ready() {
     );
 }
 
-/// Test that `arf ipc eval` returns a visible R value.
+/// Successful `arf ipc eval` variants share one headless process: visible
+/// value, stdout capture, stdout plus value, multi-statement code, and state
+/// that persists between calls.
 #[test]
-fn test_headless_eval_value() {
+fn test_headless_eval_successful_variants() {
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
 
-    let result = process.ipc_eval("1 + 1").expect("eval should run");
-    assert!(
-        result.success,
-        "eval should succeed. stderr: {}",
-        result.stderr
-    );
-    assert!(
-        result.stdout.contains("[1] 2"),
-        "should capture R value: {}",
-        result.stdout
-    );
+    // (case, code, substrings expected in the eval output)
+    let cases: [(&str, &str, &[&str]); 6] = [
+        ("value", "1 + 1", &["[1] 2"]),
+        ("stdout", r"cat('hello_headless\n')", &["hello_headless"]),
+        (
+            "stdout and value",
+            r"cat('before\n'); 42",
+            &["before", "[1] 42"],
+        ),
+        (
+            "multiple statements",
+            "f <- function(x) x + 1; f(10)",
+            &["[1] 11"],
+        ),
+        ("assignment", "x <- 42", &[]),
+        ("sees the earlier assignment", "x * 2", &["[1] 84"]),
+    ];
+    for (case, code, expected) in cases {
+        let result = process
+            .ipc_eval(code)
+            .unwrap_or_else(|e| panic!("eval case `{case}` should run: {e}"));
+        assert!(
+            result.success,
+            "eval case `{case}` should succeed. stdout: {}, stderr: {}",
+            result.stdout, result.stderr
+        );
+        for text in expected {
+            assert!(
+                result.stdout.contains(text),
+                "eval case `{case}` should output {text:?}: {}",
+                result.stdout
+            );
+        }
+    }
 }
 
 /// Restricted headless sessions apply the same exact-target policy as the
@@ -106,26 +131,6 @@ allowed_functions = ["length"]
     );
 }
 
-/// Test that `arf ipc eval` captures stdout from `cat()`.
-#[test]
-fn test_headless_eval_stdout() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
-
-    let result = process
-        .ipc_eval("cat('hello_headless\\n')")
-        .expect("eval should run");
-    assert!(
-        result.success,
-        "eval should succeed. stderr: {}",
-        result.stderr
-    );
-    assert!(
-        result.stdout.contains("hello_headless"),
-        "should capture stdout: {}",
-        result.stdout
-    );
-}
-
 /// Test that `arf ipc eval` reports R errors in the JSON response.
 #[test]
 fn test_headless_eval_error() {
@@ -150,46 +155,6 @@ fn test_headless_eval_error() {
     );
 }
 
-/// Test sequential evaluations: state persists across calls.
-#[test]
-fn test_headless_eval_sequential() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
-
-    // Assign a variable
-    let r1 = process.ipc_eval("x <- 42").expect("first eval should run");
-    assert!(r1.success, "first eval should succeed");
-
-    // Use the variable
-    let r2 = process.ipc_eval("x * 2").expect("second eval should run");
-    assert!(r2.success, "second eval should succeed");
-    assert!(
-        r2.stdout.contains("[1] 84"),
-        "should see variable from first eval: {}",
-        r2.stdout
-    );
-}
-
-/// Test that `arf ipc eval` captures both stdout and value.
-#[test]
-fn test_headless_eval_mixed_output() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
-
-    let result = process
-        .ipc_eval("cat('before\\n'); 42")
-        .expect("eval should run");
-    assert!(result.success, "eval should succeed");
-    assert!(
-        result.stdout.contains("before"),
-        "should capture stdout: {}",
-        result.stdout
-    );
-    assert!(
-        result.stdout.contains("[1] 42"),
-        "should capture value: {}",
-        result.stdout
-    );
-}
-
 /// Test that `arf ipc send` (user_input) is accepted in headless mode.
 #[test]
 fn test_headless_user_input() {
@@ -208,21 +173,6 @@ fn test_headless_user_input() {
         json["accepted"].as_bool(),
         Some(true),
         "should report acceptance: {}",
-        result.stdout
-    );
-}
-
-/// Test multiline R code evaluation in headless mode.
-#[test]
-fn test_headless_eval_multiline() {
-    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
-
-    let code = r#"f <- function(x) x + 1; f(10)"#;
-    let result = process.ipc_eval(code).expect("eval should run");
-    assert!(result.success, "eval should succeed");
-    assert!(
-        result.stdout.contains("[1] 11"),
-        "should evaluate multiline code: {}",
         result.stdout
     );
 }

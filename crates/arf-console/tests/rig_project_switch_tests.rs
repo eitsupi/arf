@@ -1,7 +1,7 @@
 //! Real rig project R-version switching regressions run in the dedicated macOS workflow.
 #![allow(dead_code)]
 
-#[path = "tui/support.rs"]
+#[path = "tui_tests/support.rs"]
 mod support;
 
 use anyhow::{Context, Result, ensure};
