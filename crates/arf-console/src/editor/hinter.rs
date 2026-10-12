@@ -5,7 +5,7 @@
 //! like `|>`, `<-`, `%>%` are treated as single tokens when accepting
 //! history hints with Ctrl+Right.
 
-use crate::r_parser::{is_atomic_node, parse_r};
+use crate::r_parser::{first_atomic_token, parse_r};
 use nu_ansi_term::Style;
 use reedline::{Hinter, History, SearchQuery};
 
@@ -25,7 +25,7 @@ fn get_first_r_token(s: &str) -> String {
         let root = tree.root_node();
 
         // Find the first meaningful token
-        if let Some((start, end)) = find_first_token_bounds(&root, s.as_bytes()) {
+        if let Some((start, end)) = first_atomic_token(root, s.as_bytes()) {
             // Include any leading whitespace before the token
             let leading_ws = &s[..start];
             let token = &s[start..end];
@@ -62,68 +62,6 @@ fn get_first_word(s: &str) -> String {
     }
 
     result
-}
-
-/// Find the byte boundaries of the first meaningful token in the syntax tree.
-///
-/// Returns `Some((start, end))` if a token is found, `None` otherwise.
-fn find_first_token_bounds(node: &tree_sitter::Node, source: &[u8]) -> Option<(usize, usize)> {
-    let mut cursor = node.walk();
-    let root_id = node.id();
-
-    // Walk to find the first non-whitespace token
-    loop {
-        let current = cursor.node();
-        let kind = current.kind();
-
-        // If this is an atomic node (e.g., string, comment), return it as a whole
-        if is_atomic_node(kind) {
-            let start = current.start_byte();
-            let end = current.end_byte();
-            if start < end {
-                return Some((start, end));
-            }
-        }
-
-        // Check if this is a leaf node (no children)
-        if current.child_count() == 0 {
-            let start = current.start_byte();
-            let end = current.end_byte();
-
-            // Skip if empty
-            if start < end {
-                // Check if it's whitespace
-                if let Ok(text) = std::str::from_utf8(&source[start..end])
-                    && !text.chars().all(char::is_whitespace)
-                {
-                    return Some((start, end));
-                }
-            }
-        } else if !is_atomic_node(kind) {
-            // Not atomic and has children, try to go deeper
-            if cursor.goto_first_child() {
-                continue;
-            }
-        }
-
-        // Try next sibling
-        if cursor.goto_next_sibling() {
-            continue;
-        }
-
-        // No siblings, go up and try next sibling
-        loop {
-            if !cursor.goto_parent() {
-                return None; // Reached root
-            }
-            if cursor.node().id() == root_id {
-                return None; // Back at original root
-            }
-            if cursor.goto_next_sibling() {
-                break;
-            }
-        }
-    }
 }
 
 /// An R language-aware hinter that properly tokenizes R code.

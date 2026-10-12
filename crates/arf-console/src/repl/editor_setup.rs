@@ -1,4 +1,84 @@
 use super::*;
+use crate::editor::keybindings::{
+    add_common_keybindings, add_key_map_keybindings, add_shell_semicolon_keybinding,
+    wrap_edit_mode_with_conditional_rules,
+};
+use crate::editor::mode::EditorStateRef;
+use crossterm::terminal;
+use reedline::{
+    EditMode, Emacs, Vi, default_emacs_keybindings, default_vi_insert_keybindings,
+    default_vi_normal_keybindings, default_vi_visual_keybindings,
+};
+
+/// Build the R-mode edit mode: Vi or Emacs keybindings, wrapped with the
+/// context-aware rules driven by the shared editor state.
+pub(super) fn build_edit_mode(config: &Config, editor_state: EditorStateRef) -> Box<dyn EditMode> {
+    build_edit_mode_with(
+        config,
+        config.experimental.shell_semicolon_shortcut,
+        Some(editor_state),
+    )
+}
+
+/// Build the shell-mode edit mode: the same Vi or Emacs keybindings as R mode
+/// without the `;` shortcut and without conditional rules.
+fn build_shell_edit_mode(config: &Config) -> Box<dyn EditMode> {
+    build_edit_mode_with(config, false, None)
+}
+
+fn build_edit_mode_with(
+    config: &Config,
+    shell_semicolon_shortcut: bool,
+    conditional_state: Option<EditorStateRef>,
+) -> Box<dyn EditMode> {
+    match config.editor.mode {
+        EditorMode::Vi => {
+            let mut insert_keybindings = default_vi_insert_keybindings();
+            add_common_keybindings(&mut insert_keybindings);
+            if shell_semicolon_shortcut {
+                add_shell_semicolon_keybinding(&mut insert_keybindings);
+            }
+            add_key_map_keybindings(&mut insert_keybindings, &config.editor.key_map);
+            let vi = Vi::new(
+                insert_keybindings,
+                default_vi_normal_keybindings(),
+                default_vi_visual_keybindings(),
+            );
+            finish_edit_mode(vi, config, shell_semicolon_shortcut, conditional_state)
+        }
+        EditorMode::Emacs => {
+            let mut keybindings = default_emacs_keybindings();
+            add_common_keybindings(&mut keybindings);
+            if shell_semicolon_shortcut {
+                add_shell_semicolon_keybinding(&mut keybindings);
+            }
+            add_key_map_keybindings(&mut keybindings, &config.editor.key_map);
+            finish_edit_mode(
+                Emacs::new(keybindings),
+                config,
+                shell_semicolon_shortcut,
+                conditional_state,
+            )
+        }
+    }
+}
+
+fn finish_edit_mode<E: EditMode + 'static>(
+    edit_mode: E,
+    config: &Config,
+    shell_semicolon_shortcut: bool,
+    conditional_state: Option<EditorStateRef>,
+) -> Box<dyn EditMode> {
+    match conditional_state {
+        Some(state) => wrap_edit_mode_with_conditional_rules(
+            edit_mode,
+            state,
+            config.experimental.completion_min_chars,
+            shell_semicolon_shortcut,
+        ),
+        None => Box::new(edit_mode),
+    }
+}
 
 impl Repl {
     /// Create the R-mode editor and attach its history and interactive features.
@@ -14,42 +94,8 @@ impl Repl {
 
         // Set up edit mode (Vi or Emacs) with conditional ':' keybinding
         let editor_state = new_editor_state_ref();
-        line_editor = match self.config.editor.mode {
-            EditorMode::Vi => {
-                let mut insert_keybindings = default_vi_insert_keybindings();
-                add_common_keybindings(&mut insert_keybindings);
-                if self.config.experimental.shell_semicolon_shortcut {
-                    add_shell_semicolon_keybinding(&mut insert_keybindings);
-                }
-                add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
-                let vi = Vi::new(
-                    insert_keybindings,
-                    default_vi_normal_keybindings(),
-                    default_vi_visual_keybindings(),
-                );
-                line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
-                    vi,
-                    editor_state.clone(),
-                    self.config.experimental.completion_min_chars,
-                    self.config.experimental.shell_semicolon_shortcut,
-                ))
-            }
-            EditorMode::Emacs => {
-                let mut keybindings = default_emacs_keybindings();
-                add_common_keybindings(&mut keybindings);
-                if self.config.experimental.shell_semicolon_shortcut {
-                    add_shell_semicolon_keybinding(&mut keybindings);
-                }
-                add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
-                let emacs = Emacs::new(keybindings);
-                line_editor.with_edit_mode(wrap_edit_mode_with_conditional_rules(
-                    emacs,
-                    editor_state.clone(),
-                    self.config.experimental.completion_min_chars,
-                    self.config.experimental.shell_semicolon_shortcut,
-                ))
-            }
-        };
+        line_editor =
+            line_editor.with_edit_mode(build_edit_mode(&self.config, editor_state.clone()));
 
         // Set up combined completer (R + meta commands) if completion is enabled
         // When :switch is unavailable, it is excluded from completion
@@ -216,24 +262,7 @@ impl Repl {
         let mut shell_editor = history_handle.attach_to_editor(shell_editor);
 
         // Use same edit mode as R editor
-        shell_editor = match self.config.editor.mode {
-            EditorMode::Vi => {
-                let mut insert_keybindings = default_vi_insert_keybindings();
-                add_common_keybindings(&mut insert_keybindings);
-                add_key_map_keybindings(&mut insert_keybindings, &self.config.editor.key_map);
-                shell_editor.with_edit_mode(Box::new(Vi::new(
-                    insert_keybindings,
-                    default_vi_normal_keybindings(),
-                    default_vi_visual_keybindings(),
-                )))
-            }
-            EditorMode::Emacs => {
-                let mut keybindings = default_emacs_keybindings();
-                add_common_keybindings(&mut keybindings);
-                add_key_map_keybindings(&mut keybindings, &self.config.editor.key_map);
-                shell_editor.with_edit_mode(Box::new(Emacs::new(keybindings)))
-            }
-        };
+        shell_editor = shell_editor.with_edit_mode(build_shell_edit_mode(&self.config));
 
         // Set up shell mode completer with path completion if completion is enabled
         if self.config.completion.enabled {
@@ -298,5 +327,202 @@ impl Repl {
             }));
 
         (shell_editor, history_handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::mode::new_editor_state_ref;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use reedline::{EditCommand, ReedlineEvent, ReedlineRawEvent};
+
+    fn config_with(mode: EditorMode, min_chars: Option<usize>, semicolon: bool) -> Config {
+        let mut config = Config::default();
+        config.editor.mode = mode;
+        config.experimental.completion_min_chars = min_chars;
+        config.experimental.shell_semicolon_shortcut = semicolon;
+        config
+    }
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> ReedlineRawEvent {
+        ReedlineRawEvent::try_from(Event::Key(KeyEvent::new(code, modifiers))).unwrap()
+    }
+
+    /// Send keys in order to one edit mode instance and collect its events.
+    fn events_for(
+        mut edit_mode: Box<dyn EditMode>,
+        keys: &[(KeyCode, KeyModifiers)],
+    ) -> Vec<ReedlineEvent> {
+        keys.iter()
+            .map(|(code, modifiers)| edit_mode.parse_event(key(*code, *modifiers)))
+            .collect()
+    }
+
+    fn insert_char(c: char) -> ReedlineEvent {
+        ReedlineEvent::Edit(vec![EditCommand::InsertChar(c)])
+    }
+
+    fn insert_string(text: &str) -> ReedlineEvent {
+        ReedlineEvent::Edit(vec![EditCommand::InsertString(text.to_string())])
+    }
+
+    const NONE: KeyModifiers = KeyModifiers::NONE;
+
+    #[test]
+    fn emacs_mode_maps_shared_and_key_map_bindings() {
+        let config = config_with(EditorMode::Emacs, None, false);
+        let events = events_for(
+            build_edit_mode(&config, new_editor_state_ref()),
+            &[
+                (KeyCode::Tab, NONE),
+                (KeyCode::Enter, KeyModifiers::SHIFT),
+                (KeyCode::Char('-'), KeyModifiers::ALT),
+                (KeyCode::Char('p'), KeyModifiers::ALT),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                ReedlineEvent::UntilFound(vec![
+                    ReedlineEvent::Menu("completion_menu".to_string()),
+                    ReedlineEvent::MenuNext,
+                ]),
+                ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+                insert_string(" <- "),
+                insert_string(" |> "),
+            ]
+        );
+    }
+
+    #[test]
+    fn vi_mode_maps_insert_mode_bindings() {
+        let config = config_with(EditorMode::Vi, None, false);
+        let events = events_for(
+            build_edit_mode(&config, new_editor_state_ref()),
+            &[
+                (KeyCode::Tab, NONE),
+                (KeyCode::Char('-'), KeyModifiers::ALT),
+                (KeyCode::Char('p'), KeyModifiers::ALT),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                ReedlineEvent::UntilFound(vec![
+                    ReedlineEvent::Menu("completion_menu".to_string()),
+                    ReedlineEvent::MenuNext,
+                ]),
+                insert_string(" <- "),
+                insert_string(" |> "),
+            ]
+        );
+    }
+
+    #[test]
+    fn colon_triggers_completion_only_at_line_start() {
+        for mode in [EditorMode::Vi, EditorMode::Emacs] {
+            let config = config_with(mode, None, false);
+            let events = events_for(
+                build_edit_mode(&config, new_editor_state_ref()),
+                &[(KeyCode::Char(':'), NONE), (KeyCode::Char(':'), NONE)],
+            );
+            assert_eq!(
+                events[0],
+                ReedlineEvent::Multiple(vec![
+                    insert_char(':'),
+                    ReedlineEvent::Menu("completion_menu".to_string()),
+                ]),
+                "{mode:?}: first ':' opens the menu"
+            );
+            assert_eq!(
+                events[1],
+                insert_char(':'),
+                "{mode:?}: ':' after existing text is a plain character"
+            );
+        }
+    }
+
+    #[test]
+    fn semicolon_shortcut_applies_only_when_enabled_and_buffer_is_empty() {
+        let keys = [(KeyCode::Char(';'), NONE), (KeyCode::Char(';'), NONE)];
+        for mode in [EditorMode::Vi, EditorMode::Emacs] {
+            let enabled = events_for(
+                build_edit_mode(&config_with(mode, None, true), new_editor_state_ref()),
+                &keys,
+            );
+            assert_eq!(
+                enabled[0],
+                ReedlineEvent::Multiple(vec![insert_string(":shell"), ReedlineEvent::Submit]),
+                "{mode:?}: ';' at an empty buffer enters shell mode"
+            );
+            assert_eq!(
+                enabled[1],
+                insert_char(';'),
+                "{mode:?}: ';' after existing text is a plain character"
+            );
+
+            let disabled = events_for(
+                build_edit_mode(&config_with(mode, None, false), new_editor_state_ref()),
+                &keys,
+            );
+            assert_eq!(disabled, [insert_char(';'), insert_char(';')]);
+        }
+    }
+
+    #[test]
+    fn completion_min_chars_appends_a_menu_event_to_character_inserts() {
+        let keys = [(KeyCode::Char('a'), NONE)];
+        let enabled = events_for(
+            build_edit_mode(
+                &config_with(EditorMode::Emacs, Some(1), false),
+                new_editor_state_ref(),
+            ),
+            &keys,
+        );
+        assert_eq!(
+            enabled,
+            [ReedlineEvent::Multiple(vec![
+                insert_char('a'),
+                ReedlineEvent::Menu("completion_menu".to_string()),
+            ])]
+        );
+
+        let disabled = events_for(
+            build_edit_mode(
+                &config_with(EditorMode::Emacs, None, false),
+                new_editor_state_ref(),
+            ),
+            &keys,
+        );
+        assert_eq!(disabled, [insert_char('a')]);
+    }
+
+    #[test]
+    fn shell_edit_mode_has_no_conditional_rules() {
+        for mode in [EditorMode::Vi, EditorMode::Emacs] {
+            // The shell editor ignores the semicolon shortcut and the
+            // completion trigger, and `:` keeps its unconditional binding.
+            let config = config_with(mode, Some(1), true);
+            let events = events_for(
+                build_shell_edit_mode(&config),
+                &[
+                    (KeyCode::Char(';'), NONE),
+                    (KeyCode::Char('a'), NONE),
+                    (KeyCode::Char('a'), NONE),
+                    (KeyCode::Char(':'), NONE),
+                ],
+            );
+            assert_eq!(events[0], insert_char(';'), "{mode:?}");
+            assert_eq!(events[1], insert_char('a'), "{mode:?}");
+            assert_eq!(
+                events[3],
+                ReedlineEvent::Multiple(vec![
+                    insert_char(':'),
+                    ReedlineEvent::Menu("completion_menu".to_string()),
+                ]),
+                "{mode:?}: ':' triggers the menu even after text"
+            );
+        }
     }
 }

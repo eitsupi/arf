@@ -4,8 +4,7 @@
 //! for shell mode commands.
 
 use super::meta::MetaCommandCompleter;
-use super::path::PathCompletionOptions;
-use super::string_context::path_to_suggestions;
+use super::path::{PathCompletionOptions, path_to_suggestions};
 use reedline::{Completer, CompletionResult, Span, Suggestion};
 
 /// Shell separators that start a new token.

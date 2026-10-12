@@ -1,3 +1,6 @@
+use super::context::LibraryContext;
+use super::namespace::NamespaceToken;
+use super::quoting::needs_backtick_quoting;
 use super::*;
 
 // --- Namespace token parsing tests ---

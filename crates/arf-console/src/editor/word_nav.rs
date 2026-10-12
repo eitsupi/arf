@@ -8,7 +8,7 @@
 //! This enables Ctrl+Left/Right to jump over operators like `|>`, `<-`, `%>%`
 //! as single units.
 
-use crate::r_parser::{is_atomic_node, parse_r};
+use crate::r_parser::{collect_atomic_tokens, parse_r};
 
 /// Find the position to move to when navigating left by one token.
 ///
@@ -71,7 +71,7 @@ fn find_token_start_before(
     source: &[u8],
 ) -> Option<usize> {
     // Collect all tokens with their positions
-    let tokens = collect_tokens(root, source);
+    let tokens = collect_atomic_tokens(*root, source);
 
     // Skip any whitespace before cursor to find the previous token
     let effective_pos = skip_whitespace_left(source, cursor_pos);
@@ -104,7 +104,7 @@ fn find_token_end_after(
     source: &[u8],
 ) -> Option<usize> {
     // Collect all tokens with their positions
-    let tokens = collect_tokens(root, source);
+    let tokens = collect_atomic_tokens(*root, source);
 
     // Skip any whitespace after cursor
     let effective_pos = skip_whitespace_right(source, cursor_pos);
@@ -121,55 +121,6 @@ fn find_token_end_after(
     }
 
     None
-}
-
-/// Collect all meaningful tokens from the syntax tree.
-fn collect_tokens(root: &tree_sitter::Node, source: &[u8]) -> Vec<(usize, usize)> {
-    let mut tokens = Vec::new();
-    collect_tokens_recursive(root, source, &mut tokens);
-    tokens.sort_by_key(|(start, _)| *start);
-    tokens
-}
-
-/// Recursively collect tokens from the syntax tree.
-fn collect_tokens_recursive(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    tokens: &mut Vec<(usize, usize)>,
-) {
-    let kind = node.kind();
-
-    // If this is an atomic node, treat it as a single token
-    if is_atomic_node(kind) {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        if start < end {
-            tokens.push((start, end));
-        }
-        return;
-    }
-
-    // If this is a leaf node (no children), it's a token
-    if node.child_count() == 0 {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        if start < end {
-            // Skip whitespace-only tokens
-            if let Ok(text) = std::str::from_utf8(&source[start..end])
-                && !text.chars().all(char::is_whitespace)
-            {
-                tokens.push((start, end));
-            }
-        }
-        return;
-    }
-
-    // Recurse into children
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            collect_tokens_recursive(&child, source, tokens);
-        }
-    }
 }
 
 /// Skip whitespace to the left of the given position.
