@@ -6,14 +6,26 @@
 //! No Cargo feature is required. Each test runs in a fresh child process.
 
 use super::r_ffi::r_evaluation_count;
-use super::static_formals::{StaticFormalsOutcome, candidates, lookup, production_candidates};
+use super::static_formals::{
+    StaticFormalsOutcome, StaticFormalsResult, candidates, lookup_with_policy,
+    production_candidates,
+};
 use super::{
-    StaticFormalsMode, StaticFormalsPolicy, check_if_functions, get_completions,
-    get_completions_with_policy, get_token,
+    StaticFormalsMode, StaticFormalsPolicy, check_if_functions, get_completions_with_policy,
+    get_r_completions, get_token,
 };
 use crate::test_support::with_r_in_subprocess;
 use crate::{eval_string_with_visibility, lib_paths};
 use std::time::{Duration, Instant};
+
+/// Look up static formals with static inspection enabled and no exclusions.
+fn lookup(line: &str, cursor_pos: usize) -> Option<StaticFormalsResult> {
+    let policy = StaticFormalsPolicy {
+        mode: StaticFormalsMode::PreferStatic,
+        ..StaticFormalsPolicy::off()
+    };
+    lookup_with_policy(line, cursor_pos, &policy)
+}
 
 #[test]
 #[ignore = "requires an installed R package corpus and is an observation harness"]
@@ -143,7 +155,7 @@ fn static_formals_integration_spike() {
                 let console_before = r_evaluation_count();
                 let _ = get_token(line, cursor);
                 let console_after_token = r_evaluation_count();
-                let _ = get_completions(line, cursor, 1_000);
+                let _ = get_r_completions(line, cursor, 1_000);
                 let console_after_completion = r_evaluation_count();
                 let _ = check_if_functions(&[function]);
                 let console_after_functions = r_evaluation_count();
@@ -269,7 +281,7 @@ fn experimental_static_first_hit_and_fallback() {
                 "stats::lm(x = value[1], fo",
                 "stats::lm(x = {1; 2}, fo",
             ] {
-                let expected = get_completions(unsupported, unsupported.len(), 1_000)
+                let expected = get_r_completions(unsupported, unsupported.len(), 1_000)
                     .expect("R oracle should remain available");
                 let before = r_evaluation_count();
                 let _ =
@@ -308,7 +320,7 @@ fn observe_r_completion(line: &str, cursor: usize) -> RCompletionObservation {
     let started = Instant::now();
     // Always use the R oracle, independently of the static production policy.
     let candidates =
-        super::get_r_completions(line, cursor, 1_000).expect("R completion oracle should succeed");
+        get_r_completions(line, cursor, 1_000).expect("R completion oracle should succeed");
     RCompletionObservation {
         candidates,
         elapsed: started.elapsed(),

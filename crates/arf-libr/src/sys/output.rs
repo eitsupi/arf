@@ -339,7 +339,7 @@ pub fn set_write_console_callback(callback: fn(&str, bool)) {
 }
 
 /// Clear the console write callback.
-pub fn clear_write_console_callback() {
+fn clear_write_console_callback() {
     unsafe {
         WRITE_CONSOLE_CALLBACK = None;
     }

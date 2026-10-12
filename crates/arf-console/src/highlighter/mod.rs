@@ -5,12 +5,12 @@
 //!
 pub mod bracket_match;
 mod meta_command;
-mod r_regex;
 mod r_tree_sitter;
+mod token;
 
 pub use meta_command::MetaCommandHighlighter;
-pub use r_regex::TokenType;
 pub use r_tree_sitter::{RTreeSitterHighlighter, tokenize_r};
+pub use token::TokenType;
 
 use crate::config::ColorsConfig;
 use crate::editor::mode::EditorStateRef;

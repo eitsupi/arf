@@ -309,7 +309,6 @@ fn debug_log(msg: &str) {
 
 /// Escape a string for debug logging (convert control characters to visible form).
 /// Used by debug_log when R_TERM_VALIDATOR_DEBUG=1.
-#[allow(dead_code)]
 fn escape_for_debug(s: &str) -> String {
     s.chars()
         .map(|c| match c {

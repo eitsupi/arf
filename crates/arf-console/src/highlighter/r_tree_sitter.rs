@@ -1,7 +1,7 @@
 //! Tree-sitter based R syntax highlighting.
 //!
 //! This module implements R syntax highlighting using tree-sitter-r,
-//! providing more accurate parsing than the regex-based approach.
+//! providing accurate parsing.
 //!
 use crate::config::RColorConfig;
 use crate::r_parser::{is_atomic_node, parse_r};
@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use tree_sitter::Node;
 
 use super::bracket_match::find_matching_bracket;
-use super::r_regex::TokenType;
+use super::token::TokenType;
 
 /// Reserved keywords in R.
 static KEYWORDS: Lazy<HashSet<&'static str>> = Lazy::new(|| {

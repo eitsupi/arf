@@ -18,16 +18,15 @@
 mod context;
 mod package_discovery;
 mod r_ffi;
-#[doc(hidden)]
-pub mod static_formals;
+pub(crate) mod static_formals;
 
 #[cfg(test)]
 mod r_tests;
 
 use crate::error::HarpResult;
 use arf_libr::{restore_stderr, suppress_stderr};
+use context::{PackageContext, detect_package_context};
 
-pub use context::{PackageContext, detect_package_context};
 pub use package_discovery::get_installed_packages;
 pub use r_ffi::{check_if_functions, get_namespace_exports, get_token};
 pub use static_formals::{StaticFormalsMode, StaticFormalsPolicy};
@@ -51,18 +50,6 @@ impl Drop for SuppressStderrGuard {
     fn drop(&mut self) {
         restore_stderr();
     }
-}
-
-/// Get completions for the given line at the specified cursor position.
-///
-/// Returns a list of completion candidates.
-///
-/// # Arguments
-/// * `line` - The input line
-/// * `cursor_pos` - Cursor position in the line
-/// * `timeout_ms` - Timeout in milliseconds for R completion (0 = no timeout)
-pub fn get_completions(line: &str, cursor_pos: usize, timeout_ms: u64) -> HarpResult<Vec<String>> {
-    get_r_completions(line, cursor_pos, timeout_ms)
 }
 
 /// Get completions using the supplied static-formals runtime policy.

@@ -6,8 +6,39 @@
 
 mod common;
 
-use arf_harp::{get_help_markdown, get_help_topics, get_package_help_markdown};
+use arf_harp::help::{
+    HelpResolution, HelpTarget, HelpTargetResolver, get_help_topics_from_paths,
+    get_package_help_markdown_by_key_in_dir,
+};
+use arf_harp::help_bridge::PreparedHelpPage;
+use arf_harp::lib_paths::lib_paths;
 use common::with_r;
+use std::path::PathBuf;
+
+/// Resolve a package-qualified help target against the installed libraries.
+///
+/// Qualified targets do not depend on the current page, so a placeholder is
+/// supplied for it.
+fn resolve_qualified(package: &str, topic: &str) -> arf_harp::HarpResult<HelpResolution> {
+    let paths = lib_paths().expect(".libPaths() should evaluate");
+    let current = PreparedHelpPage {
+        package_dir: PathBuf::new(),
+        package: String::new(),
+        display_topic: String::new(),
+        help_key: String::new(),
+        markdown: String::new(),
+    };
+    let target = HelpTarget::from_uri(&format!("x-r-help:{package}/{topic}"))
+        .expect("qualified help URI should parse");
+    HelpTargetResolver::new(paths).resolve(&current, &target)
+}
+
+fn resolve_page(package: &str, topic: &str) -> PreparedHelpPage {
+    match resolve_qualified(package, topic) {
+        Ok(HelpResolution::Page(page)) => page,
+        other => panic!("expected a help page for {package}::{topic}, got: {other:?}"),
+    }
+}
 
 /// Regression test for GitHub issue #194:
 /// `base::solve` contains `%*%` in its Rd source. Without `deparse = TRUE`,
@@ -17,57 +48,32 @@ use common::with_r;
 #[test]
 fn test_help_base_solve_returns_content() {
     with_r!(test_help_base_solve_returns_content, {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
-        let result = get_help_markdown("solve", Some("base"));
-        match &result {
-            Err(e) => panic!(r#"get_help_markdown("solve", Some("base")) failed: {e}"#),
-            Ok(md) => {
-                assert!(!md.is_empty(), "help markdown must not be empty");
-                // The title of the help page is "Solve a System of Equations"
-                assert!(
-                    md.contains("Solve"),
-                    "expected 'Solve' in help markdown, got:\n{md}"
-                );
-                // Regression check for rd-parser fix: \dots must be emitted as
-                // ellipses rather than being swallowed by a mis-terminated macro name.
-                assert!(
-                    md.contains("...") || md.contains('\u{2026}'),
-                    "expected ellipses in help markdown (\\dots regression), got:\n{md}"
-                );
-            }
-        }
-    });
-}
-
-#[test]
-fn test_both_help_conversion_paths_emit_internal_links() {
-    with_r!(test_both_help_conversion_paths_emit_internal_links, {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
-        for package in [Some("base"), None] {
-            let markdown = get_help_markdown("solve", package).expect("solve help should convert");
-            assert!(
-                markdown.contains("x-r-help:"),
-                "missing help links: {markdown}"
-            );
-            assert!(
-                markdown.contains("x-r-help:/"),
-                "missing unqualified links: {markdown}"
-            );
-        }
+        let md = resolve_page("base", "solve").markdown;
+        assert!(!md.is_empty(), "help markdown must not be empty");
+        // The title of the help page is "Solve a System of Equations"
+        assert!(
+            md.contains("Solve"),
+            "expected 'Solve' in help markdown, got:\n{md}"
+        );
+        // Regression check for rd-parser fix: \dots must be emitted as
+        // ellipses rather than being swallowed by a mis-terminated macro name.
+        assert!(
+            md.contains("...") || md.contains('\u{2026}'),
+            "expected ellipses in help markdown (\\dots regression), got:\n{md}"
+        );
+        assert!(md.contains("x-r-help:"), "missing help links: {md}");
     });
 }
 
 #[test]
 fn test_help_package_alias_and_exact_key() {
     with_r!(test_help_package_alias_and_exact_key, {
-        let alias = get_package_help_markdown("[.data.frame", "base")
-            .expect("help lookup by alias should succeed");
-        let exact_key = get_package_help_markdown("Extract.data.frame", "base")
-            .expect("help lookup by exact key should succeed");
+        let alias = resolve_page("base", "[.data.frame");
+        let exact_key = resolve_page("base", "Extract.data.frame");
 
-        assert!(!alias.is_empty(), "help for alias was empty");
-        assert!(!exact_key.is_empty(), "help for exact key was empty");
-        assert_eq!(alias, exact_key);
+        assert!(!alias.markdown.is_empty(), "help for alias was empty");
+        assert_eq!(alias.help_key, exact_key.help_key);
+        assert_eq!(alias.markdown, exact_key.markdown);
     });
 }
 
@@ -76,8 +82,7 @@ fn test_help_package_embed_fonts_does_not_have_excessive_prose_spaces() {
     with_r!(
         test_help_package_embed_fonts_does_not_have_excessive_prose_spaces,
         {
-            let markdown = get_package_help_markdown("embedFonts", "grDevices")
-                .expect("grDevices::embedFonts help should be available");
+            let markdown = resolve_page("grDevices", "embedFonts").markdown;
             assert!(
                 markdown.contains("and embed all fonts"),
                 "unexpected markdown:\n{markdown}"
@@ -92,14 +97,25 @@ fn test_help_package_embed_fonts_does_not_have_excessive_prose_spaces() {
 #[test]
 fn test_help_package_and_topic_not_found() {
     with_r!(test_help_package_and_topic_not_found, {
-        arf_harp::lib_paths::populate_lib_paths().expect(".libPaths() should evaluate");
-        let package_error =
-            get_package_help_markdown("solve", "definitely_not_an_installed_package")
-                .expect_err("unknown package should fail");
-        assert!(package_error.to_string().contains("not found"));
+        assert_eq!(
+            resolve_qualified("definitely.not.an.installed.package", "solve")
+                .expect("unknown package should resolve cleanly"),
+            HelpResolution::NotFound
+        );
+        assert_eq!(
+            resolve_qualified("base", "definitely_not_a_help_topic")
+                .expect("unknown topic should resolve cleanly"),
+            HelpResolution::NotFound
+        );
 
-        let topic_error = get_package_help_markdown("definitely_not_a_help_topic", "base")
-            .expect_err("unknown topic should fail");
+        let base_dir = resolve_page("base", "solve").package_dir;
+        let topic_error = get_package_help_markdown_by_key_in_dir(
+            &base_dir,
+            "definitely_not_a_help_topic",
+            "definitely_not_a_help_topic",
+            "base",
+        )
+        .expect_err("unknown key should fail");
         let message = topic_error.to_string();
         assert!(message.contains("definitely_not_a_help_topic"));
         assert!(message.contains("base"));
@@ -109,7 +125,8 @@ fn test_help_package_and_topic_not_found() {
 #[test]
 fn test_help_topics_reads_installed_indexes() {
     with_r!(test_help_topics_reads_installed_indexes, {
-        let topics = get_help_topics().expect("help indexes should be readable");
+        let paths = lib_paths().expect(".libPaths() should evaluate");
+        let topics = get_help_topics_from_paths(&paths);
         assert!(
             topics.iter().any(|topic| topic.package == "utils"),
             "expected at least one help topic from utils"

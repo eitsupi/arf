@@ -69,13 +69,11 @@ pub unsafe fn initialize_r_for_tests() -> RResult<()> {
 /// Initialize R with custom arguments and an unbounded C-stack policy for tests.
 ///
 /// Use this only from an isolated test process. An unbounded C-stack policy
-/// can let runaway recursion exhaust the process stack. This is public only so
-/// downstream test crates can use it.
+/// can let runaway recursion exhaust the process stack.
 ///
 /// # Safety
 /// This function initializes R's global state and must only be called once.
-#[doc(hidden)]
-pub unsafe fn initialize_r_with_args_for_tests(r_args: &[&str]) -> RResult<()> {
+unsafe fn initialize_r_with_args_for_tests(r_args: &[&str]) -> RResult<()> {
     // SAFETY: This function has the same initialization contract as its caller.
     unsafe { initialize_r_with_args_impl(r_args, true) }
 }

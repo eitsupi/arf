@@ -711,7 +711,7 @@ impl RLibrary {
 }
 
 /// Initialize the global R library.
-pub fn init_r_library(library_path: &Path) -> RResult<()> {
+pub(crate) fn init_r_library(library_path: &Path) -> RResult<()> {
     R_LIBRARY
         .set(RLibrary::load(library_path)?)
         .map_err(|_| RError::EvalError("R library already initialized".to_string()))
@@ -726,10 +726,4 @@ pub fn r_library() -> RResult<&'static RLibrary> {
 pub fn r_nil_value() -> RResult<SEXP> {
     let lib = r_library()?;
     unsafe { Ok(*lib.r_nilvalue) }
-}
-
-/// Get R_GlobalEnv.
-pub fn r_global_env() -> RResult<SEXP> {
-    let lib = r_library()?;
-    unsafe { Ok(*lib.r_globalenv) }
 }

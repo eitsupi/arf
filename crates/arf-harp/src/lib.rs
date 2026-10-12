@@ -17,7 +17,6 @@ pub mod startup;
 mod test_support;
 
 pub use error::*;
-pub use help::*;
 pub use object::*;
 pub use protect::*;
 #[cfg(windows)]
