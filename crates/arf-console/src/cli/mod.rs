@@ -634,6 +634,7 @@ mod tests {
         for (argv, env_home, env_version, expected_home, expected_version) in cases {
             guard.unset("ARF_R_HOME");
             guard.unset("ARF_R_VERSION");
+            guard.unset("ARF_R_PROVIDER");
             guard.unset("ARF_CONFIG");
             if let Some(value) = env_home {
                 guard.set("ARF_R_HOME", value);
