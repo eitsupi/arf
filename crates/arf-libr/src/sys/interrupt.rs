@@ -223,7 +223,7 @@ pub fn is_r_awaiting_console_input() -> bool {
 /// On Windows this clears both `UserBreak` (the front-end break flag) and
 /// `R_interrupts_pending` (where `onintr()` defers an interrupt that arrives
 /// while `R_interrupts_suspended` is set). On Unix they are the same flag.
-pub fn clear_r_interrupt_pending() {
+pub(super) fn clear_r_interrupt_pending() {
     let ptr = R_INTERRUPT_FLAG.load(Ordering::Acquire);
     if !ptr.is_null() {
         unsafe {

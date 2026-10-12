@@ -363,7 +363,7 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
 ///
 /// # Safety
 /// The caller must ensure that `expr` is a valid SEXP pointer.
-pub unsafe fn deparse_to_string(expr: SEXP) -> HarpResult<String> {
+unsafe fn deparse_to_string(expr: SEXP) -> HarpResult<String> {
     let lib = r_library()?;
     let mut protect = RProtect::new();
 

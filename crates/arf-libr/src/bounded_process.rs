@@ -6,9 +6,9 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command as AsyncCommand;
 
 /// Maximum bytes captured from each subprocess output stream.
-pub const BOUNDED_COMMAND_OUTPUT_LIMIT: usize = 64 * 1024;
+const BOUNDED_COMMAND_OUTPUT_LIMIT: usize = 64 * 1024;
 /// Maximum time allowed for a subprocess and both output pipes to finish.
-pub const BOUNDED_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const BOUNDED_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

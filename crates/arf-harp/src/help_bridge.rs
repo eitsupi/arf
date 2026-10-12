@@ -54,10 +54,6 @@ impl HelpRequestQueue {
         true
     }
 
-    fn take(&mut self) -> Option<PreparedHelpRequest> {
-        self.requests.pop_front()
-    }
-
     fn drain(&mut self) -> Vec<PreparedHelpRequest> {
         self.requests.drain(..).collect()
     }
@@ -72,14 +68,6 @@ pub enum HelpSubmitInstallOutcome {
     Installed,
     /// A custom or already-installed method was active, so the registry was left alone.
     SkippedExistingMethod,
-}
-
-/// Take the oldest prepared help request, if one is pending.
-pub fn take_prepared_help_request() -> Option<PreparedHelpRequest> {
-    PENDING_HELP_REQUESTS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take()
 }
 
 /// Drain all pending prepared requests in FIFO order.
@@ -443,9 +431,9 @@ mod tests {
         let mut queue = HelpRequestQueue::new();
         assert!(queue.enqueue(request(1)));
         assert!(queue.enqueue(request(2)));
-        assert_eq!(queue.take(), Some(request(1)));
+        assert_eq!(queue.requests.pop_front(), Some(request(1)));
         assert_eq!(queue.drain(), vec![request(2)]);
-        assert_eq!(queue.take(), None);
+        assert_eq!(queue.requests.pop_front(), None);
     }
 
     #[test]

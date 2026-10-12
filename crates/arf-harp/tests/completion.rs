@@ -2,10 +2,20 @@
 
 mod common;
 
-use arf_harp::completion::get_completions;
-use arf_harp::completion::get_installed_packages;
+use arf_harp::completion::{
+    StaticFormalsPolicy, get_completions_with_policy, get_installed_packages,
+};
 use arf_harp::eval_string_with_visibility;
 use common::with_r;
+
+/// Run R completion without the experimental static-formals path.
+fn get_completions(
+    line: &str,
+    cursor_pos: usize,
+    timeout_ms: u64,
+) -> arf_harp::HarpResult<Vec<String>> {
+    get_completions_with_policy(line, cursor_pos, timeout_ms, &StaticFormalsPolicy::off())
+}
 
 /// Regression test for GitHub issue #204:
 /// Tab completion should work inside function call arguments.

@@ -13,7 +13,7 @@
 //! felp's `fuzzyhelp()` implementation.
 
 use crate::error::{HarpError, HarpResult};
-use crate::lib_paths::{installed_package_dir, installed_package_dirs, lib_paths};
+use crate::lib_paths::installed_package_dirs;
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use rd_helpdb::{
@@ -71,27 +71,14 @@ unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
     data.result = Some(result);
 }
 
-/// Get help, vignette, and demo topics from installed package metadata.
-///
-/// This function reads each installed package's Rd topic metadata, vignette
-/// index, and demo index independently. It refreshes library paths from R
-/// before reading the package metadata. Call [`get_help_topics_from_paths`]
-/// when the caller already has a library-path snapshot.
-///
-/// # Returns
-///
-/// A vector of `HelpTopic` structs containing package, topic, title, and type.
-///
-pub fn get_help_topics() -> HarpResult<Vec<HelpTopic>> {
-    Ok(get_help_topics_from_paths(&lib_paths()?))
-}
-
 /// Get help, vignette, and demo topics from explicit library paths.
 ///
 /// This function only reads the supplied filesystem paths and metadata; it
 /// does not evaluate R. The paths are searched in order, with the first
 /// installed copy of a package taking precedence. Missing or unreadable
-/// metadata sources are skipped, as in [`get_help_topics`].
+/// metadata sources are skipped.
+///
+/// Rd topic metadata, vignette indexes, and demo indexes are read independently.
 pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
     let mut topics = Vec::new();
     for (package, package_dir) in installed_package_dirs(paths) {
@@ -223,12 +210,63 @@ fn vignette_topic(entry: &rd_helpdb::VignetteEntry) -> String {
 #[cfg(test)]
 mod help_metadata_tests {
     use super::{
-        get_help_topics_from_paths, get_package_help_markdown_by_key_from_paths,
-        get_package_help_markdown_by_key_in_dir, get_package_help_markdown_from_paths,
-        get_package_help_markdown_in_dir, project_help_topic_entry, read_package_topics,
-        vignette_topic,
+        HarpError, HarpResult, get_help_topics_from_paths, get_package_help_markdown_by_key_in_dir,
+        open_package_help_db, package_help_markdown_from_db, project_help_topic_entry,
+        read_package_topics, vignette_topic,
     };
+    use crate::lib_paths::installed_package_dir;
     use rd_helpdb::VignetteEntry;
+
+    /// Get package help as Markdown using explicit library paths.
+    ///
+    /// `topic` is an alias-or-exact-key input: aliases are resolved first using
+    /// the compiled help database's last-wins alias index, then the input is
+    /// used as an exact key if it is not an alias. The first installed copy of
+    /// `package` in `paths` is selected.
+    fn get_package_help_markdown_from_paths(
+        topic: &str,
+        package: &str,
+        paths: &[String],
+    ) -> HarpResult<String> {
+        let package_dir =
+            installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
+                package: package.to_string(),
+            })?;
+        get_package_help_markdown_in_dir(topic, package, &package_dir)
+    }
+
+    fn get_package_help_markdown_in_dir(
+        topic: &str,
+        package: &str,
+        package_dir: &std::path::Path,
+    ) -> HarpResult<String> {
+        let db = open_package_help_db(package_dir, package, topic, topic)?;
+        let resolved = db
+            .resolve_alias(topic)
+            .map_err(|source| HarpError::HelpDatabase {
+                package: package.to_string(),
+                topic: topic.to_string(),
+                key: topic.to_string(),
+                source: Box::new(source),
+            })?;
+        let key = resolved.unwrap_or(topic).to_string();
+        package_help_markdown_from_db(&db, topic, &key, package)
+    }
+
+    /// Get package help as Markdown with a known help key and explicit library
+    /// paths.
+    fn get_package_help_markdown_by_key_from_paths(
+        display_topic: &str,
+        help_key: &str,
+        package: &str,
+        paths: &[String],
+    ) -> HarpResult<String> {
+        let package_dir =
+            installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
+                package: package.to_string(),
+            })?;
+        get_package_help_markdown_by_key_in_dir(&package_dir, display_topic, help_key, package)
+    }
 
     fn fixture_path(name: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -784,88 +822,6 @@ pub unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
     }
 }
 
-/// Get help text for a specific topic.
-///
-/// This retrieves the help content as plain text using `tools::Rd2txt()`,
-/// bypassing R's pager system. This is important on Windows where R's
-/// help() function may try to open a GUI window.
-///
-/// The approach is inspired by the felp package's `get_help()` function.
-///
-/// # Arguments
-///
-/// * `topic` - The help topic name
-/// * `package` - Optional package name to look in
-///
-/// # Returns
-///
-/// The help text as a String, or an error if the topic is not found.
-pub fn get_help_text(topic: &str, package: Option<&str>) -> HarpResult<String> {
-    let code = if let Some(pkg) = package {
-        format!(
-            r#"local({{
-    x <- utils::help("{topic}", package = "{pkg}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    pkgname <- basename(dirname(dirname(file)))
-    paste(utils::capture.output(
-        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
-    ), collapse = "\n")
-}})"#,
-            topic = escape_r_string(topic),
-            pkg = escape_r_string(pkg)
-        )
-    } else {
-        format!(
-            r#"local({{
-    x <- utils::help("{topic}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    pkgname <- basename(dirname(dirname(file)))
-    paste(utils::capture.output(
-        tools::Rd2txt(utils:::.getHelpFile(file), package = pkgname)
-    ), collapse = "\n")
-}})"#,
-            topic = escape_r_string(topic)
-        )
-    };
-
-    unsafe {
-        eval_r_to_string(&code)?.ok_or_else(|| {
-            HarpError::RError(arf_libr::RError::EvalError(format!(
-                "No help found for topic '{}'",
-                topic
-            )))
-        })
-    }
-}
-
-/// Get help content as Markdown for a specific topic.
-///
-/// When `package` is known, this reads the installed package's compiled help
-/// database directly, after refreshing library paths from R. Without a
-/// package, it retains the R-evaluation-based resolution needed for
-/// attached-package and search-path semantics. Call
-/// [`get_package_help_markdown_from_paths`] to use an existing library-path
-/// snapshot without refreshing it from R.
-///
-/// # Arguments
-///
-/// * `topic` - The help topic name
-/// * `package` - Optional package name to look in
-///
-/// # Returns
-///
-/// The help content as a Markdown string, or an error if the topic is not found.
-pub fn get_help_markdown(topic: &str, package: Option<&str>) -> HarpResult<String> {
-    match package {
-        Some(package) => get_package_help_markdown(topic, package),
-        None => get_help_markdown_via_r(topic),
-    }
-}
-
 fn rd_convert_options() -> rd2qmd_core::RdConvertOptions {
     let mut options = rd2qmd_core::RdConvertOptions::default();
     options.code.quarto_code_blocks = false;
@@ -893,89 +849,11 @@ pub fn rd_source_to_markdown(rd_content: &str) -> HarpResult<String> {
     ))
 }
 
-/// Get package help as Markdown after refreshing R's library paths.
-///
-/// `topic` is treated as an alias-or-exact-key input: aliases are resolved
-/// first using the compiled help database's last-wins alias index, then the
-/// input is used as an exact key if it is not an alias. Call
-/// [`get_package_help_markdown_from_paths`] when the caller already has a
-/// library-path snapshot.
-pub fn get_package_help_markdown(topic: &str, package: &str) -> HarpResult<String> {
-    get_package_help_markdown_from_paths(topic, package, &lib_paths()?)
-}
-
-/// Get package help as Markdown using explicit library paths without
-/// evaluating R.
-///
-/// `topic` is treated as an alias-or-exact-key input: aliases are resolved
-/// first using the compiled help database's last-wins alias index, then the
-/// input is used as an exact key if it is not an alias. The first installed
-/// copy of `package` in `paths` is selected.
-pub fn get_package_help_markdown_from_paths(
-    topic: &str,
-    package: &str,
-    paths: &[String],
-) -> HarpResult<String> {
-    let package_dir =
-        installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
-            package: package.to_string(),
-        })?;
-    get_package_help_markdown_in_dir(topic, package, &package_dir)
-}
-
-fn get_package_help_markdown_in_dir(
-    topic: &str,
-    package: &str,
-    package_dir: &std::path::Path,
-) -> HarpResult<String> {
-    let db = open_package_help_db(package_dir, package, topic, topic)?;
-    let resolved = db
-        .resolve_alias(topic)
-        .map_err(|source| HarpError::HelpDatabase {
-            package: package.to_string(),
-            topic: topic.to_string(),
-            key: topic.to_string(),
-            source: Box::new(source),
-        })?;
-    let key = resolved.unwrap_or(topic).to_string();
-    package_help_markdown_from_db(&db, topic, &key, package)
-}
-
-/// Get package help as Markdown using a known compiled-help key directly.
-///
-/// Unlike [`get_package_help_markdown`], this path never reads
-/// `help/aliases.rds`. It is intended for indexed help rows carrying a key
-/// from `Meta/Rd.rds`. This convenience wrapper refreshes library paths from
-/// R; use [`get_package_help_markdown_by_key_from_paths`] to avoid R evaluation.
-pub fn get_package_help_markdown_by_key(
-    display_topic: &str,
-    help_key: &str,
-    package: &str,
-) -> HarpResult<String> {
-    get_package_help_markdown_by_key_from_paths(display_topic, help_key, package, &lib_paths()?)
-}
-
-/// Get package help as Markdown with a known help key and explicit library
-/// paths, without evaluating R.
-pub fn get_package_help_markdown_by_key_from_paths(
-    display_topic: &str,
-    help_key: &str,
-    package: &str,
-    paths: &[String],
-) -> HarpResult<String> {
-    let package_dir =
-        installed_package_dir(paths, package).ok_or_else(|| HarpError::PackageNotFound {
-            package: package.to_string(),
-        })?;
-    get_package_help_markdown_by_key_in_dir(&package_dir, display_topic, help_key, package)
-}
-
 /// Get package help as Markdown using a known compiled-help key in a specific
 /// installed package directory.
 ///
-/// Unlike [`get_package_help_markdown_by_key`], this function does not resolve
-/// the package name through R's library paths. Callers that already have the
-/// package directory can avoid selecting another installed copy of the same
+/// This function never reads `help/aliases.rds`. Callers that already have the
+/// package directory avoid selecting another installed copy of the same
 /// package.
 pub fn get_package_help_markdown_by_key_in_dir(
     package_dir: &std::path::Path,
@@ -1023,31 +901,6 @@ fn package_help_markdown_from_db(
     })?;
     let options = rd_convert_options();
     Ok(rd2qmd_core::convert_rd_document(&doc, &options))
-}
-
-fn get_help_markdown_via_r(topic: &str) -> HarpResult<String> {
-    let code = format!(
-        r#"local({{
-    x <- utils::help("{topic}", help_type = "text")
-    paths <- as.character(x)
-    if (length(paths) == 0) return(NULL)
-    file <- paths[1L]
-    rd <- utils:::.getHelpFile(file)
-    paste0(as.character(rd, deparse = TRUE), collapse = "")
-}})"#,
-        topic = escape_r_string(topic)
-    );
-
-    let rd_content = unsafe {
-        eval_r_to_string(&code)?.ok_or_else(|| {
-            HarpError::RError(arf_libr::RError::EvalError(format!(
-                "No help found for topic '{}'",
-                topic
-            )))
-        })?
-    };
-
-    rd_source_to_markdown(&rd_content)
 }
 
 /// Sentinel value returned by R when a vignette is in PDF format.
@@ -1109,21 +962,6 @@ Run in R: vignette("{topic}", package = "{package}")"#,
             e
         )))
     })
-}
-
-/// Show help for a specific topic (legacy function).
-///
-/// This calls `get_help_text()` and prints the result to stdout.
-/// For better control, use `get_help_text()` directly.
-///
-/// # Arguments
-///
-/// * `topic` - The help topic name
-/// * `package` - Optional package name to look in
-pub fn show_help(topic: &str, package: Option<&str>) -> HarpResult<()> {
-    let text = get_help_text(topic, package)?;
-    println!("{}", text);
-    Ok(())
 }
 
 /// Escape a string for use in R code.

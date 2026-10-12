@@ -2,10 +2,6 @@ use crate::SEXP;
 use crate::functions::r_library;
 use std::sync::RwLock;
 
-/// Tracks whether an independent condition-based hook reported an error.
-/// This catches rlang/dplyr errors that output to stdout instead of stderr.
-static CONDITION_ERROR_OCCURRED: RwLock<bool> = RwLock::new(false);
-
 /// Tracks whether stderr output should be suppressed.
 /// When true, r_write_console_ex silently drops stderr output (otype != 0).
 /// Used during completion to prevent error messages from interfering with the UI.
@@ -28,21 +24,7 @@ pub enum CommandOutcome {
 ///
 /// Call this before executing a new command to track errors accurately.
 pub fn reset_command_error_state() {
-    if let Ok(mut state) = CONDITION_ERROR_OCCURRED.write() {
-        *state = false;
-    }
-    // Also reset the R-side error state
     reset_r_error_state();
-}
-
-/// Mark that an error condition was signaled.
-///
-/// This is called by condition-based error hooks when they detect an error.
-#[allow(dead_code)]
-pub fn mark_error_condition() {
-    if let Ok(mut state) = CONDITION_ERROR_OCCURRED.write() {
-        *state = true;
-    }
 }
 
 /// Check the outcome of the current command.
@@ -53,14 +35,6 @@ pub fn mark_error_condition() {
 pub fn command_outcome() -> CommandOutcome {
     if !command_outcome_tracking_available() {
         return CommandOutcome::Unavailable;
-    }
-
-    let had_condition = match CONDITION_ERROR_OCCURRED.read() {
-        Ok(state) => *state,
-        Err(_) => return CommandOutcome::Unavailable,
-    };
-    if had_condition {
-        return CommandOutcome::Failure;
     }
 
     match check_r_error_state() {

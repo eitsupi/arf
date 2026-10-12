@@ -2,6 +2,13 @@ use super::*;
 use std::ffi::OsString;
 use std::path::Path;
 
+fn is_spinner_active() -> bool {
+    SPINNER_THREAD
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
 #[test]
 fn prompt_info_detects_ambiguity_without_changing_exact_classification() {
     let info = prompt_info_from_options("same> ", Some("same> "), Some("same> "));
@@ -99,9 +106,6 @@ fn test_spinner_lifecycle() {
 }
 
 /// Test command error state tracking.
-///
-/// These assertions are combined into a single test to avoid race conditions
-/// when tests run in parallel (they share global state via CONDITION_ERROR_OCCURRED).
 #[test]
 fn test_command_error_state() {
     use super::CommandOutcome;
@@ -112,20 +116,7 @@ fn test_command_error_state() {
     // Without the safe binding-inspection API, command outcomes are unavailable.
     assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 
-    // Without the safe binding-inspection API, even independently observed
-    // conditions cannot provide the complete command outcome contract.
-    mark_error_condition();
-    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
-
-    // Reset should clear the error state
-    reset_command_error_state();
-    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
-
-    // Mark an error again; tracking remains unavailable without R support.
-    mark_error_condition();
-    assert_eq!(command_outcome(), CommandOutcome::Unavailable);
-
-    // Final reset
+    // Resetting leaves tracking unavailable without R support.
     reset_command_error_state();
     assert_eq!(command_outcome(), CommandOutcome::Unavailable);
 }

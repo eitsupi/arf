@@ -21,24 +21,19 @@ pub use discovery::{
 };
 pub use error_state::{
     CommandOutcome, command_outcome, command_outcome_tracking_available, global_error_handler_code,
-    mark_error_condition, mark_global_error_handler_initialized, reset_command_error_state,
-    restore_stderr, suppress_stderr,
+    mark_global_error_handler_initialized, reset_command_error_state, restore_stderr,
+    suppress_stderr,
 };
-pub use init::{
-    initialize_r, initialize_r_for_tests, initialize_r_with_args, initialize_r_with_args_for_tests,
-    run_r_mainloop,
-};
+pub use init::{initialize_r, initialize_r_for_tests, initialize_r_with_args, run_r_mainloop};
 pub use interrupt::{
-    clear_r_interrupt_pending, is_r_awaiting_console_input, is_r_interrupt_flag_available,
-    process_r_events, set_r_interrupt_pending,
+    is_r_awaiting_console_input, is_r_interrupt_flag_available, process_r_events,
+    set_r_interrupt_pending,
 };
 pub use output::{
-    clear_write_console_callback, finish_ipc_capture, flush_reprex_buffer, set_reprex_mode,
-    set_write_console_callback, start_ipc_capture,
+    finish_ipc_capture, flush_reprex_buffer, set_reprex_mode, set_write_console_callback,
+    start_ipc_capture,
 };
-pub use spinner::{
-    is_spinner_active, set_spinner_color, set_spinner_frames, start_spinner, stop_spinner,
-};
+pub use spinner::{set_spinner_color, set_spinner_frames, start_spinner, stop_spinner};
 
 #[cfg(test)]
 use discovery::{parse_var_from_wrapper_script, set_r_path_vars_from_wrapper};
@@ -56,7 +51,7 @@ use crate::SexpType;
 
 #[cfg(unix)]
 use askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_termios};
-use interrupt::AwaitConsoleInputGuard;
+use interrupt::{AwaitConsoleInputGuard, clear_r_interrupt_pending};
 use output::REPREX_SETTINGS;
 
 /// Option-derived metadata for one ReadConsole invocation.

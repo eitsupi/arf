@@ -198,7 +198,7 @@ pub(crate) fn startup_env_value(name: &str) -> Option<OsString> {
 /// `base_dir` is the working directory from before initialization, used to
 /// resolve a relative R_HOME. See [`absolutize_runtime_r_home`].
 pub(crate) fn capture_runtime_r_home(base_dir: Option<&std::path::Path>) -> Option<PathBuf> {
-    let r_home = match unsafe { arf_harp::eval_r_to_string(r#"base::R.home()"#) } {
+    let r_home = match unsafe { arf_harp::help::eval_r_to_string(r#"base::R.home()"#) } {
         Ok(Some(r_home)) => r_home,
         Ok(None) => {
             log::warn!("R.home() returned NULL after R initialization");

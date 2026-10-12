@@ -15,15 +15,13 @@ mod windows_loader;
 mod sys;
 
 // error
-pub use bounded_process::{
-    BOUNDED_COMMAND_OUTPUT_LIMIT, BOUNDED_COMMAND_TIMEOUT, BoundedProcessError, run_bounded_command,
-};
+pub use bounded_process::{BoundedProcessError, run_bounded_command};
 pub use error::{RError, RResult};
 pub use library_selection::select_r_library;
 pub use rhome_probe::{RHomeProbeError, probe_r_home};
 
 // functions
-pub use functions::{RLibrary, init_r_library, r_global_env, r_library, r_nil_value};
+pub use functions::{RLibrary, r_library, r_nil_value};
 
 // types
 pub use types::{
@@ -38,17 +36,15 @@ pub use types::{Rstart, SaType, UImode};
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
 pub use sys::{
-    CommandOutcome, ReadConsolePromptInfo, clear_r_interrupt_pending, clear_write_console_callback,
-    command_outcome, command_outcome_tracking_available, ensure_ld_library_path, find_r_library,
-    finish_ipc_capture, flush_reprex_buffer, get_r_home, global_error_handler_code, initialize_r,
-    initialize_r_for_tests, initialize_r_with_args, initialize_r_with_args_for_tests,
+    CommandOutcome, ReadConsolePromptInfo, command_outcome, command_outcome_tracking_available,
+    ensure_ld_library_path, find_r_library, finish_ipc_capture, flush_reprex_buffer, get_r_home,
+    global_error_handler_code, initialize_r, initialize_r_for_tests, initialize_r_with_args,
     is_r_auto_discovery_disabled, is_r_awaiting_console_input, is_r_interrupt_flag_available,
-    is_spinner_active, mark_error_condition, mark_global_error_handler_initialized,
-    process_r_events, r_home_from_library_path, r_home_from_rhome_output, r_library_path,
-    r_path_vars_from_wrapper, reset_command_error_state, restore_stderr, run_r_mainloop,
-    set_r_auto_discovery_disabled, set_r_interrupt_pending, set_read_console_callback,
-    set_reprex_mode, set_spinner_color, set_spinner_frames, set_write_console_callback,
-    start_ipc_capture, start_spinner, stop_spinner, suppress_stderr,
+    mark_global_error_handler_initialized, process_r_events, r_home_from_library_path,
+    r_home_from_rhome_output, r_library_path, r_path_vars_from_wrapper, reset_command_error_state,
+    restore_stderr, run_r_mainloop, set_r_auto_discovery_disabled, set_r_interrupt_pending,
+    set_read_console_callback, set_reprex_mode, set_spinner_color, set_spinner_frames,
+    set_write_console_callback, start_ipc_capture, start_spinner, stop_spinner, suppress_stderr,
 };
 #[cfg(unix)]
 pub use sys::{

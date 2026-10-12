@@ -93,14 +93,6 @@ struct StaticFormalsRequest {
     used_named: Vec<String>,
 }
 
-/// Return static formals for a completion request, if it has the supported
-/// `pkg::foo(` shape. Unsupported input is represented by `None` so callers
-/// can retain their existing completion path unchanged.
-pub fn lookup(line: &str, cursor_pos: usize) -> Option<StaticFormalsResult> {
-    let request = parse_request(line, cursor_pos)?;
-    Some(lookup_request(&request))
-}
-
 /// Resolve a request unless its public package or function name is excluded.
 /// Exclusions are checked after parsing but before any installed metadata or
 /// code database access.

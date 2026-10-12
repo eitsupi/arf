@@ -244,44 +244,6 @@ pub fn complete_path(
     completions
 }
 
-/// Detect if a string looks like a path.
-///
-/// Returns true if the string:
-/// - Starts with `/`, `./`, `../`, `~/`
-/// - Contains path separators
-/// - Looks like a relative path
-#[allow(dead_code)]
-pub fn looks_like_path(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-
-    // Absolute or home-relative paths
-    if s.starts_with('/') || s.starts_with("~/") || s.starts_with(r"~\") {
-        return true;
-    }
-
-    // Relative paths
-    if s.starts_with("./") || s.starts_with(r".\") {
-        return true;
-    }
-    if s.starts_with("../") || s.starts_with(r"..\") {
-        return true;
-    }
-
-    // Contains path separator - likely a path
-    if s.contains('/') || s.contains('\\') {
-        return true;
-    }
-
-    // Single dot or double dot
-    if s == "." || s == ".." {
-        return true;
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,24 +430,6 @@ mod tests {
         // Should have src/ and tests/
         assert!(completions.iter().any(|c| c.path == "src/"));
         assert!(completions.iter().any(|c| c.path == "tests/"));
-    }
-
-    #[test]
-    fn test_looks_like_path() {
-        // Should be paths
-        assert!(looks_like_path("/usr/bin"));
-        assert!(looks_like_path("./foo"));
-        assert!(looks_like_path("../bar"));
-        assert!(looks_like_path("~/Documents"));
-        assert!(looks_like_path("src/main.rs"));
-        assert!(looks_like_path("."));
-        assert!(looks_like_path(".."));
-
-        // Should not be paths
-        assert!(!looks_like_path(""));
-        assert!(!looks_like_path("print"));
-        assert!(!looks_like_path("my_variable"));
-        assert!(!looks_like_path("data.frame"));
     }
 
     #[test]

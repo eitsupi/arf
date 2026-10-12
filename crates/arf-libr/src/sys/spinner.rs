@@ -166,11 +166,3 @@ pub fn stop_spinner() {
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }
-
-/// Check if the spinner is currently active.
-pub fn is_spinner_active() -> bool {
-    SPINNER_THREAD
-        .lock()
-        .map(|guard| guard.is_some())
-        .unwrap_or(false)
-}
