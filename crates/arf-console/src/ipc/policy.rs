@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
 use super::approval::send_policy_is_allow;
+use super::protocol::{IpcResponse, R_EVAL_NOT_ALLOWED};
 use super::session::SessionType;
 
 fn is_inert_kind(kind: &str) -> bool {
@@ -101,6 +102,16 @@ fn policy_state() -> PolicyState {
 pub fn validate(code: &str) -> Result<(), String> {
     let policy = policy_state();
     validate_with_policy(code, &policy)
+}
+
+/// Validate an IPC evaluation and build the rejection response if it is not allowed.
+pub(super) fn policy_reject(code: &str) -> Option<IpcResponse> {
+    validate(code).err().map(|reason| {
+        IpcResponse::error(
+            R_EVAL_NOT_ALLOWED,
+            format!("IPC evaluation rejected by policy: {reason}"),
+        )
+    })
 }
 
 fn validate_with_policy(code: &str, policy: &PolicyState) -> Result<(), String> {

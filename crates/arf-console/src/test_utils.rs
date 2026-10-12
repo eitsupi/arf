@@ -20,6 +20,7 @@
 //! gives each test its own process removes it outright, which is the direction
 //! being pursued separately.
 
+use crate::sync::LockRecover;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -44,7 +45,7 @@ static ENV_MUTEX: Mutex<()> = Mutex::new(());
 /// already holds an `EnvGuard`; the combined helper enforces the required
 /// environment-then-cwd order.
 pub fn lock_env() -> EnvGuard {
-    let lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let lock = ENV_MUTEX.lock_recover();
     EnvGuard {
         _lock: lock,
         originals: BTreeMap::new(),
@@ -85,7 +86,7 @@ pub fn lock_env_and_cwd() -> EnvCwdGuard {
 /// // cwd is automatically restored when _guard drops
 /// ```
 pub fn lock_cwd() -> CwdGuard {
-    let lock = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let lock = CWD_MUTEX.lock_recover();
     let original = std::env::current_dir().expect("failed to get current dir");
     CwdGuard {
         _lock: lock,
