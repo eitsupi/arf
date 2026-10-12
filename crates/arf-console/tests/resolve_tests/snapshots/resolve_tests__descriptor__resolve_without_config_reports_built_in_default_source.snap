@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/descriptor.rs
 expression: normalize_descriptor(&value)
 ---
 {
@@ -14,15 +14,15 @@ expression: normalize_descriptor(&value)
   },
   "schema_version": 1,
   "selected_by": {
-    "kind": "version_request",
+    "kind": "default",
     "requested_r_home": null,
-    "requested_version": "4.4.2",
+    "requested_version": null,
     "source": {
-      "format": "json",
-      "key": "R.Version",
-      "kind": "project_file",
+      "format": null,
+      "key": null,
+      "kind": "built_in_default",
       "name": null,
-      "path": "<source-path>"
+      "path": null
     }
   },
   "target": {

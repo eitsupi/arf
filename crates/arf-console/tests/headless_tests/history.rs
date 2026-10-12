@@ -1,32 +1,6 @@
 use super::support::*;
+use crate::common::{poll_until, wait_for_history_rows};
 use std::time::Duration;
-
-type HistoryRow = (String, Option<i64>, Option<String>, Option<String>);
-
-/// Read all history rows, or `None` while the database is missing or not yet
-/// readable.
-fn read_history_rows(db_path: &std::path::Path) -> Option<Vec<HistoryRow>> {
-    let conn =
-        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .ok()?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT command_line, exit_status, hostname, cwd \
-             FROM history ORDER BY id",
-        )
-        .ok()?;
-    stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    })
-    .ok()?
-    .collect::<Result<Vec<_>, _>>()
-    .ok()
-}
 
 #[test]
 fn test_headless_history_persistence() {
@@ -69,46 +43,57 @@ fn test_headless_history_persistence() {
 
     // Read the history database directly once the sentinel is visible.
     let db_path = tmp.path().join("r.db");
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    let rows = loop {
-        if let Some(rows) = read_history_rows(&db_path)
-            && rows.iter().any(|r| r.0 == "history_sentinel <- 1")
-        {
-            break rows;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for the history database to contain the sentinel: {}",
+    let rows = wait_for_history_rows(
+        &db_path,
+        &format!(
+            "the history database to contain the sentinel: {}",
             db_path.display()
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    };
+        ),
+        Duration::from_secs(10),
+        Duration::from_millis(50),
+        |rows| rows.iter().any(|r| r.command == "history_sentinel <- 1"),
+    )
+    .unwrap_or_else(|error| panic!("{error:#}"));
 
     // Filter to just our known commands for assertion stability.
-    let success_row = rows.iter().find(|r| r.0 == "1 + 1");
-    let error_row = rows.iter().find(|r| r.0 == "stop('test_error')");
-    let send_row = rows.iter().find(|r| r.0 == "invisible(NULL)");
+    let success_row = rows.iter().find(|r| r.command == "1 + 1");
+    let error_row = rows.iter().find(|r| r.command == "stop('test_error')");
+    let send_row = rows.iter().find(|r| r.command == "invisible(NULL)");
 
     // Successful eval
     let success_row = success_row.expect("should find '1 + 1' in history");
     assert_eq!(
-        success_row.1,
+        success_row.exit_status,
         Some(0),
         "successful eval should have exit_status=0"
     );
-    assert!(success_row.2.is_some(), "hostname should be populated");
-    assert!(success_row.3.is_some(), "cwd should be populated");
+    assert!(
+        success_row.hostname.is_some(),
+        "hostname should be populated"
+    );
+    assert!(success_row.cwd.is_some(), "cwd should be populated");
 
     // Error eval
     let error_row = error_row.expect("should find error command in history");
-    assert_eq!(error_row.1, Some(1), "error eval should have exit_status=1");
+    assert_eq!(
+        error_row.exit_status,
+        Some(1),
+        "error eval should have exit_status=1"
+    );
 
     // user_input (send)
     let send_row = send_row.expect("should find send command in history");
-    assert_eq!(send_row.1, Some(0), "send should have exit_status=0");
+    assert_eq!(
+        send_row.exit_status,
+        Some(0),
+        "send should have exit_status=0"
+    );
 
     // Whitespace-only commands should not appear in history.
-    let whitespace_rows: Vec<_> = rows.iter().filter(|r| r.0.trim().is_empty()).collect();
+    let whitespace_rows: Vec<_> = rows
+        .iter()
+        .filter(|r| r.command.trim().is_empty())
+        .collect();
     assert!(
         whitespace_rows.is_empty(),
         "whitespace-only commands should not be persisted to history"
@@ -145,14 +130,13 @@ fn test_headless_json_output() {
     // Wait for the stdout reader thread to capture the JSON output.
     // spawn_with_args already confirmed IPC readiness, so the JSON has been
     // written; we just need the reader thread to catch up.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while process.stdout_output().trim().is_empty() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "Timed out waiting for JSON on stdout"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    assert!(
+        poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            (!process.stdout_output().trim().is_empty()).then_some(())
+        })
+        .is_some(),
+        "Timed out waiting for JSON on stdout"
+    );
 
     let stdout = process.stdout_output();
 

@@ -8,14 +8,14 @@
 
 use super::support::{ERROR_PROMPT, PROMPT, Terminal, run_case, run_case_with};
 #[cfg(unix)]
+use crate::common::try_poll_until;
+#[cfg(unix)]
 use anyhow::Context;
 use anyhow::{Result, ensure};
 #[cfg(unix)]
 use std::ffi::CStr;
 #[cfg(unix)]
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::time::Instant;
 use std::{thread, time::Duration};
 
 const SPAM_INTERVAL: Duration = Duration::from_millis(90);
@@ -244,8 +244,8 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
         .env_remove("ARF_R_VERSION")
         .artifacts(artifacts);
     run_case_with(builder, |terminal| {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
+        let mut last_state = None;
+        let ready = try_poll_until(Duration::from_secs(30), Duration::from_millis(25), || {
             let state = terminal.state()?;
             ensure!(
                 state.exited.is_none(),
@@ -254,14 +254,15 @@ fn external_sigterm_uses_default_termination_disposition() -> Result<()> {
             // Preserve the original boundary: R itself must report readiness;
             // the application prompt is deliberately not a substitute.
             if terminal.output()?.contains("is ready.") {
-                break;
+                return Ok(Some(()));
             }
-            ensure!(
-                Instant::now() < deadline,
-                "timed out waiting for R startup readiness: {state:?}"
-            );
-            thread::sleep(Duration::from_millis(25));
-        }
+            last_state = Some(state);
+            Ok(None)
+        })?;
+        ensure!(
+            ready.is_some(),
+            "timed out waiting for R startup readiness: {last_state:?}"
+        );
 
         let pid = terminal.pid().context("missing arf PID")? as libc::pid_t;
         ensure!(

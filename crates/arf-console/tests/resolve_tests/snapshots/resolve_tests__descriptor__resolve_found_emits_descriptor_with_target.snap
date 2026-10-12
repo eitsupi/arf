@@ -1,12 +1,12 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/descriptor.rs
 expression: normalize_descriptor(&value)
 ---
 {
   "cwd": "<cwd>",
   "diagnostics": [],
   "metadata": null,
-  "provider": "rig",
+  "provider": "explicit_path",
   "resolved": true,
   "resolver": {
     "name": "arf",
@@ -14,20 +14,20 @@ expression: normalize_descriptor(&value)
   },
   "schema_version": 1,
   "selected_by": {
-    "kind": "version_request",
-    "requested_r_home": null,
-    "requested_version": "my-proj",
+    "kind": "r_home",
+    "requested_r_home": "<requested-r-home>",
+    "requested_version": null,
     "source": {
       "format": null,
       "key": null,
       "kind": "command_line_argument",
-      "name": "--with-r-version",
+      "name": "--r-home",
       "path": null
     }
   },
   "target": {
     "r_binary": null,
     "r_home": "<r-home>",
-    "resolved_version": "4.4.2"
+    "resolved_version": null
   }
 }

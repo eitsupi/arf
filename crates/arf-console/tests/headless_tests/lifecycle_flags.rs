@@ -1,4 +1,5 @@
 use super::support::*;
+use crate::common::poll_until;
 use std::time::Duration;
 
 fn r_quote_path(path: &std::path::Path) -> String {
@@ -10,14 +11,14 @@ fn r_quote_path(path: &std::path::Path) -> String {
 }
 
 fn wait_for_pid_file(path: &std::path::Path) {
-    let start = std::time::Instant::now();
-    while start.elapsed() < Duration::from_secs(5) {
-        if path.exists() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("PID file should exist at: {}", path.display());
+    assert!(
+        poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            path.exists().then_some(())
+        })
+        .is_some(),
+        "PID file should exist at: {}",
+        path.display()
+    );
 }
 
 #[cfg(unix)]
@@ -68,20 +69,12 @@ fn test_headless_pid_file() {
     // PID file is written right after the IPC server starts. Poll until the
     // file exists AND has non-empty content to avoid reading between create
     // and write.
-    let start = std::time::Instant::now();
-    let pid_content = loop {
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "PID file should appear with content at: {}",
-            pid_str
-        );
-        if let Ok(content) = std::fs::read_to_string(&pid_path)
-            && !content.is_empty()
-        {
-            break content;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
+    let pid_content = poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
+        std::fs::read_to_string(&pid_path)
+            .ok()
+            .filter(|content| !content.is_empty())
+    })
+    .unwrap_or_else(|| panic!("PID file should appear with content at: {}", pid_str));
     let expected_pid = process.pid.to_string();
     assert_eq!(
         pid_content.trim(),

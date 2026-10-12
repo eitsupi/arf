@@ -1,5 +1,5 @@
 ---
-source: crates/arf-console/tests/resolve_tests.rs
+source: crates/arf-console/tests/resolve_tests/descriptor.rs
 expression: normalize_descriptor(&value)
 ---
 {

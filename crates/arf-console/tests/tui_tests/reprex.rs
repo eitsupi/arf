@@ -1,53 +1,24 @@
 use super::support::{
     ERROR_PROMPT, PROMPT, Terminal, build_formatter_fixture_path, run_case, run_case_with,
 };
-use anyhow::{Result, bail, ensure};
-use rusqlite::{Connection, OpenFlags};
+use crate::common::{HistoryRow, wait_for_history_rows};
+use anyhow::{Result, ensure};
 use std::path::Path;
 use std::process::Command;
-use std::thread;
-use std::time::{Duration, Instant};
-
-type HistoryRow = (String, Option<i64>);
-
-fn history_rows(history_dir: &Path) -> Result<Vec<HistoryRow>> {
-    let path = history_dir.join("r.db");
-    ensure!(
-        path.is_file(),
-        "history database is missing: {}",
-        path.display()
-    );
-    let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let mut statement =
-        connection.prepare("SELECT command_line, exit_status FROM history ORDER BY id")?;
-    Ok(statement
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
-}
+use std::time::Duration;
 
 fn wait_for_history(
     history_dir: &Path,
     description: &str,
     predicate: impl Fn(&[HistoryRow]) -> bool,
 ) -> Result<Vec<HistoryRow>> {
-    let started = Instant::now();
-    let mut last_error = None;
-    loop {
-        match history_rows(history_dir) {
-            Ok(rows) if predicate(&rows) => return Ok(rows),
-            Ok(_) => {}
-            Err(error) => last_error = Some(error),
-        }
-        if started.elapsed() >= Duration::from_secs(30) {
-            return match last_error {
-                Some(error) => Err(error).map_err(|error| {
-                    anyhow::anyhow!("timed out waiting for {description}: {error}")
-                }),
-                None => bail!("timed out waiting for {description}"),
-            };
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
+    wait_for_history_rows(
+        &history_dir.join("r.db"),
+        description,
+        Duration::from_secs(30),
+        Duration::from_millis(25),
+        predicate,
+    )
 }
 
 #[test]
@@ -170,12 +141,12 @@ on_exit_only = false
             let failed_rows =
                 wait_for_history(&history, "failed formatter history entry", |rows| {
                     rows.iter()
-                        .any(|(command, status)| command == "42" && *status == Some(1))
+                        .any(|row| row.command == "42" && row.exit_status == Some(1))
                 })?;
             ensure!(
                 failed_rows
                     .iter()
-                    .any(|(command, status)| { command == "42" && *status == Some(1) })
+                    .any(|row| { row.command == "42" && row.exit_status == Some(1) })
             );
 
             let follow_up = "cat('FOLLOW_UP_ONE\\n'); 1";
@@ -187,9 +158,9 @@ on_exit_only = false
                     && line.trim_end().ends_with("ARF>")
             })?;
             wait_for_history(&history, "history forget after follow-up", |rows| {
-                rows.iter().any(|(command, status)| {
-                    command.contains("FOLLOW_UP_ONE") && *status == Some(0)
-                }) && !rows.iter().any(|(command, _)| command == "42")
+                rows.iter()
+                    .any(|row| row.command.contains("FOLLOW_UP_ONE") && row.exit_status == Some(0))
+                    && !rows.iter().any(|row| row.command == "42")
             })?;
             let follow_up_state = terminal.state()?;
             ensure!(
@@ -239,20 +210,19 @@ fn rlang_error_detection_records_failure_status() -> Result<()> {
                 state.text.contains("doesn't exist") && line.trim_end() == ERROR_PROMPT
             })?;
             wait_for_history(history.path(), "rlang error history entry", |rows| {
-                rows.iter().any(|(command, status)| {
-                    command.contains("dplyr::select") && *status == Some(1)
-                })
+                rows.iter()
+                    .any(|row| row.command.contains("dplyr::select") && row.exit_status == Some(1))
             })?;
             terminal.submit("1", "[1] 1", PROMPT)?;
             let rows = wait_for_history(history.path(), "successful rlang follow-up", |rows| {
-                rows.iter().any(|(command, status)| {
-                    command.contains("dplyr::select") && *status == Some(1)
-                }) && rows
-                    .iter()
-                    .any(|(command, status)| command == "42" && *status == Some(0))
+                rows.iter()
+                    .any(|row| row.command.contains("dplyr::select") && row.exit_status == Some(1))
+                    && rows
+                        .iter()
+                        .any(|row| row.command == "42" && row.exit_status == Some(0))
             })?;
-            ensure!(rows.iter().any(|(command, status)| {
-                command.contains("dplyr::select") && *status == Some(1)
+            ensure!(rows.iter().any(|row| {
+                row.command.contains("dplyr::select") && row.exit_status == Some(1)
             }));
             terminal.quit()
         },

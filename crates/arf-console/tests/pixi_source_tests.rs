@@ -1,30 +1,16 @@
 //! Provider/consumer contracts with a native fake launcher, without Pixi or R.
 
+mod common;
+
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
 fn launcher_bytes() -> &'static [u8] {
     static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
     BYTES.get_or_init(|| {
-        let directory = tempfile::tempdir().unwrap();
-        let binary = directory
-            .path()
-            .join(format!("rhome{}", std::env::consts::EXE_SUFFIX));
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rhome_probe.rs");
-        let output = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
-            .arg(source)
-            .args(["--edition=2024", "-D", "warnings", "-o"])
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        std::fs::read(binary).unwrap()
+        common::compile_fixture("rhome_probe").unwrap_or_else(|error| panic!("{error}"))
     })
 }
 
@@ -50,13 +36,7 @@ impl Fixture {
         let library = arf_libr::r_library_path(&home);
         std::fs::create_dir_all(library.parent().unwrap()).unwrap();
         std::fs::write(&library, "deliberately unloadable shared library").unwrap();
-        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
-        std::fs::write(&binary, launcher_bytes()).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        common::write_executable(&binary, launcher_bytes()).unwrap();
         let manifest = root.path().join("active-pixi.toml");
         std::fs::write(
             &manifest,
@@ -541,7 +521,7 @@ fn auto_path_discovery_times_out_after_pixi_probe_rejection() {
 
 fn assert_auto_path_discovery_is_bounded(modes: &[&str]) {
     use std::process::Stdio;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     let fixture = Fixture::new();
     std::fs::write(
@@ -554,7 +534,6 @@ r_source_overrides=[{provider='pixi'}]",
     .unwrap();
     for &mode in modes {
         let counter = fixture.root.path().join(format!("{mode}-calls"));
-        let start = Instant::now();
         let mut child = fixture
             .command(true)
             // Isolate PATH to exclude rig and any other R executable.
@@ -567,17 +546,15 @@ r_source_overrides=[{provider='pixi'}]",
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        loop {
-            if child.try_wait().unwrap().is_some() {
-                break;
-            }
-            if start.elapsed() > Duration::from_secs(35) {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("auto discovery exceeded its probe deadlines: {mode}");
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        assert!(
+            common::wait_for_child_exit(
+                &mut child,
+                Duration::from_secs(35),
+                Duration::from_millis(20)
+            )
+            .unwrap(),
+            "auto discovery exceeded its probe deadlines: {mode}"
+        );
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{mode}: {output:?}");
         assert!(output.stderr.is_empty(), "{mode}: {output:?}");
