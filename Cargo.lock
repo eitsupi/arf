@@ -2702,9 +2702,9 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tui-test-rs"
-version = "0.1.0-beta.5"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d722bcef1b12ca6b8999013f72de25f0d5932e7a5d88c5784381a1c9e7f77b78"
+checksum = "7923617b2d78943256d5180d1d929fe2cf089fa4ca2963bf7f6f6f30fa33687b"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -2713,6 +2713,7 @@ dependencies = [
  "compact_str 0.10.0",
  "dirs 6.0.0",
  "flate2",
+ "libc",
  "portable-pty",
  "regex",
  "serde",
@@ -2721,6 +2722,7 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "ttf-parser",
  "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
