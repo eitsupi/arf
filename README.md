@@ -95,6 +95,29 @@ yay -S arf-bin
 paru -S arf-bin
 ```
 
+#### Nix (nixpkgs)
+
+```sh
+# Run without installing
+nix run nixpkgs#arf
+
+# Install to your profile
+nix profile install nixpkgs#arf
+```
+
+Or declaratively:
+
+```nix
+# NixOS / nix-darwin
+environment.systemPackages = [ pkgs.arf ];
+
+# Home Manager
+home.packages = [ pkgs.arf ];              
+
+# flake.nix devShell
+packages = [ pkgs.arf ];
+```
+
 ### Build from Source
 
 ```sh
