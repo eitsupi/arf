@@ -36,13 +36,15 @@ pub use types::{Rstart, SaType, UImode};
 #[cfg(unix)]
 pub use sys::askpass_handler_code;
 pub use sys::{
-    CommandOutcome, ReadConsolePromptInfo, command_outcome, command_outcome_tracking_available,
-    ensure_ld_library_path, find_r_library, finish_ipc_capture, flush_reprex_buffer, get_r_home,
+    CommandOutcome, HeadlessReadConsoleCallback, ReadConsoleInput, ReadConsolePromptInfo,
+    command_outcome, command_outcome_tracking_available, ensure_ld_library_path, find_r_library,
+    finish_ipc_capture, flush_reprex_buffer, frame_depth_protected, get_r_home,
     global_error_handler_code, initialize_r, initialize_r_for_tests, initialize_r_with_args,
     is_r_auto_discovery_disabled, is_r_awaiting_console_input, is_r_interrupt_flag_available,
-    mark_global_error_handler_initialized, process_r_events, r_home_from_library_path,
-    r_home_from_rhome_output, r_library_path, r_path_vars_from_wrapper, reset_command_error_state,
-    restore_stderr, run_r_mainloop, set_r_auto_discovery_disabled, set_r_interrupt_pending,
+    mark_global_error_handler_initialized, process_r_events, process_r_events_protected,
+    r_home_from_library_path, r_home_from_rhome_output, r_library_path, r_path_vars_from_wrapper,
+    reset_command_error_state, reset_console_generation, restore_stderr, run_r_mainloop,
+    set_headless_read_console_callback, set_r_auto_discovery_disabled, set_r_interrupt_pending,
     set_read_console_callback, set_reprex_mode, set_spinner_color, set_spinner_frames,
     set_write_console_callback, start_ipc_capture, start_spinner, stop_spinner, suppress_stderr,
 };

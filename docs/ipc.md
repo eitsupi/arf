@@ -22,13 +22,39 @@ The server can be enabled in three ways:
 
 ## Headless Mode
 
-Headless mode starts R with an IPC server but without the interactive REPL. This is ideal for environments where no terminal is available.
+Headless mode starts R with an IPC server but without a terminal UI. This is ideal for environments where no terminal is available.
 
 ```sh
 arf headless
 ```
 
 The server runs until interrupted by `Ctrl+C`, `SIGTERM`, or `arf ipc shutdown`. Immediately after startup there is a brief window where the IPC endpoint is listening but R is not yet ready, so early client requests may return `R_BUSY`. For scripted or automated use, prefer `arf headless --json` and treat the JSON emitted on stdout as the readiness signal, or retry the first `arf ipc` command with a small backoff until it succeeds.
+
+### Headless console limitations
+
+Visible requests (`send` and `eval --visible`) use R's normal REPL. R's parser
+determines expression boundaries; a braced block is one expression. R invokes task
+callbacks for successfully evaluated top-level expressions, not failed ones,
+and applies its normal autoprinting and `.Last.value` semantics.
+
+Leading horizontal whitespace may be omitted at verified top-level input
+boundaries to prevent R from treating long whitespace-only fragments as EOF.
+Source columns and leading indentation can therefore differ from the submitted
+code. Original line breaks and string contents are preserved; no artificial
+line breaks are added or expressions rewritten. Values, expression meanings,
+and task callback counts are preserved.
+
+Older R versions may retain native REPL limitations for long console input;
+this path does not guarantee correct handling of such inputs on R 4.0/4.1.
+
+Standard nested console reads such as `parse()` reading from the console,
+`readline()`, menus, and browser prompts receive EOF; further IPC requests
+cannot supply console responses. Native console readers without R evaluation
+frames are unsupported. R's main and continuation prompt options must be
+readable, non-empty, distinct strings and must not resemble `Browse[n]>`
+prompts. `--no-echo` is unsupported in headless mode. Invalid or ambiguous
+prompt conditions produce a diagnostic and stop the session without consuming
+the next request.
 
 ### Options
 
@@ -262,13 +288,15 @@ scrolling, and states the current approval requirement for visible requests
 (`send`/`eval --visible`). When disabled, it omits the policy details.
 
 Evaluates R code and returns the captured output. The code runs silently by
-default — output is not shown in the session. With `--visible`, an interactive
-session uses the same human approval as `send`; a headless session runs it
-immediately like `send`. The response fields differ between these two visible
-paths: headless visible evaluation still goes through the capture wrapper and
-populates `value` and `error`, while interactive visible evaluation runs
-through normal REPL evaluation and returns `null` for both fields. In the
-interactive case, printed values and errors are in `stdout` and `stderr`.
+default — output is not shown in the session. Silent eval uses the direct
+evaluation path in both interactive and headless sessions; it does not invoke
+the top-level task callback. With `--visible`, an interactive session uses the
+same human approval as `send`, while headless evaluation runs immediately.
+Visible `eval` and `send` use R's normal REPL in both session types, with the
+expression and callback semantics described under [Headless console
+limitations](#headless-console-limitations). Visible `eval` captures autoprint
+and callback output in `stdout` and evaluation errors in `stderr`, returning
+`null` for both `value` and `error`.
 
 ```sh
 # Basic evaluation
@@ -294,11 +322,11 @@ arf ipc eval --pid 12345 'getwd()'
 | Parameter | Description |
 |-----------|-------------|
 | `<CODE>` | R code to evaluate (required) |
-| `--visible` | Also show output in the session. In an interactive session, this is governed by the same human approval as `send`, not the eval allowlist, and `value`/`error` are always `null` in the response. In headless mode, it runs immediately like `send` and still populates `value`/`error`. |
+| `--visible` | Evaluate through the R REPL and show output in the session. In an interactive session, this is governed by the same human approval as `send`; in headless mode it runs immediately. The response's `value` and `error` are `null`; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. |
 | `--timeout <MS>` | Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present, but `value` and `error` are not populated for an interactive session's visible evaluation: normal REPL output and errors appear in `stdout` and `stderr` instead. Silent evaluation (the default) and visible evaluation in a headless session use the capture wrapper, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
+**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. For visible evaluation, `value` and `error` are `null`; normal REPL output and errors appear in `stdout` and `stderr`. Silent evaluation (the default) uses the direct evaluation path, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
 
 When the timeout fires, the server returns a JSON-RPC error response instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. The R evaluation continues, so the session stays busy until it finishes.
 
@@ -326,7 +354,7 @@ Example (R error):
 
 ### `arf ipc send` — Send User Input
 
-Sends code as if the user typed it at the prompt. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
+Sends code through R's normal REPL, as if the user typed it at the prompt. It uses the same expression and callback semantics as visible `eval`. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
 
 `send` is a visible, history-recorded operation. In an interactive REPL it is
 shown for human approval; in headless mode it runs immediately because there is
@@ -366,7 +394,7 @@ arf ipc send 'library(dplyr)'
 arf ipc send --pid 12345 'print(mtcars)'
 ```
 
-**Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`
+**Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`. `accepted: true` acknowledges that the request was accepted; it does not report whether evaluation succeeded or completed.
 
 **When to use `eval` vs `send`:**
 
@@ -538,7 +566,9 @@ arf ipc history | jq -r '.entries[].command'
 
 ### `arf ipc shutdown` — Shut Down Headless Session
 
-Sends a graceful shutdown request to a headless session. The session cleans up (removes socket, PID file, session file) before exiting.
+Requests shutdown of a headless session. The session removes its socket, PID
+file, and session file before exiting. As before, IPC shutdown does not invoke
+`.Last()`, save the workspace, or run R's cleanup routine.
 
 ```sh
 arf ipc shutdown
@@ -723,10 +753,14 @@ Errors are caught by `tryCatch`, so the error message appears in the `error` fie
 
 ### Output Capture
 
-The `evaluate` method captures R output through two separate channels:
+Silent `evaluate` calls capture R output through two separate channels. Visible
+`evaluate` calls use normal REPL evaluation instead, so their `value` and
+`error` fields are `null`, autoprint and callback output are captured in
+`stdout`, and evaluation errors are captured in `stderr`. `user_input`/`send` also use normal
+REPL evaluation and do not return evaluation results.
 
 - **`stdout` / `stderr` (console output)**: Captured via R's `WriteConsoleEx` callback at the C level. This includes text produced by `cat()`, `message()`, `warning()`, and other writes to the R console.
-- **`value` / `error` (structured result)**: Captured separately as the evaluated result (or error) of the last expression, using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). In silent `evaluate` calls, printed values of expressions appear here rather than in `stdout`/`stderr`.
+- **`value` / `error` (structured result)**: For silent `evaluate`, the evaluated result (or error) is captured separately using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). Printed values appear here rather than in `stdout`/`stderr`. Visible evaluation uses normal REPL output and leaves both fields `null`.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
 

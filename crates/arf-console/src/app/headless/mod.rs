@@ -27,11 +27,10 @@ use info::HeadlessInfo;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Run in headless mode: R + IPC server, no interactive REPL.
+/// Run in headless mode: R + IPC server, without a terminal UI.
 ///
-/// Initializes R, starts the IPC server, and enters a polling loop.
-/// The loop processes IPC requests and R events until interrupted
-/// by Ctrl+C or a shutdown signal.
+/// Initializes R and starts the IPC server. R's mainloop owns request input
+/// until interrupted by Ctrl+C or a shutdown signal.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_headless(
     config_path: Option<&std::path::PathBuf>,
@@ -127,7 +126,8 @@ pub(crate) fn run_headless(
         eprintln!("Headless mode ready. Press Ctrl+C to exit.");
     }
 
-    run_event_loop(&shutdown);
+    arf_libr::set_headless_read_console_callback(ipc::headless_read_console);
+    unsafe { arf_libr::run_r_mainloop() };
 
     if !quiet {
         eprintln!("\nShutting down...");
@@ -366,24 +366,6 @@ fn write_session_info(output: &HeadlessInfo) -> Result<()> {
         .flush()
         .context("Failed to flush session info to stdout")?;
     Ok(())
-}
-
-/// Main event loop: process IPC requests and R events until shutdown.
-fn run_event_loop(shutdown: &AtomicBool) {
-    while !shutdown.load(Ordering::Acquire) {
-        // Process IPC requests
-        let had_work = ipc::headless_poll_and_process();
-
-        // Process R events (timers, background tasks, etc.)
-        arf_libr::process_r_events();
-
-        // Sleep to avoid busy loop — shorter if we had work (more may be coming)
-        if had_work {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    }
 }
 
 /// Configure R options for headless mode.

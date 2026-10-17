@@ -1,7 +1,60 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::SexpType;
+
+#[repr(C)]
+struct FrameDepthPayload {
+    library: *const crate::functions::RLibrary,
+    depth: c_int,
+    succeeded: bool,
+}
+
+/// Return `sys.nframe()` behind an R longjmp boundary.
+///
+/// This is used by headless ReadConsole to distinguish a real top-level prompt
+/// from nested R input requests that happen to reuse the configured prompt.
+pub fn frame_depth_protected() -> Result<c_int, String> {
+    let lib = crate::r_library().map_err(|error| error.to_string())?;
+    let mut payload = FrameDepthPayload {
+        library: lib as *const crate::functions::RLibrary,
+        depth: -1,
+        succeeded: false,
+    };
+    let completed = unsafe {
+        (lib.r_toplevelexec)(
+            Some(frame_depth_callback),
+            (&mut payload as *mut FrameDepthPayload).cast(),
+        )
+    } != 0;
+    if completed && payload.succeeded && payload.depth >= 0 {
+        Ok(payload.depth)
+    } else {
+        Err("R failed while checking the current evaluation frame".to_string())
+    }
+}
+
+unsafe extern "C" fn frame_depth_callback(payload: *mut std::ffi::c_void) {
+    let payload = payload.cast::<FrameDepthPayload>();
+    let library = unsafe { (*payload).library };
+    if library.is_null() {
+        return;
+    }
+    let lib = unsafe { &*library };
+    unsafe {
+        let function = (lib.rf_install)(c"sys.nframe".as_ptr());
+        let call = (lib.rf_protect)((lib.rf_lcons)(function, *lib.r_nilvalue));
+        let result = (lib.rf_protect)((lib.rf_eval)(call, *lib.r_baseenv));
+        if (lib.rf_typeof)(result) == crate::SexpType::IntSxp as c_int
+            && (lib.rf_length)(result) == 1
+        {
+            (*payload).depth = *(lib.integer)(result);
+            (*payload).succeeded = true;
+        }
+        (lib.rf_unprotect)(2);
+    }
+}
 
 #[cfg(unix)]
 use super::askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_termios};
@@ -12,16 +65,47 @@ use super::spinner::stop_spinner;
 /// Option-derived metadata for one ReadConsole invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadConsolePromptInfo {
+    /// Whether the raw prompt exactly matches R's current `options(prompt)` value.
+    pub is_main_prompt: bool,
     /// Whether the raw prompt exactly matches R's current `options(continue)` value.
     pub is_continuation: bool,
     /// Whether R's current `options(prompt)` and `options(continue)` values are identical.
     pub options_are_ambiguous: bool,
+    /// R's `hist` argument. Zero means this read is nested and must not draw
+    /// from the headless request queue.
+    pub hist: c_int,
+    /// Maximum bytes available for input text, excluding the trailing NUL.
+    pub buffer_capacity: usize,
+    /// Whether both prompt options were readable, distinct non-empty strings.
+    pub prompt_options_are_valid: bool,
 }
 
 /// ReadConsole callback receives the raw R prompt and option-derived metadata.
 type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<String>;
+pub type HeadlessReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<ReadConsoleInput>;
+
+/// One request-owned chunk for R's ReadConsole buffer.
+#[derive(Debug)]
+pub struct ReadConsoleInput {
+    pub text: String,
+    /// True when R should call ReadConsole again for the rest of this line.
+    pub has_more: bool,
+}
 
 static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
+static mut HEADLESS_READ_CONSOLE_CALLBACK: Option<HeadlessReadConsoleCallback> = None;
+static RESET_CONSOLE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Public R reset callback. Keep this signal handler limited to an atomic
+/// update; request state is reconciled from ReadConsole after R regains control.
+pub(super) unsafe extern "C" fn r_reset_console() {
+    RESET_CONSOLE_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Return R's reset generation for request-scoped failure accounting.
+pub fn reset_console_generation() -> u64 {
+    RESET_CONSOLE_GENERATION.load(Ordering::Acquire)
+}
 
 const DEFAULT_CONTINUATION_PROMPT: &str = "+ ";
 
@@ -67,6 +151,15 @@ fn prompt_info_from_options(
     main_prompt: Option<&str>,
     continuation_prompt: Option<&str>,
 ) -> ReadConsolePromptInfo {
+    let prompt_options_are_valid = matches!(
+        (main_prompt, continuation_prompt),
+        (Some(main), Some(continuation))
+            if !main.is_empty()
+                && !continuation.is_empty()
+                && main != continuation
+                && !is_browse_prompt(main)
+                && !is_browse_prompt(continuation)
+    );
     let options_are_ambiguous = matches!(
         (main_prompt, continuation_prompt),
         (Some(main), Some(continuation)) if main == continuation
@@ -74,8 +167,12 @@ fn prompt_info_from_options(
     let continuation_prompt = continuation_prompt.unwrap_or(DEFAULT_CONTINUATION_PROMPT);
 
     ReadConsolePromptInfo {
+        is_main_prompt: main_prompt.is_some_and(|main| raw_prompt == main),
         is_continuation: raw_prompt == continuation_prompt,
         options_are_ambiguous,
+        hist: 1,
+        buffer_capacity: 0,
+        prompt_options_are_valid,
     }
 }
 
@@ -108,7 +205,7 @@ pub(super) unsafe extern "C" fn r_read_console(
     prompt: *const c_char,
     buf: *mut c_char,
     buflen: c_int,
-    _hist: c_int,
+    hist: c_int,
 ) -> c_int {
     log::info!("r_read_console: called with buflen={}", buflen);
 
@@ -138,7 +235,11 @@ pub(super) unsafe extern "C" fn r_read_console(
             .to_str()
             .unwrap_or_default()
     };
-    let prompt_info = read_console_prompt_info(prompt_str);
+    let prompt_info = ReadConsolePromptInfo {
+        hist,
+        buffer_capacity: (buflen as usize).saturating_sub(1),
+        ..read_console_prompt_info(prompt_str)
+    };
 
     // Askpass mode: detect magic prefix, strip it, read from /dev/tty with echo disabled.
     // This runs before the input-wait guard on purpose: no Rust loop pumps R
@@ -148,7 +249,13 @@ pub(super) unsafe extern "C" fn r_read_console(
     // SA_RESTART resumes the read and the pending interrupt cancels the
     // requesting operation as soon as the read returns.
     #[cfg(unix)]
-    if !prompt.is_null() {
+    let headless_callback_installed = unsafe {
+        std::ptr::addr_of!(HEADLESS_READ_CONSOLE_CALLBACK)
+            .read()
+            .is_some()
+    };
+    #[cfg(unix)]
+    if !prompt.is_null() && !headless_callback_installed {
         let prompt_bytes = unsafe { std::ffi::CStr::from_ptr(prompt) }.to_bytes();
         if prompt_bytes.starts_with(ASKPASS_PROMPT_PREFIX) {
             let real_prompt = unsafe { prompt.add(ASKPASS_PROMPT_PREFIX.len()) };
@@ -175,6 +282,15 @@ pub(super) unsafe extern "C" fn r_read_console(
             println!();
             settings.had_output = false;
         }
+    }
+
+    // A headless callback owns its complete request buffer. Invoke it before
+    // the interactive shared remainder so nested prompts cannot consume it.
+    if let Some(callback) = unsafe { HEADLESS_READ_CONSOLE_CALLBACK } {
+        let Some(input) = callback(prompt_str, prompt_info) else {
+            return 0;
+        };
+        return unsafe { write_read_console_input(input, buf, buflen) };
     }
 
     // Get input - either from pending buffer or from callback
@@ -255,6 +371,45 @@ pub(super) unsafe extern "C" fn r_read_console(
     1
 }
 
+unsafe fn write_read_console_input(
+    input: ReadConsoleInput,
+    buf: *mut c_char,
+    buflen: c_int,
+) -> c_int {
+    if buf.is_null() || buflen <= 0 {
+        return 0;
+    }
+    let bytes = input.text.as_bytes();
+    let adds_newline = !input.has_more && (bytes.is_empty() || bytes.last() != Some(&b'\n'));
+    let written_len = bytes.len() + if adds_newline { 1 } else { 0 };
+    if written_len >= buflen as usize {
+        return 0;
+    }
+    unsafe {
+        if !bytes.is_empty() {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), bytes.len());
+        }
+        let mut pos = bytes.len();
+        if adds_newline {
+            *buf.add(pos) = b'\n' as c_char;
+            pos += 1;
+        }
+        *buf.add(pos) = 0;
+    }
+    1
+}
+
+fn is_browse_prompt(prompt: &str) -> bool {
+    let prompt = prompt.trim_end();
+    let Some(number) = prompt
+        .strip_prefix("Browse[")
+        .and_then(|tail| tail.strip_suffix("]>"))
+    else {
+        return false;
+    };
+    !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 /// Set the console read callback.
 ///
 /// The callback receives the raw R prompt and option-derived metadata. The
@@ -267,9 +422,54 @@ pub fn set_read_console_callback(callback: ReadConsoleCallback) {
     }
 }
 
+/// Install a request-owned callback for headless mainloop input.
+pub fn set_headless_read_console_callback(callback: HeadlessReadConsoleCallback) {
+    unsafe {
+        HEADLESS_READ_CONSOLE_CALLBACK = Some(callback);
+        READ_CONSOLE_CALLBACK = None;
+        *PENDING_INPUT.lock().unwrap() = String::new();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_input_requires_room_for_newline_and_nul() {
+        let mut buffer = [0xA5_u8; 4];
+        let result = unsafe {
+            write_read_console_input(
+                ReadConsoleInput {
+                    text: "abc".to_string(),
+                    has_more: false,
+                },
+                buffer.as_mut_ptr().cast(),
+                buffer.len() as c_int,
+            )
+        };
+
+        assert_eq!(result, 0);
+        assert_eq!(buffer, [0xA5; 4]);
+    }
+
+    #[test]
+    fn nonfinal_input_can_fill_capacity_before_nul() {
+        let mut buffer = [0xA5_u8; 4];
+        let result = unsafe {
+            write_read_console_input(
+                ReadConsoleInput {
+                    text: "abc".to_string(),
+                    has_more: true,
+                },
+                buffer.as_mut_ptr().cast(),
+                buffer.len() as c_int,
+            )
+        };
+
+        assert_eq!(result, 1);
+        assert_eq!(buffer, [b'a', b'b', b'c', 0]);
+    }
 
     #[test]
     fn prompt_info_detects_ambiguity_without_changing_exact_classification() {
@@ -308,5 +508,14 @@ mod tests {
 
         assert!(!missing_main.options_are_ambiguous);
         assert!(!missing_continue.options_are_ambiguous);
+    }
+
+    #[test]
+    fn prompt_options_cannot_reuse_the_browse_prompt_pattern() {
+        let browse_main = prompt_info_from_options("> ", Some("Browse[12]> "), Some("+ "));
+        let browse_continue = prompt_info_from_options("> ", Some("> "), Some("Browse[12]> "));
+
+        assert!(!browse_main.prompt_options_are_valid);
+        assert!(!browse_continue.prompt_options_are_valid);
     }
 }

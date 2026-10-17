@@ -8,6 +8,12 @@
 - On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
 - The help and history browsers show their header row again instead of scrolling it off the screen (#433).
 
+### Changed
+
+- **Breaking:** Headless IPC `send` and `eval --visible` now use R's normal REPL. R's parser determines expression boundaries (a braced block is one expression), with task callbacks for successfully evaluated top-level expressions, normal autoprinting, and `.Last.value` semantics. Visible `eval` responses now leave `value` and `error` null; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. Silent eval remains direct evaluation without top-level task callbacks.
+- **Breaking:** Headless IPC `send` now returns an `accepted` acknowledgment rather than reporting evaluation success or completion.
+- Headless standard nested console reads (`parse()` from the console, `readline()`, menus, and browser prompts) receive EOF instead of consuming further IPC requests. Main and continuation prompt options must be readable, non-empty, distinct strings and must not resemble browser prompts; `--no-echo` is unsupported. Invalid or ambiguous prompt conditions are diagnosed and stop the session without consuming the next request.
+
 ## [0.7.0-alpha.1] - 2026-10-11
 
 ### Added

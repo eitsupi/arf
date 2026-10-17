@@ -158,6 +158,9 @@ pub unsafe fn run_r_mainloop() {
         if !lib.ptr_r_readconsole.is_null() {
             *lib.ptr_r_readconsole = Some(r_read_console);
         }
+        if !lib.ptr_r_resetconsole.is_null() {
+            *lib.ptr_r_resetconsole = Some(super::read_console::r_reset_console);
+        }
     }
 
     // Check R_Interactive value before running mainloop

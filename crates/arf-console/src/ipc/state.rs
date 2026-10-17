@@ -80,6 +80,16 @@ pub fn trigger_headless_shutdown() -> bool {
     }
 }
 
+pub fn has_headless_shutdown_handler() -> bool {
+    HEADLESS_SHUTDOWN.get().is_some()
+}
+
+pub fn headless_shutdown_requested() -> bool {
+    HEADLESS_SHUTDOWN
+        .get()
+        .is_some_and(|flag| flag.load(Ordering::Acquire))
+}
+
 /// Store the receiver for polling from the idle callback.
 ///
 /// If the receiver slot already exists (from a previous stop/start), its
@@ -132,4 +142,10 @@ pub(super) fn drain_requests(mut handle: impl FnMut(IpcRequest)) -> bool {
         handle(request);
     }
     processed
+}
+
+pub(super) fn try_receive_request() -> Option<IpcRequest> {
+    let receiver = IPC_RECEIVER.get()?;
+    let guard = receiver.try_lock().ok()?;
+    guard.as_ref()?.try_recv().ok()
 }

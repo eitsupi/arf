@@ -5,6 +5,7 @@ use super::dispatch::dispatch_request;
 use crate::ipc::protocol::{
     INVALID_REQUEST, IpcRequest, JsonRpcRequest, JsonRpcResponse, PARSE_ERROR,
 };
+use crate::ipc::state::trigger_headless_shutdown;
 use std::sync::mpsc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -52,10 +53,22 @@ where
     }
 
     // Dispatch based on method
+    let is_shutdown = request.method == "shutdown";
     let response = dispatch_request(request, &tx).await;
 
     // Send HTTP response (for curl compatibility)
-    write_response(&mut stream, &response).await
+    let accepted_shutdown = is_shutdown
+        && response
+            .result
+            .as_ref()
+            .and_then(|result| result.get("accepted"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+    let result = write_response(&mut stream, &response).await;
+    if accepted_shutdown {
+        trigger_headless_shutdown();
+    }
+    result
 }
 
 /// Read the full request (up to 1MB).

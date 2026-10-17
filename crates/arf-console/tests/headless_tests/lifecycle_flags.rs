@@ -138,21 +138,55 @@ fn test_headless_pid_file_cleanup_after_ipc_q() {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     let pid_path = tmp.path().join("arf.pid");
     let pid_str = pid_path.display().to_string();
+    let sessions_dir = tmp.path().join("sessions");
+    std::fs::create_dir(&sessions_dir).expect("create sessions dir");
+    let sessions_dir_str = sessions_dir.to_str().expect("sessions dir is valid UTF-8");
 
-    let mut process = HeadlessProcess::spawn_with_args(&["--ipc-pid-file", &pid_str])
-        .expect("Failed to spawn headless with --ipc-pid-file");
+    let mut process = HeadlessProcess::spawn_with_args_and_env(
+        &["--ipc-pid-file", &pid_str],
+        &[("ARF_IPC_SESSIONS_DIR", sessions_dir_str)],
+    )
+    .expect("Failed to spawn headless with custom IPC paths");
 
     wait_for_pid_file(&pid_path);
+    let session_path = sessions_dir.join(format!("{}.json", process.pid));
+    assert!(session_path.exists(), "session file should be created");
+    let session = process.ipc_session().expect("read session metadata");
+    assert!(session.success, "session query failed: {}", session.stderr);
+    let session_json = parse_ipc_json(&session);
+    #[cfg(unix)]
+    let socket_path = session_json["socket_path"]
+        .as_str()
+        .expect("session metadata should contain socket_path");
+    #[cfg(not(unix))]
+    assert!(
+        session_json["socket_path"].is_string(),
+        "session metadata should contain socket_path: {session_json}"
+    );
+    #[cfg(unix)]
+    assert!(
+        std::path::Path::new(socket_path).exists(),
+        "IPC socket should exist at {socket_path}"
+    );
 
-    // q() may terminate the server before the IPC client receives a full
-    // response, so the process exit and PID file cleanup are the assertions.
-    let _ = process.ipc_eval_with_timeout(r#"q(save = "no")"#, 1000);
+    // q() may terminate the server before the IPC client receives its reply.
+    let _ = process.ipc_send(r#"q(save = "no")"#);
 
-    process
+    let status = process
         .wait_for_exit(Duration::from_secs(10))
         .expect("headless process should exit after q()");
+    assert!(status.success(), "q() should exit cleanly: {status}");
 
     assert!(!pid_path.exists(), "PID file should be removed after q()");
+    assert!(
+        !session_path.exists(),
+        "session file should be removed after q()"
+    );
+    #[cfg(unix)]
+    assert!(
+        !std::path::Path::new(socket_path).exists(),
+        "IPC socket should be removed after q(): {socket_path}"
+    );
 }
 
 /// Test that non-UTF-8 --ipc-pid-file paths are cleaned up without lossy conversion.
