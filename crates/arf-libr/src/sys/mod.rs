@@ -36,7 +36,8 @@ pub use output::{
 };
 pub use read_console::{
     HeadlessReadConsoleCallback, ReadConsoleInput, ReadConsolePromptInfo, frame_depth_protected,
-    reset_console_generation, set_headless_read_console_callback, set_read_console_callback,
+    read_console_chunk_end, reset_console_generation, set_headless_read_console_callback,
+    set_read_console_callback,
 };
 pub use spinner::{set_spinner_color, set_spinner_frames, start_spinner, stop_spinner};
 
