@@ -10,6 +10,8 @@
 
 ### Changed
 
+- **Experimental/Breaking:** Headless IPC history records each non-whitespace external code request, including silent `evaluate`. Rows appear when execution begins with start metadata captured before evaluation, and exit status is updated before the evaluation response when a reliable result is available. Interactive history continues to record visible `send` and `eval --visible`; silent eval is omitted so background queries do not enter the user's command recall. Requests rejected before execution and IPC queries are not recorded.
+- **Experimental/Breaking:** IPC rejects code containing a NUL character consistently before dispatch in both interactive and headless sessions.
 - **Breaking:** Headless IPC `send` and `eval --visible` now use R's normal REPL. R's parser determines expression boundaries (a braced block is one expression), with task callbacks for successfully evaluated top-level expressions, normal autoprinting, and `.Last.value` semantics. Visible `eval` responses now leave `value` and `error` null; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. Silent eval remains direct evaluation without top-level task callbacks.
 - **Breaking:** Headless IPC `send` now returns an `accepted` acknowledgment rather than reporting evaluation success or completion.
 - Headless standard nested console reads (`parse()` from the console, `readline()`, menus, and browser prompts) receive EOF instead of consuming further IPC requests. Main and continuation prompt options must be readable, non-empty, distinct strings and must not resemble browser prompts; `--no-echo` is unsupported. Invalid or ambiguous prompt conditions are diagnosed and stop the session without consuming the next request.

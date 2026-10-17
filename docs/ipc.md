@@ -249,9 +249,15 @@ human approval instead: an interactive session shows a confirmation prompt, and
 a headless session has no human to ask, so both headless `send` and headless
 `eval --visible` run immediately and are unrestricted.
 
-History follows a related but separate rule: every IPC operation is recorded
-except silent eval in an interactive session, which is the one path that runs
-without leaving anything behind for the person at the prompt.
+Headless history records each non-whitespace external IPC code request once it
+begins execution, including silent eval. Interactive history records visible
+`send` and `eval --visible` requests. Interactive silent eval is omitted from
+command history so background tool queries do not appear in the user's command
+recall. Requests rejected before execution, requests whose client has stopped
+waiting before execution begins, and `session` or `history` queries are not
+recorded. A recorded request appears in history immediately; its exit status
+remains `null` until a reliable result is available. History metadata such as
+the start time and working directory is captured when execution begins.
 
 Plain (silent) IPC evaluation uses a best-effort tree-sitter-r policy in both
 interactive and headless sessions. The default allowlist is empty. Configure
@@ -273,6 +279,8 @@ Other R operators use their exact spelling (such as `+`) in the same list.
 Assignments, control flow, computed callees, the native pipe `|>`, and `:::`
 are always rejected in restricted mode. Syntax errors and policy violations
 are rejected before R evaluation and history recording.
+`evaluate` and `user_input` also reject code containing a NUL character before
+dispatch in both interactive and headless sessions.
 `--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
 R sandbox and does not promise that an allowed function is non-mutating. Evaluating
 a bare identifier can itself run code by forcing a promise or triggering an active
@@ -562,7 +570,9 @@ arf ipc history | jq -r '.entries[].command'
 **Output format:** JSON object with `entries` array (newest first) and `session_id`. Each entry contains `command`, `timestamp`, `cwd`, `exit_status`, and `session_id` (all fields are always present; null when not available). Output is pretty-printed when stdout is a terminal, compact when piped.
 
 > [!NOTE]
-> Only completed commands are recorded in the history database. A command that is currently executing will not appear in the results until it finishes.
+> A command appears in history as soon as execution begins, so a currently
+> running command can appear with a `null` exit status. The status stays `null`
+> when arf cannot determine a reliable result.
 
 ### `arf ipc shutdown` — Shut Down Headless Session
 

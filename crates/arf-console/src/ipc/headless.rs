@@ -2,13 +2,12 @@
 //!
 //! The R mainloop reads request-owned input without an interactive editor.
 
-use super::capture;
+use super::execution;
 use super::history_query::set_history_store;
-use super::policy;
-use super::protocol::{INVALID_PARAMS, IpcMethod, IpcRequest, IpcResponse, UserInputResult};
+use super::protocol::{IpcMethod, IpcRequest, IpcResponse};
 use super::session_result::collect_session_result;
 use super::state::{r_is_at_prompt, try_receive_request};
-use crate::history::{HistoryExtraInfo, HistoryStore};
+use crate::history::{HistoryStore, IpcHistoryEntry};
 use std::sync::{Mutex, OnceLock, atomic::Ordering};
 
 /// History backend for headless mode. When set, evaluated commands are
@@ -27,6 +26,7 @@ struct ActiveRequest {
     reset_generation: u64,
     exhausted: bool,
     continuation_eof_sent: bool,
+    history_entry: Option<IpcHistoryEntry>,
 }
 
 static ACTIVE_REQUEST: Mutex<Option<ActiveRequest>> = Mutex::new(None);
@@ -44,25 +44,10 @@ pub fn set_headless_history(history: HistoryStore) {
     set_history_store(ipc_history);
 }
 
-/// Save a command to the headless history database, if configured.
-///
-/// Errors are logged but never propagated — history saving must not
-/// interfere with IPC response delivery.
-fn save_to_headless_history(code: &str, exit_status: Option<i64>) {
-    let Some(h) = HEADLESS_HISTORY.get() else {
-        return;
-    };
-    let mut item = reedline::HistoryItem::from_command_line(code);
-    item.start_timestamp = Some(chrono::Utc::now());
-    item.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
-    item.cwd = std::env::current_dir()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned());
-    item.exit_status = exit_status;
-    item.session_id = HEADLESS_HISTORY.get().and_then(HistoryStore::session);
-    if let Err(e) = h.save_known(item, HistoryExtraInfo::default()) {
-        log::warn!("Failed to save headless history: {}", e);
-    }
+/// Start a headless history row immediately before request execution.
+fn begin_headless_history(code: &str) -> Option<IpcHistoryEntry> {
+    let store = HEADLESS_HISTORY.get()?;
+    IpcHistoryEntry::begin(store, code, store.session())
 }
 
 /// Read request-owned input through R's actual top-level loop.
@@ -205,33 +190,24 @@ enum RequestStart {
 
 fn start_request(request: IpcRequest) -> RequestStart {
     let IpcRequest { method, reply } = request;
+    if reply.is_closed() {
+        return RequestStart::Continue;
+    }
     match method {
-        IpcMethod::Evaluate { code, visible, .. } => {
-            if code.contains('\0') {
-                let _ = reply.send(IpcResponse::error(
-                    INVALID_PARAMS,
-                    "R code contains a NUL byte".to_string(),
-                ));
-                return RequestStart::Continue;
+        IpcMethod::SilentEvaluate { code, .. } => {
+            let history_entry = begin_headless_history(&code);
+            let result = execution::run_silent_eval(&code);
+            let exit_status = if result.error.is_some() { 1 } else { 0 };
+            if let Some(entry) = history_entry {
+                entry.finish(Some(exit_status));
             }
-            if !visible {
-                if let Some(rejection) = policy::policy_reject(&code) {
-                    let _ = reply.send(rejection);
-                    return RequestStart::Continue;
-                }
-                r_is_at_prompt().store(false, Ordering::Release);
-                let result = capture::evaluate_with_capture(&code, false);
-                r_is_at_prompt().store(true, Ordering::Release);
-                let exit_status = if result.error.is_some() { 1 } else { 0 };
-                let _ = reply.send(IpcResponse::Evaluate(result));
-                if !code.trim().is_empty() {
-                    save_to_headless_history(&code, Some(exit_status));
-                }
-                return RequestStart::Continue;
-            }
-            arf_libr::start_ipc_capture(true);
+            let _ = reply.send(IpcResponse::Evaluate(result));
+            RequestStart::Continue
+        }
+        IpcMethod::VisibleEvaluate { code, .. } => {
+            execution::begin_visible_eval();
             let generation = arf_libr::reset_console_generation();
-            r_is_at_prompt().store(false, Ordering::Release);
+            let history_entry = begin_headless_history(&code);
             *ACTIVE_REQUEST.lock().unwrap() = Some(ActiveRequest {
                 code,
                 offset: 0,
@@ -239,20 +215,14 @@ fn start_request(request: IpcRequest) -> RequestStart {
                 reset_generation: generation,
                 exhausted: false,
                 continuation_eof_sent: false,
+                history_entry,
             });
             RequestStart::Input
         }
         IpcMethod::UserInput { code } => {
-            if code.contains('\0') {
-                let _ = reply.send(IpcResponse::error(
-                    INVALID_PARAMS,
-                    "R code contains a NUL byte".to_string(),
-                ));
-                return RequestStart::Continue;
-            }
-            let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
             let generation = arf_libr::reset_console_generation();
             r_is_at_prompt().store(false, Ordering::Release);
+            let history_entry = begin_headless_history(&code);
             *ACTIVE_REQUEST.lock().unwrap() = Some(ActiveRequest {
                 code,
                 offset: 0,
@@ -260,7 +230,9 @@ fn start_request(request: IpcRequest) -> RequestStart {
                 reset_generation: generation,
                 exhausted: false,
                 continuation_eof_sent: false,
+                history_entry,
             });
+            execution::accept_user_input(reply);
             RequestStart::Input
         }
         IpcMethod::Session => {
@@ -289,18 +261,14 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
         }
     }
     let remaining = &request.code[request.offset..];
-    let final_capacity = capacity.saturating_sub(1);
-    let (end, has_more) = if remaining.len() <= final_capacity {
-        (remaining.len(), false)
-    } else {
-        let mut end = capacity.min(remaining.len());
-        while end > 0 && !remaining.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == 0 {
+    let (mut end, has_more) = match arf_libr::read_console_chunk_end(remaining, capacity) {
+        Some(chunk) => chunk,
+        None => {
             log::error!("R ReadConsole buffer cannot fit one UTF-8 character");
             return None;
         }
+    };
+    let has_more = if has_more {
         let mut deferred_end = end;
         while deferred_end > 0
             && is_horizontal_ascii_whitespace(remaining.as_bytes()[deferred_end - 1])
@@ -308,10 +276,11 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
             deferred_end -= 1;
         }
         if deferred_end > 0 {
-            (deferred_end, true)
-        } else {
-            (end, true)
+            end = deferred_end;
         }
+        true
+    } else {
+        false
     };
     let text = remaining[..end].to_owned();
     request.offset += end;
@@ -327,33 +296,31 @@ fn finish_active_request() {
     let request = ACTIVE_REQUEST.lock().unwrap().take();
     let Some(request) = request else { return };
     let failed = request.reset_generation != arf_libr::reset_console_generation();
-    if let ActiveKind::Evaluate(reply) = request.kind {
-        let (stdout, stderr) = arf_libr::finish_ipc_capture();
-        let _ = reply.send(IpcResponse::Evaluate(super::protocol::EvaluateResult {
-            stdout,
-            stderr,
-            value: None,
-            error: None,
-        }));
+    let result = match request.kind {
+        ActiveKind::Evaluate(reply) => Some((reply, execution::finish_visible_eval())),
+        ActiveKind::UserInput => None,
+    };
+    if let Some(entry) = request.history_entry {
+        entry.finish(Some(if failed { 1 } else { 0 }));
     }
-    if !request.code.trim().is_empty() {
-        save_to_headless_history(&request.code, Some(if failed { 1 } else { 0 }));
+    if let Some((reply, result)) = result {
+        let _ = reply.send(IpcResponse::Evaluate(result));
     }
     r_is_at_prompt().store(true, Ordering::Release);
 }
 
 fn shutdown_before_eof(exit_code: i32) -> ! {
     let pending = { ACTIVE_REQUEST.lock().unwrap().take() };
-    let _ = arf_libr::finish_ipc_capture();
+    let _ = execution::finish_visible_eval();
     if let Some(request) = pending {
+        if let Some(entry) = request.history_entry {
+            entry.finish(None);
+        }
         if let ActiveKind::Evaluate(reply) = request.kind {
             let _ = reply.send(IpcResponse::error(
                 super::protocol::R_NOT_AT_PROMPT,
                 "Headless session is shutting down".to_string(),
             ));
-        }
-        if !request.code.trim().is_empty() {
-            save_to_headless_history(&request.code, Some(1));
         }
     }
     if let Some(history) = HEADLESS_HISTORY.get()
@@ -383,4 +350,36 @@ fn is_browse_prompt(prompt: &str) -> bool {
         return false;
     };
     !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_reply_is_discarded_before_starting_a_request() {
+        let temp_dir = tempfile::tempdir().expect("create temporary history directory");
+        let history = HistoryStore::open(
+            temp_dir.path().join("r.db"),
+            crate::history::artifact::HistoryKind::R,
+            None,
+            None,
+        )
+        .expect("open history store");
+        assert!(HEADLESS_HISTORY.set(history.clone()).is_ok());
+        ACTIVE_REQUEST.lock().unwrap().take();
+        let (reply, response) = tokio::sync::oneshot::channel();
+        drop(response);
+
+        let result = start_request(IpcRequest {
+            method: IpcMethod::UserInput {
+                code: "headless_closed_reply_sentinel <- 1".to_string(),
+            },
+            reply,
+        });
+
+        assert!(matches!(result, RequestStart::Continue));
+        assert!(ACTIVE_REQUEST.lock().unwrap().is_none());
+        assert_eq!(history.count_all().unwrap(), 0);
+    }
 }

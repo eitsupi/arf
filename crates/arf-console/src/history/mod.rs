@@ -6,11 +6,13 @@
 pub(crate) mod artifact;
 pub mod export;
 pub mod import;
+mod ipc;
 mod metadata;
 mod query;
 mod reedline_adapter;
 mod store;
 
+pub(crate) use ipc::{IpcHistoryEntry, ipc_history_item};
 pub use metadata::HistoryExtraInfo;
 pub(crate) use query::{HistoryQuery, parse_since};
 pub use reedline_adapter::ReedlineHistoryAdapter;

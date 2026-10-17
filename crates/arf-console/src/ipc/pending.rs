@@ -4,11 +4,11 @@
 //! [`PendingIpcOperation`] and the REPL is interrupted so it can check the
 //! editor buffer before accepting or rejecting the operation.
 
-use super::capture;
-use super::policy;
+use super::execution;
+use super::execution::DEFAULT_EVAL_TIMEOUT;
 use super::protocol::{
-    EvaluateResult, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, USER_IS_TYPING, UserInputResult,
+    INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
+    USER_IS_TYPING,
 };
 use super::session_result::collect_session_result;
 use super::state::{drain_requests, fire_break_signal, is_in_alternate_mode, r_is_at_prompt};
@@ -76,10 +76,15 @@ impl PendingIpcKind {
             | PendingIpcKind::UserInput { reply } => reply,
         }
     }
-}
 
-/// Default timeout for visible evaluate (5 minutes).
-pub(super) const DEFAULT_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+    pub fn reply_is_closed(&self) -> bool {
+        match self {
+            PendingIpcKind::SilentEvaluate { reply }
+            | PendingIpcKind::VisibleEvaluate { reply, .. }
+            | PendingIpcKind::UserInput { reply } => reply.is_closed(),
+        }
+    }
+}
 
 /// Send an error response on a reply channel, ignoring a closed receiver.
 pub(super) fn reply_error(
@@ -107,14 +112,14 @@ pub(super) fn cancel_in_flight_operations() {
     // Finalize any active visible eval capture.
     // Use blocking lock — stop_server is a final cleanup and can afford to wait.
     if let Some(pending) = pending_visible_eval().lock_recover().take() {
-        let (stdout, stderr) = arf_libr::finish_ipc_capture();
+        let result = execution::finish_visible_eval();
         reply_error(
             pending.reply,
             R_NOT_AT_PROMPT,
             format!(
                 "IPC server shut down during visible evaluate (stdout: {} bytes, stderr: {} bytes)",
-                stdout.len(),
-                stderr.len(),
+                result.stdout.len(),
+                result.stderr.len(),
             ),
         );
     }
@@ -158,15 +163,15 @@ fn check_visible_eval_completion() {
     {
         let pending = guard.take().unwrap();
         // Best-effort capture cleanup (may race with active R evaluation)
-        let (stdout, stderr) = arf_libr::finish_ipc_capture();
+        let result = execution::finish_visible_eval();
         reply_error(
             pending.reply,
             R_BUSY,
             format!(
                 "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
                 pending.timeout.as_secs(),
-                stdout.len(),
-                stderr.len(),
+                result.stdout.len(),
+                result.stderr.len(),
             ),
         );
         // Do NOT set r_is_at_prompt(true) here — R may still be evaluating.
@@ -184,17 +189,7 @@ fn check_visible_eval_completion() {
         r_is_at_prompt().store(false, Ordering::Release);
 
         // Finish WriteConsoleEx capture and collect output
-        let (stdout, stderr) = arf_libr::finish_ipc_capture();
-
-        let result = EvaluateResult {
-            stdout,
-            stderr,
-            // In visible mode, auto-printed values are in stdout and errors in stderr.
-            // Structured value/error fields are not available because the code runs
-            // through normal REPL evaluation (no tryCatch wrapper).
-            value: None,
-            error: None,
-        };
+        let result = execution::finish_visible_eval();
 
         let _ = pending.reply.send(IpcResponse::Evaluate(result));
 
@@ -237,6 +232,10 @@ fn reply_session(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 fn handle_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
 
+    if reply.is_closed() {
+        return;
+    }
+
     if matches!(method, IpcMethod::Session) {
         reply_session(reply);
         return;
@@ -263,33 +262,29 @@ fn handle_request(request: IpcRequest) {
     }
 
     match method {
-        IpcMethod::Evaluate {
-            code,
-            visible,
-            timeout_ms,
-        } => {
-            if !visible && let Some(rejection) = policy::policy_reject(&code) {
-                let _ = reply.send(rejection);
-                return;
-            }
+        IpcMethod::SilentEvaluate { code, .. } => {
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(Ordering::Acquire) {
                 reply_error(reply, R_BUSY, "R is busy");
                 return;
             }
 
-            let timeout = timeout_ms
-                .map(std::time::Duration::from_millis)
-                .unwrap_or(DEFAULT_EVAL_TIMEOUT);
-
-            let kind = if visible {
-                PendingIpcKind::VisibleEvaluate { reply, timeout }
-            } else {
-                PendingIpcKind::SilentEvaluate { reply }
-            };
-
             // Store operation and fire break signal
-            *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation { kind, code });
+            *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
+                kind: PendingIpcKind::SilentEvaluate { reply },
+                code,
+            });
+            fire_break_signal();
+        }
+        IpcMethod::VisibleEvaluate { code, timeout } => {
+            if !r_is_at_prompt().load(Ordering::Acquire) {
+                reply_error(reply, R_BUSY, "R is busy");
+                return;
+            }
+            *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
+                kind: PendingIpcKind::VisibleEvaluate { reply, timeout },
+                code,
+            });
             fire_break_signal();
         }
         IpcMethod::UserInput { code } => {
@@ -355,10 +350,7 @@ pub fn setup_visible_eval(
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
     timeout: std::time::Duration,
 ) {
-    r_is_at_prompt().store(false, Ordering::Release);
-
-    // Start WriteConsoleEx capture (visible=true → also print to terminal)
-    arf_libr::start_ipc_capture(true);
+    execution::begin_visible_eval();
 
     // Store reply channel — will be consumed by check_visible_eval_completion.
     // The deadline is set from now + timeout, aligning with the server-side
@@ -370,30 +362,6 @@ pub fn setup_visible_eval(
             .unwrap_or_else(|| std::time::Instant::now() + DEFAULT_EVAL_TIMEOUT),
         timeout,
     });
-}
-
-/// Run a silent evaluate and send the reply.
-///
-/// Called from the REPL after the buffer check passes. Runs R code with
-/// full output capture (stdout/stderr via WriteConsoleEx, value/error via
-/// temp file). The response is sent synchronously before returning.
-///
-/// **Note:** `evaluate_with_capture` does not support interactive R functions
-/// (e.g., `readline()`, `browser()`, `menu()`). If the evaluated code triggers
-/// a nested `ReadConsole` callback, R will block waiting for input that never
-/// arrives, eventually requiring user intervention from the console.
-pub fn run_silent_eval(code: &str, reply: tokio::sync::oneshot::Sender<IpcResponse>) {
-    r_is_at_prompt().store(false, Ordering::Release);
-
-    let result = capture::evaluate_with_capture(code, false);
-
-    r_is_at_prompt().store(true, Ordering::Release);
-    let _ = reply.send(IpcResponse::Evaluate(result));
-}
-
-/// Accept a user_input operation: send the success reply.
-pub fn accept_user_input(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
-    let _ = reply.send(IpcResponse::UserInput(UserInputResult { accepted: true }));
 }
 
 #[cfg(test)]
@@ -456,10 +424,9 @@ mod tests {
         {
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let request = IpcRequest {
-                method: IpcMethod::Evaluate {
+                method: IpcMethod::SilentEvaluate {
                     code: "1+1".to_string(),
-                    visible: false,
-                    timeout_ms: None,
+                    timeout: std::time::Duration::from_secs(1),
                 },
                 reply: reply_tx,
             };

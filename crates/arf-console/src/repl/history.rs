@@ -2,10 +2,12 @@
 
 #[cfg(test)]
 use crate::config::HistoryMode;
-use crate::history::{HistoryExtraInfo, HistoryRuntime, HistorySaveOutcome, HistoryStore};
+use crate::history::{
+    HistoryRuntime, HistorySaveOutcome, HistoryStore, IpcHistoryEntry, ipc_history_item,
+};
 #[cfg(test)]
 use reedline::Reedline;
-use reedline::{History, HistoryItem, HistoryItemId, HistorySessionId};
+use reedline::{History, HistoryItemId, HistorySessionId};
 
 /// Set up an editor using the shared history lifecycle factory.
 #[cfg(test)]
@@ -46,35 +48,14 @@ pub(super) fn save_ipc_history(
     code: &str,
     session_id: Option<HistorySessionId>,
 ) -> Option<HistoryItemId> {
-    if code.trim().is_empty() {
-        return None;
-    }
-
     let Some(store) = store else {
-        let mut item = HistoryItem::from_command_line(code);
-        item.start_timestamp = Some(chrono::Utc::now());
-        item.session_id = session_id;
+        let item = ipc_history_item(code, session_id)?;
         if let Err(error) = history.save(item) {
             log::warn!("Failed to save IPC history to the in-memory backend: {error}");
         }
         return None;
     };
-
-    let mut item = HistoryItem::from_command_line(code);
-    item.start_timestamp = Some(chrono::Utc::now());
-    item.hostname = Some(gethostname::gethostname().to_string_lossy().into_owned());
-    item.cwd = std::env::current_dir()
-        .ok()
-        .map(|path| path.to_string_lossy().into_owned());
-    item.session_id = session_id;
-
-    match store.save_known(item, HistoryExtraInfo::default()) {
-        Ok(item) => item.id,
-        Err(error) => {
-            log::warn!("Failed to save IPC history: {error}");
-            None
-        }
-    }
+    IpcHistoryEntry::begin(&store, code, session_id).map(|entry| entry.id())
 }
 
 /// Finalize metadata for the row identified by an editor save outcome.
@@ -107,8 +88,8 @@ mod tests {
     use crate::config::{HistoryMode, RSourceStatus};
     use crate::editor::prompt::PromptFormatter;
     use crate::history::{
-        HistoryFailureDetail, HistoryHandle, HistorySaveReceipt, ReedlineHistoryAdapter,
-        VolatileHistoryReason,
+        HistoryExtraInfo, HistoryFailureDetail, HistoryHandle, HistorySaveReceipt,
+        ReedlineHistoryAdapter, VolatileHistoryReason,
     };
     use crate::repl::meta_command::{MetaCommandContext, process_meta_command};
     use crate::repl::reprex::ReprexRuntime;
