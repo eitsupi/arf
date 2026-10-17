@@ -1,5 +1,6 @@
 use super::support::*;
 use crate::common::{poll_until, wait_for_history_rows};
+use std::path::Path;
 use std::time::Duration;
 
 #[test]
@@ -13,6 +14,12 @@ fn test_headless_history_persistence() {
     // Run a successful command
     let r1 = process.ipc_eval("1 + 1").expect("eval should run");
     assert!(r1.success, "first eval should succeed");
+    let immediate_history = process
+        .ipc_history(&["--grep", "1 + 1"])
+        .expect("query history after evaluation response");
+    assert!(immediate_history.success, "history query should succeed");
+    let immediate_history = parse_ipc_json(&immediate_history);
+    assert_eq!(immediate_history["entries"][0]["exit_status"], 0);
 
     // Run a command that errors (R errors are returned in JSON, exit 0)
     let r2 = process
@@ -98,6 +105,110 @@ fn test_headless_history_persistence() {
         whitespace_rows.is_empty(),
         "whitespace-only commands should not be persisted to history"
     );
+}
+
+#[test]
+fn test_headless_history_captures_working_directory_when_execution_starts() {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let history_dir = tmp.path().join("history");
+    let initial_dir = tmp.path().join("initial");
+    let work_dir = tmp.path().join("work");
+    let gate_path = tmp.path().join("continue-request");
+    std::fs::create_dir_all(&history_dir).expect("create history directory");
+    std::fs::create_dir_all(&initial_dir).expect("create initial directory");
+    std::fs::create_dir_all(&work_dir).expect("create work directory");
+    let initial_cwd = initial_dir
+        .canonicalize()
+        .expect("canonicalize initial directory");
+    let work_dir_r = serde_json::to_string(&work_dir.to_string_lossy().as_ref())
+        .expect("encode work directory as an R string");
+    let gate_path_r = serde_json::to_string(&gate_path.to_string_lossy().as_ref())
+        .expect("encode gate path as an R string");
+
+    let process = HeadlessProcess::spawn_with_args_in_dir(
+        &[
+            "--history-dir",
+            history_dir.to_str().expect("history path is UTF-8"),
+        ],
+        &initial_dir,
+    )
+    .expect("Failed to spawn headless with --history-dir");
+
+    let command = format!(
+        "local({{ deadline <- Sys.time() + 10; while (!file.exists({gate_path_r}) && Sys.time() < deadline) Sys.sleep(0.01); if (!file.exists({gate_path_r})) stop('history test gate timed out'); setwd({work_dir_r}) }})"
+    );
+    let accepted = process.ipc_send(&command).expect("send should be accepted");
+    assert!(accepted.success, "send should be accepted");
+    assert_eq!(parse_ipc_json(&accepted)["accepted"], true);
+
+    let db_path = history_dir.join("r.db");
+    let pending_rows = wait_for_history_rows(
+        &db_path,
+        "pending history row for running setwd request",
+        Duration::from_secs(5),
+        Duration::from_millis(25),
+        |rows| {
+            rows.iter()
+                .any(|row| row.command == command && row.exit_status.is_none())
+        },
+    )
+    .unwrap_or_else(|error| panic!("{error:#}"));
+    let pending = pending_rows
+        .iter()
+        .find(|row| row.command == command)
+        .expect("running setwd request should already be in history");
+    let pending_cwd = pending
+        .cwd
+        .as_deref()
+        .expect("running setwd request should have a cwd");
+    assert_eq!(
+        Path::new(pending_cwd)
+            .canonicalize()
+            .expect("canonicalize recorded start cwd"),
+        initial_cwd
+    );
+    let timestamp: Option<i64> = rusqlite::Connection::open(&db_path)
+        .expect("open history database")
+        .query_row(
+            "SELECT start_timestamp FROM history WHERE command_line = ?1",
+            [&command],
+            |row| row.get(0),
+        )
+        .expect("read start timestamp");
+    assert!(
+        timestamp.is_some(),
+        "start timestamp should be set at begin"
+    );
+    std::fs::write(&gate_path, "continue").expect("release R request gate");
+
+    let sentinel = process
+        .ipc_eval("history_cwd_sentinel <- 1")
+        .expect("sentinel should flush history");
+    assert!(sentinel.success, "history sentinel should succeed");
+    let rows = wait_for_history_rows(
+        &db_path,
+        "history row for setwd request",
+        Duration::from_secs(10),
+        Duration::from_millis(50),
+        |rows| {
+            rows.iter()
+                .any(|row| row.command == command && row.exit_status.is_some())
+        },
+    )
+    .unwrap_or_else(|error| panic!("{error:#}"));
+    let row = rows
+        .iter()
+        .find(|row| row.command == command)
+        .expect("setwd request should be in history");
+    let recorded_cwd = row.cwd.as_deref().expect("setwd request should have a cwd");
+    assert_eq!(
+        Path::new(recorded_cwd)
+            .canonicalize()
+            .expect("canonicalize recorded cwd"),
+        initial_cwd
+    );
+    assert_eq!(row.exit_status, Some(0));
+    assert_eq!(rows.iter().filter(|row| row.command == command).count(), 1);
 }
 
 /// Test that --no-history prevents history from being saved in headless mode.

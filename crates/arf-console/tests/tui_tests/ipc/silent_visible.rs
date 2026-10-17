@@ -1,14 +1,21 @@
 use super::super::support::{PROMPT, Terminal, run_case, run_case_with};
+use crate::common::read_history_rows;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 
 #[test]
 fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Result<()> {
-    run_case(
-        "ipc-silent",
-        &["--with-ipc", "--ipc-eval-unrestricted"],
+    let history = tempfile::tempdir()?;
+    run_case_with(
+        Terminal::builder("ipc-silent")
+            .args(["--with-ipc", "--ipc-eval-unrestricted"])
+            .history_dir(history.path()),
         |terminal| {
+            terminal.wait_for_first_prompt()?;
             let checkpoint = terminal.checkpoint()?;
+            let history_before_silent = terminal
+                .start_ipc(&["history", "--limit", "1000"])?
+                .finish()?;
             let response = terminal
                 .start_ipc(&["eval", "1 + 1", "--timeout", "10000"])?
                 .finish()?;
@@ -24,7 +31,6 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
                 response["stdout"] == "",
                 "unexpected simple stdout: {response}"
             );
-
             let response = terminal
                 .start_ipc(&["eval", r"cat('SILENT_IPC_STDOUT\n')", "--timeout", "10000"])?
                 .finish()?;
@@ -77,6 +83,13 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
                 response["error"].is_null(),
                 "unexpected mixed error: {response}"
             );
+            let history_after_silent = terminal
+                .start_ipc(&["history", "--limit", "1000"])?
+                .finish()?;
+            ensure!(
+                history_after_silent["entries"] == history_before_silent["entries"],
+                "interactive silent eval changed command history: before={history_before_silent}, after={history_after_silent}"
+            );
 
             // Cross a visible PTY output boundary before asserting absence:
             // the IPC reply can arrive before the terminal reader catches up.
@@ -102,7 +115,18 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
             }
             Ok(())
         },
-    )
+    )?;
+
+    let rows = read_history_rows(&history.path().join("r.db"))?;
+    let sentinel = rows
+        .iter()
+        .filter(|row| row.command == r"cat('SILENT_IPC_SENTINEL\n')")
+        .count();
+    ensure!(
+        sentinel == 1,
+        "visible send should have one history row: {sentinel}"
+    );
+    Ok(())
 }
 
 #[test]
@@ -145,6 +169,15 @@ fn visible_ipc_evaluation_waits_for_approval_and_repl_completion() -> Result<()>
         ensure!(
             response["error"].is_null(),
             "visible reply has an error: {response}"
+        );
+        let history = terminal
+            .start_ipc(&["history", "--grep", "VISIBLE_IPC_OUTPUT"])?
+            .finish()?;
+        ensure!(
+            history["entries"]
+                .as_array()
+                .is_some_and(|entries| { entries.len() == 1 && entries[0]["exit_status"] == 0 }),
+            "visible evaluation history should be finalized before its response: {history}"
         );
 
         terminal.wait_for("visible output reaches the R prompt", |state, line| {

@@ -23,6 +23,11 @@ struct ApprovedInteractiveIpcOperation {
     wrote_newline: bool,
 }
 
+struct AcceptedInteractiveIpcOperation {
+    wrote_newline: bool,
+    accepted_reply: Option<tokio::sync::oneshot::Sender<crate::ipc::protocol::IpcResponse>>,
+}
+
 /// Ask for approval for an operation that executes in the user's interactive
 /// session, replying with the standard rejection when it is declined.
 fn approve_interactive_ipc_operation(
@@ -48,23 +53,42 @@ fn approve_interactive_ipc_operation(
 ///
 /// Returns whether the approval step already wrote a newline, or `None` when
 /// the operation was rejected. Silent evaluation never reaches this function.
-fn approve_and_accept(code: &str, kind: PendingIpcKind) -> Option<bool> {
+fn approve_and_accept(code: &str, kind: PendingIpcKind) -> Option<AcceptedInteractiveIpcOperation> {
     match kind {
         PendingIpcKind::VisibleEvaluate { reply, timeout } => {
+            if reply.is_closed() {
+                return None;
+            }
             let ApprovedInteractiveIpcOperation {
                 reply,
                 wrote_newline,
             } = approve_interactive_ipc_operation(code, reply)?;
+            if reply.is_closed() {
+                crate::ipc::set_r_at_prompt(true);
+                return None;
+            }
             setup_visible_eval(reply, timeout);
-            Some(wrote_newline)
+            Some(AcceptedInteractiveIpcOperation {
+                wrote_newline,
+                accepted_reply: None,
+            })
         }
         PendingIpcKind::UserInput { reply } => {
+            if reply.is_closed() {
+                return None;
+            }
             let ApprovedInteractiveIpcOperation {
                 reply,
                 wrote_newline,
             } = approve_interactive_ipc_operation(code, reply)?;
-            accept_user_input(reply);
-            Some(wrote_newline)
+            if reply.is_closed() {
+                crate::ipc::set_r_at_prompt(true);
+                return None;
+            }
+            Some(AcceptedInteractiveIpcOperation {
+                wrote_newline,
+                accepted_reply: Some(reply),
+            })
         }
         PendingIpcKind::SilentEvaluate { .. } => {
             unreachable!("silent evaluation is handled before interactive acceptance")
@@ -126,16 +150,21 @@ pub(super) fn dispatch_pre_prompt_ipc(
     }
     let op = crate::ipc::take_pending_ipc_operation()?;
 
-    if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
-        // Run silent evaluate directly — no buffer conflict possible.
-        // Unlike visible eval / user_input, silent eval does not return
-        // code to R. It runs synchronously here and then falls through
-        // to the reedline loop to wait for user input.
-        run_silent_eval(&op.code, reply);
+    if op.kind.reply_is_closed() {
         return None;
     }
 
-    approve_and_accept(&op.code, op.kind)?;
+    if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
+        // Run silent evaluate directly — no buffer conflict possible.
+        // Unlike visible eval / user_input, silent eval does not return
+        // code to R. Keep this background operation out of the user's REPL
+        // command history, then fall through to the editor loop.
+        let result = run_silent_eval(&op.code);
+        let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
+        return None;
+    }
+
+    let accepted = approve_and_accept(&op.code, op.kind)?;
     IpcCodeInjection {
         editor: &mut state.line_editor,
         history: &state.r_history,
@@ -147,6 +176,9 @@ pub(super) fn dispatch_pre_prompt_ipc(
         let prompt_str = "agent> ";
         println!("{}{}", prompt_str.dark_cyan(), op.code);
     });
+    if let Some(reply) = accepted.accepted_reply {
+        accept_user_input(reply);
+    }
     Some(op.code)
 }
 
@@ -173,6 +205,10 @@ pub(super) fn handle_external_break(
         return ControlFlow::Continue(());
     };
 
+    if op.kind.reply_is_closed() {
+        return ControlFlow::Continue(());
+    }
+
     // If the user has typed something, reject the IPC operation.
     // We use trim() because reedline may include trailing whitespace
     // in the buffer; whitespace-only input is treated as empty.
@@ -183,7 +219,8 @@ pub(super) fn handle_external_break(
 
     // Silent evaluate: run in-place and return to reedline
     if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
-        // Show visual indicator, run eval, then return to reedline
+        // Show a visual indicator and run without adding a command-history
+        // entry; silent background queries should not affect REPL recall.
         {
             let mut out = io::stdout();
             clear_current_line(&mut out);
@@ -191,7 +228,8 @@ pub(super) fn handle_external_break(
             let _ = out.flush();
         }
 
-        run_silent_eval(&op.code, reply);
+        let result = run_silent_eval(&op.code);
+        let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
 
         // Clear the indicator — reedline will repaint the prompt
         clear_current_line(&mut io::stdout());
@@ -201,7 +239,7 @@ pub(super) fn handle_external_break(
 
     // Visible evaluate / user input: accept, inject code into REPL.
     // Preserve whether approval already emitted its CRLF.
-    let Some(approval_wrote_newline) = approve_and_accept(&op.code, op.kind) else {
+    let Some(accepted) = approve_and_accept(&op.code, op.kind) else {
         return ControlFlow::Continue(());
     };
 
@@ -227,9 +265,12 @@ pub(super) fn handle_external_break(
         // leave the cursor one row beyond that range. Otherwise, when R produces
         // no output, the next repaint reuses the old prompt origin and clears the
         // echoed agent line.
-        if !approval_wrote_newline {
+        if !accepted.wrote_newline {
             println!();
         }
     });
+    if let Some(reply) = accepted.accepted_reply {
+        accept_user_input(reply);
+    }
     ControlFlow::Break(Some(op.code))
 }

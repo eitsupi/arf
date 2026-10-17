@@ -222,10 +222,13 @@ pub struct IpcRequest {
 
 /// IPC method variants for internal dispatch.
 pub enum IpcMethod {
-    Evaluate {
+    SilentEvaluate {
         code: String,
-        visible: bool,
-        timeout_ms: Option<u64>,
+        timeout: std::time::Duration,
+    },
+    VisibleEvaluate {
+        code: String,
+        timeout: std::time::Duration,
     },
     UserInput {
         code: String,

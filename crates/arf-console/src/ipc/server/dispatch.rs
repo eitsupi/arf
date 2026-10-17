@@ -1,21 +1,18 @@
 //! JSON-RPC method dispatch: parameter parsing, forwarding to the main thread,
 //! and conversion of the main-thread reply into a JSON-RPC response.
 
-use crate::editor::validator::RValidator;
+use crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
 use crate::ipc::history_query::{HistoryQueryError, query_history};
-use crate::ipc::pending::DEFAULT_EVAL_TIMEOUT;
 use crate::ipc::protocol::{
-    EvaluateParams, HistoryParams, INCOMPLETE_INPUT, INTERNAL_ERROR, INVALID_PARAMS, IpcMethod,
-    IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, R_NOT_AT_PROMPT,
+    EvaluateParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS, IpcMethod, IpcRequest,
+    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, R_NOT_AT_PROMPT,
     ShutdownResult, UserInputParams,
 };
 use crate::ipc::session_result::collect_session_result;
 use crate::ipc::state::{has_headless_shutdown_handler, is_in_alternate_mode};
+use crate::ipc::validation::{validate_code, validated_method};
 use std::sync::mpsc;
 
-/// Clamp for evaluate timeouts, to avoid overflowing Tokio's internal
-/// deadline computations or tying up the server task indefinitely.
-const MAX_TIMEOUT_MS: u64 = 86_400_000; // 24 hours
 /// Session info collection is lightweight; use a short timeout.
 const SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -148,21 +145,12 @@ fn parse_method(
     match method {
         "evaluate" => {
             let params: EvaluateParams = parse_params(id, params)?;
-            if let Some(response) = incomplete_input_response(id.clone(), &params.code) {
-                return Err(Box::new(response));
-            }
-            Ok(IpcMethod::Evaluate {
-                code: params.code,
-                visible: params.visible,
-                timeout_ms: params.timeout_ms,
-            })
+            validated_method(id, params.code, params.visible, params.timeout_ms)
         }
         "shutdown" => Err(Box::new(handle_shutdown(id.clone()))),
         "user_input" => {
             let params: UserInputParams = parse_params(id, params)?;
-            if let Some(response) = incomplete_input_response(id.clone(), &params.code) {
-                return Err(Box::new(response));
-            }
+            validate_code(id, &params.code)?;
             Ok(IpcMethod::UserInput { code: params.code })
         }
         "session" => Ok(IpcMethod::Session),
@@ -175,20 +163,14 @@ fn parse_method(
     }
 }
 
-/// Extract the reply timeout from a method (evaluate supports custom timeout).
-///
-/// Returns the INVALID_PARAMS message when the requested timeout is too large.
-fn timeout_for(method: &IpcMethod) -> Result<std::time::Duration, String> {
+/// Extract the reply timeout from a validated method.
+fn timeout_for(method: &IpcMethod) -> std::time::Duration {
     match method {
-        IpcMethod::Evaluate { timeout_ms, .. } => match timeout_ms {
-            Some(ms) if *ms > MAX_TIMEOUT_MS => Err(format!(
-                "timeout_ms too large (max {MAX_TIMEOUT_MS} ms, got {ms})"
-            )),
-            Some(ms) => Ok(std::time::Duration::from_millis(*ms)),
-            None => Ok(DEFAULT_EVAL_TIMEOUT),
-        },
-        IpcMethod::Session => Ok(SESSION_TIMEOUT),
-        _ => Ok(DEFAULT_EVAL_TIMEOUT),
+        IpcMethod::SilentEvaluate { timeout, .. } | IpcMethod::VisibleEvaluate { timeout, .. } => {
+            *timeout
+        }
+        IpcMethod::Session => SESSION_TIMEOUT,
+        _ => DEFAULT_EVAL_TIMEOUT,
     }
 }
 
@@ -235,10 +217,7 @@ pub(super) async fn dispatch_request(
         Err(response) => return *response,
     };
 
-    let timeout = match timeout_for(&method) {
-        Ok(timeout) => timeout,
-        Err(message) => return JsonRpcResponse::error(id, INVALID_PARAMS, message),
-    };
+    let timeout = timeout_for(&method);
 
     // Send to main thread and await response
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -273,19 +252,6 @@ pub(super) async fn dispatch_request(
             "Request timed out",
         ),
     }
-}
-
-/// Reject code that would make R wait for continuation input.
-fn incomplete_input_response(id: Option<serde_json::Value>, code: &str) -> Option<JsonRpcResponse> {
-    if RValidator::new().is_complete(code) {
-        return None;
-    }
-
-    Some(JsonRpcResponse::error(
-        id,
-        INCOMPLETE_INPUT,
-        "R code is syntactically incomplete".to_string(),
-    ))
 }
 
 #[cfg(test)]
@@ -334,6 +300,76 @@ mod tests {
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
         // Cleanup handled by Guard drop
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn nul_code_is_rejected_before_main_thread_dispatch() {
+        set_in_alternate_mode(false);
+        let _guard = Guard;
+        let (tx, rx) = mpsc::channel();
+
+        for (method, params) in [
+            ("evaluate", serde_json::json!({"code": "function(x) {\0"})),
+            (
+                "evaluate",
+                serde_json::json!({"code": "function(x) {\0", "visible": true}),
+            ),
+            ("user_input", serde_json::json!({"code": "function(x) {\0"})),
+        ] {
+            let response = dispatch_request(
+                JsonRpcRequest {
+                    jsonrpc: "2.0".to_string(),
+                    method: method.to_string(),
+                    params,
+                    id: Some(serde_json::json!(1)),
+                },
+                &tx,
+            )
+            .await;
+            assert_eq!(response.error.unwrap().code, INVALID_PARAMS);
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn requested_timeout_expires_while_evaluate_is_queued_in_both_modes() {
+        set_in_alternate_mode(false);
+        let _guard = Guard;
+
+        for visible in [false, true] {
+            let (tx, rx) = mpsc::channel();
+            let request = JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                method: "evaluate".to_string(),
+                params: serde_json::json!({
+                    "code": "1",
+                    "visible": visible,
+                    "timeout_ms": 25,
+                }),
+                id: Some(serde_json::json!(1)),
+            };
+            let dispatch_tx = tx.clone();
+            let task = tokio::spawn(async move { dispatch_request(request, &dispatch_tx).await });
+            let queued = tokio::task::spawn_blocking(move || {
+                rx.recv().expect("evaluation should be queued")
+            })
+            .await
+            .expect("receiver task should complete");
+
+            match (&queued.method, visible) {
+                (IpcMethod::SilentEvaluate { timeout, .. }, false)
+                | (IpcMethod::VisibleEvaluate { timeout, .. }, true) => {
+                    assert_eq!(*timeout, std::time::Duration::from_millis(25));
+                }
+                _ => panic!("evaluation visibility was not preserved in the queued method"),
+            }
+
+            let response = task.await.expect("dispatch task should complete");
+            assert_eq!(response.error.unwrap().code, INTERNAL_ERROR);
+            assert!(queued.reply.is_closed());
+        }
     }
 
     /// Tests that `session` returns arf-only success (not an error) in alternate mode,

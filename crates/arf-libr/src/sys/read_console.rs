@@ -92,6 +92,39 @@ pub struct ReadConsoleInput {
     pub has_more: bool,
 }
 
+/// Find the end of the next UTF-8-safe ReadConsole chunk.
+///
+/// `capacity` is the maximum number of input bytes available in R's buffer,
+/// excluding the trailing NUL byte. The final chunk also includes a newline
+/// when `text` does not already end with one. Returns the byte index after the
+/// chunk and whether more text remains, or `None` when the capacity cannot
+/// advance by one complete UTF-8 character. `None` also means the text fits
+/// exactly but leaves no room for its terminating newline: in that case this
+/// helper leaves a character for the next call so interactive input never
+/// needs to queue an empty final chunk. Interactive pending input uses an empty
+/// string to mean "no queued input", so it cannot represent that extra call.
+/// An empty line itself requires capacity for its newline.
+pub fn read_console_chunk_end(text: &str, capacity: usize) -> Option<(usize, bool)> {
+    let bytes = text.as_bytes();
+    let ends_with_newline = bytes.last() == Some(&b'\n');
+    let final_len = bytes.len() + usize::from(!ends_with_newline);
+
+    if final_len <= capacity {
+        return Some((bytes.len(), false));
+    }
+
+    // If all remaining text would fit but its terminating newline would not,
+    // leave at least one byte for the next ReadConsole call.
+    let mut max_end = capacity.min(bytes.len());
+    if max_end == bytes.len() {
+        max_end = max_end.saturating_sub(1);
+    }
+    while max_end > 0 && !text.is_char_boundary(max_end) {
+        max_end -= 1;
+    }
+    (max_end > 0).then_some((max_end, true))
+}
+
 static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
 static mut HEADLESS_READ_CONSOLE_CALLBACK: Option<HeadlessReadConsoleCallback> = None;
 static RESET_CONSOLE_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -326,49 +359,29 @@ pub(super) unsafe extern "C" fn r_read_console(
         }
     };
 
-    let bytes = input.as_bytes();
-    // Reserve 2 bytes: one for potential newline, one for null terminator
-    let max_len = (buflen as usize).saturating_sub(2);
-
-    // Find copy length, ensuring we don't split multibyte characters
-    let copy_len = if bytes.len() <= max_len {
-        bytes.len()
-    } else {
-        // Find the last valid UTF-8 boundary at or before max_len
-        let mut end = max_len;
-        while end > 0 && !input.is_char_boundary(end) {
-            end -= 1;
-        }
-        end
+    let Some((chunk_end, has_more)) = read_console_chunk_end(&input, prompt_info.buffer_capacity)
+    else {
+        log::error!(
+            "r_read_console: buffer capacity {} cannot hold input chunk",
+            prompt_info.buffer_capacity
+        );
+        return 0;
     };
-
-    // SAFETY: buf is a valid buffer of at least buflen bytes from R
-    unsafe {
-        if copy_len > 0 {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, copy_len);
-        }
-
-        let mut pos = copy_len;
-
-        // Store remaining input for next call, or add newline if done
-        if copy_len < bytes.len() {
-            // More input remaining - store it for next ReadConsole call
-            let mut pending = PENDING_INPUT.lock().unwrap();
-            *pending = input[copy_len..].to_string();
-            // No newline - R will call us again
-        } else {
-            // All input consumed - add newline if not present
-            if bytes.is_empty() || bytes[bytes.len() - 1] != b'\n' {
-                *buf.add(pos) = b'\n' as c_char;
-                pos += 1;
-            }
-        }
-
-        // Null terminate
-        *buf.add(pos) = 0;
+    let result = unsafe {
+        write_read_console_input(
+            ReadConsoleInput {
+                text: input[..chunk_end].to_owned(),
+                has_more,
+            },
+            buf,
+            buflen,
+        )
+    };
+    if result == 1 && has_more {
+        let mut pending = PENDING_INPUT.lock().unwrap();
+        *pending = input[chunk_end..].to_owned();
     }
-
-    1
+    result
 }
 
 unsafe fn write_read_console_input(
@@ -434,6 +447,43 @@ pub fn set_headless_read_console_callback(callback: HeadlessReadConsoleCallback)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_boundaries_preserve_utf8_and_reconstruct_the_input() {
+        let input = "aé🙂z\n";
+        let mut remainder = input;
+        let mut reconstructed = String::new();
+
+        loop {
+            let (end, has_more) = read_console_chunk_end(remainder, 4).unwrap();
+            assert!(remainder.is_char_boundary(end));
+            reconstructed.push_str(&remainder[..end]);
+            if !has_more {
+                break;
+            }
+            assert!(end > 0);
+            remainder = &remainder[end..];
+        }
+
+        assert_eq!(reconstructed, input);
+    }
+
+    #[test]
+    fn final_chunk_accounts_for_existing_or_added_newline() {
+        assert_eq!(read_console_chunk_end("abc\n", 4), Some((4, false)));
+        assert_eq!(read_console_chunk_end("abc", 4), Some((3, false)));
+        assert_eq!(read_console_chunk_end("", 1), Some((0, false)));
+        assert_eq!(read_console_chunk_end("", 0), None);
+    }
+
+    #[test]
+    fn full_capacity_without_newline_is_split_to_make_room_for_terminator() {
+        assert_eq!(read_console_chunk_end("abc", 3), Some((2, true)));
+        assert_eq!(read_console_chunk_end("é", 1), None);
+        assert_eq!(read_console_chunk_end("é", 2), None);
+        assert_eq!(read_console_chunk_end("a", 1), None);
+        assert_eq!(read_console_chunk_end("a", 2), Some((1, false)));
+    }
 
     #[test]
     fn complete_input_requires_room_for_newline_and_nul() {

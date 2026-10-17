@@ -5,18 +5,25 @@
 //!
 //! ## Mutual exclusion between console and IPC input
 //!
-//! All IPC operations that could conflict with console input (user_input,
-//! evaluate with visible=true/false) are routed through reedline's ExternalBreak
-//! mechanism. This allows the REPL to check the editor buffer before accepting
-//! or rejecting the operation:
+//! Interactive operations that could conflict with console input (user_input,
+//! visible evaluate, and silent evaluate) are routed through reedline's
+//! ExternalBreak mechanism. This allows the REPL to check the editor buffer
+//! before accepting or rejecting the operation:
 //!
 //! 1. Idle callback receives IPC request → stores in `PENDING_IPC_OPERATION` → fires break signal
 //! 2. Reedline returns `Signal::ExternalBreak(buffer)` with current editor buffer
 //! 3. REPL checks buffer: empty → accept operation, non-empty → reject with `USER_IS_TYPING`
+//!
+//! Headless operations bypass reedline. At the next top-level `ReadConsole`,
+//! the R mainloop takes one queued request and feeds its code from a
+//! request-owned input buffer. The request completes when R returns to the
+//! next main prompt; nested console reads receive EOF and cannot consume a
+//! later IPC request.
 
 mod approval;
 mod capture;
 pub mod client;
+mod execution;
 mod headless;
 mod history_query;
 mod pending;
@@ -26,17 +33,19 @@ pub mod server;
 pub mod session;
 mod session_result;
 mod state;
+mod validation;
 
 #[allow(unused_imports)]
 pub use approval::{
     UserInputApproval, approve_user_input, reject_user_input_not_approved, send_policy_is_allow,
     set_send_policy_allow,
 };
+pub(crate) use execution::{accept_user_input, run_silent_eval};
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;
 pub use pending::{
-    PendingIpcKind, accept_user_input, poll_ipc_requests, reject_operation_user_typing,
-    run_silent_eval, setup_visible_eval, take_pending_ipc_operation,
+    PendingIpcKind, poll_ipc_requests, reject_operation_user_typing, setup_visible_eval,
+    take_pending_ipc_operation,
 };
 pub use session_result::{clear_history_session_id, read_r_version};
 pub use state::{
