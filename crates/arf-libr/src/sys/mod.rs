@@ -28,13 +28,16 @@ pub use error_state::{
 pub use init::{initialize_r, initialize_r_for_tests, initialize_r_with_args, run_r_mainloop};
 pub use interrupt::{
     is_r_awaiting_console_input, is_r_interrupt_flag_available, process_r_events,
-    set_r_interrupt_pending,
+    process_r_events_protected, set_r_interrupt_pending,
 };
 pub use output::{
     finish_ipc_capture, flush_reprex_buffer, set_reprex_mode, set_write_console_callback,
     start_ipc_capture,
 };
-pub use read_console::{ReadConsolePromptInfo, set_read_console_callback};
+pub use read_console::{
+    HeadlessReadConsoleCallback, ReadConsoleInput, ReadConsolePromptInfo, frame_depth_protected,
+    reset_console_generation, set_headless_read_console_callback, set_read_console_callback,
+};
 pub use spinner::{set_spinner_color, set_spinner_frames, start_spinner, stop_spinner};
 
 #[cfg(test)]

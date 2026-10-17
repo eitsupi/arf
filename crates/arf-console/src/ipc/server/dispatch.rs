@@ -10,7 +10,7 @@ use crate::ipc::protocol::{
     ShutdownResult, UserInputParams,
 };
 use crate::ipc::session_result::collect_session_result;
-use crate::ipc::state::{is_in_alternate_mode, trigger_headless_shutdown};
+use crate::ipc::state::{has_headless_shutdown_handler, is_in_alternate_mode};
 use std::sync::mpsc;
 
 /// Clamp for evaluate timeouts, to avoid overflowing Tokio's internal
@@ -90,7 +90,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 /// Shutdown is handled directly on the server thread — no need to send to the
 /// main thread. Only available in headless mode.
 fn handle_shutdown(id: Option<serde_json::Value>) -> JsonRpcResponse {
-    if trigger_headless_shutdown() {
+    if has_headless_shutdown_handler() {
         JsonRpcResponse::success(
             id,
             serde_json::to_value(ShutdownResult { accepted: true }).unwrap(),

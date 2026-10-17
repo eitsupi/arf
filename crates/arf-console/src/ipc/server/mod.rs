@@ -12,12 +12,14 @@ mod transport;
 use crate::ipc::protocol::IpcRequest;
 use crate::ipc::session::{SessionInfo, SessionType, remove_session, write_session};
 use crate::sync::LockRecover;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use tokio_util::sync::CancellationToken;
 
 /// Global shutdown token and join handle for the server thread.
 static SERVER_HANDLE: OnceLock<Mutex<Option<ServerState>>> = OnceLock::new();
+static SERVER_ATEXIT_REGISTERED: AtomicBool = AtomicBool::new(false);
 
 /// Return whether the IPC server is currently running.
 pub fn is_server_running() -> bool {
@@ -60,6 +62,13 @@ pub fn start_server(
     history_session_id: Option<i64>,
     session_type: SessionType,
 ) -> std::io::Result<SessionInfo> {
+    if !SERVER_ATEXIT_REGISTERED.swap(true, Ordering::AcqRel) {
+        let result = unsafe { libc::atexit(stop_server_at_exit) };
+        if result != 0 {
+            SERVER_ATEXIT_REGISTERED.store(false, Ordering::Release);
+            log::warn!("Failed to register IPC server cleanup with atexit");
+        }
+    }
     // Acquire the lock once and hold it through check-and-set to avoid TOCTOU.
     let handle_store = SERVER_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_store.lock().unwrap();
@@ -173,6 +182,10 @@ pub fn start_server(
     }
 
     Ok(session)
+}
+
+extern "C" fn stop_server_at_exit() {
+    stop_server();
 }
 
 /// Stop the IPC server gracefully.

@@ -182,6 +182,48 @@ pub fn process_r_events() {
     }
 }
 
+/// Process R events behind an R top-level jump boundary.
+///
+/// The callback payload contains only a raw library pointer and the callback
+/// frame owns no Rust values with destructors, so an R error cannot unwind
+/// through Rust-owned state.
+pub fn process_r_events_protected() -> bool {
+    let lib = match r_library() {
+        Ok(lib) => lib,
+        Err(_) => return false,
+    };
+    clear_r_interrupt_pending();
+    let suspend = SuspendRInterruptsGuard::new(lib.r_interrupts_suspended);
+    let mut payload = lib as *const crate::functions::RLibrary as *mut std::ffi::c_void;
+    let completed = unsafe {
+        (lib.r_toplevelexec)(
+            Some(process_r_events_callback),
+            (&mut payload as *mut *mut std::ffi::c_void).cast(),
+        )
+    } != 0;
+    drop(suspend);
+    completed
+}
+
+unsafe extern "C" fn process_r_events_callback(payload: *mut std::ffi::c_void) {
+    let library_ptr =
+        unsafe { *(payload.cast::<*mut std::ffi::c_void>()) } as *const crate::functions::RLibrary;
+    if library_ptr.is_null() {
+        return;
+    }
+    let lib = unsafe { &*library_ptr };
+    unsafe {
+        (lib.r_processevents)();
+        #[cfg(unix)]
+        if !lib.r_inputhandlers.is_null() {
+            let what = (lib.r_checkactivity)(0, 1);
+            if !what.is_null() {
+                (lib.r_runhandlers)(*lib.r_inputhandlers, what);
+            }
+        }
+    }
+}
+
 /// Set R's interrupt pending flag to request computation interruption.
 ///
 /// This is async-signal-safe: only performs an atomic load and a volatile write.

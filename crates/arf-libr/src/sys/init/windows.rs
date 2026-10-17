@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use crate::sys::discovery::get_r_home;
 use crate::sys::interrupt::{R_DEFERRED_INTERRUPT_FLAG, R_INTERRUPT_FLAG};
 use crate::sys::output::{decode_windows_native, r_write_console_ex};
-use crate::sys::read_console::r_read_console;
+use crate::sys::read_console::{r_read_console, r_reset_console};
 
 /// Enable virtual terminal processing on Windows.
 ///
@@ -188,6 +188,7 @@ pub(super) unsafe fn initialize_r_windows(
         (*params_ptr).write_console = None;
         (*params_ptr).write_console_ex = Some(r_write_console_ex);
         (*params_ptr).read_console = Some(r_read_console);
+        (*params_ptr).reset_console = Some(r_reset_console);
         (*params_ptr).show_message = Some(r_show_message);
         (*params_ptr).yes_no_cancel = Some(r_yes_no_cancel);
         (*params_ptr).callback = Some(r_callback);

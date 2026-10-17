@@ -319,6 +319,12 @@ fn test_headless_shutdown_via_ipc() {
     let session = process.ipc_session().expect("session should work");
     assert!(session.success, "should be running");
 
+    let last = process
+        .ipc_eval(r#".Last <- function() stop("HEADLESS_LAST_SHOULD_NOT_RUN")"#)
+        .expect("set .Last silently");
+    assert!(last.success, "setting .Last failed: {}", last.stderr);
+    assert!(parse_ipc_json(&last)["error"].is_null());
+
     // Send shutdown
     let result = process.ipc_shutdown().expect("shutdown should run");
     assert!(
@@ -335,9 +341,20 @@ fn test_headless_shutdown_via_ipc() {
     );
 
     // Process should exit within a few seconds
-    process
+    let status = process
         .wait_for_exit(Duration::from_secs(10))
         .expect("headless process should exit after shutdown");
+    assert!(
+        status.success(),
+        "shutdown should exit cleanly despite .Last: {status}"
+    );
+    assert!(
+        !process
+            .server_output()
+            .contains("HEADLESS_LAST_SHOULD_NOT_RUN"),
+        ".Last should not run during IPC shutdown: {}",
+        process.server_output()
+    );
 }
 
 /// Test that help pages are captured via the custom pager instead of

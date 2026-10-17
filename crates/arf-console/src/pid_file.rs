@@ -355,6 +355,12 @@ pub(crate) fn cleanup_ipc_pid_file(path: &std::path::Path) {
     IPC_PID_FILE_CLEANUP_DONE.store(true, std::sync::atomic::Ordering::Release);
 }
 
+pub(crate) fn cleanup_registered_ipc_pid_file() {
+    if let Some(path) = IPC_PID_FILE_PATH.get() {
+        cleanup_ipc_pid_file(path);
+    }
+}
+
 /// Remove the parent's PID file before a non-Unix replacement is spawned.
 /// The atexit handler remains armed if removal fails, so the old PID is never
 /// restored or overwritten by a best-effort operation.

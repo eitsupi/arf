@@ -113,6 +113,8 @@ pub struct RLibrary {
     #[cfg(unix)]
     pub ptr_r_readconsole: *mut ReadConsoleFunc,
     #[cfg(unix)]
+    pub ptr_r_resetconsole: *mut Option<unsafe extern "C" fn()>,
+    #[cfg(unix)]
     pub ptr_r_writeconsoleex: *mut WriteConsoleExFunc,
     #[cfg(unix)]
     pub ptr_r_writeconsole: *mut Option<unsafe extern "C" fn(*const c_char, c_int)>,
@@ -345,6 +347,12 @@ impl RLibrary {
             // Load console callbacks (Unix only - Windows uses Rstart params)
             #[cfg(unix)]
             load_ptr!(ptr_r_readconsole, b"ptr_R_ReadConsole\0", ReadConsoleFunc);
+            #[cfg(unix)]
+            load_ptr!(
+                ptr_r_resetconsole,
+                b"ptr_R_ResetConsole\0",
+                Option<unsafe extern "C" fn()>
+            );
             #[cfg(unix)]
             load_ptr!(
                 ptr_r_writeconsoleex,
@@ -610,6 +618,8 @@ impl RLibrary {
                 r_cstacklimit,
                 #[cfg(unix)]
                 ptr_r_readconsole,
+                #[cfg(unix)]
+                ptr_r_resetconsole,
                 #[cfg(unix)]
                 ptr_r_writeconsoleex,
                 #[cfg(unix)]

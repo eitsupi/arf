@@ -32,7 +32,7 @@ pub use approval::{
     UserInputApproval, approve_user_input, reject_user_input_not_approved, send_policy_is_allow,
     set_send_policy_allow,
 };
-pub use headless::{headless_poll_and_process, set_headless_history};
+pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;
 pub use pending::{
     PendingIpcKind, accept_user_input, poll_ipc_requests, reject_operation_user_typing,
