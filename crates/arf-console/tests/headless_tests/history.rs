@@ -1,5 +1,6 @@
 use super::support::*;
 use crate::common::{poll_until, wait_for_history_rows};
+use std::path::Path;
 use std::time::Duration;
 
 #[test]
@@ -156,7 +157,16 @@ fn test_headless_history_captures_working_directory_when_execution_starts() {
         .iter()
         .find(|row| row.command == command)
         .expect("running setwd request should already be in history");
-    assert_eq!(pending.cwd.as_deref(), initial_cwd.to_str());
+    let pending_cwd = pending
+        .cwd
+        .as_deref()
+        .expect("running setwd request should have a cwd");
+    assert_eq!(
+        Path::new(pending_cwd)
+            .canonicalize()
+            .expect("canonicalize recorded start cwd"),
+        initial_cwd
+    );
     let timestamp: Option<i64> = rusqlite::Connection::open(&db_path)
         .expect("open history database")
         .query_row(
@@ -190,7 +200,13 @@ fn test_headless_history_captures_working_directory_when_execution_starts() {
         .iter()
         .find(|row| row.command == command)
         .expect("setwd request should be in history");
-    assert_eq!(row.cwd.as_deref(), initial_cwd.to_str());
+    let recorded_cwd = row.cwd.as_deref().expect("setwd request should have a cwd");
+    assert_eq!(
+        Path::new(recorded_cwd)
+            .canonicalize()
+            .expect("canonicalize recorded cwd"),
+        initial_cwd
+    );
     assert_eq!(row.exit_status, Some(0));
     assert_eq!(rows.iter().filter(|row| row.command == command).count(), 1);
 }
