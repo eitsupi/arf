@@ -95,14 +95,38 @@ fn empty_or_missing_legacy_creates_nothing() {
     let dirs = Dirs::new();
     assert!(matches!(
         dirs.run(false).unwrap(),
-        MigrationOutcome::NoLegacyHistory(_)
+        MigrationOutcome::NoLegacyHistory { .. }
     ));
     std::fs::remove_dir(&dirs.legacy).unwrap();
     assert!(matches!(
         dirs.run(false).unwrap(),
-        MigrationOutcome::NoLegacyHistory(_)
+        MigrationOutcome::NoLegacyHistory { .. }
     ));
     assert!(!dirs.current.exists());
+}
+
+#[test]
+fn a_migration_that_finds_no_legacy_history_reports_cleared_records() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    dirs.migrate();
+    std::fs::remove_file(dirs.legacy.join("r.db")).unwrap();
+
+    let cleared = |outcome| match outcome {
+        MigrationOutcome::NoLegacyHistory {
+            cleared_records, ..
+        } => cleared_records,
+        other => panic!("unexpected outcome: {other:?}"),
+    };
+    // A dry run leaves the record; the real run clears it once.
+    assert!(!cleared(dirs.run(true).unwrap()));
+    assert_eq!(recorded(&dirs), [true, false]);
+    assert!(cleared(dirs.run(false).unwrap()));
+    assert_eq!(recorded(&dirs), [false, false]);
+    assert!(!cleared(dirs.run(false).unwrap()));
 }
 
 #[test]

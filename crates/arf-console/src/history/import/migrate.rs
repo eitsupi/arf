@@ -5,12 +5,12 @@
 //! The legacy databases are only ever opened read-only.
 
 use anyhow::{Context, Result, bail};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::artifact::{self, HistoryArtifact, HistoryKind};
 use super::service::{self, HistoryDbPaths, ImportPolicy};
 use super::{ImportResult, ParsedImport, parse_arf_history};
+use crate::config::same_directory;
 
 /// What a migration run found and did.
 #[derive(Debug)]
@@ -18,7 +18,11 @@ pub(crate) enum MigrationOutcome {
     /// Legacy and current are the same directory; nothing was touched.
     SameLocation(PathBuf),
     /// The legacy directory holds neither `r.db` nor `shell.db`.
-    NoLegacyHistory(PathBuf),
+    NoLegacyHistory {
+        directory: PathBuf,
+        /// Whether records of an earlier migration from it were cleared.
+        cleared_records: bool,
+    },
     Migrated(Box<MigrationReport>),
 }
 
@@ -36,14 +40,6 @@ pub(crate) struct MigrationReport {
     /// recorded. Without the record, startup keeps reporting the legacy
     /// history as not yet copied, so this makes the migration incomplete.
     pub(crate) record_failures: usize,
-}
-
-fn same_directory(a: &Path, b: &Path) -> bool {
-    a == b
-        || matches!(
-            (fs::canonicalize(a), fs::canonicalize(b)),
-            (Ok(a), Ok(b)) if a == b
-        )
 }
 
 /// Check for a database file, reporting I/O and permission errors instead of
@@ -93,7 +89,7 @@ fn record_completed_migration(
         let recorded = if present {
             artifact::record_legacy_migration(current.path(kind), kind, legacy_dir)
         } else {
-            artifact::clear_legacy_migration(current.path(kind), legacy_dir)
+            artifact::clear_legacy_migration(current.path(kind), legacy_dir).map(|_| ())
         };
         if let Err(error) = recorded {
             failures += 1;
@@ -124,14 +120,19 @@ pub(crate) fn migrate_history(
     let legacy_has_r = database_exists(&legacy.r)?;
     let legacy_has_shell = database_exists(&legacy.shell)?;
     if !legacy_has_r && !legacy_has_shell {
+        let mut cleared_records = false;
         if !dry_run {
             // Records an earlier migration left would otherwise hide legacy
             // databases created here later.
             for kind in [HistoryKind::R, HistoryKind::Shell] {
-                artifact::clear_legacy_migration(current.path(kind), &legacy.directory)?;
+                cleared_records |=
+                    artifact::clear_legacy_migration(current.path(kind), &legacy.directory)?;
             }
         }
-        return Ok(MigrationOutcome::NoLegacyHistory(legacy.directory));
+        return Ok(MigrationOutcome::NoLegacyHistory {
+            directory: legacy.directory,
+            cleared_records,
+        });
     }
 
     for kind in [HistoryKind::R, HistoryKind::Shell] {
@@ -232,11 +233,19 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
             );
             return Ok(());
         }
-        MigrationOutcome::NoLegacyHistory(dir) => {
+        MigrationOutcome::NoLegacyHistory {
+            directory,
+            cleared_records,
+        } => {
             println!(
                 "Nothing to migrate: no history databases (r.db, shell.db) found in the legacy location ({}).",
-                dir.display()
+                directory.display()
             );
+            if *cleared_records {
+                println!(
+                    "Cleared the record of an earlier migration from it, so history created there later is reported again."
+                );
+            }
             return Ok(());
         }
         MigrationOutcome::Migrated(report) => report,

@@ -286,24 +286,26 @@ pub(crate) fn record_legacy_migration(
     Ok(())
 }
 
-/// Remove a record of a migration from `legacy_dir`, if this database has one.
+/// Remove a record of a migration from `legacy_dir`, if this database has one,
+/// and report whether one was removed.
 ///
 /// A migration that finds no legacy database of this kind calls this, so a
 /// record left by an earlier migration does not cover a legacy database of
 /// this kind that is created later.
-pub(crate) fn clear_legacy_migration(path: &Path, legacy_dir: &Path) -> Result<()> {
+///
+/// The database is only opened for writing when it holds such a record, so a
+/// migration with nothing to clear never needs write access.
+pub(crate) fn clear_legacy_migration(path: &Path, legacy_dir: &Path) -> Result<bool> {
     if !path
         .try_exists()
         .with_context(|| format!("failed to inspect history database path {}", path.display()))?
+        || !legacy_migration_recorded(path, legacy_dir)?
     {
-        return Ok(());
+        return Ok(false);
     }
     let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
         .with_context(|| format!("failed to open history database {}", path.display()))?;
-    if !metadata_table_exists(&connection)? {
-        return Ok(());
-    }
-    connection
+    let removed = connection
         .execute(
             "DELETE FROM arf_metadata WHERE key = ?1 AND value = ?2",
             [LEGACY_MIGRATED_KEY, legacy_dir.to_string_lossy().as_ref()],
@@ -314,7 +316,7 @@ pub(crate) fn clear_legacy_migration(path: &Path, legacy_dir: &Path) -> Result<(
                 path.display()
             )
         })?;
-    Ok(())
+    Ok(removed > 0)
 }
 
 /// Whether a completed migration from `legacy_dir` was recorded in this

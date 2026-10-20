@@ -425,6 +425,18 @@ mod unix_probe {
     }
 
     #[test]
+    fn legacy_directory_that_links_to_the_current_one_is_not_a_legacy_location() {
+        let dirs = Dirs::new();
+        Dirs::database(&dirs.current, HistoryKind::R);
+        fs::create_dir_all(dirs.legacy.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&dirs.current, &dirs.legacy).unwrap();
+
+        let resolved = dirs.resolve();
+        assert_eq!(resolved.source(), HistoryLocationSource::Default);
+        assert!(resolved.startup_warning().is_none());
+    }
+
+    #[test]
     fn unreadable_legacy_directory_is_a_failure_not_absence() {
         let dirs = Dirs::new();
         fs::create_dir_all(&dirs.current).unwrap();

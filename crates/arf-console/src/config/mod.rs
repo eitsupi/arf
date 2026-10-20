@@ -22,6 +22,7 @@ pub use experimental::{
 pub use experimental::{HelpViewer, RHelpConfig};
 pub(crate) use history::{
     DefaultHistoryDirs, HistoryLocationSource, HistoryProbeFailure, ResolvedHistoryLocation,
+    same_directory,
 };
 pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;
