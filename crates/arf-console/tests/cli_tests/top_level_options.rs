@@ -259,6 +259,9 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
     );
 }
 
+// Not on Windows: its default locations are Known Folders that environment
+// variables cannot redirect, so this would migrate the real user profile.
+#[cfg(not(windows))]
 #[test]
 fn test_history_migrate_is_a_noop_without_legacy_history() {
     use tempfile::TempDir;
@@ -286,7 +289,7 @@ fn test_history_migrate_is_a_noop_without_legacy_history() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Linux has distinct legacy and current defaults; elsewhere they coincide.
+    // Linux has distinct legacy and current defaults; on macOS they coincide.
     #[cfg(target_os = "linux")]
     let expected =
         "Nothing to migrate: no history databases (r.db, shell.db) found in the legacy location";

@@ -201,7 +201,6 @@ fn default_history_dirs_use_local_appdata_with_roaming_as_legacy() {
 
     assert_eq!(defaults.current, local);
     assert_eq!(defaults.legacy, Some(roaming));
-    assert_ne!(Some(defaults.current), defaults.legacy);
 }
 
 #[cfg(target_os = "macos")]
