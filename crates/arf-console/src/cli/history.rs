@@ -59,6 +59,22 @@ pub(crate) enum HistoryAction {
         #[arg(long, default_value = "shell")]
         shell_table: String,
     },
+    /// Copy history from the legacy default location to the current default location
+    ///
+    /// Reads r.db and shell.db from the legacy default history directory and imports them
+    /// into the current default history directory, skipping entries that already exist.
+    /// The legacy location is never modified or deleted, and rerunning is safe.
+    ///
+    /// This command only moves history between the two default locations. An explicit
+    /// history directory (--history-dir, ARF_HISTORY_DIR, or history.mode in the config
+    /// file) does not change them. Use `arf history import --from arf` for other paths.
+    ///
+    /// Close other running arf sessions before migrating.
+    Migrate {
+        /// Show what would be migrated without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Export history to a unified SQLite file (experimental)
     ///
     /// Export both R and shell history to a single SQLite file.

@@ -260,6 +260,51 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
 }
 
 #[test]
+fn test_history_migrate_is_a_noop_when_default_locations_match() {
+    use tempfile::TempDir;
+
+    let data_home = TempDir::new().expect("Failed to create data directory");
+    let explicit = TempDir::new().expect("Failed to create explicit history directory");
+    let explicit_dir = explicit.path().join("not-created");
+
+    let output = sanitized_arf_command()
+        .env("XDG_DATA_HOME", data_home.path())
+        .args([
+            "--history-dir",
+            explicit_dir.to_str().unwrap(),
+            "history",
+            "migrate",
+        ])
+        .output()
+        .expect("Failed to run arf history migrate");
+
+    assert!(
+        output.status.success(),
+        "history migrate should accept --history-dir: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Nothing to migrate: legacy and current default locations are the same"),
+        "unexpected output: {stdout}"
+    );
+    assert!(
+        stdout.contains("only migrates between the default locations"),
+        "explicit directory note missing: {stdout}"
+    );
+    assert!(
+        !explicit_dir.exists(),
+        "explicit directory must not be created"
+    );
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        std::fs::read_dir(data_home.path()).unwrap().count(),
+        0,
+        "no-op migration must not create files in the default data directory"
+    );
+}
+
+#[test]
 fn test_vanilla_without_subcommand_still_works() {
     let output = sanitized_arf_command()
         .args(["--vanilla", "-e", "1 + 1"])

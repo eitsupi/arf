@@ -71,6 +71,19 @@ pub(crate) fn resolve_history_location(
     }
 }
 
+/// The platform default history directories, independent of any explicit
+/// override (`--history-dir`, `ARF_HISTORY_DIR`, or `history.mode`).
+///
+/// `current` is where a default-configured arf reads and writes history.
+/// `legacy` is the previous default, kept so history left there can be copied
+/// forward. Both are derived from environment lookup only; neither is probed
+/// on the filesystem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefaultHistoryDirs {
+    pub(crate) current: PathBuf,
+    pub(crate) legacy: PathBuf,
+}
+
 /// History configuration.
 #[derive(Debug, Clone)]
 pub struct HistoryConfig {

@@ -20,8 +20,8 @@ pub use experimental::{
 };
 #[allow(unused_imports)]
 pub use experimental::{HelpViewer, RHelpConfig};
+pub(crate) use history::{DefaultHistoryDirs, HistoryLocationSource, ResolvedHistoryLocation};
 pub use history::{HistoryConfig, HistoryMode};
-pub(crate) use history::{HistoryLocationSource, ResolvedHistoryLocation};
 pub use ipc::IpcConfig;
 #[allow(unused_imports)]
 // StatusSymbol is part of public API for programmatic StatusConfig construction
@@ -184,13 +184,26 @@ pub fn config_file_path() -> Option<PathBuf> {
     config_dir().map(|p| p.join("arf.toml"))
 }
 
+/// Get the platform default history directories (current and legacy).
+///
+/// The two paths are equal wherever the default location has never moved.
+/// Resolution of the active history directory uses only `current`; `legacy`
+/// exists solely so `arf history migrate` knows where older history may live.
+pub(crate) fn default_history_dirs() -> Option<DefaultHistoryDirs> {
+    let data_history = data_dir().map(|p| p.join("history"))?;
+    Some(DefaultHistoryDirs {
+        current: data_history.clone(),
+        legacy: data_history,
+    })
+}
+
 /// Get the history directory path.
 ///
 /// History files are stored in a subdirectory: `~/.local/share/arf/history/`
 /// - R mode: `history/r.db`
 /// - Shell mode: `history/shell.db`
 pub fn history_dir() -> Option<PathBuf> {
-    data_dir().map(|p| p.join("history"))
+    default_history_dirs().map(|dirs| dirs.current)
 }
 
 /// Resolve history mode against the current default directory without probing

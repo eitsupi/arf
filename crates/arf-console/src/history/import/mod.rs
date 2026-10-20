@@ -15,6 +15,8 @@ use super::metadata::HistoryExtraInfo;
 use super::store::HistoryStore;
 
 mod execution;
+pub(crate) mod migrate;
+pub(crate) mod service;
 mod source;
 
 #[cfg(test)]
