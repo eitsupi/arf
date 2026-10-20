@@ -57,14 +57,13 @@ fn replacing_error_option_leaves_history_status_unavailable() -> Result<()> {
                 "Error: known_before_handler_change",
                 ERROR_PROMPT,
             )?;
-            terminal.enter("options(error = function() stop('replacement_handler_error'))")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
-            terminal.enter("stop('unhandled_with_replacement')")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
-            terminal.enter("options(error = NULL)")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
-            terminal.enter("stop('unhandled_after_error_option_removal')")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit_quiet(
+                "options(error = function() stop('replacement_handler_error'))",
+                PROMPT,
+            )?;
+            terminal.submit_quiet("stop('unhandled_with_replacement')", PROMPT)?;
+            terminal.submit_quiet("options(error = NULL)", PROMPT)?;
+            terminal.submit_quiet("stop('unhandled_after_error_option_removal')", PROMPT)?;
             terminal.quit()
         },
     )?;
@@ -200,10 +199,10 @@ fn active_error_state_binding_is_not_evaluated() -> Result<()> {
             .history_dir(history.path()),
         |terminal| {
             terminal.wait_for_first_prompt()?;
-            terminal.enter(
+            terminal.submit_quiet(
                 "rm('.arf_error_state', envir = .GlobalEnv); makeActiveBinding('.arf_error_state', function(value) { cat(paste0('ACTIVE', '_STATE_CALLED\\n')); stop('active_state_error') }, .GlobalEnv)",
+                PROMPT,
             )?;
-            terminal.wait_for_prompt(None, PROMPT)?;
             terminal.enter("42")?;
             terminal.wait_for(
                 "REPL continues without invoking active binding",
@@ -241,12 +240,11 @@ fn active_error_flag_binding_is_not_evaluated_by_tracking_or_handler() -> Result
             .history_dir(history.path()),
         |terminal| {
             terminal.wait_for_first_prompt()?;
-            terminal.enter(
+            terminal.submit_quiet(
                 "state <- get('.arf_error_state', .GlobalEnv); rm('had_error', envir = state); makeActiveBinding('had_error', function(value) { cat(paste0('ACTIVE_', 'HAD_ERROR_CALLED\\n')); stop('active_had_error') }, state)",
+                PROMPT,
             )?;
-            terminal.wait_for_prompt(None, PROMPT)?;
-            terminal.enter("stop('active_binding_trigger')")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit_quiet("stop('active_binding_trigger')", PROMPT)?;
             terminal.wait_for("active binding was not invoked", |state, _| {
                 state.text.contains("Error: active_binding_trigger")
                     && !state.text.contains("ACTIVE_HAD_ERROR_CALLED")
