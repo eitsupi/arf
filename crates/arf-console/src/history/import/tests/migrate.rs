@@ -35,7 +35,7 @@ impl Dirs {
 
 fn report(outcome: MigrationOutcome) -> MigrationReport {
     match outcome {
-        MigrationOutcome::Migrated(report) => report,
+        MigrationOutcome::Migrated(report) => *report,
         other => panic!("expected a migration, got {other:?}"),
     }
 }

@@ -19,7 +19,7 @@ pub(crate) enum MigrationOutcome {
     SameLocation(PathBuf),
     /// The legacy directory holds neither `r.db` nor `shell.db`.
     NoLegacyHistory(PathBuf),
-    Migrated(MigrationReport),
+    Migrated(Box<MigrationReport>),
 }
 
 #[derive(Debug)]
@@ -143,7 +143,7 @@ pub(crate) fn migrate_history(
         })?
     };
 
-    Ok(MigrationOutcome::Migrated(MigrationReport {
+    Ok(MigrationOutcome::Migrated(Box::new(MigrationReport {
         legacy,
         current,
         legacy_has_r,
@@ -152,7 +152,7 @@ pub(crate) fn migrate_history(
         current_had_shell,
         dry_run,
         result,
-    }))
+    })))
 }
 
 /// Print what [`migrate_history`] found and did.
