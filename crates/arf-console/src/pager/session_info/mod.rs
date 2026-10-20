@@ -5,7 +5,7 @@ mod render;
 
 use super::lines_content::{CopyAction, LinesContent};
 use super::{PagerConfig, run};
-use crate::config::{ConfigFileInfo, RSourceStatus};
+use crate::config::{ConfigFileInfo, HistoryLocationSource, RSourceStatus};
 use crate::history::HistoryRuntime;
 use crate::repl::reprex::ReprexRuntime;
 use crate::repl::state::PromptRuntimeConfig;
@@ -19,6 +19,7 @@ pub fn display_session_info(
     config_file_info: &ConfigFileInfo,
     r_history: &HistoryRuntime,
     shell_history: &HistoryRuntime,
+    history_source: HistoryLocationSource,
     r_source_status: &RSourceStatus,
 ) {
     let lines = generate_info_lines(
@@ -27,6 +28,7 @@ pub fn display_session_info(
         config_file_info,
         r_history,
         shell_history,
+        history_source,
         r_source_status,
     );
 
@@ -50,6 +52,7 @@ fn generate_info_lines(
     config_file_info: &ConfigFileInfo,
     r_history: &HistoryRuntime,
     shell_history: &HistoryRuntime,
+    history_source: HistoryLocationSource,
     r_source_status: &RSourceStatus,
 ) -> Vec<String> {
     SessionInfo::collect(
@@ -58,6 +61,7 @@ fn generate_info_lines(
         config_file_info,
         r_history,
         shell_history,
+        history_source,
         r_source_status,
     )
     .to_lines()

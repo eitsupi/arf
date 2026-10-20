@@ -65,6 +65,11 @@ fn test_generate_schema_lines_contains_expected_content() {
     assert!(
         lines
             .iter()
+            .any(|l| l.contains("`legacy_migrated_from` (optional)"))
+    );
+    assert!(
+        lines
+            .iter()
             .any(|l| l.contains("artifact = history-export"))
     );
 

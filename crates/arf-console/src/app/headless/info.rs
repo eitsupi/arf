@@ -2,7 +2,7 @@
 
 use crate::app::r_source_selection::RSourceSelection;
 use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute};
-use crate::config::ConfigLoadProvenance;
+use crate::config::{ConfigLoadProvenance, HistoryLocationSource};
 use crate::history::HistoryRuntime;
 use crate::ipc::policy::IpcPolicy;
 use crate::ipc::session::{SessionInfo, SessionType};
@@ -34,15 +34,17 @@ pub(super) struct HeadlessInfo {
 #[derive(Debug, Serialize)]
 pub(super) struct HeadlessHistoryRuntime {
     state: String,
+    source: &'static str,
     path: Option<String>,
     reason: Option<String>,
     detail: Option<String>,
 }
 
 impl HeadlessHistoryRuntime {
-    pub(super) fn from_runtime(runtime: &HistoryRuntime) -> Self {
+    pub(super) fn from_runtime(runtime: &HistoryRuntime, source: HistoryLocationSource) -> Self {
         Self {
             state: runtime.state_name().to_string(),
+            source: source.as_str(),
             path: runtime
                 .requested_path()
                 .map(|path| path.display().to_string()),
@@ -83,6 +85,7 @@ impl HeadlessInfo {
     pub(super) fn from_session(
         session: &SessionInfo,
         history_runtime: &HistoryRuntime,
+        history_source: HistoryLocationSource,
         warnings: Vec<String>,
         resolution: &RSourceResolutionReport,
         launch_cwd: &std::path::Path,
@@ -105,7 +108,7 @@ impl HeadlessInfo {
             log_file: session.log_file.clone(),
             history_session_id: session.history_session_id,
             ipc_policy: crate::ipc::policy::policy(SessionType::Headless),
-            history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime),
+            history_runtime: HeadlessHistoryRuntime::from_runtime(history_runtime, history_source),
             r_source_override: HeadlessRSourceOverride::from_report(resolution),
             r_source_selection: RSourceSelection::from_report(
                 launch_cwd,

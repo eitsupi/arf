@@ -45,6 +45,7 @@ CREATE TABLE arf_metadata (
 - `format_version`: `1`
 - `history_kind`: `r` or `shell`
 - `created_by_version`: the arf package version
+- `legacy_migrated_from` (optional): the legacy directory whose history `arf history migrate` copied into this database; written only by that command
 Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`.
 
 ## Analyze or Export

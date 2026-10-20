@@ -14,18 +14,35 @@ use content::schema_content;
 use lines::generate_schema_lines;
 use print::{print_schema_colored, print_schema_plain};
 use std::io::{self, IsTerminal};
+use std::path::Path;
 
 /// Error returned when history directory cannot be determined.
 #[derive(Debug)]
-pub struct HistoryDirError;
+pub struct HistoryDirError {
+    detail: Option<String>,
+}
 
 impl std::fmt::Display for HistoryDirError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No persistent history directory is available")
+        write!(f, "No persistent history directory is available")?;
+        match &self.detail {
+            Some(detail) => write!(f, ": {detail}"),
+            None => Ok(()),
+        }
     }
 }
 
 impl std::error::Error for HistoryDirError {}
+
+/// The effective directory, or the reason there is none.
+fn history_directory(location: &ResolvedHistoryLocation) -> Result<&Path, HistoryDirError> {
+    if location.source() == HistoryLocationSource::Volatile {
+        return Err(HistoryDirError { detail: None });
+    }
+    location.directory().ok_or_else(|| HistoryDirError {
+        detail: location.probe_failure().map(ToString::to_string),
+    })
+}
 
 /// Print the history schema documentation to stdout.
 ///
@@ -40,10 +57,7 @@ impl std::error::Error for HistoryDirError {}
 ///
 /// Returns an error if the history directory cannot be determined.
 pub fn print_schema(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
-    if location.source() == HistoryLocationSource::Volatile {
-        return Err(HistoryDirError);
-    }
-    let history_path = location.directory().ok_or(HistoryDirError)?;
+    let history_path = history_directory(location)?;
 
     // Check if stdout is a terminal - only use colors if it is
     if io::stdout().is_terminal() {
@@ -64,10 +78,7 @@ pub fn print_schema(location: &ResolvedHistoryLocation) -> Result<(), HistoryDir
 ///
 /// Returns an error if the history directory cannot be determined.
 pub fn show_schema_pager(location: &ResolvedHistoryLocation) -> Result<(), HistoryDirError> {
-    if location.source() == HistoryLocationSource::Volatile {
-        return Err(HistoryDirError);
-    }
-    let history_path = location.directory().ok_or(HistoryDirError)?;
+    let history_path = history_directory(location)?;
 
     // Generate content lines
     let lines = generate_schema_lines(history_path);

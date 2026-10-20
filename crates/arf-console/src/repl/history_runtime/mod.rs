@@ -9,6 +9,10 @@ impl Repl {
         let (r_runtime, shell_runtime) = self.initialize_history_runtimes();
         Self::report_history_runtime("R", &r_runtime);
         Self::report_history_runtime("Shell", &shell_runtime);
+        if let Some(warning) = self.history_location.startup_warning() {
+            eprintln!("Warning: {warning}");
+            log::warn!("{warning}");
+        }
         if let Some(store) = r_runtime.store() {
             crate::ipc::set_history_store(store);
         }
@@ -25,16 +29,18 @@ impl Repl {
     pub(super) fn initialize_history_runtimes(&self) -> (HistoryRuntime, HistoryRuntime) {
         use crate::history::artifact::HistoryKind;
 
-        let r_runtime = HistoryRuntime::initialize(
+        let r_runtime = HistoryRuntime::initialize_for_location(
             &self.config.history.mode,
-            self.r_history_path(),
+            &self.history_location,
+            "r.db",
             HistoryKind::R,
             self.session_id,
             Some(chrono::Utc::now()),
         );
-        let shell_runtime = HistoryRuntime::initialize(
+        let shell_runtime = HistoryRuntime::initialize_for_location(
             &self.config.history.mode,
-            self.shell_history_path(),
+            &self.history_location,
+            "shell.db",
             HistoryKind::Shell,
             self.session_id,
             Some(chrono::Utc::now()),
@@ -67,16 +73,6 @@ impl Repl {
             .store()
             .and_then(|store| store.session())
             .map(i64::from)
-    }
-
-    /// Get the R history database path based on configuration.
-    pub(super) fn r_history_path(&self) -> Option<std::path::PathBuf> {
-        self.history_location.database_path("r.db")
-    }
-
-    /// Get the Shell history database path based on configuration.
-    pub(super) fn shell_history_path(&self) -> Option<std::path::PathBuf> {
-        self.history_location.database_path("shell.db")
     }
 }
 

@@ -215,6 +215,9 @@ fn print_artifact_metadata(s: &SchemaStyles) {
     println!("- `history_kind`: `r` or `shell`");
     println!("- `created_by_version`: the arf package version");
     println!(
+        "- `legacy_migrated_from` (optional): the legacy directory whose history `arf history migrate` copied into this database; written only by that command"
+    );
+    println!(
         "Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`."
     );
 }

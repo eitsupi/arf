@@ -1,7 +1,7 @@
 use super::super::ImportEntry;
 use super::super::migrate::{MigrationOutcome, MigrationReport, migrate_history, report_outcome};
 use super::support::*;
-use crate::history::artifact::HistoryKind;
+use crate::history::artifact::{HistoryKind, legacy_migration_recorded};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -95,14 +95,38 @@ fn empty_or_missing_legacy_creates_nothing() {
     let dirs = Dirs::new();
     assert!(matches!(
         dirs.run(false).unwrap(),
-        MigrationOutcome::NoLegacyHistory(_)
+        MigrationOutcome::NoLegacyHistory { .. }
     ));
     std::fs::remove_dir(&dirs.legacy).unwrap();
     assert!(matches!(
         dirs.run(false).unwrap(),
-        MigrationOutcome::NoLegacyHistory(_)
+        MigrationOutcome::NoLegacyHistory { .. }
     ));
     assert!(!dirs.current.exists());
+}
+
+#[test]
+fn a_migration_that_finds_no_legacy_history_reports_cleared_records() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    dirs.migrate();
+    std::fs::remove_file(dirs.legacy.join("r.db")).unwrap();
+
+    let cleared = |outcome| match outcome {
+        MigrationOutcome::NoLegacyHistory {
+            cleared_records, ..
+        } => cleared_records,
+        other => panic!("unexpected outcome: {other:?}"),
+    };
+    // A dry run leaves the record; the real run clears it once.
+    assert!(!cleared(dirs.run(true).unwrap()));
+    assert_eq!(recorded(&dirs), [true, false]);
+    assert!(cleared(dirs.run(false).unwrap()));
+    assert_eq!(recorded(&dirs), [false, false]);
+    assert!(!cleared(dirs.run(false).unwrap()));
 }
 
 #[test]
@@ -435,5 +459,152 @@ fn legacy_parse_warnings_are_reported_for_real_and_dry_runs() {
     for dry_run in [true, false] {
         let report = report(dirs.run(dry_run).unwrap());
         assert_eq!(report.result.warnings.len(), 2, "dry_run={dry_run}");
+    }
+}
+
+fn recorded(dirs: &Dirs) -> [bool; 2] {
+    [
+        legacy_migration_recorded(&dirs.current.join("r.db"), &dirs.legacy).unwrap(),
+        legacy_migration_recorded(&dirs.current.join("shell.db"), &dirs.legacy).unwrap(),
+    ]
+}
+
+#[test]
+fn completed_migration_records_itself_only_for_the_kinds_the_legacy_directory_had() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+
+    dirs.migrate();
+    // Shell history created in the legacy directory later is not covered.
+    assert_eq!(recorded(&dirs), [true, false]);
+    // The marker is optional metadata: the databases still open normally.
+    assert_eq!(
+        open_items(&dirs.current.join("r.db"), HistoryKind::R).len(),
+        1
+    );
+    // Rerunning keeps the single record.
+    dirs.migrate();
+    assert_eq!(recorded(&dirs), [true, false]);
+}
+
+#[test]
+fn a_record_names_the_legacy_directory_it_was_copied_from() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    dirs.migrate();
+
+    let current_r = dirs.current.join("r.db");
+    assert!(legacy_migration_recorded(&current_r, &dirs.legacy).unwrap());
+    assert!(!legacy_migration_recorded(&current_r, &dirs.current.join("elsewhere")).unwrap());
+}
+
+#[test]
+fn opening_a_database_never_records_a_migration() {
+    let dirs = Dirs::new();
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    open_items(&dirs.current.join("r.db"), HistoryKind::R);
+    assert!(!legacy_migration_recorded(&dirs.current.join("r.db"), &dirs.legacy).unwrap());
+}
+
+#[test]
+fn dry_run_and_incomplete_migrations_record_nothing() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    report(dirs.run(true).unwrap());
+    assert!(!dirs.current.exists());
+
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("blocked", "2024-01-01T00:00:00Z").item],
+    );
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    create_reedline_db(&dirs.current.join("r.db"), &[]);
+    block_writes_for(&dirs.current.join("r.db"), "INSERT", "blocked");
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 1);
+    assert_eq!(recorded(&dirs), [false, false]);
+}
+
+#[test]
+fn a_destination_without_arf_metadata_gets_it_when_the_migration_is_recorded() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    // An accepted metadata-less destination, as written by older arf versions.
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    let current_r = dirs.current.join("r.db");
+    create_reedline_db(&current_r, &[]);
+
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 0);
+    assert_eq!(report.record_failures, 0);
+    assert_eq!(recorded(&dirs), [true, false]);
+    // The standard metadata for the kind was added with the record, so the
+    // database still opens as that kind and rejects the other one.
+    let connection = rusqlite::Connection::open(&current_r).unwrap();
+    assert_eq!(
+        crate::history::artifact::read_artifact(&connection).unwrap(),
+        crate::history::artifact::HistoryArtifact::History(HistoryKind::R)
+    );
+    drop(connection);
+    assert_eq!(open_items(&current_r, HistoryKind::R).len(), 1);
+    assert!(
+        crate::history::HistoryStore::open(current_r.clone(), HistoryKind::Shell, None, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn failing_to_record_the_migration_makes_it_incomplete() {
+    for event in ["INSERT", "UPDATE"] {
+        let dirs = Dirs::new();
+        create_reedline_db(
+            &dirs.legacy.join("r.db"),
+            &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+        );
+        // Valid metadata, so the record is a plain upsert that the trigger
+        // can refuse; a first migration inserts and a rerun updates.
+        std::fs::create_dir_all(&dirs.current).unwrap();
+        let current_r = dirs.current.join("r.db");
+        crate::history::HistoryStore::open(current_r.clone(), HistoryKind::R, None, None).unwrap();
+        if event == "UPDATE" {
+            dirs.migrate();
+        }
+        rusqlite::Connection::open(&current_r)
+            .unwrap()
+            .execute_batch(&format!(
+                r#"CREATE TRIGGER refuse_record BEFORE {event} ON arf_metadata
+                   WHEN NEW.key = 'legacy_migrated_from'
+                   BEGIN SELECT RAISE(ABORT, 'blocked by test'); END"#
+            ))
+            .unwrap();
+
+        let report = dirs.migrate();
+        assert_eq!(report.result.write_failures, 0, "{event}");
+        assert_eq!(report.record_failures, 1, "{event}");
+        assert!(
+            report
+                .result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("Could not record the completed migration")),
+            "{event}"
+        );
+        let error = format!("{:#}", incomplete_error(report));
+        assert!(error.contains("incomplete"), "{event}: {error}");
+        assert!(error.contains("could not be recorded"), "{event}: {error}");
+        assert!(error.contains("safe"), "{event}: {error}");
     }
 }

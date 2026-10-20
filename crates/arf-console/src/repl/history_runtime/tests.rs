@@ -48,9 +48,12 @@ fn history_database_paths_share_the_resolved_location() {
     )
     .unwrap();
 
-    assert_eq!(repl.r_history_path(), Some(temp_dir.path().join("r.db")));
     assert_eq!(
-        repl.shell_history_path(),
+        repl.history_location.database_path("r.db"),
+        Some(temp_dir.path().join("r.db"))
+    );
+    assert_eq!(
+        repl.history_location.database_path("shell.db"),
         Some(temp_dir.path().join("shell.db"))
     );
     assert_eq!(
@@ -77,8 +80,8 @@ fn volatile_repl_has_no_persistent_history_paths() {
     )
     .unwrap();
 
-    assert_eq!(repl.r_history_path(), None);
-    assert_eq!(repl.shell_history_path(), None);
+    assert_eq!(repl.history_location.database_path("r.db"), None);
+    assert_eq!(repl.history_location.database_path("shell.db"), None);
     assert_eq!(
         repl.history_location.source(),
         crate::config::HistoryLocationSource::Volatile

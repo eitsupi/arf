@@ -119,7 +119,8 @@ When `--json` is specified, arf prints session connection info to stdout as a si
   },
   "history_runtime": {
     "state": "persistent",
-    "path": "/home/user/.local/share/arf/history/r.db",
+    "source": "default",
+    "path": "/home/user/.local/state/arf/history/r.db",
     "reason": null,
     "detail": null
   },
@@ -151,7 +152,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `source` is where the history directory came from: `default`, `legacy_default` (the previous Linux default location, used because it holds history and the current default does not; a warning is added to `warnings`), `explicit` (`--history-dir`, `ARF_HISTORY_DIR`, or `history.mode`), or `volatile`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
 
 `r_source_selection` reports the actual selected provider, its provenance, and provider `metadata` using the same fields as [`arf r resolve`](r-resolve.md#json-descriptor), for both configured overrides and explicit `--r-provider` or `ARF_R_PROVIDER` requests. Provider details such as the Pixi environment or the rig project manifest appear only there.
 

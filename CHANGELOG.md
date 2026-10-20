@@ -4,7 +4,8 @@
 
 ### Added
 
-- **Experimental:** `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
+- `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
+- **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`).
 
 ### Fixed
 
@@ -19,6 +20,10 @@
 - **Breaking:** Headless IPC `send` and `eval --visible` now use R's normal REPL. R's parser determines expression boundaries (a braced block is one expression), with task callbacks for successfully evaluated top-level expressions, normal autoprinting, and `.Last.value` semantics. Visible `eval` responses now leave `value` and `error` null; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. Silent eval remains direct evaluation without top-level task callbacks.
 - **Breaking:** Headless IPC `send` now returns an `accepted` acknowledgment rather than reporting evaluation success or completion.
 - Headless standard nested console reads (`parse()` from the console, `readline()`, menus, and browser prompts) receive EOF instead of consuming further IPC requests. Main and continuation prompt options must be readable, non-empty, distinct strings and must not resemble browser prompts; `--no-echo` is unsupported. Invalid or ambiguous prompt conditions are diagnosed and stop the session without consuming the next request.
+- **Breaking:** On Linux, the default history location is now `$XDG_STATE_HOME/arf/history` (`~/.local/state/arf/history`) instead of `$XDG_DATA_HOME/arf/history` (`~/.local/share/arf/history`), because the XDG Base Directory Specification classifies command history as state data.
+  - If only the old location has history, arf keeps using it and shows a startup warning listing both locations.
+  - Run `arf history migrate` to copy it to the new location; arf then uses the new location and the old one is left unchanged.
+  - Explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) and the macOS and Windows defaults are not affected.
 
 ## [0.7.0-alpha.1] - 2026-10-11
 

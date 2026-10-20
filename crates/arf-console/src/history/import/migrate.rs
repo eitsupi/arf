@@ -5,10 +5,10 @@
 //! The legacy databases are only ever opened read-only.
 
 use anyhow::{Context, Result, bail};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::artifact::{self, HistoryArtifact, HistoryKind};
+use super::super::paths::same_directory;
 use super::service::{self, HistoryDbPaths, ImportPolicy};
 use super::{ImportResult, ParsedImport, parse_arf_history};
 
@@ -18,7 +18,11 @@ pub(crate) enum MigrationOutcome {
     /// Legacy and current are the same directory; nothing was touched.
     SameLocation(PathBuf),
     /// The legacy directory holds neither `r.db` nor `shell.db`.
-    NoLegacyHistory(PathBuf),
+    NoLegacyHistory {
+        directory: PathBuf,
+        /// Whether records of an earlier migration from it were cleared.
+        cleared_records: bool,
+    },
     Migrated(Box<MigrationReport>),
 }
 
@@ -32,14 +36,10 @@ pub(crate) struct MigrationReport {
     pub(crate) current_had_shell: bool,
     pub(crate) dry_run: bool,
     pub(crate) result: ImportResult,
-}
-
-fn same_directory(a: &Path, b: &Path) -> bool {
-    a == b
-        || matches!(
-            (fs::canonicalize(a), fs::canonicalize(b)),
-            (Ok(a), Ok(b)) if a == b
-        )
+    /// Current databases in which the completed migration could not be
+    /// recorded. Without the record, startup keeps reporting the legacy
+    /// history as not yet copied, so this makes the migration incomplete.
+    pub(crate) record_failures: usize,
 }
 
 /// Check for a database file, reporting I/O and permission errors instead of
@@ -67,6 +67,40 @@ fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<ParsedImport> 
     parse_arf_history(path)
 }
 
+/// Mark the current databases of the kinds the legacy directory had as
+/// migrated so startup stops reporting that legacy history as not yet copied.
+/// Kinds the legacy directory lacked are left unmarked, and a record an earlier
+/// migration left for them is cleared, so legacy history of that kind created
+/// later is still reported. Failures are returned as a count (with a warning
+/// each) rather than hidden: the migration is incomplete until the record
+/// exists, and a rerun retries it.
+fn record_completed_migration(
+    current: &HistoryDbPaths,
+    legacy_dir: &Path,
+    legacy_has_r: bool,
+    legacy_has_shell: bool,
+    warnings: &mut Vec<String>,
+) -> usize {
+    let mut failures = 0;
+    for (kind, present) in [
+        (HistoryKind::R, legacy_has_r),
+        (HistoryKind::Shell, legacy_has_shell),
+    ] {
+        let recorded = if present {
+            artifact::record_legacy_migration(current.path(kind), kind, legacy_dir)
+        } else {
+            artifact::clear_legacy_migration(current.path(kind), legacy_dir).map(|_| ())
+        };
+        if let Err(error) = recorded {
+            failures += 1;
+            warnings.push(format!(
+                "Could not record the completed migration: {error:#}"
+            ));
+        }
+    }
+    failures
+}
+
 /// Copy history from `legacy_dir` into `current_dir` with duplicate detection.
 ///
 /// With `dry_run`, nothing is created or modified. Source databases are read
@@ -86,7 +120,19 @@ pub(crate) fn migrate_history(
     let legacy_has_r = database_exists(&legacy.r)?;
     let legacy_has_shell = database_exists(&legacy.shell)?;
     if !legacy_has_r && !legacy_has_shell {
-        return Ok(MigrationOutcome::NoLegacyHistory(legacy.directory));
+        let mut cleared_records = false;
+        if !dry_run {
+            // Records an earlier migration left would otherwise hide legacy
+            // databases created here later.
+            for kind in [HistoryKind::R, HistoryKind::Shell] {
+                cleared_records |=
+                    artifact::clear_legacy_migration(current.path(kind), &legacy.directory)?;
+            }
+        }
+        return Ok(MigrationOutcome::NoLegacyHistory {
+            directory: legacy.directory,
+            cleared_records,
+        });
     }
 
     for kind in [HistoryKind::R, HistoryKind::Shell] {
@@ -147,6 +193,18 @@ pub(crate) fn migrate_history(
 
     result.warnings.extend(parse_warnings);
 
+    let record_failures = if !dry_run && result.write_failures == 0 {
+        record_completed_migration(
+            &current,
+            &legacy.directory,
+            legacy_has_r,
+            legacy_has_shell,
+            &mut result.warnings,
+        )
+    } else {
+        0
+    };
+
     Ok(MigrationOutcome::Migrated(Box::new(MigrationReport {
         legacy,
         current,
@@ -156,6 +214,7 @@ pub(crate) fn migrate_history(
         current_had_shell,
         dry_run,
         result,
+        record_failures,
     })))
 }
 
@@ -174,11 +233,19 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
             );
             return Ok(());
         }
-        MigrationOutcome::NoLegacyHistory(dir) => {
+        MigrationOutcome::NoLegacyHistory {
+            directory,
+            cleared_records,
+        } => {
             println!(
                 "Nothing to migrate: no history databases (r.db, shell.db) found in the legacy location ({}).",
-                dir.display()
+                directory.display()
             );
+            if *cleared_records {
+                println!(
+                    "Cleared the record of an earlier migration from it, so history created there later is reported again."
+                );
+            }
             return Ok(());
         }
         MigrationOutcome::Migrated(report) => report,
@@ -202,9 +269,10 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
     };
     println!("  Existing:       {existing}");
 
+    let incomplete = report.result.write_failures > 0 || report.record_failures > 0;
     let heading = if report.dry_run {
         "[Dry run] Would migrate:"
-    } else if report.result.write_failures > 0 {
+    } else if incomplete {
         "Migration incomplete:"
     } else {
         "Migration complete:"
@@ -216,13 +284,26 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
         " (already in the current location)",
     );
 
-    if report.result.write_failures > 0 {
+    if incomplete {
+        let mut problems = Vec::new();
+        if report.result.write_failures > 0 {
+            problems.push(format!(
+                "{} row(s) could not be written",
+                report.result.write_failures
+            ));
+        }
+        if report.record_failures > 0 {
+            problems.push(format!(
+                "the completed migration could not be recorded in {} database(s)",
+                report.record_failures
+            ));
+        }
         bail!(
-            "Migration into {} was incomplete: {} row(s) could not be written (see the warnings above).\n\
+            "Migration into {} was incomplete: {} (see the warnings above).\n\
              The legacy location {} was not modified. Rerunning `arf history migrate` is safe: \
              entries already copied are skipped.",
             report.current.directory.display(),
-            report.result.write_failures,
+            problems.join("; "),
             report.legacy.directory.display()
         );
     }
@@ -232,7 +313,10 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
         println!(
             "\nThe legacy location was kept unchanged. Arf sessions that were open during the \
              migration may still have written to it; close them and rerun this command to copy \
-             any remaining entries (rerunning is safe)."
+             any remaining entries (rerunning is safe). Once you have confirmed your history in \
+             the new location, you may delete the legacy directory {} manually, but arf \
+             versions from before the default location changed still use it.",
+            report.legacy.directory.display()
         );
     }
     Ok(())

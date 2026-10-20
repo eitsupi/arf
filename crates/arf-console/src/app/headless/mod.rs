@@ -95,7 +95,7 @@ pub(crate) fn run_headless(
 
     install_ipc_eval_policy(&config, ipc_eval_allow_function, ipc_eval_unrestricted);
 
-    let history_runtime = initialize_history(&config, json, &mut warnings);
+    let (history_runtime, history_source) = initialize_history(&config, json, &mut warnings);
 
     let session = start_ipc_server(bind, r_home, log_file, &history_runtime, quiet)?;
 
@@ -114,6 +114,7 @@ pub(crate) fn run_headless(
         let output = HeadlessInfo::from_session(
             &session,
             &history_runtime,
+            history_source,
             warnings,
             &resolution,
             launch_cwd
@@ -247,13 +248,25 @@ fn install_ipc_eval_policy(
 
 /// Initialize the single history owner for headless mode. Volatile history
 /// is still queryable through IPC during this process but never touches disk.
-fn initialize_history(config: &Config, json: bool, warnings: &mut Vec<String>) -> HistoryRuntime {
+fn initialize_history(
+    config: &Config,
+    json: bool,
+    warnings: &mut Vec<String>,
+) -> (HistoryRuntime, config::HistoryLocationSource) {
     let session_id = create_session_id(config);
     let history_location = config::resolved_history_location(&config.history.mode);
-    let history_path = history_location.database_path("r.db");
-    let history_runtime = HistoryRuntime::initialize(
+    if let Some(warning) = history_location.startup_warning() {
+        log::warn!("Headless history: {warning}");
+        if json {
+            warnings.push(warning);
+        } else {
+            eprintln!("Warning: {warning}");
+        }
+    }
+    let history_runtime = HistoryRuntime::initialize_for_location(
         &config.history.mode,
-        history_path,
+        &history_location,
+        "r.db",
         crate::history::artifact::HistoryKind::R,
         session_id,
         Some(chrono::Utc::now()),
@@ -280,7 +293,7 @@ fn initialize_history(config: &Config, json: bool, warnings: &mut Vec<String>) -
             eprintln!("Warning: Headless history unavailable: {warning}");
         }
     }
-    history_runtime
+    (history_runtime, history_location.source())
 }
 
 /// Start the IPC server (with optional custom bind path).

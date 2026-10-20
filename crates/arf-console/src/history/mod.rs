@@ -8,6 +8,7 @@ pub mod export;
 pub mod import;
 mod ipc;
 mod metadata;
+pub(crate) mod paths;
 mod query;
 mod reedline_adapter;
 mod store;

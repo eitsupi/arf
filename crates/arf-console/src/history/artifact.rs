@@ -1,13 +1,29 @@
 //! Versioned metadata for arf-owned history database artifacts.
 
 use anyhow::{Context, Result, bail};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 const METADATA_TABLE: &str = "arf_metadata";
 const FORMAT_VERSION: &str = "1";
+
+/// Optional `arf_metadata` key written by a completed `arf history migrate` to
+/// each current-location database whose kind it copied. Its value is the
+/// legacy directory the history was copied from, and it means the history was
+/// copied as of that migration: entries an older arf adds to the legacy
+/// database afterwards are not covered. It is only ever written by migrate
+/// (never when a database is opened) and readers that do not know it ignore
+/// it, so it does not change the format version.
+///
+/// The key exists only to stop the startup warning about uncopied history
+/// for the move between the current and the legacy default location. It is
+/// not a provenance record, a migration log, or a guarantee that the two
+/// locations hold the same history, and it must not be reused for anything
+/// else. A future change of the default location should replace it rather
+/// than extend it.
+pub(crate) const LEGACY_MIGRATED_KEY: &str = "legacy_migrated_from";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HistoryKind {
@@ -218,21 +234,109 @@ pub(crate) fn initialize_history_metadata(
             }
         }
     } else {
-        write_metadata_in_transaction(
-            &transaction,
-            &[
-                ("artifact", "history"),
-                ("format_version", FORMAT_VERSION),
-                ("history_kind", kind.as_str()),
-                ("created_by_version", env!("CARGO_PKG_VERSION")),
-            ],
-        )
-        .context("failed to create history artifact metadata")?;
+        write_metadata_in_transaction(&transaction, &history_metadata_rows(kind))
+            .context("failed to create history artifact metadata")?;
     }
     transaction
         .commit()
         .context("failed to commit history artifact metadata transaction")?;
     Ok(())
+}
+
+fn history_metadata_rows(kind: HistoryKind) -> [(&'static str, &'static str); 4] {
+    [
+        ("artifact", "history"),
+        ("format_version", FORMAT_VERSION),
+        ("history_kind", kind.as_str()),
+        ("created_by_version", env!("CARGO_PKG_VERSION")),
+    ]
+}
+
+/// Record that a migration from `legacy_dir` into this `kind` database
+/// completed.
+///
+/// A destination without arf metadata (an accepted metadata-less legacy-format
+/// database) gets the standard history metadata for `kind` first, in the same
+/// transaction as the record, so it is never left with a partial table.
+pub(crate) fn record_legacy_migration(
+    path: &Path,
+    kind: HistoryKind,
+    legacy_dir: &Path,
+) -> Result<()> {
+    let mut connection =
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .with_context(|| format!("failed to open history database {}", path.display()))?;
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .with_context(|| format!("failed to start a transaction in {}", path.display()))?;
+    if !metadata_table_exists(&transaction)? {
+        write_metadata_in_transaction(&transaction, &history_metadata_rows(kind))
+            .with_context(|| format!("failed to add arf metadata to {}", path.display()))?;
+    }
+    transaction
+        .execute(
+            "INSERT INTO arf_metadata (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [LEGACY_MIGRATED_KEY, legacy_dir.to_string_lossy().as_ref()],
+        )
+        .with_context(|| format!("failed to record the migration in {}", path.display()))?;
+    transaction
+        .commit()
+        .with_context(|| format!("failed to record the migration in {}", path.display()))?;
+    Ok(())
+}
+
+/// Remove a record of a migration from `legacy_dir`, if this database has one,
+/// and report whether one was removed.
+///
+/// A migration that finds no legacy database of this kind calls this, so a
+/// record left by an earlier migration does not cover a legacy database of
+/// this kind that is created later.
+///
+/// The database is only opened for writing when it holds such a record, so a
+/// migration with nothing to clear never needs write access.
+pub(crate) fn clear_legacy_migration(path: &Path, legacy_dir: &Path) -> Result<bool> {
+    if !path
+        .try_exists()
+        .with_context(|| format!("failed to inspect history database path {}", path.display()))?
+        || !legacy_migration_recorded(path, legacy_dir)?
+    {
+        return Ok(false);
+    }
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .with_context(|| format!("failed to open history database {}", path.display()))?;
+    let removed = connection
+        .execute(
+            "DELETE FROM arf_metadata WHERE key = ?1 AND value = ?2",
+            [LEGACY_MIGRATED_KEY, legacy_dir.to_string_lossy().as_ref()],
+        )
+        .with_context(|| {
+            format!(
+                "failed to clear an earlier migration record in {}",
+                path.display()
+            )
+        })?;
+    Ok(removed > 0)
+}
+
+/// Whether a completed migration from `legacy_dir` was recorded in this
+/// database. A database without arf metadata, or whose record names a
+/// different legacy directory, has no such record.
+pub(crate) fn legacy_migration_recorded(path: &Path, legacy_dir: &Path) -> Result<bool> {
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open history database {}", path.display()))?;
+    if !metadata_table_exists(&connection)? {
+        return Ok(false);
+    }
+    let recorded: Option<String> = connection
+        .query_row(
+            "SELECT value FROM arf_metadata WHERE key = ?1",
+            [LEGACY_MIGRATED_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .with_context(|| format!("failed to read arf metadata from {}", path.display()))?;
+    Ok(recorded.is_some_and(|value| value == legacy_dir.to_string_lossy()))
 }
 
 pub(crate) fn write_export_metadata(connection: &mut Connection) -> rusqlite::Result<()> {

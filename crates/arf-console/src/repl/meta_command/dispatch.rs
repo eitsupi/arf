@@ -65,6 +65,7 @@ pub(in crate::repl) fn handle_meta_command_result(
                     ctx.config_file_info,
                     ctx.r_history,
                     ctx.shell_history,
+                    ctx.history_location.source(),
                     ctx.r_source_status,
                 );
             });
