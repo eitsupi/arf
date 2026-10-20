@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Experimental:** `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
+- `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
 - **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`).
 
 ### Fixed
