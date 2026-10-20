@@ -219,6 +219,8 @@ pub(crate) fn print_outcome(outcome: &MigrationOutcome) {
 
     let heading = if report.dry_run {
         "[Dry run] Would migrate:"
+    } else if report.result.write_failures > 0 {
+        "Migration incomplete:"
     } else {
         "Migration complete:"
     };
