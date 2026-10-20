@@ -236,6 +236,21 @@ fn legacy_history_of_a_kind_recreated_after_a_later_migration_is_reported() {
 }
 
 #[test]
+fn legacy_history_recreated_after_a_migration_that_found_none_is_reported() {
+    let dirs = Dirs::new();
+    Dirs::database(&dirs.legacy, HistoryKind::R);
+    Dirs::database(&dirs.legacy, HistoryKind::Shell);
+    dirs.migrate();
+    std::fs::remove_file(dirs.legacy.join("r.db")).unwrap();
+    std::fs::remove_file(dirs.legacy.join("shell.db")).unwrap();
+    dirs.migrate();
+
+    Dirs::database(&dirs.legacy, HistoryKind::R);
+    let warning = dirs.resolve().startup_warning().unwrap();
+    assert!(warning.contains(&dirs.legacy.join("r.db").display().to_string()));
+}
+
+#[test]
 fn same_kinds_in_both_directories_warn_until_migrated() {
     let dirs = Dirs::new();
     for directory in [&dirs.current, &dirs.legacy] {

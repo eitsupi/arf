@@ -124,6 +124,13 @@ pub(crate) fn migrate_history(
     let legacy_has_r = database_exists(&legacy.r)?;
     let legacy_has_shell = database_exists(&legacy.shell)?;
     if !legacy_has_r && !legacy_has_shell {
+        if !dry_run {
+            // Records an earlier migration left would otherwise hide legacy
+            // databases created here later.
+            for kind in [HistoryKind::R, HistoryKind::Shell] {
+                artifact::clear_legacy_migration(current.path(kind), &legacy.directory)?;
+            }
+        }
         return Ok(MigrationOutcome::NoLegacyHistory(legacy.directory));
     }
 
