@@ -20,7 +20,9 @@ pub use experimental::{
 };
 #[allow(unused_imports)]
 pub use experimental::{HelpViewer, RHelpConfig};
-pub(crate) use history::{DefaultHistoryDirs, HistoryLocationSource, ResolvedHistoryLocation};
+pub(crate) use history::{
+    DefaultHistoryDirs, HistoryLocationSource, HistoryProbeFailure, ResolvedHistoryLocation,
+};
 pub use history::{HistoryConfig, HistoryMode};
 pub use ipc::IpcConfig;
 #[allow(unused_imports)]
@@ -186,34 +188,30 @@ pub fn config_file_path() -> Option<PathBuf> {
 
 /// Get the platform default history directories (current and legacy).
 ///
-/// The two paths are equal wherever the default location has never moved.
-/// Resolution of the active history directory uses only `current`; `legacy`
-/// exists solely so `arf history migrate` knows where older history may live.
+/// On Linux the current default lives under `$XDG_STATE_HOME` and the legacy
+/// one under `$XDG_DATA_HOME`; everywhere else the two are equal. If the state
+/// directory cannot be determined, the legacy directory stays the default.
+/// This only derives paths; selecting between them is the resolver's job.
 pub(crate) fn default_history_dirs() -> Option<DefaultHistoryDirs> {
-    let data_history = data_dir().map(|p| p.join("history"))?;
-    Some(DefaultHistoryDirs {
-        current: data_history.clone(),
-        legacy: data_history,
-    })
+    let legacy = data_dir().map(|p| p.join("history"))?;
+    #[cfg(target_os = "linux")]
+    let current = dirs::state_dir()
+        .map(|p| p.join(APP_NAME).join("history"))
+        .unwrap_or_else(|| legacy.clone());
+    #[cfg(not(target_os = "linux"))]
+    let current = legacy.clone();
+    Some(DefaultHistoryDirs { current, legacy })
 }
 
-/// Get the history directory path.
-///
-/// History files are stored in a subdirectory: `~/.local/share/arf/history/`
-/// - R mode: `history/r.db`
-/// - Shell mode: `history/shell.db`
-pub fn history_dir() -> Option<PathBuf> {
-    default_history_dirs().map(|dirs| dirs.current)
-}
-
-/// Resolve history mode against the current default directory without probing
-/// the filesystem. Volatile mode does not query the default path at all.
+/// Resolve history mode against the platform default directories. Volatile and
+/// explicit modes neither derive nor probe the default paths; only the default
+/// mode inspects the filesystem.
 pub(crate) fn resolved_history_location(mode: &HistoryMode) -> ResolvedHistoryLocation {
-    let default_directory = match mode {
-        HistoryMode::Persistent { dir: None } => history_dir(),
+    let defaults = match mode {
+        HistoryMode::Persistent { dir: None } => default_history_dirs(),
         HistoryMode::Persistent { dir: Some(_) } | HistoryMode::Volatile => None,
     };
-    history::resolve_history_location(mode, default_directory)
+    history::resolve_history_location(mode, defaults.as_ref())
 }
 
 /// Apply command-line history overrides to a configured mode.

@@ -260,15 +260,17 @@ fn test_top_level_history_dir_is_consumed_by_history_import() {
 }
 
 #[test]
-fn test_history_migrate_is_a_noop_when_default_locations_match() {
+fn test_history_migrate_is_a_noop_without_legacy_history() {
     use tempfile::TempDir;
 
     let data_home = TempDir::new().expect("Failed to create data directory");
+    let state_home = TempDir::new().expect("Failed to create state directory");
     let explicit = TempDir::new().expect("Failed to create explicit history directory");
     let explicit_dir = explicit.path().join("not-created");
 
     let output = sanitized_arf_command()
         .env("XDG_DATA_HOME", data_home.path())
+        .env("XDG_STATE_HOME", state_home.path())
         .args([
             "--history-dir",
             explicit_dir.to_str().unwrap(),
@@ -284,10 +286,13 @@ fn test_history_migrate_is_a_noop_when_default_locations_match() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("Nothing to migrate: legacy and current default locations are the same"),
-        "unexpected output: {stdout}"
-    );
+    // Linux has distinct legacy and current defaults; elsewhere they coincide.
+    #[cfg(target_os = "linux")]
+    let expected =
+        "Nothing to migrate: no history databases (r.db, shell.db) found in the legacy location";
+    #[cfg(not(target_os = "linux"))]
+    let expected = "Nothing to migrate: legacy and current default locations are the same";
+    assert!(stdout.contains(expected), "unexpected output: {stdout}");
     assert!(
         stdout.contains("only migrates between the default locations"),
         "explicit directory note missing: {stdout}"
@@ -297,11 +302,13 @@ fn test_history_migrate_is_a_noop_when_default_locations_match() {
         "explicit directory must not be created"
     );
     #[cfg(target_os = "linux")]
-    assert_eq!(
-        std::fs::read_dir(data_home.path()).unwrap().count(),
-        0,
-        "no-op migration must not create files in the default data directory"
-    );
+    for home in [&data_home, &state_home] {
+        assert_eq!(
+            std::fs::read_dir(home.path()).unwrap().count(),
+            0,
+            "no-op migration must not create files in the default directories"
+        );
+    }
 }
 
 #[test]

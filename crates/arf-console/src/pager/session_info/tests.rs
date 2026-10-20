@@ -3,7 +3,7 @@ use super::info::history_runtime_label;
 use super::info::mask_env_value;
 use super::render::{append_ipc_info_lines, style_info_line};
 use super::*;
-use crate::config::{ConfigStatus, mask_home_path};
+use crate::config::{ConfigStatus, HistoryLocationSource, mask_home_path};
 use crate::history::HistoryFailureDetail;
 use crate::ipc::policy::{IpcPolicy, SilentPolicy};
 use ratatui::style::{Color, Modifier, Style};
@@ -137,6 +137,7 @@ fn test_generate_info_lines_config_path_none() {
         },
         &unavailable_history(),
         &unavailable_history(),
+        HistoryLocationSource::Default,
         &RSourceStatus::Path,
     );
     let ipc_index = lines.iter().position(|line| line == "## IPC").unwrap();
@@ -177,6 +178,7 @@ fn test_generate_info_lines_config_path_existing() {
         },
         &unavailable_history(),
         &unavailable_history(),
+        HistoryLocationSource::Default,
         &RSourceStatus::Path,
     );
     let config_line = lines
@@ -218,6 +220,7 @@ fn test_generate_info_lines_config_path_nonexistent() {
         },
         &unavailable_history(),
         &unavailable_history(),
+        HistoryLocationSource::Default,
         &RSourceStatus::Path,
     );
     let config_line = lines
@@ -248,6 +251,7 @@ fn test_generate_info_lines_config_parse_error() {
         },
         &unavailable_history(),
         &unavailable_history(),
+        HistoryLocationSource::Default,
         &RSourceStatus::Path,
     );
     let config_line = lines
@@ -278,6 +282,7 @@ fn test_generate_info_lines_config_read_error() {
         },
         &unavailable_history(),
         &unavailable_history(),
+        HistoryLocationSource::Default,
         &RSourceStatus::Path,
     );
     let config_line = lines
@@ -338,11 +343,29 @@ fn history_runtime_labels_cover_all_lifecycle_states() {
         receipt: HistorySaveReceipt::new(),
     });
 
-    assert!(history_runtime_label(&persistent).contains("persistent ("));
-    assert!(history_runtime_label(&configured).contains("volatile (session only)"));
-    assert!(history_runtime_label(&fallback_with_path).contains("fallback; requested path"));
-    assert!(history_runtime_label(&fallback_without_path).contains("fallback; no persistent path"));
-    assert!(history_runtime_label(&unavailable).starts_with("unavailable"));
+    assert!(
+        history_runtime_label(&persistent, HistoryLocationSource::Default).contains("persistent (")
+    );
+    assert!(
+        history_runtime_label(&persistent, HistoryLocationSource::LegacyDefault)
+            .contains("legacy default location")
+    );
+    assert!(
+        history_runtime_label(&configured, HistoryLocationSource::Volatile)
+            .contains("volatile (session only)")
+    );
+    assert!(
+        history_runtime_label(&fallback_with_path, HistoryLocationSource::Default)
+            .contains("fallback; requested path")
+    );
+    assert!(
+        history_runtime_label(&fallback_without_path, HistoryLocationSource::Default)
+            .contains("fallback; no persistent path")
+    );
+    assert!(
+        history_runtime_label(&unavailable, HistoryLocationSource::Default)
+            .starts_with("unavailable")
+    );
 }
 
 #[test]

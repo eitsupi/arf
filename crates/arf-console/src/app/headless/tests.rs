@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::r_source_selection::RSourceSelection;
 use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute};
-use crate::config::ConfigLoadProvenance;
+use crate::config::{ConfigLoadProvenance, HistoryLocationSource};
 use crate::history::HistoryRuntime;
 use crate::ipc::session::{SessionInfo, SessionType};
 use info::{HeadlessHistoryRuntime, HeadlessInfo, HeadlessRSourceOverride};
@@ -76,6 +76,7 @@ fn headless_json_includes_r_home_from_session() {
     let output = HeadlessInfo::from_session(
         &session,
         &history_runtime,
+        HistoryLocationSource::Explicit,
         Vec::new(),
         &report(RSourceOverrideState::NotConfigured),
         std::path::Path::new("/launch"),
@@ -103,6 +104,7 @@ fn headless_json_includes_r_home_from_session() {
     let output = HeadlessInfo::from_session(
         &session,
         &history_runtime,
+        HistoryLocationSource::Explicit,
         Vec::new(),
         &report(RSourceOverrideState::NotConfigured),
         std::path::Path::new("/tmp"),
@@ -164,34 +166,51 @@ fn headless_history_runtime_uses_stable_reason_and_separate_path() {
     assert!(configured.startup_warning().is_none());
     assert!(fallback.startup_warning().is_some());
     assert!(unavailable.startup_warning().is_some());
-    let persistent_json =
-        serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&persistent)).unwrap();
+    let persistent_json = serde_json::to_value(HeadlessHistoryRuntime::from_runtime(
+        &persistent,
+        HistoryLocationSource::LegacyDefault,
+    ))
+    .unwrap();
     assert_eq!(persistent_json["state"], "persistent");
+    assert_eq!(persistent_json["source"], "legacy_default");
     assert!(persistent_json["reason"].is_null());
     assert_eq!(
         persistent_json["path"],
         persistent_path.display().to_string()
     );
 
-    let configured_json =
-        serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&configured)).unwrap();
+    let configured_json = serde_json::to_value(HeadlessHistoryRuntime::from_runtime(
+        &configured,
+        HistoryLocationSource::Volatile,
+    ))
+    .unwrap();
     assert_eq!(configured_json["state"], "volatile");
+    assert_eq!(configured_json["source"], "volatile");
     assert_eq!(configured_json["reason"], "configured");
     assert!(configured_json["path"].is_null());
     assert!(configured_json["detail"].is_null());
 
-    let fallback_json =
-        serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback)).unwrap();
+    let fallback_json = serde_json::to_value(HeadlessHistoryRuntime::from_runtime(
+        &fallback,
+        HistoryLocationSource::Default,
+    ))
+    .unwrap();
     assert_eq!(fallback_json["reason"], "fallback");
     assert_eq!(fallback_json["path"], "/tmp/history.db");
     assert!(!fallback_json["detail"].as_str().unwrap().is_empty());
-    let no_path_json =
-        serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&fallback_without_path)).unwrap();
+    let no_path_json = serde_json::to_value(HeadlessHistoryRuntime::from_runtime(
+        &fallback_without_path,
+        HistoryLocationSource::Default,
+    ))
+    .unwrap();
     assert_eq!(no_path_json["reason"], "fallback");
     assert!(no_path_json["path"].is_null());
 
-    let unavailable_json =
-        serde_json::to_value(HeadlessHistoryRuntime::from_runtime(&unavailable)).unwrap();
+    let unavailable_json = serde_json::to_value(HeadlessHistoryRuntime::from_runtime(
+        &unavailable,
+        HistoryLocationSource::Default,
+    ))
+    .unwrap();
     assert_eq!(unavailable_json["state"], "unavailable");
     assert_eq!(unavailable_json["reason"], "initialization_failed");
     assert_eq!(unavailable_json["path"], "/tmp/history.db");

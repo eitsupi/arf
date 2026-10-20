@@ -46,16 +46,20 @@ pub struct HistoryFailureDetail {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum HistoryFailureStage {
     PersistentPathResolution,
+    PersistentLocationProbe,
     PersistentOpen,
     MemoryInitialization,
 }
 
 impl HistoryRuntime {
-    /// Construct the complete history lifecycle decision for one runtime.
+    /// Construct the complete history lifecycle decision for one runtime from
+    /// an already-chosen database path. Production code goes through
+    /// [`Self::initialize_for_location`].
     ///
     /// Persistent open failures (including an unavailable default path) are
     /// deliberately represented as volatile fallbacks.  Only failure to
     /// create that fallback reaches `Unavailable`.
+    #[cfg(test)]
     pub(crate) fn initialize(
         mode: &crate::config::HistoryMode,
         requested_path: Option<PathBuf>,
@@ -74,15 +78,82 @@ impl HistoryRuntime {
         )
     }
 
+    /// Construct the lifecycle for one database file of a resolved location.
+    ///
+    /// Persistent open failures (including an unavailable default path) are
+    /// deliberately represented as volatile fallbacks.  Only failure to
+    /// create that fallback reaches `Unavailable`.
+    ///
+    /// A location whose default directories could not be inspected becomes a
+    /// persistent failure naming the directory, so it surfaces through the same
+    /// volatile-fallback diagnostics as any other persistent open failure.
+    pub(crate) fn initialize_for_location(
+        mode: &crate::config::HistoryMode,
+        location: &crate::config::ResolvedHistoryLocation,
+        filename: &str,
+        history_kind: HistoryKind,
+        session_id: Option<HistorySessionId>,
+        session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Self {
+        let target = match location.probe_failure() {
+            Some(failure) => Err(HistoryFailureDetail::location_probe(failure)),
+            None => Ok(location.database_path(filename)),
+        };
+        Self::initialize_with_target(
+            mode,
+            target,
+            history_kind,
+            session_id,
+            session_timestamp,
+            HistoryStore::open,
+            HistoryStore::in_memory,
+        )
+    }
+
     /// Apply the lifecycle decision with injectable backend factories.
     ///
     /// The factories are kept private so production callers cannot bypass the
     /// single runtime construction path. Unit tests use this helper to cover
     /// initialization failures that the operating system cannot reliably
     /// reproduce on every platform.
+    #[cfg(test)]
     fn initialize_with_factories<Open, Memory>(
         mode: &crate::config::HistoryMode,
         requested_path: Option<PathBuf>,
+        history_kind: HistoryKind,
+        session_id: Option<HistorySessionId>,
+        session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+        open: Open,
+        in_memory: Memory,
+    ) -> Self
+    where
+        Open: FnMut(
+            PathBuf,
+            HistoryKind,
+            Option<HistorySessionId>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ) -> Result<HistoryStore>,
+        Memory: FnMut(
+            Option<HistorySessionId>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ) -> Result<HistoryStore>,
+    {
+        Self::initialize_with_target(
+            mode,
+            Ok(requested_path),
+            history_kind,
+            session_id,
+            session_timestamp,
+            open,
+            in_memory,
+        )
+    }
+
+    /// Core of runtime construction. `target` is either the requested database
+    /// path (if any) or a failure that already prevents choosing one.
+    fn initialize_with_target<Open, Memory>(
+        mode: &crate::config::HistoryMode,
+        target: std::result::Result<Option<PathBuf>, HistoryFailureDetail>,
         history_kind: HistoryKind,
         session_id: Option<HistorySessionId>,
         session_timestamp: Option<chrono::DateTime<chrono::Utc>>,
@@ -119,12 +190,15 @@ impl HistoryRuntime {
             };
         }
 
-        let persistent_failure = match requested_path.clone() {
-            Some(path) => match open(path.clone(), history_kind, session_id, session_timestamp) {
-                Ok(store) => return Self::Persistent(make_handle(store)),
-                Err(error) => HistoryFailureDetail::persistent_open(path, error),
-            },
-            None => HistoryFailureDetail::persistent_path(),
+        let persistent_failure = match target {
+            Err(failure) => failure,
+            Ok(Some(path)) => {
+                match open(path.clone(), history_kind, session_id, session_timestamp) {
+                    Ok(store) => return Self::Persistent(make_handle(store)),
+                    Err(error) => HistoryFailureDetail::persistent_open(path, error),
+                }
+            }
+            Ok(None) => HistoryFailureDetail::persistent_path(),
         };
 
         match in_memory(session_id, session_timestamp) {
@@ -281,6 +355,14 @@ impl HistoryFailureDetail {
         }
     }
 
+    fn location_probe(failure: &crate::config::HistoryProbeFailure) -> Self {
+        Self {
+            stage: HistoryFailureStage::PersistentLocationProbe,
+            path: Some(failure.directory().to_path_buf()),
+            message: failure.message().to_string(),
+        }
+    }
+
     fn persistent_open(path: PathBuf, error: reedline::ReedlineError) -> Self {
         Self {
             stage: HistoryFailureStage::PersistentOpen,
@@ -304,6 +386,9 @@ impl HistoryFailureDetail {
                     "persistent history path resolution failed: {}",
                     self.message
                 )
+            }
+            HistoryFailureStage::PersistentLocationProbe => {
+                format!("persistent history location probe failed: {}", self.message)
             }
             HistoryFailureStage::PersistentOpen => {
                 format!("persistent history open failed: {}", self.message)

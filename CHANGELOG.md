@@ -19,6 +19,7 @@
 - **Breaking:** Headless IPC `send` and `eval --visible` now use R's normal REPL. R's parser determines expression boundaries (a braced block is one expression), with task callbacks for successfully evaluated top-level expressions, normal autoprinting, and `.Last.value` semantics. Visible `eval` responses now leave `value` and `error` null; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. Silent eval remains direct evaluation without top-level task callbacks.
 - **Breaking:** Headless IPC `send` now returns an `accepted` acknowledgment rather than reporting evaluation success or completion.
 - Headless standard nested console reads (`parse()` from the console, `readline()`, menus, and browser prompts) receive EOF instead of consuming further IPC requests. Main and continuation prompt options must be readable, non-empty, distinct strings and must not resemble browser prompts; `--no-echo` is unsupported. Invalid or ambiguous prompt conditions are diagnosed and stop the session without consuming the next request.
+- **Breaking:** On Linux, the default history location is now `$XDG_STATE_HOME/arf/history` (`~/.local/state/arf/history`). History that exists only in the old location (`~/.local/share/arf/history`) keeps being used, with a startup warning, until you move it with `arf history migrate`.
 
 ## [0.7.0-alpha.1] - 2026-10-11
 

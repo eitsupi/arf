@@ -83,6 +83,7 @@ pub(super) fn isolated_command(temp_path: &std::path::Path) -> Command {
         .env("HOME", home_dir)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME")
         .env_remove("XDG_CACHE_HOME");
     command
 }

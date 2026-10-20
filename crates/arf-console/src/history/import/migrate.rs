@@ -232,7 +232,10 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
         println!(
             "\nThe legacy location was kept unchanged. Arf sessions that were open during the \
              migration may still have written to it; close them and rerun this command to copy \
-             any remaining entries (rerunning is safe)."
+             any remaining entries (rerunning is safe). Once you have confirmed your history in \
+             the new location, you may delete the legacy directory {} manually, but arf \
+             versions from before the default location changed still use it.",
+            report.legacy.directory.display()
         );
     }
     Ok(())

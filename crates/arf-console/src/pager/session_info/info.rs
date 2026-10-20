@@ -5,7 +5,8 @@
 //! `render`.
 
 use crate::config::{
-    ConfigFileInfo, ConfigStatus, RSourceStatus, ReprexFormatter, ReprexMode, mask_home_path,
+    ConfigFileInfo, ConfigStatus, HistoryLocationSource, RSourceStatus, ReprexFormatter,
+    ReprexMode, mask_home_path,
 };
 use crate::editor::prompt::get_r_version;
 use crate::external::rig;
@@ -73,6 +74,7 @@ impl SessionInfo {
         config_file_info: &ConfigFileInfo,
         r_history: &HistoryRuntime,
         shell_history: &HistoryRuntime,
+        history_source: HistoryLocationSource,
         r_source_status: &RSourceStatus,
     ) -> Self {
         Self {
@@ -88,8 +90,8 @@ impl SessionInfo {
             reprex_mode: reprex.mode,
             formatter_selector: reprex.formatter_selector,
             formatter_command: reprex.formatter.map(|backend| backend.command()),
-            r_history: history_runtime_label(r_history),
-            shell_history: history_runtime_label(shell_history),
+            r_history: history_runtime_label(r_history, history_source),
+            shell_history: history_runtime_label(shell_history, history_source),
             env_vars: collect_env_vars(),
             ipc: IpcInfo {
                 policy: policy(SessionType::Interactive),
@@ -154,11 +156,14 @@ fn collect_env_vars() -> Vec<(&'static str, String)> {
         .collect()
 }
 
-pub(super) fn history_runtime_label(runtime: &HistoryRuntime) -> String {
+pub(super) fn history_runtime_label(
+    runtime: &HistoryRuntime,
+    source: HistoryLocationSource,
+) -> String {
     let label = match runtime {
         HistoryRuntime::Persistent(_) => runtime
             .requested_path()
-            .map(|path| format!("persistent ({})", mask_home_path(path)))
+            .map(|path| format!("persistent ({}; {})", mask_home_path(path), source.label()))
             .unwrap_or_else(|| "persistent".to_string()),
         HistoryRuntime::Volatile { reason, .. } => match reason {
             crate::history::VolatileHistoryReason::Configured => {

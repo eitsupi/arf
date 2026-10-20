@@ -75,6 +75,13 @@ pub(crate) fn handle_history_command(
         false,
     );
     let history_location = config::resolved_history_location(&mode);
+    // `migrate` has fixed endpoints, so an unreadable default directory must not
+    // block the very command that moves history out of it.
+    if !matches!(action, HistoryAction::Migrate { .. })
+        && let Some(failure) = history_location.probe_failure()
+    {
+        anyhow::bail!("Cannot determine the history directory: {failure}");
+    }
 
     match action {
         HistoryAction::Schema => pager::history_schema::print_schema(&history_location)
