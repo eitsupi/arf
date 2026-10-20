@@ -8,9 +8,9 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
 use super::super::artifact::{self, HistoryArtifact, HistoryKind};
+use super::super::paths::same_directory;
 use super::service::{self, HistoryDbPaths, ImportPolicy};
 use super::{ImportResult, ParsedImport, parse_arf_history};
-use crate::config::same_directory;
 
 /// What a migration run found and did.
 #[derive(Debug)]

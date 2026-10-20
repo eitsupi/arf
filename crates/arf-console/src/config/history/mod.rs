@@ -232,18 +232,6 @@ pub(crate) fn resolve_history_location(
     }
 }
 
-/// Whether two paths name the same directory, also through symlinks or a
-/// different spelling. Startup and `arf history migrate` both use this, so a
-/// legacy location that is the current one never produces a warning that
-/// migrate cannot resolve.
-pub(crate) fn same_directory(a: &Path, b: &Path) -> bool {
-    a == b
-        || matches!(
-            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
-            (Ok(a), Ok(b)) if a == b
-        )
-}
-
 fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedHistoryLocation {
     let resolved = |directory: Option<PathBuf>, source| ResolvedHistoryLocation {
         directory,
@@ -259,7 +247,7 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
     let Some(legacy) = defaults
         .legacy
         .as_ref()
-        .filter(|legacy| !same_directory(legacy, &defaults.current))
+        .filter(|legacy| !crate::history::paths::same_directory(legacy, &defaults.current))
     else {
         return resolved(
             Some(defaults.current.clone()),

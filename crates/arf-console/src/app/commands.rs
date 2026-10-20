@@ -307,7 +307,7 @@ fn migrate_between_defaults(
         );
     }
 
-    if legacy != dirs.current {
+    if !crate::history::paths::same_directory(legacy, &dirs.current) {
         println!(
             "Close other running arf sessions before migrating, and keep them closed until it finishes.\n\
              The legacy location is kept; it is only read, never modified or deleted.\n"
