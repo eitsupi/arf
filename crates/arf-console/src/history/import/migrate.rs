@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use super::super::artifact::{self, HistoryArtifact, HistoryKind};
 use super::service::{self, HistoryDbPaths, ImportPolicy};
-use super::{ImportEntry, ImportResult, parse_arf_history};
+use super::{ImportResult, ParsedImport, parse_arf_history};
 
 /// What a migration run found and did.
 #[derive(Debug)]
@@ -34,6 +34,26 @@ pub(crate) struct MigrationReport {
     pub(crate) result: ImportResult,
 }
 
+impl MigrationReport {
+    /// Fail if any row could not be written to the current location.
+    ///
+    /// The import engine reports row-level write errors as warnings so one bad
+    /// row does not stop the rest; a migration must not call that success.
+    pub(crate) fn ensure_complete(&self) -> Result<()> {
+        if self.result.write_failures == 0 {
+            return Ok(());
+        }
+        bail!(
+            "Migration into {} was incomplete: {} row(s) could not be written (see the warnings above).\n\
+             The legacy location {} was not modified. Rerunning `arf history migrate` is safe: \
+             entries already copied are skipped.",
+            self.current.directory.display(),
+            self.result.write_failures,
+            self.legacy.directory.display()
+        )
+    }
+}
+
 fn same_directory(a: &Path, b: &Path) -> bool {
     a == b
         || matches!(
@@ -54,7 +74,7 @@ fn database_exists(path: &Path) -> Result<bool> {
 }
 
 /// Read one legacy database, insisting it is the kind its filename promises.
-fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<Vec<ImportEntry>> {
+fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<ParsedImport> {
     if let HistoryArtifact::History(actual) = artifact::read_artifact_from_path(path)?
         && actual != kind
     {
@@ -64,8 +84,7 @@ fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<Vec<ImportEntr
             actual.as_str()
         );
     }
-    let parsed = parse_arf_history(path)?;
-    Ok(parsed.entries)
+    parse_arf_history(path)
 }
 
 /// Copy history from `legacy_dir` into `current_dir` with duplicate detection.
@@ -102,20 +121,23 @@ pub(crate) fn migrate_history(
     }
 
     let mut entries = Vec::new();
+    let mut parse_warnings = Vec::new();
     for (kind, present) in [
         (HistoryKind::R, legacy_has_r),
         (HistoryKind::Shell, legacy_has_shell),
     ] {
         if present {
             let path = legacy.path(kind);
-            entries.extend(read_legacy_database(path, kind).with_context(|| {
+            let parsed = read_legacy_database(path, kind).with_context(|| {
                 format!(
                     "Failed to read legacy {} history database: {}\n\
                      Nothing was written to the current location. Fix or move the file and rerun.",
                     kind.as_str(),
                     path.display()
                 )
-            })?);
+            })?;
+            entries.extend(parsed.entries);
+            parse_warnings.extend(parsed.warnings);
         }
     }
 
@@ -125,7 +147,7 @@ pub(crate) fn migrate_history(
         hostname: None,
         skip_duplicates: true,
     };
-    let result = if dry_run {
+    let mut result = if dry_run {
         service::preview(&entries, Some(&current), policy).with_context(|| {
             format!(
                 "Failed to read current history in: {}",
@@ -142,6 +164,8 @@ pub(crate) fn migrate_history(
             )
         })?
     };
+
+    result.warnings.extend(parse_warnings);
 
     Ok(MigrationOutcome::Migrated(Box::new(MigrationReport {
         legacy,

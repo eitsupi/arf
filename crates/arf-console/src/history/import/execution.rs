@@ -415,6 +415,7 @@ pub(super) fn import_entries_with_dedup_sets(
                             .warnings
                             .push(format!("Failed to import entry: {}", error));
                         result.skipped += 1;
+                        result.write_failures += 1;
                     }
                 }
             }
@@ -446,6 +447,7 @@ pub(super) fn import_entries_with_dedup_sets(
                             command, error
                         ));
                         result.duplicates_skipped += 1;
+                        result.write_failures += 1;
                     }
                 }
             }

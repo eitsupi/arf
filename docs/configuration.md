@@ -783,7 +783,7 @@ arf history import --from r
 > [!NOTE]
 > Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
-To copy history from the legacy default location to the current default location, use `arf history migrate` (add `--dry-run` to preview). It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it.
+To copy history from the legacy default location to the current default location, use `arf history migrate` (add `--dry-run` to preview). It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it. Migrated entries are appended after any existing history, so migrate before building up new history in the current location to keep older entries ordered first.
 
 ## Experimental Features
 

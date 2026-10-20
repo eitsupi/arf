@@ -294,6 +294,7 @@ fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>)
     print_outcome(&outcome);
 
     if let MigrationOutcome::Migrated(report) = &outcome {
+        report.ensure_complete()?;
         if report.dry_run {
             println!("\nDry run only: no history was written.");
         } else {

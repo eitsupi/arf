@@ -352,3 +352,83 @@ fn unreadable_legacy_directory_is_an_error_not_an_empty_legacy() {
     );
     assert!(!dirs.current.exists());
 }
+
+/// Make the destination reject writes touching `command`, as a failing disk would.
+fn block_writes_for(db: &Path, event: &str, command: &str) {
+    let connection = rusqlite::Connection::open(db).unwrap();
+    connection
+        .execute_batch(&format!(
+            r#"CREATE TRIGGER block_{event} BEFORE {event} ON history
+               WHEN NEW.command_line = '{command}'
+               BEGIN SELECT RAISE(ABORT, 'blocked by test'); END"#
+        ))
+        .unwrap();
+}
+
+#[test]
+fn rows_that_cannot_be_written_fail_the_migration_but_the_rest_are_copied() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[
+            rich("blocked", "2024-01-01T00:00:00Z").item,
+            rich("fine", "2024-01-02T00:00:00Z").item,
+        ],
+    );
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    create_reedline_db(&dirs.current.join("r.db"), &[]);
+    block_writes_for(&dirs.current.join("r.db"), "INSERT", "blocked");
+
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 1);
+    assert_eq!(report.result.r_imported, 1);
+    let error = format!("{:#}", report.ensure_complete().unwrap_err());
+    assert!(
+        error.contains(&dirs.current.display().to_string()),
+        "{error}"
+    );
+    assert!(error.contains("not modified"), "{error}");
+    assert!(error.contains("safe"), "{error}");
+    let copied = open_items(&dirs.current.join("r.db"), HistoryKind::R);
+    assert_eq!(copied.len(), 1);
+    assert_eq!(copied[0].command_line, "fine");
+}
+
+#[test]
+fn rows_that_cannot_be_repaired_fail_the_migration() {
+    let dirs = Dirs::new();
+    let full = rich("repair me", "2024-01-01T00:00:00Z").item;
+    let mut sparse = full.clone();
+    sparse.cwd = None;
+    create_reedline_db(&dirs.legacy.join("r.db"), std::slice::from_ref(&full));
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    create_reedline_db(&dirs.current.join("r.db"), &[sparse]);
+    block_writes_for(&dirs.current.join("r.db"), "UPDATE", "repair me");
+
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 1);
+    assert!(report.ensure_complete().is_err());
+}
+
+#[test]
+fn legacy_parse_warnings_are_reported_for_real_and_dry_runs() {
+    let dirs = Dirs::new();
+    create_reedline_db(&dirs.legacy.join("r.db"), &[r("bad metadata").item]);
+    let db = rusqlite::Connection::open(dirs.legacy.join("r.db")).unwrap();
+    db.execute(
+        r#"UPDATE history SET more_info = ? WHERE command_line = ?"#,
+        rusqlite::params![r#"{"unterminated"#, "bad metadata"],
+    )
+    .unwrap();
+    drop(db);
+    create_reedline_db(&dirs.legacy.join("shell.db"), &[shell("also bad").item]);
+    let db = rusqlite::Connection::open(dirs.legacy.join("shell.db")).unwrap();
+    db.execute(r#"UPDATE history SET more_info = ?"#, [r#"{"unterminated"#])
+        .unwrap();
+    drop(db);
+
+    for dry_run in [true, false] {
+        let report = report(dirs.run(dry_run).unwrap());
+        assert_eq!(report.result.warnings.len(), 2, "dry_run={dry_run}");
+    }
+}

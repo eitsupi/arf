@@ -110,6 +110,11 @@ pub struct ImportResult {
     pub duplicates_skipped: usize,
     /// Number of existing duplicate rows whose missing fields were repaired.
     pub duplicates_repaired: usize,
+    /// Number of rows that could not be written (insert or repair errors).
+    ///
+    /// These are also counted in `skipped` / `duplicates_skipped` and explained
+    /// in `warnings`; this count lets callers that must not lose rows fail.
+    pub write_failures: usize,
     /// Warning messages for non-fatal issues.
     pub warnings: Vec<String>,
 }
