@@ -752,7 +752,7 @@ History files are stored as SQLite databases:
 - Shell history: `{dir}/shell.db`
 
 Default location:
-- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used; arf warns if the old directory has R or shell history that the new one lacks.
+- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used. In that case arf still warns while the old directory has R or shell history that has not been copied: that kind is missing from the new directory, or `arf history migrate` has not completed since. A completed migration records this in the new databases (an optional `legacy_migrated_from` entry in their `arf_metadata` table), which ends the warning even though the old directory is kept.
 - **macOS**: `~/Library/Application Support/arf/history/`
 - **Windows**: `C:\Users\<user>\AppData\Local\arf\history\`
 

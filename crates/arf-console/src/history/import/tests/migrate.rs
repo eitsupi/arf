@@ -1,7 +1,7 @@
 use super::super::ImportEntry;
 use super::super::migrate::{MigrationOutcome, MigrationReport, migrate_history, report_outcome};
 use super::support::*;
-use crate::history::artifact::HistoryKind;
+use crate::history::artifact::{HistoryKind, legacy_migration_recorded};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -436,4 +436,92 @@ fn legacy_parse_warnings_are_reported_for_real_and_dry_runs() {
         let report = report(dirs.run(dry_run).unwrap());
         assert_eq!(report.result.warnings.len(), 2, "dry_run={dry_run}");
     }
+}
+
+fn recorded(dirs: &Dirs) -> [bool; 2] {
+    [
+        legacy_migration_recorded(&dirs.current.join("r.db")).unwrap(),
+        legacy_migration_recorded(&dirs.current.join("shell.db")).unwrap(),
+    ]
+}
+
+#[test]
+fn completed_migration_records_itself_in_both_current_databases_only() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+
+    dirs.migrate();
+    // Even the kind with no legacy database is marked, so one record covers
+    // the whole current directory.
+    assert_eq!(recorded(&dirs), [true, true]);
+    // The marker is optional metadata: the databases still open normally.
+    assert_eq!(
+        open_items(&dirs.current.join("r.db"), HistoryKind::R).len(),
+        1
+    );
+    // Rerunning keeps the single record.
+    dirs.migrate();
+    assert_eq!(recorded(&dirs), [true, true]);
+}
+
+#[test]
+fn opening_a_database_never_records_a_migration() {
+    let dirs = Dirs::new();
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    open_items(&dirs.current.join("r.db"), HistoryKind::R);
+    assert!(!legacy_migration_recorded(&dirs.current.join("r.db")).unwrap());
+}
+
+#[test]
+fn dry_run_and_incomplete_migrations_record_nothing() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    report(dirs.run(true).unwrap());
+    assert!(!dirs.current.exists());
+
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("blocked", "2024-01-01T00:00:00Z").item],
+    );
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    create_reedline_db(&dirs.current.join("r.db"), &[]);
+    block_writes_for(&dirs.current.join("r.db"), "INSERT", "blocked");
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 1);
+    assert_eq!(recorded(&dirs), [false, false]);
+}
+
+#[test]
+fn failing_to_record_the_migration_makes_it_incomplete() {
+    let dirs = Dirs::new();
+    create_reedline_db(
+        &dirs.legacy.join("r.db"),
+        &[rich("1 + 1", "2024-01-01T00:00:00Z").item],
+    );
+    // A destination without arf metadata cannot carry the record.
+    std::fs::create_dir_all(&dirs.current).unwrap();
+    create_reedline_db(&dirs.current.join("r.db"), &[]);
+
+    let report = dirs.migrate();
+    assert_eq!(report.result.write_failures, 0);
+    assert_eq!(report.record_failures, 1);
+    assert!(
+        report
+            .result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Could not record the completed migration"))
+    );
+    assert_eq!(recorded(&dirs), [false, true]);
+    let error = format!("{:#}", incomplete_error(report));
+    assert!(error.contains("incomplete"), "{error}");
+    assert!(error.contains("could not be recorded"), "{error}");
+    assert!(error.contains("safe"), "{error}");
 }

@@ -61,6 +61,9 @@ pub(super) fn generate_schema_lines(history_path: &Path) -> Vec<String> {
     lines.push("- `history_kind`: `r` or `shell`".to_string());
     lines.push("- `created_by_version`: the arf package version".to_string());
     lines.push(
+        "- `legacy_migrated_from` (optional): the legacy directory whose history `arf history migrate` copied into this database; written only by that command".to_string(),
+    );
+    lines.push(
         "Unified exports use `artifact = history-export`, `format_version = 1`, and `created_by_version`; they omit `history_kind`.".to_string(),
     );
     lines.push(String::new());

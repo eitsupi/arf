@@ -32,6 +32,10 @@ pub(crate) struct MigrationReport {
     pub(crate) current_had_shell: bool,
     pub(crate) dry_run: bool,
     pub(crate) result: ImportResult,
+    /// Current databases in which the completed migration could not be
+    /// recorded. Without the record, startup keeps reporting the legacy
+    /// history as not yet copied, so this makes the migration incomplete.
+    pub(crate) record_failures: usize,
 }
 
 fn same_directory(a: &Path, b: &Path) -> bool {
@@ -65,6 +69,27 @@ fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<ParsedImport> 
         );
     }
     parse_arf_history(path)
+}
+
+/// Mark both current databases as migrated so startup stops reporting the
+/// legacy history as not yet copied. Failures are returned as a count (with a
+/// warning each) rather than hidden: the migration is incomplete until the
+/// record exists, and a rerun retries it.
+fn record_completed_migration(
+    current: &HistoryDbPaths,
+    legacy_dir: &Path,
+    warnings: &mut Vec<String>,
+) -> usize {
+    let mut failures = 0;
+    for kind in [HistoryKind::R, HistoryKind::Shell] {
+        if let Err(error) = artifact::record_legacy_migration(current.path(kind), legacy_dir) {
+            failures += 1;
+            warnings.push(format!(
+                "Could not record the completed migration: {error:#}"
+            ));
+        }
+    }
+    failures
 }
 
 /// Copy history from `legacy_dir` into `current_dir` with duplicate detection.
@@ -147,6 +172,12 @@ pub(crate) fn migrate_history(
 
     result.warnings.extend(parse_warnings);
 
+    let record_failures = if !dry_run && result.write_failures == 0 {
+        record_completed_migration(&current, &legacy.directory, &mut result.warnings)
+    } else {
+        0
+    };
+
     Ok(MigrationOutcome::Migrated(Box::new(MigrationReport {
         legacy,
         current,
@@ -156,6 +187,7 @@ pub(crate) fn migrate_history(
         current_had_shell,
         dry_run,
         result,
+        record_failures,
     })))
 }
 
@@ -202,9 +234,10 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
     };
     println!("  Existing:       {existing}");
 
+    let incomplete = report.result.write_failures > 0 || report.record_failures > 0;
     let heading = if report.dry_run {
         "[Dry run] Would migrate:"
-    } else if report.result.write_failures > 0 {
+    } else if incomplete {
         "Migration incomplete:"
     } else {
         "Migration complete:"
@@ -216,13 +249,26 @@ pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
         " (already in the current location)",
     );
 
-    if report.result.write_failures > 0 {
+    if incomplete {
+        let mut problems = Vec::new();
+        if report.result.write_failures > 0 {
+            problems.push(format!(
+                "{} row(s) could not be written",
+                report.result.write_failures
+            ));
+        }
+        if report.record_failures > 0 {
+            problems.push(format!(
+                "the completed migration could not be recorded in {} database(s)",
+                report.record_failures
+            ));
+        }
         bail!(
-            "Migration into {} was incomplete: {} row(s) could not be written (see the warnings above).\n\
+            "Migration into {} was incomplete: {} (see the warnings above).\n\
              The legacy location {} was not modified. Rerunning `arf history migrate` is safe: \
              entries already copied are skipped.",
             report.current.directory.display(),
-            report.result.write_failures,
+            problems.join("; "),
             report.legacy.directory.display()
         );
     }
