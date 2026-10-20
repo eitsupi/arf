@@ -74,12 +74,18 @@ pub(crate) fn handle_history_command(
         cli_history_dir.map(|path| path.as_path()),
         false,
     );
+    // `migrate` has fixed endpoints, so it never resolves or probes a location:
+    // an unreadable default directory must not block the very command that
+    // copies history out of it.
+    if let HistoryAction::Migrate { dry_run } = action {
+        let explicit_dir = match &mode {
+            config::HistoryMode::Persistent { dir: Some(dir) } => Some(dir.as_path()),
+            _ => None,
+        };
+        return handle_history_migrate(*dry_run, explicit_dir);
+    }
     let history_location = config::resolved_history_location(&mode);
-    // `migrate` has fixed endpoints, so an unreadable default directory must not
-    // block the very command that moves history out of it.
-    if !matches!(action, HistoryAction::Migrate { .. })
-        && let Some(failure) = history_location.probe_failure()
-    {
+    if let Some(failure) = history_location.probe_failure() {
         anyhow::bail!("Cannot determine the history directory: {failure}");
     }
 
@@ -108,13 +114,7 @@ pub(crate) fn handle_history_command(
                 .directory()
                 .map(std::path::Path::to_path_buf),
         ),
-        HistoryAction::Migrate { dry_run } => handle_history_migrate(
-            *dry_run,
-            match history_location.source() {
-                config::HistoryLocationSource::Explicit => history_location.directory(),
-                _ => None,
-            },
-        ),
+        HistoryAction::Migrate { .. } => unreachable!("migrate is handled before resolving"),
         HistoryAction::Export {
             file,
             r_table,
@@ -277,10 +277,27 @@ fn handle_history_import(
 /// never changes the migration endpoints, which are always the platform
 /// defaults; it is only reported so the user is not misled.
 fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>) -> Result<()> {
-    use history::import::migrate::{migrate_history, report_outcome};
-
     let dirs = config::default_history_dirs()
         .ok_or_else(|| anyhow::anyhow!("Could not determine the default history directories"))?;
+    migrate_between_defaults(&dirs, dry_run, explicit_dir)
+}
+
+/// Migrate between the given default locations. A legacy location that cannot
+/// be determined is an error, never "nothing to migrate": silence would hide
+/// that history may exist somewhere arf cannot see.
+fn migrate_between_defaults(
+    dirs: &config::DefaultHistoryDirs,
+    dry_run: bool,
+    explicit_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    use history::import::migrate::{migrate_history, report_outcome};
+
+    let legacy = dirs.legacy.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not determine the legacy default history directory, so there is nothing \
+             to migrate from (the platform data directory is unavailable)"
+        )
+    })?;
 
     if let Some(dir) = explicit_dir {
         println!(
@@ -290,14 +307,14 @@ fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>)
         );
     }
 
-    if dirs.legacy != dirs.current {
+    if legacy != dirs.current {
         println!(
             "Close other running arf sessions before migrating, and keep them closed until it finishes.\n\
              The legacy location is kept; it is only read, never modified or deleted.\n"
         );
     }
 
-    let outcome = migrate_history(&dirs.legacy, &dirs.current, dry_run)?;
+    let outcome = migrate_history(legacy, &dirs.current, dry_run)?;
     report_outcome(&outcome)
 }
 
@@ -365,6 +382,24 @@ fn should_parse_unified_import(
 mod tests {
     use super::*;
     use crate::history::artifact::{HistoryArtifact, HistoryKind};
+
+    #[test]
+    fn migrate_with_unknown_legacy_directory_is_an_error_and_touches_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join("state").join("arf").join("history");
+        let dirs = config::DefaultHistoryDirs {
+            current: current.clone(),
+            legacy: None,
+        };
+        let error = migrate_between_defaults(&dirs, false, None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("legacy default history directory"),
+            "unexpected error: {error}"
+        );
+        assert!(!current.exists());
+    }
 
     #[test]
     fn versioned_artifact_metadata_precedes_filename_and_unified_flag() {

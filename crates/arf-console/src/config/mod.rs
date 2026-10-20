@@ -189,17 +189,21 @@ pub fn config_file_path() -> Option<PathBuf> {
 /// Get the platform default history directories (current and legacy).
 ///
 /// On Linux the current default lives under `$XDG_STATE_HOME` and the legacy
-/// one under `$XDG_DATA_HOME`; everywhere else the two are equal. If the state
-/// directory cannot be determined, the legacy directory stays the default.
-/// This only derives paths; selecting between them is the resolver's job.
+/// one under `$XDG_DATA_HOME`; everywhere else the two are equal. The current
+/// default is derived independently of the legacy one, so an undeterminable
+/// legacy directory leaves `legacy` as `None` rather than discarding a usable
+/// current default. If the Linux state directory cannot be determined, the
+/// legacy directory stays the default. Returns `None` only when no default
+/// can be determined at all. This only derives paths; selecting between them
+/// is the resolver's job.
 pub(crate) fn default_history_dirs() -> Option<DefaultHistoryDirs> {
-    let legacy = data_dir().map(|p| p.join("history"))?;
+    let legacy = data_dir().map(|p| p.join("history"));
     #[cfg(target_os = "linux")]
     let current = dirs::state_dir()
         .map(|p| p.join(APP_NAME).join("history"))
-        .unwrap_or_else(|| legacy.clone());
+        .or_else(|| legacy.clone())?;
     #[cfg(not(target_os = "linux"))]
-    let current = legacy.clone();
+    let current = legacy.clone()?;
     Some(DefaultHistoryDirs { current, legacy })
 }
 

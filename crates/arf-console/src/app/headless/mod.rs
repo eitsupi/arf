@@ -255,7 +255,7 @@ fn initialize_history(
 ) -> (HistoryRuntime, config::HistoryLocationSource) {
     let session_id = create_session_id(config);
     let history_location = config::resolved_history_location(&config.history.mode);
-    if let Some(warning) = history_location.legacy_default_warning() {
+    if let Some(warning) = history_location.startup_warning() {
         log::warn!("Headless history: {warning}");
         if json {
             warnings.push(warning);

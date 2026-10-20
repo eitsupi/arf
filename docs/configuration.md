@@ -752,7 +752,7 @@ History files are stored as SQLite databases:
 - Shell history: `{dir}/shell.db`
 
 Default location:
-- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used.
+- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used; arf warns if the old directory has R or shell history that the new one lacks.
 - **macOS**: `~/Library/Application Support/arf/history/`
 - **Windows**: `C:\Users\<user>\AppData\Local\arf\history\`
 

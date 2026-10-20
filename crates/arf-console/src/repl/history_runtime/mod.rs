@@ -9,7 +9,7 @@ impl Repl {
         let (r_runtime, shell_runtime) = self.initialize_history_runtimes();
         Self::report_history_runtime("R", &r_runtime);
         Self::report_history_runtime("Shell", &shell_runtime);
-        if let Some(warning) = self.history_location.legacy_default_warning() {
+        if let Some(warning) = self.history_location.startup_warning() {
             eprintln!("Warning: {warning}");
             log::warn!("{warning}");
         }

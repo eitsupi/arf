@@ -94,6 +94,16 @@ pub(crate) struct ResolvedHistoryLocation {
     /// The current default directory, kept only when the legacy default was
     /// selected so the startup warning can name both.
     current_default: Option<PathBuf>,
+    /// Legacy databases whose kind is missing from the selected current
+    /// default directory, so their history is not in use.
+    legacy_only: Vec<LegacyOnlyDatabase>,
+}
+
+/// A legacy database that has no counterpart in the current default directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LegacyOnlyDatabase {
+    label: &'static str,
+    path: PathBuf,
 }
 
 impl ResolvedHistoryLocation {
@@ -113,6 +123,14 @@ impl ResolvedHistoryLocation {
         self.directory
             .as_ref()
             .map(|directory| directory.join(filename))
+    }
+
+    /// The startup warning for this location, if any: either the legacy
+    /// directory was selected, or the current default is missing a kind of
+    /// history that only the legacy directory has.
+    pub(crate) fn startup_warning(&self) -> Option<String> {
+        self.legacy_default_warning()
+            .or_else(|| self.split_history_warning())
     }
 
     /// Startup warning shown only when the legacy default directory was
@@ -136,6 +154,36 @@ impl ResolvedHistoryLocation {
             current.display()
         ))
     }
+
+    /// Warning shown when the current default was selected but the legacy
+    /// directory holds a kind of history (R or shell) that the current one
+    /// lacks. Selection stays per directory, so that history is not recalled
+    /// until it is copied.
+    fn split_history_warning(&self) -> Option<String> {
+        if self.legacy_only.is_empty() {
+            return None;
+        }
+        let current = self.directory.as_deref()?;
+        let mut message = String::from(
+            "arf found history in the legacy default location that is missing from the \
+             current default location, so it is not used:",
+        );
+        for database in &self.legacy_only {
+            message.push_str(&format!(
+                "\n  {:<22}{}",
+                format!("{}:", database.label),
+                database.path.display()
+            ));
+        }
+        message.push_str(&format!(
+            "\n  {:<22}{}\n\
+             Run `arf history migrate` to copy it (duplicates are skipped); the legacy \
+             location is left unchanged.",
+            "Current default:",
+            current.display()
+        ));
+        Some(message)
+    }
 }
 
 /// Resolve the history directory for one process.
@@ -157,6 +205,7 @@ pub(crate) fn resolve_history_location(
             source: HistoryLocationSource::Explicit,
             probe_failure: None,
             current_default: None,
+            legacy_only: Vec::new(),
         },
         HistoryMode::Persistent { dir: None } => resolve_default_directory(defaults),
         HistoryMode::Volatile => ResolvedHistoryLocation {
@@ -164,6 +213,7 @@ pub(crate) fn resolve_history_location(
             source: HistoryLocationSource::Volatile,
             probe_failure: None,
             current_default: None,
+            legacy_only: Vec::new(),
         },
     }
 }
@@ -174,30 +224,55 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
         source,
         probe_failure: None,
         current_default: None,
+        legacy_only: Vec::new(),
     };
     let Some(defaults) = defaults else {
         return resolved(None, HistoryLocationSource::Default);
     };
-    if defaults.current == defaults.legacy {
+    let Some(legacy) = defaults
+        .legacy
+        .as_ref()
+        .filter(|legacy| **legacy != defaults.current)
+    else {
         return resolved(
             Some(defaults.current.clone()),
             HistoryLocationSource::Default,
         );
-    }
-    let selected = directory_has_history(&defaults.current).and_then(|current_has_history| {
-        if current_has_history {
-            return Ok(resolved(
+    };
+    let selected = probe_databases(&defaults.current).and_then(|current| {
+        if current.any() {
+            let mut location = resolved(
                 Some(defaults.current.clone()),
                 HistoryLocationSource::Default,
-            ));
+            );
+            // Only a partially populated current directory can hide legacy
+            // history. This check is best effort: legacy errors are ignored
+            // because the current directory already has history.
+            if !(current.r && current.shell)
+                && let Ok(found) = probe_databases(legacy)
+            {
+                location.legacy_only = [
+                    ("Legacy R history", "r.db", found.r && !current.r),
+                    (
+                        "Legacy shell history",
+                        "shell.db",
+                        found.shell && !current.shell,
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, _, missing)| *missing)
+                .map(|(label, filename, _)| LegacyOnlyDatabase {
+                    label,
+                    path: legacy.join(filename),
+                })
+                .collect();
+            }
+            return Ok(location);
         }
-        Ok(if directory_has_history(&defaults.legacy)? {
+        Ok(if probe_databases(legacy)?.any() {
             ResolvedHistoryLocation {
                 current_default: Some(defaults.current.clone()),
-                ..resolved(
-                    Some(defaults.legacy.clone()),
-                    HistoryLocationSource::LegacyDefault,
-                )
+                ..resolved(Some(legacy.clone()), HistoryLocationSource::LegacyDefault)
             }
         } else {
             resolved(
@@ -211,25 +286,39 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
         source: HistoryLocationSource::Default,
         probe_failure: Some(failure),
         current_default: None,
+        legacy_only: Vec::new(),
     })
 }
 
-/// Whether `directory` contains `r.db` or `shell.db`. An empty or missing
-/// directory has no history; any other inspection error is reported.
-fn directory_has_history(directory: &Path) -> Result<bool, HistoryProbeFailure> {
-    for filename in ["r.db", "shell.db"] {
-        match directory.join(filename).try_exists() {
-            Ok(true) => return Ok(true),
-            Ok(false) => {}
-            Err(error) => {
-                return Err(HistoryProbeFailure {
-                    directory: directory.to_path_buf(),
-                    message: format!("cannot check {filename}: {error}"),
-                });
-            }
-        }
+/// Which history databases a directory contains.
+struct DatabasePresence {
+    r: bool,
+    shell: bool,
+}
+
+impl DatabasePresence {
+    fn any(&self) -> bool {
+        self.r || self.shell
     }
-    Ok(false)
+}
+
+/// Check for `r.db` and `shell.db` in `directory`. A missing directory simply
+/// has neither; any other inspection error is reported rather than treated as
+/// absence.
+fn probe_databases(directory: &Path) -> Result<DatabasePresence, HistoryProbeFailure> {
+    let exists = |filename: &str| {
+        directory
+            .join(filename)
+            .try_exists()
+            .map_err(|error| HistoryProbeFailure {
+                directory: directory.to_path_buf(),
+                message: format!("cannot check {filename}: {error}"),
+            })
+    };
+    Ok(DatabasePresence {
+        r: exists("r.db")?,
+        shell: exists("shell.db")?,
+    })
 }
 
 /// The platform default history directories, independent of any explicit
@@ -238,11 +327,13 @@ fn directory_has_history(directory: &Path) -> Result<bool, HistoryProbeFailure> 
 /// `current` is the preferred default. `legacy` is the previous default, which
 /// is still used when it holds history and `current` does not, and is where
 /// `arf history migrate` copies from. The two are equal wherever the default
-/// location has never moved. Both are derived from environment lookup only.
+/// location has never moved. `legacy` is `None` when the previous default
+/// cannot be determined (distinct from "same as current"); `current` is then
+/// used as is. Both are derived from environment lookup only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DefaultHistoryDirs {
     pub(crate) current: PathBuf,
-    pub(crate) legacy: PathBuf,
+    pub(crate) legacy: Option<PathBuf>,
 }
 
 /// History configuration.
@@ -416,18 +507,24 @@ mod location_tests {
 
     struct Dirs {
         _root: tempfile::TempDir,
+        current: PathBuf,
+        legacy: PathBuf,
         defaults: DefaultHistoryDirs,
     }
 
     impl Dirs {
         fn new() -> Self {
             let root = tempfile::tempdir().unwrap();
+            let current = root.path().join("state").join("arf").join("history");
+            let legacy = root.path().join("data").join("arf").join("history");
             let defaults = DefaultHistoryDirs {
-                current: root.path().join("state").join("arf").join("history"),
-                legacy: root.path().join("data").join("arf").join("history"),
+                current: current.clone(),
+                legacy: Some(legacy.clone()),
             };
             Self {
                 _root: root,
+                current,
+                legacy,
                 defaults,
             }
         }
@@ -462,18 +559,14 @@ mod location_tests {
         let dirs = Dirs::new();
         assert_selected(
             &dirs.resolve(),
-            &dirs.defaults.current,
+            &dirs.current,
             HistoryLocationSource::Default,
         );
 
         // An empty legacy directory does not count as history.
-        fs::create_dir_all(&dirs.defaults.legacy).unwrap();
+        fs::create_dir_all(&dirs.legacy).unwrap();
         let resolved = dirs.resolve();
-        assert_selected(
-            &resolved,
-            &dirs.defaults.current,
-            HistoryLocationSource::Default,
-        );
+        assert_selected(&resolved, &dirs.current, HistoryLocationSource::Default);
         assert!(resolved.legacy_default_warning().is_none());
     }
 
@@ -481,16 +574,16 @@ mod location_tests {
     fn legacy_with_either_database_selects_the_whole_legacy_directory() {
         for filename in ["r.db", "shell.db"] {
             let dirs = Dirs::new();
-            Dirs::touch(&dirs.defaults.legacy, filename);
+            Dirs::touch(&dirs.legacy, filename);
             let resolved = dirs.resolve();
             assert_selected(
                 &resolved,
-                &dirs.defaults.legacy,
+                &dirs.legacy,
                 HistoryLocationSource::LegacyDefault,
             );
             let warning = resolved.legacy_default_warning().unwrap();
-            assert!(warning.contains(&dirs.defaults.legacy.display().to_string()));
-            assert!(warning.contains(&dirs.defaults.current.display().to_string()));
+            assert!(warning.contains(&dirs.legacy.display().to_string()));
+            assert!(warning.contains(&dirs.current.display().to_string()));
             assert!(warning.contains("arf history migrate"));
             assert!(warning.contains("copy"));
         }
@@ -499,24 +592,66 @@ mod location_tests {
     #[test]
     fn current_history_wins_without_a_warning() {
         let dirs = Dirs::new();
-        Dirs::touch(&dirs.defaults.current, "shell.db");
+        Dirs::touch(&dirs.current, "shell.db");
         let resolved = dirs.resolve();
-        assert_selected(
-            &resolved,
-            &dirs.defaults.current,
-            HistoryLocationSource::Default,
-        );
+        assert_selected(&resolved, &dirs.current, HistoryLocationSource::Default);
         assert!(resolved.legacy_default_warning().is_none());
 
         // With history in both, current still wins and nothing is merged.
-        Dirs::touch(&dirs.defaults.legacy, "r.db");
+        Dirs::touch(&dirs.legacy, "r.db");
         let resolved = dirs.resolve();
-        assert_selected(
-            &resolved,
-            &dirs.defaults.current,
-            HistoryLocationSource::Default,
-        );
+        assert_selected(&resolved, &dirs.current, HistoryLocationSource::Default);
         assert!(resolved.legacy_default_warning().is_none());
+    }
+
+    #[test]
+    fn current_missing_a_kind_that_legacy_has_warns_naming_that_kind() {
+        // Current has only shell history; legacy has R history.
+        let dirs = Dirs::new();
+        Dirs::touch(&dirs.current, "shell.db");
+        Dirs::touch(&dirs.legacy, "r.db");
+        let resolved = dirs.resolve();
+        assert_selected(&resolved, &dirs.current, HistoryLocationSource::Default);
+        assert!(resolved.legacy_default_warning().is_none());
+        let warning = resolved.startup_warning().unwrap();
+        assert!(warning.contains("R history"));
+        assert!(!warning.contains("shell history"));
+        assert!(warning.contains(&dirs.legacy.join("r.db").display().to_string()));
+        assert!(warning.contains(&dirs.current.display().to_string()));
+        assert!(warning.contains("arf history migrate"));
+
+        // Current has only R history; legacy has shell history.
+        let dirs = Dirs::new();
+        Dirs::touch(&dirs.current, "r.db");
+        Dirs::touch(&dirs.legacy, "shell.db");
+        let warning = dirs.resolve().startup_warning().unwrap();
+        assert!(warning.contains("shell history"));
+        assert!(!warning.contains("R history"));
+        assert!(warning.contains(&dirs.legacy.join("shell.db").display().to_string()));
+    }
+
+    #[test]
+    fn same_kinds_in_both_directories_or_a_complete_current_do_not_warn() {
+        // Normal after a migration: legacy is kept alongside current.
+        let dirs = Dirs::new();
+        for directory in [&dirs.current, &dirs.legacy] {
+            Dirs::touch(directory, "r.db");
+            Dirs::touch(directory, "shell.db");
+        }
+        assert!(dirs.resolve().startup_warning().is_none());
+
+        // Same single kind on both sides.
+        let dirs = Dirs::new();
+        Dirs::touch(&dirs.current, "r.db");
+        Dirs::touch(&dirs.legacy, "r.db");
+        assert!(dirs.resolve().startup_warning().is_none());
+
+        // A complete current directory never reports legacy leftovers.
+        let dirs = Dirs::new();
+        Dirs::touch(&dirs.current, "r.db");
+        Dirs::touch(&dirs.current, "shell.db");
+        Dirs::touch(&dirs.legacy, "r.db");
+        assert!(dirs.resolve().startup_warning().is_none());
     }
 
     #[test]
@@ -525,7 +660,7 @@ mod location_tests {
         use crate::history::artifact::HistoryKind;
 
         let dirs = Dirs::new();
-        Dirs::touch(&dirs.defaults.legacy, "r.db");
+        Dirs::touch(&dirs.legacy, "r.db");
         let resolved = dirs.resolve();
         let mode = HistoryMode::Persistent { dir: None };
 
@@ -547,8 +682,8 @@ mod location_tests {
         );
         assert_eq!(r.state_name(), "persistent");
         assert_eq!(shell.state_name(), "persistent");
-        assert!(dirs.defaults.legacy.join("shell.db").exists());
-        assert!(!dirs.defaults.current.exists());
+        assert!(dirs.legacy.join("shell.db").exists());
+        assert!(!dirs.current.exists());
     }
 
     #[test]
@@ -557,11 +692,32 @@ mod location_tests {
         let same = root.path().join("history");
         let defaults = DefaultHistoryDirs {
             current: same.clone(),
-            legacy: same.clone(),
+            legacy: Some(same.clone()),
         };
         let resolved =
             resolve_history_location(&HistoryMode::Persistent { dir: None }, Some(&defaults));
         assert_selected(&resolved, &same, HistoryLocationSource::Default);
+    }
+
+    #[test]
+    fn unknown_legacy_directory_selects_current_without_probing_legacy() {
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join("state").join("arf").join("history");
+        let defaults = DefaultHistoryDirs {
+            current: current.clone(),
+            legacy: None,
+        };
+        // With and without history in the current directory.
+        for populate in [false, true] {
+            if populate {
+                fs::create_dir_all(&current).unwrap();
+                fs::write(current.join("shell.db"), b"").unwrap();
+            }
+            let resolved =
+                resolve_history_location(&HistoryMode::Persistent { dir: None }, Some(&defaults));
+            assert_selected(&resolved, &current, HistoryLocationSource::Default);
+            assert!(resolved.startup_warning().is_none());
+        }
     }
 
     #[test]
@@ -575,8 +731,8 @@ mod location_tests {
     #[test]
     fn explicit_directory_wins_without_probing_or_warning() {
         let dirs = Dirs::new();
-        Dirs::touch(&dirs.defaults.legacy, "r.db");
-        let explicit = dirs.defaults.current.join("elsewhere");
+        Dirs::touch(&dirs.legacy, "r.db");
+        let explicit = dirs.current.join("elsewhere");
         let resolved = resolve_history_location(
             &HistoryMode::Persistent {
                 dir: Some(explicit.clone()),
@@ -588,22 +744,18 @@ mod location_tests {
         // Explicitly naming the legacy path is still explicit.
         let resolved = resolve_history_location(
             &HistoryMode::Persistent {
-                dir: Some(dirs.defaults.legacy.clone()),
+                dir: Some(dirs.legacy.clone()),
             },
             Some(&dirs.defaults),
         );
-        assert_selected(
-            &resolved,
-            &dirs.defaults.legacy,
-            HistoryLocationSource::Explicit,
-        );
+        assert_selected(&resolved, &dirs.legacy, HistoryLocationSource::Explicit);
         assert!(resolved.legacy_default_warning().is_none());
     }
 
     #[test]
     fn volatile_never_looks_at_persistent_paths() {
         let dirs = Dirs::new();
-        Dirs::touch(&dirs.defaults.legacy, "r.db");
+        Dirs::touch(&dirs.legacy, "r.db");
         let resolved = resolve_history_location(&HistoryMode::Volatile, Some(&dirs.defaults));
         assert_eq!(resolved.directory(), None);
         assert_eq!(resolved.database_path("r.db"), None);
@@ -638,9 +790,9 @@ mod location_tests {
         #[test]
         fn unreadable_legacy_directory_is_a_failure_not_absence() {
             let dirs = Dirs::new();
-            fs::create_dir_all(&dirs.defaults.current).unwrap();
-            fs::create_dir_all(&dirs.defaults.legacy).unwrap();
-            let Some(_locked) = Locked::new(&dirs.defaults.legacy) else {
+            fs::create_dir_all(&dirs.current).unwrap();
+            fs::create_dir_all(&dirs.legacy).unwrap();
+            let Some(_locked) = Locked::new(&dirs.legacy) else {
                 return;
             };
 
@@ -648,11 +800,11 @@ mod location_tests {
             assert_eq!(resolved.directory(), None);
             assert_eq!(resolved.database_path("r.db"), None);
             let failure = resolved.probe_failure().expect("probe error is reported");
-            assert_eq!(failure.directory(), dirs.defaults.legacy);
+            assert_eq!(failure.directory(), dirs.legacy);
             assert!(
                 failure
                     .to_string()
-                    .contains(&dirs.defaults.legacy.display().to_string())
+                    .contains(&dirs.legacy.display().to_string())
             );
             assert!(resolved.legacy_default_warning().is_none());
         }
@@ -663,9 +815,9 @@ mod location_tests {
             use crate::history::artifact::HistoryKind;
 
             let dirs = Dirs::new();
-            fs::create_dir_all(&dirs.defaults.current).unwrap();
-            fs::create_dir_all(&dirs.defaults.legacy).unwrap();
-            let Some(_locked) = Locked::new(&dirs.defaults.legacy) else {
+            fs::create_dir_all(&dirs.current).unwrap();
+            fs::create_dir_all(&dirs.legacy).unwrap();
+            let Some(_locked) = Locked::new(&dirs.legacy) else {
                 return;
             };
             let resolved = dirs.resolve();
@@ -681,45 +833,52 @@ mod location_tests {
                 );
                 assert_eq!(runtime.state_name(), "volatile");
                 assert_eq!(runtime.reason_name(), Some("fallback"));
-                assert_eq!(
-                    runtime.requested_path(),
-                    Some(dirs.defaults.legacy.as_path())
-                );
+                assert_eq!(runtime.requested_path(), Some(dirs.legacy.as_path()));
                 let warning = runtime.startup_warning().unwrap();
-                assert!(warning.contains(&dirs.defaults.legacy.display().to_string()));
+                assert!(warning.contains(&dirs.legacy.display().to_string()));
             }
-            assert!(!dirs.defaults.current.join("r.db").exists());
+            assert!(!dirs.current.join("r.db").exists());
+        }
+
+        #[test]
+        fn unreadable_legacy_does_not_fail_split_history_detection() {
+            let dirs = Dirs::new();
+            Dirs::touch(&dirs.current, "r.db");
+            fs::create_dir_all(&dirs.legacy).unwrap();
+            let Some(_locked) = Locked::new(&dirs.legacy) else {
+                return;
+            };
+            let resolved = dirs.resolve();
+            assert_selected(&resolved, &dirs.current, HistoryLocationSource::Default);
+            assert!(resolved.startup_warning().is_none());
         }
 
         #[test]
         fn unreadable_current_directory_is_a_failure_not_absence() {
             let dirs = Dirs::new();
-            Dirs::touch(&dirs.defaults.legacy, "r.db");
-            fs::create_dir_all(&dirs.defaults.current).unwrap();
-            let Some(_locked) = Locked::new(&dirs.defaults.current) else {
+            Dirs::touch(&dirs.legacy, "r.db");
+            fs::create_dir_all(&dirs.current).unwrap();
+            let Some(_locked) = Locked::new(&dirs.current) else {
                 return;
             };
 
             let resolved = dirs.resolve();
             assert_eq!(resolved.directory(), None);
-            assert_eq!(
-                resolved.probe_failure().unwrap().directory(),
-                dirs.defaults.current
-            );
+            assert_eq!(resolved.probe_failure().unwrap().directory(), dirs.current);
         }
 
         #[test]
         fn unreadable_legacy_is_ignored_when_current_has_history() {
             let dirs = Dirs::new();
-            Dirs::touch(&dirs.defaults.current, "r.db");
-            fs::create_dir_all(&dirs.defaults.legacy).unwrap();
-            let Some(_locked) = Locked::new(&dirs.defaults.legacy) else {
+            Dirs::touch(&dirs.current, "r.db");
+            fs::create_dir_all(&dirs.legacy).unwrap();
+            let Some(_locked) = Locked::new(&dirs.legacy) else {
                 return;
             };
 
             assert_selected(
                 &dirs.resolve(),
-                &dirs.defaults.current,
+                &dirs.current,
                 HistoryLocationSource::Default,
             );
         }
