@@ -738,7 +738,7 @@ The history directory is resolved with the following priority (highest first):
 1. CLI `--history-dir`
 2. `ARF_HISTORY_DIR` environment variable
 3. TOML `[history] mode = { dir = "..." }`
-4. XDG default
+4. Platform default location (see below)
 
 ### CLI Options
 

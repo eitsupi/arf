@@ -50,7 +50,7 @@ complete -c arf -n "__fish_arf_needs_command" -l arch -d '[R] Specify a sub-arch
 complete -c arf -n "__fish_arf_needs_command" -l ipc-bind -d 'Bind IPC socket to a specific path instead of the default (requires --with-ipc)' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l ipc-pid-file -d 'Write server PID to a file on startup (requires --with-ipc)' -r -F
 complete -c arf -n "__fish_arf_needs_command" -l ipc-eval-allow-function -d 'Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use `package::function`' -r
-complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_needs_command" -l history-dir -d 'Custom history directory (overrides the default location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_needs_command" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
 complete -c arf -n "__fish_arf_needs_command" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_needs_command" -l no-banner -d 'Suppress the startup banner'
@@ -173,7 +173,7 @@ complete -c arf -n "__fish_arf_using_subcommand headless" -l max-connections -d 
 complete -c arf -n "__fish_arf_using_subcommand headless" -l max-ppsize -d '[R] Set max size of protect stack to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-nsize -d '[R] Set min number of fixed size obj\'s ("cons cells") to N' -r
 complete -c arf -n "__fish_arf_using_subcommand headless" -l min-vsize -d '[R] Set vector heap minimum to N bytes; \'4M\' = 4 MegaB' -r
-complete -c arf -n "__fish_arf_using_subcommand headless" -l history-dir -d 'Custom history directory (overrides default XDG location)' -r -f -a "(__fish_complete_directories)"
+complete -c arf -n "__fish_arf_using_subcommand headless" -l history-dir -d 'Custom history directory (overrides the default location)' -r -f -a "(__fish_complete_directories)"
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-source-overrides -d 'Disable experimental directory-level R source overrides'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l no-r-auto-discovery -d 'Test-support flag for reproducing a machine with no R installed'
 complete -c arf -n "__fish_arf_using_subcommand headless" -l ipc-eval-unrestricted -d 'Disable the IPC evaluate allowlist for this server startup only'

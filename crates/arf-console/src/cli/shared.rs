@@ -118,7 +118,7 @@ pub struct RCompatArgs {
 
 #[derive(Args, Debug)]
 pub struct HistoryOptions {
-    /// Custom history directory (overrides default XDG location)
+    /// Custom history directory (overrides the default location)
     ///
     /// R history is stored at `{dir}/r.db`. The interactive console also
     /// stores shell history at `{dir}/shell.db`.

@@ -133,7 +133,7 @@ Options:
           Disable the IPC evaluate allowlist for this server startup only
 
       --history-dir <HISTORY_DIR>
-          Custom history directory (overrides default XDG location)
+          Custom history directory (overrides the default location)
           
           R history is stored at `{dir}/r.db`. The interactive console also stores shell history at `{dir}/shell.db`.
           
