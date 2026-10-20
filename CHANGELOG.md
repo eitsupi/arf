@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
+
 ### Fixed
 
 - On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).

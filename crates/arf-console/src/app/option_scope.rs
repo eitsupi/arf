@@ -168,7 +168,7 @@ fn is_history_option_allowed(path: &[String], long: &str) -> bool {
     matches!(long, "config" | "history-dir")
         && path.len() == 2
         && path[0] == "history"
-        && matches!(path[1].as_str(), "import" | "export" | "schema")
+        && matches!(path[1].as_str(), "import" | "export" | "schema" | "migrate")
 }
 
 #[cfg(test)]

@@ -9,7 +9,6 @@ use crate::history;
 use crate::ipc;
 use crate::pager;
 use anyhow::{Context, Result};
-use std::fs;
 
 /// Handle config subcommands.
 pub(crate) fn handle_config_command(action: &ConfigAction) -> Result<()> {
@@ -102,6 +101,13 @@ pub(crate) fn handle_history_command(
                 .directory()
                 .map(std::path::Path::to_path_buf),
         ),
+        HistoryAction::Migrate { dry_run } => handle_history_migrate(
+            *dry_run,
+            match history_location.source() {
+                config::HistoryLocationSource::Explicit => history_location.directory(),
+                _ => None,
+            },
+        ),
         HistoryAction::Export {
             file,
             r_table,
@@ -152,10 +158,10 @@ fn handle_history_import(
     shell_table: &str,
     history_dir: Option<std::path::PathBuf>,
 ) -> Result<()> {
+    use history::import::service::{self, HistoryDbPaths, ImportPolicy};
     use history::import::{
-        DedupSet, default_r_history_path, default_radian_path, import_entries,
-        import_entries_dry_run, parse_arf_history, parse_r_history, parse_radian_history,
-        parse_unified_arf_history,
+        default_r_history_path, default_radian_path, parse_arf_history, parse_r_history,
+        parse_radian_history, parse_unified_arf_history,
     };
 
     // Determine source file path
@@ -205,181 +211,87 @@ fn handle_history_import(
 
     println!("Found {} entries to import", entries.len());
 
+    let policy = ImportPolicy {
+        hostname,
+        skip_duplicates,
+    };
+    let duplicates_note = " (use --import-duplicates to import anyway)";
+
     // In dry-run mode, simulate the import
     if dry_run {
-        // Build dedup sets if duplicate skipping is enabled (requires DB access).
-        // Each database is checked independently so dedup works even if only
-        // one of the two target databases exists.
-        let (r_dedup, shell_dedup) = if skip_duplicates {
-            if let Some(ref history_dir) = history_dir {
-                let r_path = history_dir.join("r.db");
-                let shell_path = history_dir.join("shell.db");
-                let r_dedup = if r_path.exists() {
-                    Some(DedupSet::from_db(
-                        &r_path,
-                        history::artifact::HistoryKind::R,
-                    )?)
-                } else {
-                    None
-                };
-                let shell_dedup = if shell_path.exists() {
-                    Some(DedupSet::from_db(
-                        &shell_path,
-                        history::artifact::HistoryKind::Shell,
-                    )?)
-                } else {
-                    None
-                };
-                (r_dedup, shell_dedup)
-            } else {
-                // No persistent history directory was resolved (for example, volatile mode).
-                // Dedup is silently skipped; warn the user so they know the
-                // duplicate count is not available.
-                eprintln!(
-                    "Warning: Could not determine history directory; \
-                     duplicate detection skipped in dry-run."
-                );
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
-
-        let dry_entries = if let Some(hostname) = hostname {
-            entries
-                .iter()
-                .cloned()
-                .map(|mut entry| {
-                    entry.item.hostname = Some(hostname.to_owned());
-                    entry
-                })
-                .collect()
-        } else {
-            entries.clone()
-        };
-        let mut result =
-            import_entries_dry_run(&dry_entries, r_dedup.as_ref(), shell_dedup.as_ref());
+        let destination = history_dir.map(HistoryDbPaths::new);
+        let mut result = service::preview(&entries, destination.as_ref(), policy)?;
         result.warnings.extend(parse_warnings);
-
-        println!("\n[Dry run] Would import:");
-        if let Some(h) = hostname {
-            println!("  Hostname:       {}", h);
-        }
-        println!("  R commands:     {}", result.r_imported);
-        println!("  Shell commands: {}", result.shell_imported);
-        println!("  Skipped:        {}", result.skipped);
-        if result.duplicates_repaired > 0 {
-            println!("  Duplicate repairs:  {}", result.duplicates_repaired);
-        }
-        if result.duplicates_skipped > 0 {
-            println!(
-                "  Duplicates:     {} (use --import-duplicates to import anyway)",
-                result.duplicates_skipped
-            );
-        }
-
-        if !result.warnings.is_empty() {
-            println!("\nWarnings:");
-            for warning in result.warnings.iter().take(10) {
-                println!("  - {}", warning);
-            }
-            if result.warnings.len() > 10 {
-                println!("  ... and {} more warnings", result.warnings.len() - 10);
-            }
-        }
-
+        service::print_summary(
+            "[Dry run] Would import:",
+            &result,
+            hostname,
+            duplicates_note,
+        );
         return Ok(());
     }
 
     // Determine target database paths (require history_dir for actual import)
-    let history_dir =
-        history_dir.ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?;
-    let r_path = history_dir.join("r.db");
-    let shell_path = history_dir.join("shell.db");
+    let destination = HistoryDbPaths::new(
+        history_dir.ok_or_else(|| anyhow::anyhow!("Could not determine history directory"))?,
+    );
 
     // Prevent self-import when using `--from arf` with `--file` pointing at the
     // same database as the target, which would duplicate history entries.
     if matches!(source, ImportSource::Arf)
-        && let Ok(source_canon) = fs::canonicalize(&source_path)
+        && let Some(kind) = service::shared_database(&source_path, &destination)
     {
-        if fs::canonicalize(&r_path).is_ok_and(|r_canon| source_canon == r_canon) {
-            anyhow::bail!(
-                "Refusing to import from '{}' into itself (R history database). \
-                 Please specify a different --file or history directory.",
-                source_path.display()
-            );
-        }
-        if fs::canonicalize(&shell_path).is_ok_and(|shell_canon| source_canon == shell_canon) {
-            anyhow::bail!(
-                "Refusing to import from '{}' into itself (shell history database). \
-                 Please specify a different --file or history directory.",
-                source_path.display()
-            );
-        }
-    }
-
-    // Ensure the history directory exists (config::ensure_directories only creates XDG base dirs,
-    // not the history subdirectory or custom --history-dir paths)
-    fs::create_dir_all(&history_dir).with_context(|| {
-        format!(
-            "Failed to create history directory: {}",
-            history_dir.display()
-        )
-    })?;
-
-    println!("Target databases:");
-    println!("  R:     {}", r_path.display());
-    println!("  Shell: {}", shell_path.display());
-
-    let mut targets = history::import::ImportTargets {
-        r_history: history::HistoryStore::open(
-            r_path,
-            history::artifact::HistoryKind::R,
-            None,
-            None,
-        )
-        .context("Failed to open R history database")?,
-        shell_history: history::HistoryStore::open(
-            shell_path,
-            history::artifact::HistoryKind::Shell,
-            None,
-            None,
-        )
-        .context("Failed to open shell history database")?,
-    };
-
-    // Import entries
-    let mut result = import_entries(&mut targets, entries, hostname, skip_duplicates)?;
-    result.warnings.extend(parse_warnings);
-
-    println!("\nImport complete:");
-    if let Some(h) = hostname {
-        println!("  Hostname:       {}", h);
-    }
-    println!("  R commands:     {}", result.r_imported);
-    println!("  Shell commands: {}", result.shell_imported);
-    println!("  Skipped:        {}", result.skipped);
-    if result.duplicates_repaired > 0 {
-        println!("  Duplicate repairs:  {}", result.duplicates_repaired);
-    }
-    if result.duplicates_skipped > 0 {
-        println!(
-            "  Duplicates:     {} (use --import-duplicates to import anyway)",
-            result.duplicates_skipped
+        let label = match kind {
+            history::artifact::HistoryKind::R => "R",
+            history::artifact::HistoryKind::Shell => "shell",
+        };
+        anyhow::bail!(
+            "Refusing to import from '{}' into itself ({} history database). \
+             Please specify a different --file or history directory.",
+            source_path.display(),
+            label
         );
     }
 
-    if !result.warnings.is_empty() {
-        println!("\nWarnings:");
-        for warning in result.warnings.iter().take(10) {
-            println!("  - {}", warning);
-        }
-        if result.warnings.len() > 10 {
-            println!("  ... and {} more warnings", result.warnings.len() - 10);
-        }
-    }
+    println!("Target databases:");
+    println!("  R:     {}", destination.r.display());
+    println!("  Shell: {}", destination.shell.display());
+
+    let mut result = service::execute(entries, &destination, policy)?;
+    result.warnings.extend(parse_warnings);
+    service::print_summary("Import complete:", &result, hostname, duplicates_note);
 
     Ok(())
+}
+
+/// Handle `arf history migrate`.
+///
+/// `explicit_dir` is an explicitly configured history directory, if any. It
+/// never changes the migration endpoints, which are always the platform
+/// defaults; it is only reported so the user is not misled.
+fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>) -> Result<()> {
+    use history::import::migrate::{migrate_history, report_outcome};
+
+    let dirs = config::default_history_dirs()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine the default history directories"))?;
+
+    if let Some(dir) = explicit_dir {
+        println!(
+            "Note: an explicit history directory is configured ({}). It is ignored here: \
+             `arf history migrate` only migrates between the default locations.",
+            dir.display()
+        );
+    }
+
+    if dirs.legacy != dirs.current {
+        println!(
+            "Close other running arf sessions before migrating, and keep them closed until it finishes.\n\
+             The legacy location is kept; it is only read, never modified or deleted.\n"
+        );
+    }
+
+    let outcome = migrate_history(&dirs.legacy, &dirs.current, dry_run)?;
+    report_outcome(&outcome)
 }
 
 fn handle_history_export(

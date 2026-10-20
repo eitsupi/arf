@@ -92,6 +92,9 @@ _arf() {
             arf__subcmd__help__subcmd__history,import)
                 cmd="arf__subcmd__help__subcmd__history__subcmd__import"
                 ;;
+            arf__subcmd__help__subcmd__history,migrate)
+                cmd="arf__subcmd__help__subcmd__history__subcmd__migrate"
+                ;;
             arf__subcmd__help__subcmd__history,schema)
                 cmd="arf__subcmd__help__subcmd__history__subcmd__schema"
                 ;;
@@ -125,6 +128,9 @@ _arf() {
             arf__subcmd__history,import)
                 cmd="arf__subcmd__history__subcmd__import"
                 ;;
+            arf__subcmd__history,migrate)
+                cmd="arf__subcmd__history__subcmd__migrate"
+                ;;
             arf__subcmd__history,schema)
                 cmd="arf__subcmd__history__subcmd__schema"
                 ;;
@@ -136,6 +142,9 @@ _arf() {
                 ;;
             arf__subcmd__history__subcmd__help,import)
                 cmd="arf__subcmd__history__subcmd__help__subcmd__import"
+                ;;
+            arf__subcmd__history__subcmd__help,migrate)
+                cmd="arf__subcmd__history__subcmd__help__subcmd__migrate"
                 ;;
             arf__subcmd__history__subcmd__help,schema)
                 cmd="arf__subcmd__history__subcmd__help__subcmd__schema"
@@ -758,7 +767,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help__subcmd__history)
-            opts="schema import export"
+            opts="schema import migrate export"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -786,6 +795,20 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help__subcmd__history__subcmd__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__history__subcmd__migrate)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -940,7 +963,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__history)
-            opts="-h --help schema import export help"
+            opts="-h --help schema import migrate export help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -991,7 +1014,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__history__subcmd__help)
-            opts="schema import export help"
+            opts="schema import migrate export help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1033,6 +1056,20 @@ _arf() {
             return 0
             ;;
         arf__subcmd__history__subcmd__help__subcmd__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__history__subcmd__help__subcmd__migrate)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1098,6 +1135,20 @@ _arf() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__history__subcmd__migrate)
+            opts="-h --dry-run --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 *)
                     COMPREPLY=()
                     ;;

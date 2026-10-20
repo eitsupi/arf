@@ -127,6 +127,13 @@ impl ImportFixture {
     }
 }
 
+pub(super) fn open_items(
+    path: &Path,
+    kind: crate::history::artifact::HistoryKind,
+) -> Vec<HistoryItem<HistoryExtraInfo>> {
+    items(&HistoryStore::open(path.to_owned(), kind, None, None).unwrap())
+}
+
 fn items(store: &HistoryStore) -> Vec<HistoryItem<HistoryExtraInfo>> {
     store
         .search(SearchQuery::everything(SearchDirection::Forward, None))
