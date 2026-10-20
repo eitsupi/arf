@@ -91,6 +91,9 @@ pub(crate) struct ResolvedHistoryLocation {
     directory: Option<PathBuf>,
     source: HistoryLocationSource,
     probe_failure: Option<HistoryProbeFailure>,
+    /// The current default directory, kept only when the legacy default was
+    /// selected so the startup warning can name both.
+    current_default: Option<PathBuf>,
 }
 
 impl ResolvedHistoryLocation {
@@ -113,16 +116,24 @@ impl ResolvedHistoryLocation {
     }
 
     /// Startup warning shown only when the legacy default directory was
-    /// selected automatically.
+    /// selected automatically. It is a multi-line message naming both
+    /// directories and the way to switch to the current default.
     pub(crate) fn legacy_default_warning(&self) -> Option<String> {
         if self.source != HistoryLocationSource::LegacyDefault {
             return None;
         }
-        let directory = self.directory.as_deref()?;
+        let legacy = self.directory.as_deref()?;
+        let current = self.current_default.as_deref()?;
         Some(format!(
-            "Using the legacy history location {}; the default location has changed. \
-             Run `arf history migrate` to move your history to the new default location.",
-            directory.display()
+            "arf is using history from the legacy default location.\n  \
+             Legacy location:  {}\n  \
+             Current default:  {}\n\
+             The current default location has no history yet, so arf keeps reading and \
+             writing the legacy location.\n\
+             Run `arf history migrate` to copy your history to the current default \
+             location; arf uses it from then on. The legacy location is left unchanged.",
+            legacy.display(),
+            current.display()
         ))
     }
 }
@@ -145,12 +156,14 @@ pub(crate) fn resolve_history_location(
             directory: Some(directory.clone()),
             source: HistoryLocationSource::Explicit,
             probe_failure: None,
+            current_default: None,
         },
         HistoryMode::Persistent { dir: None } => resolve_default_directory(defaults),
         HistoryMode::Volatile => ResolvedHistoryLocation {
             directory: None,
             source: HistoryLocationSource::Volatile,
             probe_failure: None,
+            current_default: None,
         },
     }
 }
@@ -160,6 +173,7 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
         directory,
         source,
         probe_failure: None,
+        current_default: None,
     };
     let Some(defaults) = defaults else {
         return resolved(None, HistoryLocationSource::Default);
@@ -178,10 +192,13 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
             ));
         }
         Ok(if directory_has_history(&defaults.legacy)? {
-            resolved(
-                Some(defaults.legacy.clone()),
-                HistoryLocationSource::LegacyDefault,
-            )
+            ResolvedHistoryLocation {
+                current_default: Some(defaults.current.clone()),
+                ..resolved(
+                    Some(defaults.legacy.clone()),
+                    HistoryLocationSource::LegacyDefault,
+                )
+            }
         } else {
             resolved(
                 Some(defaults.current.clone()),
@@ -193,6 +210,7 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
         directory: None,
         source: HistoryLocationSource::Default,
         probe_failure: Some(failure),
+        current_default: None,
     })
 }
 
@@ -472,7 +490,9 @@ mod location_tests {
             );
             let warning = resolved.legacy_default_warning().unwrap();
             assert!(warning.contains(&dirs.defaults.legacy.display().to_string()));
+            assert!(warning.contains(&dirs.defaults.current.display().to_string()));
             assert!(warning.contains("arf history migrate"));
+            assert!(warning.contains("copy"));
         }
     }
 

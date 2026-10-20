@@ -752,7 +752,7 @@ History files are stored as SQLite databases:
 - Shell history: `{dir}/shell.db`
 
 Default location:
-- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup. If both contain history, the new directory is used.
+- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used.
 - **macOS**: `~/Library/Application Support/arf/history/`
 - **Windows**: `C:\Users\<user>\AppData\Local\arf\history\`
 
@@ -783,7 +783,7 @@ arf history import --from r
 > [!NOTE]
 > Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
-To copy history from the legacy default location (`~/.local/share/arf/history/` on Linux) to the current default location (`~/.local/state/arf/history/`), use `arf history migrate` (add `--dry-run` to preview). It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it. Migrated entries are appended after any existing history, so migrate before building up new history in the current location to keep older entries ordered first. It never deletes anything; once you have confirmed your history in the new location, you may delete the legacy directory yourself, but arf versions from before the move still read it.
+To copy history from the legacy default location (`~/.local/share/arf/history/` on Linux) to the current default location (`~/.local/state/arf/history/`), use `arf history migrate` (add `--dry-run` to preview); once the current location has history, arf uses it from then on. It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it. Migrated entries are appended after any existing history, so migrate before building up new history in the current location to keep older entries ordered first. It never deletes anything; once you have confirmed your history in the new location, you may delete the legacy directory yourself, but arf versions from before the move still read it.
 
 ## Experimental Features
 
