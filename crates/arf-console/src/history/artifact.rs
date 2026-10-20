@@ -16,6 +16,13 @@ const FORMAT_VERSION: &str = "1";
 /// database afterwards are not covered. It is only ever written by migrate
 /// (never when a database is opened) and readers that do not know it ignore
 /// it, so it does not change the format version.
+///
+/// The key exists only to stop the startup warning about uncopied history
+/// for the move between the current and the legacy default location. It is
+/// not a provenance record, a migration log, or a guarantee that the two
+/// locations hold the same history, and it must not be reused for anything
+/// else. A future change of the default location should replace it rather
+/// than extend it.
 pub(crate) const LEGACY_MIGRATED_KEY: &str = "legacy_migrated_from";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
