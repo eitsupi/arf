@@ -738,7 +738,7 @@ The history directory is resolved with the following priority (highest first):
 1. CLI `--history-dir`
 2. `ARF_HISTORY_DIR` environment variable
 3. TOML `[history] mode = { dir = "..." }`
-4. XDG default
+4. Platform default location (see below)
 
 ### CLI Options
 
@@ -752,9 +752,11 @@ History files are stored as SQLite databases:
 - Shell history: `{dir}/shell.db`
 
 Default location:
-- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`); if that directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the old directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used. In that case arf still warns while the old directory has R or shell history that has not been copied: that kind is missing from the new directory, or `arf history migrate` has not completed since. A completed migration records this in each new database whose kind it copied (an optional `legacy_migrated_from` entry in its `arf_metadata` table, holding the old directory it was copied from), which ends the warning even though the old directory is kept; the warning resumes if the legacy location changes. The record means history was copied at the last migration, so entries an older arf adds to the legacy databases afterwards are not detected; rerun `arf history migrate` to copy them. It only serves to end this warning; it does not record where history came from or prove that both directories hold the same history.
-- **macOS**: `~/Library/Application Support/arf/history/`
-- **Windows**: `C:\Users\<user>\AppData\Local\arf\history\`
+- **Linux**: `$XDG_STATE_HOME/arf/history/` (`~/.local/state/arf/history/`). Earlier versions used `$XDG_DATA_HOME/arf/history/` (`~/.local/share/arf/history/`).
+- **macOS**: `~/Library/Application Support/arf/history/` (unchanged: it is already a per-machine location, and macOS has no separate directory for state data)
+- **Windows**: `%LOCALAPPDATA%\arf\history\` (`C:\Users\<user>\AppData\Local\arf\history\`). Earlier versions used `%APPDATA%\arf\history\` (Roaming AppData).
+
+On Linux and Windows, if the earlier directory contains `r.db` or `shell.db` and the new one does not, arf keeps using the earlier directory for both R and shell history and warns at startup until you copy that history with `arf history migrate`, after which arf uses the new directory. If both contain history, the new directory is used. In that case arf still warns while the earlier directory has R or shell history that has not been copied: that kind is missing from the new directory, or `arf history migrate` has not completed since. A completed migration records this in each new database whose kind it copied (an optional `legacy_migrated_from` entry in its `arf_metadata` table, holding the earlier directory it was copied from), which ends the warning even though the earlier directory is kept; the warning resumes if the legacy location changes. The record means history was copied at the last migration, so entries an older arf adds to the legacy databases afterwards are not detected; rerun `arf history migrate` to copy them. It only serves to end this warning; it does not record where history came from or prove that both directories hold the same history.
 
 ### Exporting and Importing History
 
@@ -783,7 +785,7 @@ arf history import --from r
 > [!NOTE]
 > Re-importing the same file is safe — duplicate entries are automatically skipped by matching command text and timestamp.
 
-To copy history from the legacy default location (`~/.local/share/arf/history/` on Linux) to the current default location (`~/.local/state/arf/history/`), use `arf history migrate` (add `--dry-run` to preview); once the current location has history, arf uses it from then on. It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it. When the legacy location no longer has a database of some kind, it clears the record an earlier migration left for that kind (and says so when nothing else is left to migrate), so history created there later is reported again. Migrated entries are appended after any existing history, so migrate before building up new history in the current location to keep older entries ordered first. It never deletes anything; once you have confirmed your history in the new location, you may delete the legacy directory yourself, but arf versions from before the move still read it.
+To copy history from the legacy default location to the current default location (see above), use `arf history migrate` (add `--dry-run` to preview); once the current location has history, arf uses it from then on. It skips duplicates, never modifies the legacy location, and ignores explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`). Close other arf sessions before running it. When the legacy location no longer has a database of some kind, it clears the record an earlier migration left for that kind (and says so when nothing else is left to migrate), so history created there later is reported again. Migrated entries are appended after any existing history, so migrate before building up new history in the current location to keep older entries ordered first. It never deletes anything; once you have confirmed your history in the new location, you may delete the legacy directory yourself, but arf versions from before the move still read it.
 
 ## Experimental Features
 

@@ -23,7 +23,8 @@
 - **Breaking:** On Linux, the default history location is now `$XDG_STATE_HOME/arf/history` (`~/.local/state/arf/history`) instead of `$XDG_DATA_HOME/arf/history` (`~/.local/share/arf/history`), because the XDG Base Directory Specification classifies command history as state data.
   - If only the old location has history, arf keeps using it and shows a startup warning listing both locations.
   - Run `arf history migrate` to copy it to the new location; arf then uses the new location and the old one is left unchanged.
-  - Explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) and the macOS and Windows defaults are not affected.
+  - Explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) and the macOS default are not affected.
+- **Breaking:** On Windows, the default history location is now `%LOCALAPPDATA%\arf\history` instead of `%APPDATA%\arf\history`, because the roaming profile is meant for data synchronized across machines and command history is per-machine. The same fallback to the old location, startup warning, and `arf history migrate` apply as on Linux.
 
 ## [0.7.0-alpha.1] - 2026-10-11
 

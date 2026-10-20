@@ -330,7 +330,7 @@ fn run() -> Result<()> {
     eval_allowlist.extend(cli.ipc_eval_allow_function.iter().cloned());
     ipc::policy::set_policy(eval_allowlist, cli.ipc_eval_unrestricted);
 
-    // History configuration: CLI flag overrides default XDG location
+    // History configuration: CLI flag overrides the default location
     config.history.mode = config::history_mode_with_overrides(
         &config.history.mode,
         cli.history.history_dir.as_deref(),

@@ -191,3 +191,22 @@ on_exit_only = true
     assert_eq!(config.experimental.history_forget.delay, 5);
     assert!(config.experimental.history_forget.on_exit_only);
 }
+
+#[cfg(windows)]
+#[test]
+fn default_history_dirs_use_local_appdata_with_roaming_as_legacy() {
+    let defaults = default_history_dirs().expect("Windows known folders are available");
+    let local = dirs::data_local_dir().unwrap().join("arf").join("history");
+    let roaming = dirs::data_dir().unwrap().join("arf").join("history");
+
+    assert_eq!(defaults.current, local);
+    assert_eq!(defaults.legacy, Some(roaming));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn default_history_dirs_are_equal_on_macos() {
+    let defaults = default_history_dirs().expect("the home directory is available");
+
+    assert_eq!(Some(defaults.current), defaults.legacy);
+}

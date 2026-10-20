@@ -1,6 +1,7 @@
 //! End-to-end checks of the default history location, driven through the real
-//! `HOME` / `XDG_*` environment lookup. Linux only: other platforms have a
-//! single default location.
+//! `HOME` / `XDG_*` environment lookup. Linux only: the XDG variables can
+//! redirect the default locations there, whereas Windows resolves them through
+//! the Known Folder API, which environment variables cannot redirect.
 
 use super::common::{read_history_rows, sanitized_arf_command};
 use std::path::Path;

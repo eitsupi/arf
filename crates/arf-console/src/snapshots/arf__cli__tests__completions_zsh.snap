@@ -45,7 +45,7 @@ format\:"Format code with the configured formatter before reprex evaluation"))' 
 '--ipc-bind=[Bind IPC socket to a specific path instead of the default (requires --with-ipc)]:IPC_BIND:_files' \
 '--ipc-pid-file=[Write server PID to a file on startup (requires --with-ipc)]:IPC_PID_FILE:_files' \
 '*--ipc-eval-allow-function=[Add an exact function target to the IPC evaluate allowlist. May be repeated; package-qualified targets use \`package\:\:function\`]:IPC_EVAL_ALLOW_FUNCTION:_default' \
-'--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
+'--history-dir=[Custom history directory (overrides the default location)]:HISTORY_DIR:_files -/' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '--no-banner[Suppress the startup banner]' \
@@ -374,7 +374,7 @@ _arguments "${_arguments_options[@]}" : \
 '--max-ppsize=[\[R\] Set max size of protect stack to N]:MAX_PPSIZE:_default' \
 '--min-nsize=[\[R\] Set min number of fixed size obj'\''s ("cons cells") to N]:MIN_NSIZE:_default' \
 '--min-vsize=[\[R\] Set vector heap minimum to N bytes; '\''4M'\'' = 4 MegaB]:MIN_VSIZE:_default' \
-'--history-dir=[Custom history directory (overrides default XDG location)]:HISTORY_DIR:_files -/' \
+'--history-dir=[Custom history directory (overrides the default location)]:HISTORY_DIR:_files -/' \
 '--no-r-source-overrides[Disable experimental directory-level R source overrides]' \
 '--no-r-auto-discovery[Test-support flag for reproducing a machine with no R installed]' \
 '--ipc-eval-unrestricted[Disable the IPC evaluate allowlist for this server startup only]' \
