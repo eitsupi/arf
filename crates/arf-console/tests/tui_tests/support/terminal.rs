@@ -205,6 +205,11 @@ impl Terminal {
     /// the prompt that was already on screen and race the next input against
     /// the evaluation. Requiring the prompt on a row below the starting row
     /// proves the input was accepted and the new prompt was drawn.
+    ///
+    /// This deliberately does not handle scrolling: it fails once the cursor
+    /// reaches the last screen row instead of guessing. Use `submit` with a
+    /// unique output marker for commands late in a long session, or give the
+    /// session more rows.
     pub fn submit_quiet(&self, source: &str, prompt: &str) -> Result<()> {
         let start = self.state()?;
         // Scrolling keeps the cursor on the last row, which would make the
