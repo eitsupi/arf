@@ -355,8 +355,18 @@ fn history_runtime_labels_cover_all_lifecycle_states() {
             .contains("volatile (session only)")
     );
     assert!(
-        history_runtime_label(&fallback_with_path, HistoryLocationSource::Default)
-            .contains("fallback; requested path")
+        history_runtime_label(&fallback_with_path, HistoryLocationSource::LegacyDefault)
+            .contains("fallback; requested path: /tmp/history.db; legacy default location)")
+    );
+    let unavailable_with_path = HistoryRuntime::Unavailable {
+        failure: HistoryFailureDetail::test_memory(),
+        previous_failure: Some(HistoryFailureDetail::test_persistent_open(
+            "/tmp/history.db".into(),
+        )),
+    };
+    assert!(
+        history_runtime_label(&unavailable_with_path, HistoryLocationSource::Explicit)
+            .starts_with("unavailable (requested path: /tmp/history.db; explicit directory)")
     );
     assert!(
         history_runtime_label(&fallback_without_path, HistoryLocationSource::Default)

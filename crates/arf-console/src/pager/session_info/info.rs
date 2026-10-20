@@ -172,15 +172,20 @@ pub(super) fn history_runtime_label(
             crate::history::VolatileHistoryReason::Fallback { .. } => {
                 match runtime.requested_path() {
                     Some(path) => format!(
-                        "volatile (fallback; requested path: {})",
-                        mask_home_path(path)
+                        "volatile (fallback; requested path: {}; {})",
+                        mask_home_path(path),
+                        source.label()
                     ),
                     None => "volatile (fallback; no persistent path)".to_string(),
                 }
             }
         },
         HistoryRuntime::Unavailable { .. } => match runtime.requested_path() {
-            Some(path) => format!("unavailable (requested path: {})", mask_home_path(path)),
+            Some(path) => format!(
+                "unavailable (requested path: {}; {})",
+                mask_home_path(path),
+                source.label()
+            ),
             None => "unavailable".to_string(),
         },
     };
