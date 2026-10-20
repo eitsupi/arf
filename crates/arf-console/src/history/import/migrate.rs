@@ -73,10 +73,11 @@ fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<ParsedImport> 
 
 /// Mark the current databases of the kinds the legacy directory had as
 /// migrated so startup stops reporting that legacy history as not yet copied.
-/// Kinds the legacy directory lacked are left unmarked, so legacy history of
-/// that kind created later is still reported. Failures are returned as a count
-/// (with a warning each) rather than hidden: the migration is incomplete until
-/// the record exists, and a rerun retries it.
+/// Kinds the legacy directory lacked are left unmarked, and a record an earlier
+/// migration left for them is cleared, so legacy history of that kind created
+/// later is still reported. Failures are returned as a count (with a warning
+/// each) rather than hidden: the migration is incomplete until the record
+/// exists, and a rerun retries it.
 fn record_completed_migration(
     current: &HistoryDbPaths,
     legacy_dir: &Path,
@@ -89,11 +90,12 @@ fn record_completed_migration(
         (HistoryKind::R, legacy_has_r),
         (HistoryKind::Shell, legacy_has_shell),
     ] {
-        if !present {
-            continue;
-        }
-        if let Err(error) = artifact::record_legacy_migration(current.path(kind), kind, legacy_dir)
-        {
+        let recorded = if present {
+            artifact::record_legacy_migration(current.path(kind), kind, legacy_dir)
+        } else {
+            artifact::clear_legacy_migration(current.path(kind), legacy_dir)
+        };
+        if let Err(error) = recorded {
             failures += 1;
             warnings.push(format!(
                 "Could not record the completed migration: {error:#}"

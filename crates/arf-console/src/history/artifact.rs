@@ -286,6 +286,37 @@ pub(crate) fn record_legacy_migration(
     Ok(())
 }
 
+/// Remove a record of a migration from `legacy_dir`, if this database has one.
+///
+/// A migration that finds no legacy database of this kind calls this, so a
+/// record left by an earlier migration does not cover a legacy database of
+/// this kind that is created later.
+pub(crate) fn clear_legacy_migration(path: &Path, legacy_dir: &Path) -> Result<()> {
+    if !path
+        .try_exists()
+        .with_context(|| format!("failed to inspect history database path {}", path.display()))?
+    {
+        return Ok(());
+    }
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .with_context(|| format!("failed to open history database {}", path.display()))?;
+    if !metadata_table_exists(&connection)? {
+        return Ok(());
+    }
+    connection
+        .execute(
+            "DELETE FROM arf_metadata WHERE key = ?1 AND value = ?2",
+            [LEGACY_MIGRATED_KEY, legacy_dir.to_string_lossy().as_ref()],
+        )
+        .with_context(|| {
+            format!(
+                "failed to clear an earlier migration record in {}",
+                path.display()
+            )
+        })?;
+    Ok(())
+}
+
 /// Whether a completed migration from `legacy_dir` was recorded in this
 /// database. A database without arf metadata, or whose record names a
 /// different legacy directory, has no such record.
