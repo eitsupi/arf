@@ -71,18 +71,29 @@ fn read_legacy_database(path: &Path, kind: HistoryKind) -> Result<ParsedImport> 
     parse_arf_history(path)
 }
 
-/// Mark both current databases as migrated so startup stops reporting the
-/// legacy history as not yet copied. Failures are returned as a count (with a
-/// warning each) rather than hidden: the migration is incomplete until the
-/// record exists, and a rerun retries it.
+/// Mark the current databases of the kinds the legacy directory had as
+/// migrated so startup stops reporting that legacy history as not yet copied.
+/// Kinds the legacy directory lacked are left unmarked, so legacy history of
+/// that kind created later is still reported. Failures are returned as a count
+/// (with a warning each) rather than hidden: the migration is incomplete until
+/// the record exists, and a rerun retries it.
 fn record_completed_migration(
     current: &HistoryDbPaths,
     legacy_dir: &Path,
+    legacy_has_r: bool,
+    legacy_has_shell: bool,
     warnings: &mut Vec<String>,
 ) -> usize {
     let mut failures = 0;
-    for kind in [HistoryKind::R, HistoryKind::Shell] {
-        if let Err(error) = artifact::record_legacy_migration(current.path(kind), legacy_dir) {
+    for (kind, present) in [
+        (HistoryKind::R, legacy_has_r),
+        (HistoryKind::Shell, legacy_has_shell),
+    ] {
+        if !present {
+            continue;
+        }
+        if let Err(error) = artifact::record_legacy_migration(current.path(kind), kind, legacy_dir)
+        {
             failures += 1;
             warnings.push(format!(
                 "Could not record the completed migration: {error:#}"
@@ -173,7 +184,13 @@ pub(crate) fn migrate_history(
     result.warnings.extend(parse_warnings);
 
     let record_failures = if !dry_run && result.write_failures == 0 {
-        record_completed_migration(&current, &legacy.directory, &mut result.warnings)
+        record_completed_migration(
+            &current,
+            &legacy.directory,
+            legacy_has_r,
+            legacy_has_shell,
+            &mut result.warnings,
+        )
     } else {
         0
     };

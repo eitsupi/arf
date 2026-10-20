@@ -292,9 +292,10 @@ fn resolve_default_directory(defaults: Option<&DefaultHistoryDirs>) -> ResolvedH
 /// the problems that prevented checking some of them.
 ///
 /// A legacy database counts as uncopied when the current database of the same
-/// kind is missing or lacks the record a completed `arf history migrate`
-/// leaves. Kinds with no legacy database are never inspected further, so a
-/// directory without legacy history costs only the existence checks.
+/// kind is missing or lacks the record a completed `arf history migrate` of
+/// this legacy directory leaves. Kinds with no legacy database are never
+/// inspected further, so a directory without legacy history costs only the
+/// existence checks.
 fn check_uncopied_legacy(
     legacy: &Path,
     current_directory: &Path,
@@ -320,7 +321,7 @@ fn check_uncopied_legacy(
         }
         let copied = if current_has_kind {
             let current_database = current_directory.join(filename);
-            match crate::history::artifact::legacy_migration_recorded(&current_database) {
+            match crate::history::artifact::legacy_migration_recorded(&current_database, legacy) {
                 Ok(recorded) => recorded,
                 Err(error) => {
                     problems.push(format!(

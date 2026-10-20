@@ -189,6 +189,38 @@ fn migration_silences_the_warning_while_the_legacy_directory_is_kept() {
 }
 
 #[test]
+fn migration_from_another_legacy_directory_does_not_silence_the_warning() {
+    let dirs = Dirs::new();
+    let other = dirs._root.path().join("other");
+    Dirs::database(&other, HistoryKind::R);
+    Dirs::database(&dirs.legacy, HistoryKind::R);
+    migrate_history(&other, &dirs.current, false).unwrap();
+
+    let warning = dirs
+        .resolve()
+        .startup_warning()
+        .expect("the record names a different legacy directory");
+    assert!(warning.contains(&dirs.legacy.join("r.db").display().to_string()));
+
+    dirs.migrate();
+    assert!(dirs.resolve().startup_warning().is_none());
+}
+
+#[test]
+fn legacy_history_of_a_kind_created_after_the_migration_is_reported() {
+    let dirs = Dirs::new();
+    Dirs::database(&dirs.legacy, HistoryKind::R);
+    dirs.migrate();
+    assert!(dirs.resolve().startup_warning().is_none());
+
+    Dirs::database(&dirs.legacy, HistoryKind::Shell);
+    let warning = dirs.resolve().startup_warning().unwrap();
+    assert!(warning.contains("shell history"));
+    assert!(!warning.contains("R history"));
+    assert!(warning.contains(&dirs.legacy.join("shell.db").display().to_string()));
+}
+
+#[test]
 fn same_kinds_in_both_directories_warn_until_migrated() {
     let dirs = Dirs::new();
     for directory in [&dirs.current, &dirs.legacy] {
