@@ -162,7 +162,9 @@ impl Terminal {
         // A new, independent output line plus the cursor's prompt line avoids
         // matching old prompts and source echoes. Each command's marker must be
         // unique within the session. For repeated commands, compare the cursor
-        // row before and after submission, then check the result on screen.
+        // row before and after submission, then check the result on screen;
+        // `submit_quiet` does this for commands that print nothing and return
+        // to the same prompt.
         // Recording checkpoints are for stream-only checks such as erased
         // output, complete echoes, and non-leak behavior.
         // arf emits no shell integration: WaitReady/WaitCommand are not suitable.
@@ -195,6 +197,29 @@ impl Terminal {
     pub fn submit(&self, source: &str, output: &str, prompt: &str) -> Result<()> {
         self.enter(source)?;
         self.wait_for_prompt(Some(output), prompt)
+    }
+
+    /// Submit a command that prints no unique output and returns to `prompt`.
+    ///
+    /// Submission does not wait for the echo, so a bare prompt wait could match
+    /// the prompt that was already on screen and race the next input against
+    /// the evaluation. Requiring the prompt on a row below the starting row
+    /// proves the input was accepted and the new prompt was drawn.
+    pub fn submit_quiet(&self, source: &str, prompt: &str) -> Result<()> {
+        let start = self.state()?;
+        // Scrolling keeps the cursor on the last row, which would make the
+        // row comparison meaningless.
+        ensure!(
+            start.cursor.y + 1 < start.rows,
+            "cursor is on the last screen row before a quiet submit: {start:?}"
+        );
+        let start_row = start.cursor.y;
+        self.enter(source)?;
+        self.wait_for("input prompt on a new row", |state, line| {
+            state.cursor.y > start_row
+                && line.trim_end() == prompt
+                && usize::from(state.cursor.x) == prompt.len() + 1
+        })
     }
 
     pub fn write(&self, text: &str) -> Result<()> {

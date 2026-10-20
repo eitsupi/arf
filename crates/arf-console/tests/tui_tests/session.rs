@@ -102,8 +102,7 @@ fn auto_width_disabled_preserves_explicit_width_after_idle_boundary() -> Result<
             .rows(32),
         |terminal| {
             terminal.wait_for_first_prompt()?;
-            terminal.enter("options(width = 42)")?;
-            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit_quiet("options(width = 42)", PROMPT)?;
             // IPC evaluation is serviced after the REPL's idle callback. This
             // avoids racing a width synchronization against the next input.
             let response = terminal

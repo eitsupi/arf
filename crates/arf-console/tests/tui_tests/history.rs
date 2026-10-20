@@ -34,8 +34,7 @@ fn history_menu_selection_replaces_existing_buffer() -> Result<()> {
         "history-menu-replace",
         &["--no-auto-match", "--no-completion"],
         |terminal| {
-            terminal.enter(command)?;
-            terminal.wait_for_prompt(None, PROMPT)?;
+            terminal.submit_quiet(command, PROMPT)?;
             terminal.write("history_menu")?;
             terminal.wait_for("partial history input", |_, line| {
                 line.trim_end().starts_with("ARF> history_menu")
