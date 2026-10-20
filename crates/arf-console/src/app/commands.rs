@@ -270,7 +270,7 @@ fn handle_history_import(
 /// never changes the migration endpoints, which are always the platform
 /// defaults; it is only reported so the user is not misled.
 fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>) -> Result<()> {
-    use history::import::migrate::{MigrationOutcome, migrate_history, print_outcome};
+    use history::import::migrate::{migrate_history, report_outcome};
 
     let dirs = config::default_history_dirs()
         .ok_or_else(|| anyhow::anyhow!("Could not determine the default history directories"))?;
@@ -291,21 +291,7 @@ fn handle_history_migrate(dry_run: bool, explicit_dir: Option<&std::path::Path>)
     }
 
     let outcome = migrate_history(&dirs.legacy, &dirs.current, dry_run)?;
-    print_outcome(&outcome);
-
-    if let MigrationOutcome::Migrated(report) = &outcome {
-        report.ensure_complete()?;
-        if report.dry_run {
-            println!("\nDry run only: no history was written.");
-        } else {
-            println!(
-                "\nThe legacy location was kept unchanged. Arf sessions that were open during the \
-                 migration may still have written to it; close them and rerun this command to copy \
-                 any remaining entries (rerunning is safe)."
-            );
-        }
-    }
-    Ok(())
+    report_outcome(&outcome)
 }
 
 fn handle_history_export(

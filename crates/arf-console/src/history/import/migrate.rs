@@ -34,26 +34,6 @@ pub(crate) struct MigrationReport {
     pub(crate) result: ImportResult,
 }
 
-impl MigrationReport {
-    /// Fail if any row could not be written to the current location.
-    ///
-    /// The import engine reports row-level write errors as warnings so one bad
-    /// row does not stop the rest; a migration must not call that success.
-    pub(crate) fn ensure_complete(&self) -> Result<()> {
-        if self.result.write_failures == 0 {
-            return Ok(());
-        }
-        bail!(
-            "Migration into {} was incomplete: {} row(s) could not be written (see the warnings above).\n\
-             The legacy location {} was not modified. Rerunning `arf history migrate` is safe: \
-             entries already copied are skipped.",
-            self.current.directory.display(),
-            self.result.write_failures,
-            self.legacy.directory.display()
-        )
-    }
-}
-
 fn same_directory(a: &Path, b: &Path) -> bool {
     a == b
         || matches!(
@@ -180,21 +160,26 @@ pub(crate) fn migrate_history(
 }
 
 /// Print what [`migrate_history`] found and did.
-pub(crate) fn print_outcome(outcome: &MigrationOutcome) {
+///
+/// Returns an error when any row could not be written to the current
+/// location, after the summary and warnings are shown. The import engine
+/// reports row-level write errors as warnings so one bad row does not stop the
+/// rest; a migration must not call that success.
+pub(crate) fn report_outcome(outcome: &MigrationOutcome) -> Result<()> {
     let report = match outcome {
         MigrationOutcome::SameLocation(dir) => {
             println!(
                 "Nothing to migrate: legacy and current default locations are the same ({}).",
                 dir.display()
             );
-            return;
+            return Ok(());
         }
         MigrationOutcome::NoLegacyHistory(dir) => {
             println!(
                 "Nothing to migrate: no history databases (r.db, shell.db) found in the legacy location ({}).",
                 dir.display()
             );
-            return;
+            return Ok(());
         }
         MigrationOutcome::Migrated(report) => report,
     };
@@ -230,4 +215,25 @@ pub(crate) fn print_outcome(outcome: &MigrationOutcome) {
         None,
         " (already in the current location)",
     );
+
+    if report.result.write_failures > 0 {
+        bail!(
+            "Migration into {} was incomplete: {} row(s) could not be written (see the warnings above).\n\
+             The legacy location {} was not modified. Rerunning `arf history migrate` is safe: \
+             entries already copied are skipped.",
+            report.current.directory.display(),
+            report.result.write_failures,
+            report.legacy.directory.display()
+        );
+    }
+    if report.dry_run {
+        println!("\nDry run only: no history was written.");
+    } else {
+        println!(
+            "\nThe legacy location was kept unchanged. Arf sessions that were open during the \
+             migration may still have written to it; close them and rerun this command to copy \
+             any remaining entries (rerunning is safe)."
+        );
+    }
+    Ok(())
 }

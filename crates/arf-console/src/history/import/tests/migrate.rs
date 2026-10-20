@@ -1,5 +1,5 @@
 use super::super::ImportEntry;
-use super::super::migrate::{MigrationOutcome, MigrationReport, migrate_history};
+use super::super::migrate::{MigrationOutcome, MigrationReport, migrate_history, report_outcome};
 use super::support::*;
 use crate::history::artifact::HistoryKind;
 use std::collections::BTreeMap;
@@ -38,6 +38,11 @@ fn report(outcome: MigrationOutcome) -> MigrationReport {
         MigrationOutcome::Migrated(report) => *report,
         other => panic!("expected a migration, got {other:?}"),
     }
+}
+
+/// The error `report_outcome` raises for a report, which must be an incomplete one.
+fn incomplete_error(report: MigrationReport) -> anyhow::Error {
+    report_outcome(&MigrationOutcome::Migrated(Box::new(report))).unwrap_err()
 }
 
 fn rich(command: &str, ts: &str) -> ImportEntry {
@@ -382,7 +387,7 @@ fn rows_that_cannot_be_written_fail_the_migration_but_the_rest_are_copied() {
     let report = dirs.migrate();
     assert_eq!(report.result.write_failures, 1);
     assert_eq!(report.result.r_imported, 1);
-    let error = format!("{:#}", report.ensure_complete().unwrap_err());
+    let error = format!("{:#}", incomplete_error(report));
     assert!(
         error.contains(&dirs.current.display().to_string()),
         "{error}"
@@ -407,7 +412,7 @@ fn rows_that_cannot_be_repaired_fail_the_migration() {
 
     let report = dirs.migrate();
     assert_eq!(report.result.write_failures, 1);
-    assert!(report.ensure_complete().is_err());
+    incomplete_error(report);
 }
 
 #[test]
