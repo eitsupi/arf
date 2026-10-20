@@ -176,7 +176,10 @@ pub(super) fn history_runtime_label(
                         mask_home_path(path),
                         source.label()
                     ),
-                    None => "volatile (fallback; no persistent path)".to_string(),
+                    None => format!(
+                        "volatile (fallback; no persistent path; {})",
+                        source.label()
+                    ),
                 }
             }
         },
@@ -186,7 +189,7 @@ pub(super) fn history_runtime_label(
                 mask_home_path(path),
                 source.label()
             ),
-            None => "unavailable".to_string(),
+            None => format!("unavailable ({})", source.label()),
         },
     };
     match runtime.diagnostic_detail() {

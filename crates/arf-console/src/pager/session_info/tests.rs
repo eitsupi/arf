@@ -370,11 +370,11 @@ fn history_runtime_labels_cover_all_lifecycle_states() {
     );
     assert!(
         history_runtime_label(&fallback_without_path, HistoryLocationSource::Default)
-            .contains("fallback; no persistent path")
+            .contains("fallback; no persistent path; default location)")
     );
     assert!(
-        history_runtime_label(&unavailable, HistoryLocationSource::Default)
-            .starts_with("unavailable")
+        history_runtime_label(&unavailable, HistoryLocationSource::Explicit)
+            .starts_with("unavailable (explicit directory)")
     );
 }
 
