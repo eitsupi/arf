@@ -95,8 +95,8 @@ pub struct RLibrary {
     pub rf_setattrib: unsafe extern "C" fn(SEXP, SEXP, SEXP) -> SEXP,
 
     // Top-level execution (for safe error handling)
-    pub r_toplevelexec: unsafe extern "C" fn(
-        Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+    pub r_toplevelexec: unsafe extern "C-unwind" fn(
+        Option<unsafe extern "C-unwind" fn(*mut std::ffi::c_void)>,
         *mut std::ffi::c_void,
     ) -> Rboolean,
 

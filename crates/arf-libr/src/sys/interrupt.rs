@@ -205,7 +205,7 @@ pub fn process_r_events_protected() -> bool {
     completed
 }
 
-unsafe extern "C" fn process_r_events_callback(payload: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn process_r_events_callback(payload: *mut std::ffi::c_void) {
     let library_ptr =
         unsafe { *(payload.cast::<*mut std::ffi::c_void>()) } as *const crate::functions::RLibrary;
     if library_ptr.is_null() {

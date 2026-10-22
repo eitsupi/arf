@@ -35,7 +35,7 @@ pub fn frame_depth_protected() -> Result<c_int, String> {
     }
 }
 
-unsafe extern "C" fn frame_depth_callback(payload: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn frame_depth_callback(payload: *mut std::ffi::c_void) {
     let payload = payload.cast::<FrameDepthPayload>();
     let library = unsafe { (*payload).library };
     if library.is_null() {

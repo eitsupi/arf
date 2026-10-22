@@ -41,7 +41,7 @@ pub(crate) struct EvalPayload {
 ///
 /// If the evaluation raises an R error, `R_ToplevelExec` catches it and
 /// `result` stays `None`.
-pub(crate) unsafe extern "C" fn eval_callback(payload: *mut std::ffi::c_void) {
+pub(crate) unsafe extern "C-unwind" fn eval_callback(payload: *mut std::ffi::c_void) {
     let data = unsafe { &mut *(payload as *mut EvalPayload) };
     let lib = match r_library() {
         Ok(lib) => lib,
@@ -58,7 +58,7 @@ struct TopLevelPayload<F, T> {
     result: Option<T>,
 }
 
-unsafe extern "C" fn top_level_trampoline<F, T>(data: *mut std::ffi::c_void)
+unsafe extern "C-unwind" fn top_level_trampoline<F, T>(data: *mut std::ffi::c_void)
 where
     F: FnOnce() -> T,
 {
