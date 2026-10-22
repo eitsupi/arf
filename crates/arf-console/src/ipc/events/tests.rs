@@ -4,6 +4,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::task::JoinHandle;
 
+use super::bus::SeqSource;
 use super::*;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -380,7 +381,10 @@ async fn event_size_limit_is_enforced_at_publish() {
         max_event_bytes: 1024,
         ..Limits::default()
     };
-    let (bus, _task) = spawn_bus(limits);
+    // A private sequence source makes the exact numbers deterministic.
+    let (bus, dispatcher) =
+        EventBus::with_seq_source(limits, Box::leak(Box::new(SeqSource::new())));
+    let _task = tokio::spawn(dispatcher.run());
     let mut stream = subscribed(&bus, &["t"]);
 
     // 96 bytes of envelope allowance + 1 byte topic + (n + 2) bytes of JSON
@@ -663,4 +667,23 @@ fn connection_ids_are_unique_across_buses() {
     ];
     let unique: std::collections::HashSet<_> = ids.iter().collect();
     assert_eq!(unique.len(), ids.len());
+}
+
+#[test]
+fn seq_keeps_increasing_across_buses() {
+    let (first_bus, _first_dispatcher) = EventBus::new(Limits::default());
+    let seq_a = first_bus.publish(internal("t"), Value::Null, None).unwrap();
+    drop(first_bus);
+
+    let (second_bus, _second_dispatcher) = EventBus::new(Limits::default());
+    let seq_b = second_bus
+        .publish(internal("t"), Value::Null, None)
+        .unwrap();
+    let (third_bus, _third_dispatcher) = EventBus::new(Limits::default());
+    let seq_c = third_bus.publish(internal("t"), Value::Null, None).unwrap();
+    let seq_d = second_bus
+        .publish(internal("t"), Value::Null, None)
+        .unwrap();
+
+    assert!(seq_a < seq_b && seq_b < seq_c && seq_c < seq_d);
 }

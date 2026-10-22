@@ -199,8 +199,22 @@ impl OverflowRecord {
     }
 }
 
+/// Source of event sequence numbers.
+///
+/// The production source is process-wide, so `seq` keeps increasing when the
+/// bus is recreated within one process (for example by stopping and
+/// restarting the IPC server).
+pub(super) struct SeqSource(Mutex<u64>);
+
+impl SeqSource {
+    pub(super) const fn new() -> Self {
+        Self(Mutex::new(1))
+    }
+}
+
+static PROCESS_SEQ: SeqSource = SeqSource::new();
+
 struct PublishState {
-    next_seq: u64,
     /// `None` once the bus has been closed.
     sender: Option<QueueSender>,
 }
@@ -210,6 +224,7 @@ pub(super) struct Inner {
     /// Sequence assignment and enqueueing happen under this lock so that the
     /// queue order always equals the `seq` order.
     publish: Mutex<PublishState>,
+    seq: &'static SeqSource,
     overflow: Mutex<OverflowRecord>,
     /// Hint that `overflow` holds something; checked without locking.
     overflow_pending: AtomicBool,
@@ -293,14 +308,21 @@ impl EventBus {
     /// Create a bus and the dispatcher that must be run (see
     /// [`EventDispatcher::run`]) for events to reach connections.
     pub fn new(limits: Limits) -> (Self, EventDispatcher) {
+        Self::with_seq_source(limits, &PROCESS_SEQ)
+    }
+
+    pub(super) fn with_seq_source(
+        limits: Limits,
+        seq: &'static SeqSource,
+    ) -> (Self, EventDispatcher) {
         limits.assert_consistent();
         let (sender, receiver) = queue(limits.publish_queue);
         let inner = Arc::new(Inner {
             limits,
             publish: Mutex::new(PublishState {
-                next_seq: 1,
                 sender: Some(sender),
             }),
+            seq,
             overflow: Mutex::new(OverflowRecord::default()),
             overflow_pending: AtomicBool::new(false),
             overflow_notify: Notify::new(),
@@ -313,8 +335,9 @@ impl EventBus {
     /// Publish an event. Never blocks and never waits for delivery.
     ///
     /// Events are delivered in the order of successful `publish` calls.
-    /// Returns the assigned `seq`, which starts at 1 for each bus (it is not
-    /// continued across bus instances). Events nobody is subscribed to are
+    /// Returns the assigned `seq`. Sequence numbers are shared by all buses
+    /// of the process, so they keep increasing across bus instances; a failed
+    /// publish does not consume one. Events nobody is subscribed to are
     /// discarded by the dispatcher.
     ///
     /// If the publish queue is full the event is dropped, the dispatcher is
@@ -338,15 +361,18 @@ impl EventBus {
             });
         };
 
-        let mut state = self.inner.publish.lock_recover();
-        let seq = state.next_seq;
+        let state = self.inner.publish.lock_recover();
+        // Lock order is always bus publish lock, then the sequence source.
+        // The sequence number is only consumed once the event is queued.
+        let mut next_seq = self.inner.seq.0.lock_recover();
+        let seq = *next_seq;
         let event = Arc::new(Event::new(seq, topic, data, execution, data_len));
         let Some(sender) = state.sender.as_ref() else {
             return Err(PublishError::Closed);
         };
         match sender.try_send(&event) {
             Ok(()) => {
-                state.next_seq += 1;
+                *next_seq += 1;
                 Ok(seq)
             }
             Err(QueueError::Full) => {

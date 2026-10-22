@@ -33,8 +33,8 @@
 //! `seq` is assigned in publication order and the order is preserved through
 //! both queues, so each connection receives its events in increasing `seq`.
 //! Subscriptions apply from the moment the dispatcher routes an event, not
-//! from when it was published. Connection ids are unique across the whole
-//! process, while `seq` restarts at 1 for every bus.
+//! from when it was published. Connection ids and `seq` are shared across
+//! the whole process, so they keep increasing even if the bus is recreated.
 
 // Nothing outside this module and its tests uses the event bus yet; the
 // expectation fails (and must be removed) once a caller exists.
