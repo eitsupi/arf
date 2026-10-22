@@ -23,6 +23,7 @@
 mod approval;
 mod capture;
 pub mod client;
+mod events;
 mod execution;
 mod headless;
 mod history_query;
