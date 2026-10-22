@@ -20,12 +20,21 @@
 //! Disconnected connections can observe why through
 //! [`EventStream::disconnect_reason`].
 //!
+//! ## Topics and subscriptions
+//!
+//! A topic is a dot-separated name. Each segment is non-empty and made of
+//! ASCII letters, digits, `_` and `-`; the whole name is at most 128 bytes.
+//! Names starting with `arf.` are reserved for arf itself (see
+//! [`Topic::external`]). A subscription pattern is an exact topic or
+//! `prefix.*`, which matches every topic starting with `prefix.`.
+//!
 //! ## Ordering
 //!
 //! `seq` is assigned in publication order and the order is preserved through
 //! both queues, so each connection receives its events in increasing `seq`.
 //! Subscriptions apply from the moment the dispatcher routes an event, not
-//! from when it was published.
+//! from when it was published. Connection ids are unique across the whole
+//! process, while `seq` restarts at 1 for every bus.
 
 // Nothing outside this module and its tests uses the event bus yet; the
 // expectation fails (and must be removed) once a caller exists.

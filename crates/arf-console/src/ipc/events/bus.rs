@@ -149,6 +149,10 @@ struct ConnectionEntry {
 #[derive(Default)]
 struct Registry {
     connections: HashMap<ConnectionId, ConnectionEntry>,
+    /// Set once the dispatcher is gone. Registration checks it under the same
+    /// lock that `disconnect_all` takes, so a connection is either removed by
+    /// that sweep or never registered.
+    shut_down: bool,
 }
 
 impl Registry {
@@ -211,8 +215,12 @@ pub(super) struct Inner {
     overflow_pending: AtomicBool,
     overflow_notify: Notify,
     registry: Mutex<Registry>,
-    next_connection: AtomicU64,
 }
+
+/// Connection ids come from one process-wide counter, so ids stay unique
+/// even when the bus is recreated (for example by stopping and restarting
+/// the IPC server).
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
 impl Inner {
     /// Take the recorded overflow, if any.
@@ -261,6 +269,7 @@ impl Inner {
 
     pub(super) fn disconnect_all(&self, reason: DisconnectReason) {
         let mut registry = self.registry.lock_recover();
+        registry.shut_down = true;
         let ids: Vec<ConnectionId> = registry.connections.keys().copied().collect();
         for id in ids {
             registry.remove(id, reason);
@@ -296,7 +305,6 @@ impl EventBus {
             overflow_pending: AtomicBool::new(false),
             overflow_notify: Notify::new(),
             registry: Mutex::new(Registry::default()),
-            next_connection: AtomicU64::new(1),
         });
         let dispatcher = EventDispatcher::new(Arc::clone(&inner), receiver);
         (Self { inner }, dispatcher)
@@ -305,7 +313,8 @@ impl EventBus {
     /// Publish an event. Never blocks and never waits for delivery.
     ///
     /// Events are delivered in the order of successful `publish` calls.
-    /// Returns the assigned `seq`. Events nobody is subscribed to are
+    /// Returns the assigned `seq`, which starts at 1 for each bus (it is not
+    /// continued across bus instances). Events nobody is subscribed to are
     /// discarded by the dispatcher.
     ///
     /// If the publish queue is full the event is dropped, the dispatcher is
@@ -364,20 +373,31 @@ impl EventBus {
     }
 
     /// Register a new connection with no subscriptions.
+    ///
+    /// If the dispatcher has already shut down, the returned stream is not
+    /// registered and is already disconnected with
+    /// [`DisconnectReason::Shutdown`], so `recv` returns `None` right away.
     pub fn register_connection(&self) -> EventStream {
-        let id = ConnectionId(self.inner.next_connection.fetch_add(1, Ordering::Relaxed));
+        let id = ConnectionId(NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = queue(self.inner.limits.connection_queue);
         let shared = Arc::new(ConnectionShared {
             reason: OnceLock::new(),
         });
-        self.inner.registry.lock_recover().connections.insert(
-            id,
-            ConnectionEntry {
-                subscriptions: SubscriptionSet::default(),
-                sender,
-                shared: Arc::clone(&shared),
-            },
-        );
+        {
+            let mut registry = self.inner.registry.lock_recover();
+            if registry.shut_down {
+                let _ = shared.reason.set(DisconnectReason::Shutdown);
+            } else {
+                registry.connections.insert(
+                    id,
+                    ConnectionEntry {
+                        subscriptions: SubscriptionSet::default(),
+                        sender,
+                        shared: Arc::clone(&shared),
+                    },
+                );
+            }
+        }
         EventStream {
             id,
             receiver,

@@ -221,10 +221,12 @@ async fn every_subscribed_connection_gets_each_event_in_order() {
 #[tokio::test]
 async fn events_without_subscribers_are_discarded() {
     let (bus, _task) = spawn_bus(Limits::default());
+    let mut watcher = subscribed(&bus, &["marker"]);
     let first = publish(&bus, "nobody.listens", json!("lost"));
+    publish(&bus, "marker", json!("routed"));
+    // Once the watcher has the marker, the earlier event has been routed too.
+    next(&mut watcher).await;
 
-    // Let the dispatcher route the first event while no one is subscribed.
-    tokio::task::yield_now().await;
     let mut late = subscribed(&bus, &["nobody.*"]);
     let second = publish(&bus, "nobody.listens", json!("kept"));
 
@@ -508,14 +510,18 @@ async fn disconnect_discards_subscriptions_and_queue() {
     assert_eq!(bus.subscription_count(id), Some(2));
 
     // Queue events for the connection, then disconnect before reading them.
+    // `witness` receives both events from the same routing step, so once it
+    // has them they are in `stream`'s queue too.
     let task = tokio::spawn(dispatcher.run());
+    let mut witness = subscribed(&bus, &["a"]);
     publish(&bus, "a", json!(1));
     publish(&bus, "a", json!(2));
-    tokio::task::yield_now().await;
+    next(&mut witness).await;
+    next(&mut witness).await;
 
     assert!(bus.disconnect(id, DisconnectReason::Requested));
     assert!(!bus.disconnect(id, DisconnectReason::Requested));
-    assert_eq!(bus.connection_count(), 0);
+    assert_eq!(bus.connection_count(), 1); // only the witness remains
     assert_eq!(bus.subscription_count(id), None);
     assert_disconnected(&mut stream, DisconnectReason::Requested).await;
     assert_eq!(stream.try_recv(), Ok(None));
@@ -602,4 +608,59 @@ async fn dropping_the_dispatcher_disconnects_connections_and_closes_publishing()
         bus.publish(internal("a"), Value::Null, None),
         Err(PublishError::Closed)
     );
+}
+
+#[tokio::test]
+async fn registering_after_shutdown_yields_a_disconnected_stream() {
+    let (bus, dispatcher) = EventBus::new(Limits::default());
+    drop(dispatcher);
+
+    let mut stream = bus.register_connection();
+    assert_eq!(stream.disconnect_reason(), Some(DisconnectReason::Shutdown));
+    assert_disconnected(&mut stream, DisconnectReason::Shutdown).await;
+    assert_eq!(bus.connection_count(), 0);
+    assert_eq!(
+        bus.subscribe(stream.id(), pattern("a")),
+        Err(SubscribeError::UnknownConnection)
+    );
+}
+
+#[test]
+fn registration_racing_with_shutdown_never_leaves_a_live_connection() {
+    for _ in 0..200 {
+        let (bus, dispatcher) = EventBus::new(Limits::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let registrar = {
+            let bus = bus.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                (0..20)
+                    .map(|_| bus.register_connection())
+                    .collect::<Vec<_>>()
+            })
+        };
+        barrier.wait();
+        drop(dispatcher);
+        let streams = registrar.join().unwrap();
+
+        assert_eq!(bus.connection_count(), 0);
+        for stream in &streams {
+            assert_eq!(stream.disconnect_reason(), Some(DisconnectReason::Shutdown));
+        }
+    }
+}
+
+#[test]
+fn connection_ids_are_unique_across_buses() {
+    let (first_bus, _first_dispatcher) = EventBus::new(Limits::default());
+    let (second_bus, _second_dispatcher) = EventBus::new(Limits::default());
+    let ids = [
+        first_bus.register_connection().id(),
+        second_bus.register_connection().id(),
+        first_bus.register_connection().id(),
+        second_bus.register_connection().id(),
+    ];
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(unique.len(), ids.len());
 }
