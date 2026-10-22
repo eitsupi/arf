@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use super::event::{Topic, TopicError, validate_prefix};
+use super::event::{MAX_TOPIC_BYTES, Topic, TopicError, validate_prefix};
 
 /// A subscription pattern: an exact topic or a `prefix.*` wildcard.
 ///
@@ -21,6 +21,13 @@ impl SubscriptionPattern {
     pub fn parse(pattern: &str) -> Result<Self, TopicError> {
         match pattern.strip_suffix(".*") {
             Some(prefix) => {
+                // The limit covers the whole pattern, including the `.*`.
+                if pattern.len() > MAX_TOPIC_BYTES {
+                    return Err(TopicError::TooLong {
+                        len: pattern.len(),
+                        max: MAX_TOPIC_BYTES,
+                    });
+                }
                 validate_prefix(prefix)?;
                 Ok(Self::Prefix(format!("{prefix}.")))
             }

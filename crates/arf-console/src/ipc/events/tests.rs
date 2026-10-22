@@ -116,6 +116,15 @@ fn pattern_parsing() {
     }
     // Subscribers may name reserved topics.
     assert!(SubscriptionPattern::parse("arf.*").is_ok());
+    // The length limit covers the whole pattern, including the `.*`.
+    let at_limit = format!("{}.*", "a".repeat(126));
+    assert_eq!(at_limit.len(), 128);
+    assert!(SubscriptionPattern::parse(&at_limit).is_ok());
+    let over_limit = format!("{}.*", "a".repeat(127));
+    assert_eq!(
+        SubscriptionPattern::parse(&over_limit),
+        Err(TopicError::TooLong { len: 129, max: 128 })
+    );
 }
 
 #[test]
