@@ -314,7 +314,7 @@ r_test!(
         assert_to_json("1.5", json!(1.5));
         assert_to_json("3", json!(3.0));
         assert_to_json("-0.25", json!(-0.25));
-        assert_to_json("1e300", json!(1e300));
+        assert_to_json("2^1000", json!(2f64.powi(1000)));
         assert_to_json("5L", json!(5));
         assert_to_json("-2147483647L", json!(-2_147_483_647_i64));
         assert_to_json(r#""x""#, json!("x"));
