@@ -8,6 +8,7 @@ mod error;
 mod ffi;
 pub mod help;
 pub mod help_bridge;
+pub mod json;
 pub mod lib_paths;
 mod object;
 mod protect;
