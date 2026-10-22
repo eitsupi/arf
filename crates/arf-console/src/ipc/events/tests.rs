@@ -687,3 +687,33 @@ fn seq_keeps_increasing_across_buses() {
 
     assert!(seq_a < seq_b && seq_b < seq_c && seq_c < seq_d);
 }
+
+#[test]
+fn publishing_after_dispatcher_drop_reports_closed_even_when_queue_is_full() {
+    let limits = Limits {
+        max_event_bytes: 1024,
+        publish_queue: QueueLimits {
+            max_events: 100,
+            max_bytes: 1024,
+        },
+        ..Limits::default()
+    };
+    let (bus, dispatcher) = EventBus::new(limits);
+    let payload = "x".repeat(400);
+    bus.publish(internal("big"), json!(payload), None).unwrap();
+    bus.publish(internal("big"), json!(payload), None).unwrap();
+    assert_eq!(
+        bus.publish(internal("big"), json!(payload), None),
+        Err(PublishError::QueueOverflow)
+    );
+
+    drop(dispatcher);
+    assert_eq!(
+        bus.publish(internal("big"), json!(payload), None),
+        Err(PublishError::Closed)
+    );
+    assert_eq!(
+        bus.publish(internal("small"), Value::Null, None),
+        Err(PublishError::Closed)
+    );
+}

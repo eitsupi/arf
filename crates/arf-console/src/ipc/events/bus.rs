@@ -282,6 +282,11 @@ impl Inner {
         }
     }
 
+    /// Stop accepting events; later publishes fail with [`PublishError::Closed`].
+    pub(super) fn close_publishing(&self) {
+        self.publish.lock_recover().sender = None;
+    }
+
     pub(super) fn disconnect_all(&self, reason: DisconnectReason) {
         let mut registry = self.registry.lock_recover();
         registry.shut_down = true;
@@ -395,7 +400,7 @@ impl EventBus {
     /// Stop accepting events. The dispatcher delivers what is already queued,
     /// disconnects all connections with [`DisconnectReason::Shutdown`] and exits.
     pub fn close(&self) {
-        self.inner.publish.lock_recover().sender = None;
+        self.inner.close_publishing();
     }
 
     /// Register a new connection with no subscriptions.

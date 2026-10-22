@@ -46,6 +46,7 @@ impl EventDispatcher {
 
 impl Drop for EventDispatcher {
     fn drop(&mut self) {
+        self.inner.close_publishing();
         self.inner.disconnect_all(DisconnectReason::Shutdown);
     }
 }
