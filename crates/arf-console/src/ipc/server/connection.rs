@@ -229,11 +229,6 @@ fn scan_raw_json(buf: &[u8]) -> FrameScan {
     match values.next() {
         Some(Ok(_)) => {
             let body_end = values.byte_offset();
-            // A number has no closing delimiter, so at the end of the buffer
-            // more digits may still follow.
-            if body_end == buf.len() && starts_with_number(buf) {
-                return need_more(buf.len(), 0);
-            }
             if body_end > MAX_REQUEST_BYTES {
                 return FrameScan::TooLarge;
             }
@@ -251,13 +246,6 @@ fn scan_raw_json(buf: &[u8]) -> FrameScan {
             body_end: buf.len(),
         },
     }
-}
-
-/// Whether the first non-whitespace byte begins a JSON number.
-fn starts_with_number(buf: &[u8]) -> bool {
-    buf.iter()
-        .find(|b| !b.is_ascii_whitespace())
-        .is_some_and(|b| b.is_ascii_digit() || *b == b'-')
 }
 
 /// Parse and validate a JSON-RPC request body.
@@ -322,6 +310,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+    use std::time::Duration;
     use tokio::io::{AsyncRead, ReadBuf};
 
     /// Reader that yields the given chunks one per read, then EOF.
@@ -469,17 +458,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bare_number_waits_for_more_digits() {
-        let (body, rest) = read_frame(ChunkedReader::new(["12", "34", " "])).await;
-        assert_eq!(body, b"1234");
-        assert_eq!(rest, b" ");
-    }
+    async fn test_bare_number_completes_without_waiting_for_eof() {
+        // JSON-RPC requests are objects, so a number frame is invalid however
+        // many digits follow. The client keeps the connection open (the writer
+        // is alive), so the reader must answer without waiting for more data.
+        let (mut client, mut server) = tokio::io::duplex(64);
+        client.write_all(b"1").await.unwrap();
 
-    #[tokio::test]
-    async fn test_bare_number_completes_at_eof() {
-        let (body, rest) = read_frame(ChunkedReader::new(["12", "34"])).await;
-        assert_eq!(body, b"1234");
-        assert!(rest.is_empty());
+        let frame = tokio::time::timeout(Duration::from_secs(5), read_frame(&mut server))
+            .await
+            .expect("a bare number must complete the frame without EOF");
+        assert_eq!(frame.0, b"1");
+        assert!(frame.1.is_empty());
+        assert!(parse_request(&frame.0).is_err());
+        drop(client);
     }
 
     #[tokio::test]
