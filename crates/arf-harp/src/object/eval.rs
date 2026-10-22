@@ -104,7 +104,7 @@ pub(super) struct ParsePayload {
 }
 
 /// Callback for R_ToplevelExec - parses the expression.
-pub(super) unsafe extern "C" fn parse_callback(payload: *mut std::ffi::c_void) {
+pub(super) unsafe extern "C-unwind" fn parse_callback(payload: *mut std::ffi::c_void) {
     let data = unsafe { &mut *(payload as *mut ParsePayload) };
     let lib = match r_library() {
         Ok(lib) => lib,

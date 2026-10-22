@@ -181,6 +181,7 @@ dependencies = [
  "rd-rds",
  "rd-source",
  "rd2qmd-core",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

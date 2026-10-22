@@ -21,3 +21,4 @@ rd-ast = { workspace = true, features = ["rds"] }
 log.workspace = true
 thiserror.workspace = true
 once_cell.workspace = true
+serde_json.workspace = true

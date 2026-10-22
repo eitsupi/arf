@@ -202,7 +202,7 @@ struct SourcePayload {
 }
 
 /// Callback for R_ToplevelExec - executes sys.source().
-unsafe extern "C" fn source_callback(payload: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn source_callback(payload: *mut std::ffi::c_void) {
     let data = unsafe { &mut *(payload as *mut SourcePayload) };
     let lib = match r_library() {
         Ok(lib) => lib,
@@ -363,7 +363,7 @@ struct CallPayload {
 }
 
 /// R_ToplevelExec callback for calling a no-arg R function.
-unsafe extern "C" fn call_callback(payload: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn call_callback(payload: *mut std::ffi::c_void) {
     let data = unsafe { &mut *(payload as *mut CallPayload) };
     let lib = match r_library() {
         Ok(lib) => lib,

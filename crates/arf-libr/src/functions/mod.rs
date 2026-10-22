@@ -52,6 +52,18 @@ pub struct RLibrary {
     pub set_string_elt: unsafe extern "C" fn(SEXP, isize, SEXP),
     pub string_elt: unsafe extern "C" fn(SEXP, isize) -> SEXP,
     pub vector_elt: unsafe extern "C" fn(SEXP, isize) -> SEXP,
+    pub set_vector_elt: unsafe extern "C" fn(SEXP, isize, SEXP) -> SEXP,
+
+    // Encoding-aware string functions. The encoding argument is an R
+    // `cetype_t`, passed as a C int (see the `CE_*` constants).
+    pub rf_mkcharlence: unsafe extern "C" fn(*const c_char, c_int, c_int) -> SEXP,
+    pub rf_translatecharutf8: unsafe extern "C" fn(SEXP) -> *const c_char,
+    pub rf_getcharce: unsafe extern "C" fn(SEXP) -> c_int,
+
+    // Transient allocation (R_alloc) stack mark, used to release temporary
+    // buffers such as translated strings.
+    pub vmaxget: unsafe extern "C" fn() -> *mut std::ffi::c_void,
+    pub vmaxset: unsafe extern "C" fn(*const std::ffi::c_void),
 
     // Type checking
     pub rf_typeof: unsafe extern "C" fn(SEXP) -> c_int,
@@ -74,9 +86,17 @@ pub struct RLibrary {
     // Integer vector access
     pub integer: unsafe extern "C" fn(SEXP) -> *mut c_int,
 
+    // Double vector access and construction
+    pub real: unsafe extern "C" fn(SEXP) -> *mut f64,
+    pub rf_scalarreal: unsafe extern "C" fn(f64) -> SEXP,
+
+    // Attribute access
+    pub rf_getattrib: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
+    pub rf_setattrib: unsafe extern "C" fn(SEXP, SEXP, SEXP) -> SEXP,
+
     // Top-level execution (for safe error handling)
-    pub r_toplevelexec: unsafe extern "C" fn(
-        Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+    pub r_toplevelexec: unsafe extern "C-unwind" fn(
+        Option<unsafe extern "C-unwind" fn(*mut std::ffi::c_void)>,
         *mut std::ffi::c_void,
     ) -> Rboolean,
 
@@ -90,6 +110,8 @@ pub struct RLibrary {
     pub r_baseenv: *mut SEXP,
     pub r_basenamespace: *mut SEXP,
     pub r_unboundvalue: *mut SEXP,
+    pub r_namessymbol: *mut SEXP,
+    pub r_classsymbol: *mut SEXP,
 
     // Environment and variable manipulation
     // Rf_findVar searches through enclosing environments
@@ -293,6 +315,16 @@ impl RLibrary {
             load_symbol!(set_string_elt, b"SET_STRING_ELT\0");
             load_symbol!(string_elt, b"STRING_ELT\0");
             load_symbol!(vector_elt, b"VECTOR_ELT\0");
+            load_symbol!(set_vector_elt, b"SET_VECTOR_ELT\0");
+
+            // Load encoding-aware string functions
+            load_symbol!(rf_mkcharlence, b"Rf_mkCharLenCE\0");
+            load_symbol!(rf_translatecharutf8, b"Rf_translateCharUTF8\0");
+            load_symbol!(rf_getcharce, b"Rf_getCharCE\0");
+
+            // Load transient allocation stack mark functions
+            load_symbol!(vmaxget, b"vmaxget\0");
+            load_symbol!(vmaxset, b"vmaxset\0");
 
             // Load type checking functions
             load_symbol!(rf_typeof, b"TYPEOF\0");
@@ -315,6 +347,14 @@ impl RLibrary {
             // Load integer access
             load_symbol!(integer, b"INTEGER\0");
 
+            // Load double access and construction
+            load_symbol!(real, b"REAL\0");
+            load_symbol!(rf_scalarreal, b"Rf_ScalarReal\0");
+
+            // Load attribute access
+            load_symbol!(rf_getattrib, b"Rf_getAttrib\0");
+            load_symbol!(rf_setattrib, b"Rf_setAttrib\0");
+
             // Load top-level execution
             load_symbol!(r_toplevelexec, b"R_ToplevelExec\0");
             load_symbol!(rf_eval, b"Rf_eval\0");
@@ -326,6 +366,8 @@ impl RLibrary {
             load_ptr!(r_baseenv, b"R_BaseEnv\0", SEXP);
             load_ptr!(r_basenamespace, b"R_BaseNamespace\0", SEXP);
             load_ptr!(r_unboundvalue, b"R_UnboundValue\0", SEXP);
+            load_ptr!(r_namessymbol, b"R_NamesSymbol\0", SEXP);
+            load_ptr!(r_classsymbol, b"R_ClassSymbol\0", SEXP);
 
             // Load environment and variable manipulation functions
             // Rf_findVar takes (symbol, env) and searches through enclosing environments
@@ -590,6 +632,12 @@ impl RLibrary {
                 set_string_elt,
                 string_elt,
                 vector_elt,
+                set_vector_elt,
+                rf_mkcharlence,
+                rf_translatecharutf8,
+                rf_getcharce,
+                vmaxget,
+                vmaxset,
                 rf_typeof,
                 rf_isstring,
                 rf_printvalue,
@@ -599,6 +647,10 @@ impl RLibrary {
                 car,
                 logical,
                 integer,
+                real,
+                rf_scalarreal,
+                rf_getattrib,
+                rf_setattrib,
                 r_toplevelexec,
                 rf_eval,
                 r_nilvalue,
@@ -607,6 +659,8 @@ impl RLibrary {
                 r_baseenv,
                 r_basenamespace,
                 r_unboundvalue,
+                r_namessymbol,
+                r_classsymbol,
                 rf_findvar,
                 rf_findvar_in_frame,
                 r_exists_var_in_frame,

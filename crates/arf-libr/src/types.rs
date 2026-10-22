@@ -102,6 +102,15 @@ pub enum SexpType {
     S4Sxp = 25,
 }
 
+/// R's `cetype_t` encoding tag for a CHARSXP: native encoding.
+pub const CE_NATIVE: c_int = 0;
+/// R's `cetype_t` encoding tag for a CHARSXP: UTF-8.
+pub const CE_UTF8: c_int = 1;
+/// R's `cetype_t` encoding tag for a CHARSXP: Latin-1.
+pub const CE_LATIN1: c_int = 2;
+/// R's `cetype_t` encoding tag for a CHARSXP: raw bytes with no declared encoding.
+pub const CE_BYTES: c_int = 3;
+
 /// Pointer to C function for console read callback.
 pub type ReadConsoleFunc = Option<
     unsafe extern "C" fn(
