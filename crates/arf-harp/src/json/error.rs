@@ -79,19 +79,6 @@ impl fmt::Display for JsonPath {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum JsonErrorKind {
-    /// The JSON text is not well-formed.
-    #[error("invalid JSON syntax at byte {offset}: {message}")]
-    Syntax {
-        /// Byte offset into the text where the problem was detected.
-        offset: usize,
-        /// What was wrong.
-        message: &'static str,
-    },
-
-    /// The JSON text is larger than [`MAX_TEXT_BYTES`](super::MAX_TEXT_BYTES).
-    #[error("JSON text is {len} bytes, which exceeds the limit of {limit} bytes")]
-    TextTooLarge { len: usize, limit: usize },
-
     /// Arrays/objects are nested deeper than [`MAX_DEPTH`](super::MAX_DEPTH).
     #[error("nesting is deeper than the limit of {limit} levels")]
     DepthExceeded { limit: usize },
@@ -104,7 +91,7 @@ pub enum JsonErrorKind {
     #[error("strings and keys total more than {limit} bytes")]
     StringBytesExceeded { limit: usize },
 
-    /// An object has two members with the same key.
+    /// An R list has two elements with the same name (after conversion to UTF-8).
     #[error("duplicate object key")]
     DuplicateKey,
 
@@ -135,10 +122,6 @@ pub enum JsonErrorKind {
     /// A value carrying a class attribute.
     #[error("values with a class attribute cannot be converted")]
     ClassAttribute,
-
-    /// A value carrying an attribute other than `names` and `class`.
-    #[error("values with the attribute {name:?} cannot be converted")]
-    UnsupportedAttribute { name: String },
 
     /// A `names` attribute that is not a character vector matching the list length.
     #[error("the names attribute is malformed")]

@@ -91,10 +91,7 @@ pub struct RLibrary {
     pub rf_scalarreal: unsafe extern "C" fn(f64) -> SEXP,
 
     // Attribute access
-    pub attrib: unsafe extern "C" fn(SEXP) -> SEXP,
-    pub tag: unsafe extern "C" fn(SEXP) -> SEXP,
-    pub cdr: unsafe extern "C" fn(SEXP) -> SEXP,
-    pub printname: unsafe extern "C" fn(SEXP) -> SEXP,
+    pub rf_getattrib: unsafe extern "C" fn(SEXP, SEXP) -> SEXP,
     pub rf_setattrib: unsafe extern "C" fn(SEXP, SEXP, SEXP) -> SEXP,
 
     // Top-level execution (for safe error handling)
@@ -355,10 +352,7 @@ impl RLibrary {
             load_symbol!(rf_scalarreal, b"Rf_ScalarReal\0");
 
             // Load attribute access
-            load_symbol!(attrib, b"ATTRIB\0");
-            load_symbol!(tag, b"TAG\0");
-            load_symbol!(cdr, b"CDR\0");
-            load_symbol!(printname, b"PRINTNAME\0");
+            load_symbol!(rf_getattrib, b"Rf_getAttrib\0");
             load_symbol!(rf_setattrib, b"Rf_setAttrib\0");
 
             // Load top-level execution
@@ -655,10 +649,7 @@ impl RLibrary {
                 integer,
                 real,
                 rf_scalarreal,
-                attrib,
-                tag,
-                cdr,
-                printname,
+                rf_getattrib,
                 rf_setattrib,
                 r_toplevelexec,
                 rf_eval,

@@ -10,7 +10,12 @@ use serde_json::{Map, Number, Value};
 /// R's `NA_integer_` and `NA_logical_` are `INT_MIN`.
 const NA_INTEGER: i32 = i32::MIN;
 
-/// The low word R stores in the payload of `NA_real_`.
+/// The low word of the payload R stores in `NA_real_`.
+///
+/// R's own `R_IsNA` decides by this word alone and ignores the sign and
+/// exponent bits, because arithmetic on an NA can change the high word while
+/// still yielding an NA. The same test is used here so that a value counts as
+/// NA exactly when R says it does.
 const NA_REAL_PAYLOAD: u64 = 1954;
 
 /// Convert an R value to a JSON value.
@@ -105,11 +110,20 @@ impl Converter {
 
     /// Translate a non-NA CHARSXP to UTF-8 and charge it to the budget.
     ///
+    /// The CHARSXP is protected until it has been copied: an ALTREP string
+    /// vector may hand out an element that nothing else keeps alive, and the
+    /// translation itself allocates.
+    ///
     /// # Safety
-    /// `charsxp` must be a valid, reachable CHARSXP.
+    /// `charsxp` must be a valid CHARSXP.
     unsafe fn string(&mut self, charsxp: SEXP) -> Result<String, JsonError> {
-        let text =
-            unsafe { charsxp_to_string(self.lib, charsxp) }.map_err(|e| self.fail(e.into()))?;
+        // SAFETY: no R allocation happens between obtaining `charsxp` and here.
+        let guard = unsafe { RObject::new(charsxp) };
+        let text = unsafe {
+            charsxp_to_string(self.lib, guard.sexp(), self.budget.remaining_string_bytes())
+        }
+        .map_err(|e| self.fail(e.into()))?;
+        drop(guard);
         self.budget
             .count_string(text.len())
             .map_err(|kind| self.fail(kind))?;
@@ -123,21 +137,9 @@ impl Converter {
             },
             Reject::Length(length) => JsonErrorKind::InvalidLength { length },
             Reject::Class => JsonErrorKind::ClassAttribute,
-            Reject::Attribute(symbol) => JsonErrorKind::UnsupportedAttribute {
-                name: unsafe { self.symbol_name(symbol) },
-            },
             Reject::MalformedNames => JsonErrorKind::MalformedNames,
         };
         self.fail(kind)
-    }
-
-    /// The name of a symbol, for error messages only.
-    ///
-    /// # Safety
-    /// `symbol` must be a valid symbol.
-    unsafe fn symbol_name(&self, symbol: SEXP) -> String {
-        let charsxp = unsafe { (self.lib.printname)(symbol) };
-        unsafe { charsxp_to_string(self.lib, charsxp) }.unwrap_or_else(|_| "?".to_string())
     }
 
     /// # Safety

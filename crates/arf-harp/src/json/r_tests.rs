@@ -1,8 +1,7 @@
 //! Tests that run against an embedded R, each in its own subprocess.
 
-use super::r_call::{RJumped, r_protected};
 use super::*;
-use crate::ffi::install_symbol;
+use crate::ffi::{install_symbol, top_level_exec};
 use crate::object::{RObject, eval_string_with_visibility};
 use crate::test_support::with_r_in_subprocess;
 use arf_libr::{SexpType, r_library};
@@ -67,9 +66,10 @@ fn assert_json_to_r(value: Value, check: &str) {
     assert!(r_true(check), "{value} did not satisfy: {check}");
 }
 
-/// Same, starting from JSON text.
+/// Same, starting from JSON text parsed by `serde_json`.
 fn assert_text_to_r(text: &str, check: &str) {
-    let object = json_text_to_r(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    let value: Value = serde_json::from_str(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    let object = json_to_r(&value).unwrap_or_else(|e| panic!("{text}: {e}"));
     bind(".jr", &object);
     assert!(r_true(check), "{text} did not satisfy: {check}");
 }
@@ -197,8 +197,8 @@ r_test!(
 );
 
 r_test!(
-    json_text_converts_to_r,
-    json_text_converts_to_r_in_r,
+    parsed_json_text_converts_to_r,
+    parsed_json_text_converts_to_r_in_r,
     || {
         assert_text_to_r(
             r#" {"a": [1, "b", null, true], "c": {}, "d": [] } "#,
@@ -215,23 +215,31 @@ r_test!(
 );
 
 r_test!(
-    json_text_rejections_surface_with_paths,
-    json_text_rejections_surface_with_paths_in_r,
+    json_rejections_surface_with_paths,
+    json_rejections_surface_with_paths_in_r,
     || {
-        let error = json_text_to_r(r#"{"a":[1,{"k":1,"k":2}]}"#).unwrap_err();
-        assert_eq!(error.kind(), &JsonErrorKind::DuplicateKey);
-        assert_eq!(error.path().to_pointer(), "/a/1/k");
-
-        let error = json_text_to_r("[1, 9007199254740993]").unwrap_err();
+        let error = json_to_r(&json!([1, 9_007_199_254_740_993_i64])).unwrap_err();
         assert_eq!(error.kind(), &JsonErrorKind::IntegerOutOfRange);
         assert_eq!(error.path().to_pointer(), "/1");
 
-        let error = json_text_to_r(r#"{"a/b":"x\u0000y"}"#).unwrap_err();
+        let error = json_to_r(&json!({"a/b": "x\u{0}y"})).unwrap_err();
         assert_eq!(error.kind(), &JsonErrorKind::NulInString);
         assert_eq!(error.path().to_pointer(), "/a~1b");
 
         // Every failure above leaves R usable.
         assert_text_to_r("[1]", "identical(.jr, list(1))");
+    }
+);
+
+r_test!(
+    duplicate_keys_in_incoming_json_keep_the_last,
+    duplicate_keys_in_incoming_json_keep_the_last_in_r,
+    || {
+        // `serde_json` resolves the duplicate while parsing.
+        assert_text_to_r(
+            r#"{"a": 1, "b": [], "a": 2}"#,
+            r#"identical(.jr[["a"]], 2) && length(.jr) == 2L"#,
+        );
     }
 );
 
@@ -364,7 +372,7 @@ r_test!(
             r_to_json_text(&r_value(r#"list(a = 1L, b = "x", c = list(TRUE, NULL))"#)).unwrap();
         assert_eq!(text, r#"{"a":1,"b":"x","c":[true,null]}"#);
         assert_eq!(
-            parse_json_text(&text).unwrap(),
+            serde_json::from_str::<Value>(&text).unwrap(),
             json!({"a": 1, "b": "x", "c": [true, null]})
         );
     }
@@ -410,8 +418,8 @@ r_test!(
 );
 
 r_test!(
-    attributes_are_rejected,
-    attributes_are_rejected_in_r,
+    class_is_rejected_and_other_attributes_are_ignored,
+    class_is_rejected_and_other_attributes_are_ignored_in_r,
     || {
         for code in [
             r#"factor("a")"#,
@@ -420,30 +428,30 @@ r_test!(
             r#"structure(1, class = "x")"#,
             r#"structure(list(), class = "x")"#,
             r#"structure(list(a = 1), class = "x")"#,
+            r#"structure(list(a = 1), class = "x", foo = 1)"#,
             "as.POSIXct(0, origin = '1970-01-01', tz = 'UTC')",
         ] {
             assert_to_json_err(code, JsonErrorKind::ClassAttribute, "");
         }
-        let attribute = |name: &str| JsonErrorKind::UnsupportedAttribute {
-            name: name.to_string(),
-        };
-        assert_to_json_err(r#"structure(1, foo = "x")"#, attribute("foo"), "");
-        assert_to_json_err("matrix(1)", attribute("dim"), "");
-        assert_to_json_err(r#"structure(list(), foo = 1)"#, attribute("foo"), "");
+        // A class on a nested element is located.
         assert_to_json_err(
-            r#"structure(list(a = 1), comment = "x")"#,
-            attribute("comment"),
-            "",
-        );
-        assert_to_json_err(r#"structure(1L, levels = "a")"#, attribute("levels"), "");
-        // An attribute on a nested element is located.
-        assert_to_json_err(
-            r#"list(a = list(structure(1, tsp = c(1, 1, 1))))"#,
-            attribute("tsp"),
+            r#"list(a = list(structure(1, class = "x")))"#,
+            JsonErrorKind::ClassAttribute,
             "/a/0",
         );
-        // An attribute alongside names is still rejected.
-        assert_to_json_err(r#"structure(list(a = 1), foo = 1)"#, attribute("foo"), "");
+        // Anything but class and names is not looked at.
+        assert_to_json(r#"structure(1, foo = "x")"#, json!(1.0));
+        assert_to_json("matrix(1)", json!(1.0));
+        assert_to_json(r#"structure(1L, levels = "a")"#, json!(1));
+        assert_to_json(r#"structure(list(), foo = 1)"#, json!([]));
+        assert_to_json(
+            r#"structure(list(a = 1), comment = "x", foo = 1)"#,
+            json!({"a": 1.0}),
+        );
+        assert_to_json(
+            "list(a = list(structure(1, tsp = c(1, 1, 1))))",
+            json!({"a": [1.0]}),
+        );
     }
 );
 
@@ -682,7 +690,7 @@ r_test!(
             let back = r_to_json(&object).unwrap();
             assert_eq!(back, document);
             let text = r_to_json_text(&object).unwrap();
-            assert_eq!(parse_json_text(&text).unwrap(), document);
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), document);
         }
         // Whole numbers come back as numbers, if no longer integers.
         let object = json_to_r(&json!([1, 2, 3])).unwrap();
@@ -723,24 +731,24 @@ r_test!(
         });
         let from_r = r_value(
             r#"list(list = list(1.5, "two", NULL, setNames(list(list(TRUE, setNames(list(), character(0))), "empty key"), c("three", ""))),
-                text = intToUtf8(c(99L, 97L, 102L, 233L)),
+                text = {
+                    x <- rawToChar(as.raw(c(99L, 97L, 102L, 233L)))
+                    Encoding(x) <- "latin1"
+                    x
+                },
                 object = list(a = list(b = list(c = list()))))"#,
         );
         eval_string_with_visibility("gctorture(TRUE)").unwrap();
         let to_r = json_to_r(&document);
         let back = r_to_json(&from_r);
-        let from_text = json_text_to_r(&document.to_string());
         eval_string_with_visibility("gctorture(FALSE)").unwrap();
 
         let to_r = to_r.unwrap();
-        let from_text = from_text.unwrap();
         assert_eq!(back.unwrap(), document);
         assert_eq!(r_to_json(&to_r).unwrap(), document);
-        assert_eq!(r_to_json(&from_text).unwrap(), document);
         // Results are still intact after more allocation.
         eval_string_with_visibility("invisible(gc())").unwrap();
         assert_eq!(r_to_json(&to_r).unwrap(), document);
-        assert_eq!(r_to_json(&from_text).unwrap(), document);
     }
 );
 
@@ -776,8 +784,6 @@ r_test!(
             assert!(to_json("list(a = 1, a = 2)").is_err());
             assert!(to_json(r#"list(function() 1)"#).is_err());
             assert!(json_to_r(&json!(["a", "b\u{0}"])).is_err());
-            assert!(json_text_to_r(r#"{"a":1,"a":2}"#).is_err());
-            assert!(json_text_to_r("[1,").is_err());
         }
         let after = json_to_r(&json!({"after": [true]})).unwrap();
         eval_string_with_visibility("invisible(gc())").unwrap();
@@ -797,15 +803,42 @@ r_test!(
         let lib = r_library().unwrap();
         // Allocating a vector of negative length raises an R error.
         let failed = unsafe {
-            r_protected(move || (lib.rf_allocvector)(SexpType::IntSxp as i32, -1) as usize)
+            top_level_exec(move || (lib.rf_allocvector)(SexpType::IntSxp as i32, -1) as usize)
         };
-        assert!(matches!(failed, Err(RJumped)));
+        assert!(failed.is_err());
 
         // The same call with a valid length succeeds, and R is intact afterwards.
         let ok = unsafe {
-            r_protected(move || (lib.rf_allocvector)(SexpType::IntSxp as i32, 1) as usize)
+            top_level_exec(move || (lib.rf_allocvector)(SexpType::IntSxp as i32, 1) as usize)
         };
         assert!(ok.is_ok());
         assert_to_json("list(1L)", json!([1]));
+    }
+);
+
+r_test!(
+    oversized_strings_are_rejected_before_copying,
+    oversized_strings_are_rejected_before_copying_in_r,
+    || {
+        let limit = JsonErrorKind::StringBytesExceeded {
+            limit: MAX_STRING_BYTES,
+        };
+        assert_to_json_err(
+            &format!("list(strrep('a', {}))", MAX_STRING_BYTES + 1),
+            limit.clone(),
+            "/0",
+        );
+        // The budget is shared by all strings and names in the document.
+        assert_to_json_err(
+            &format!("list(strrep('a', {}), 'b', 'c')", MAX_STRING_BYTES - 1),
+            limit.clone(),
+            "/2",
+        );
+        assert_to_json_err(
+            &format!("setNames(list(1L), strrep('k', {}))", MAX_STRING_BYTES + 1),
+            limit,
+            "/0",
+        );
+        assert_to_json("list('ok')", json!(["ok"]));
     }
 );

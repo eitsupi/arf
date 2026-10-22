@@ -17,9 +17,6 @@ pub const MAX_NODES: usize = 1_000_000;
 /// document.
 pub const MAX_STRING_BYTES: usize = 16 * 1024 * 1024;
 
-/// Largest accepted JSON text, in bytes.
-pub const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
-
 /// The largest magnitude of an integer-valued number that a double holds
 /// exactly (2^53).
 pub(super) const MAX_EXACT_INTEGER: u64 = 1 << 53;
@@ -39,6 +36,11 @@ impl Budget {
         }
         self.nodes += 1;
         Ok(())
+    }
+
+    /// How many more bytes of string data fit in the budget.
+    pub(super) fn remaining_string_bytes(&self) -> usize {
+        MAX_STRING_BYTES - self.string_bytes
     }
 
     /// Account for `bytes` more bytes of string or key data.

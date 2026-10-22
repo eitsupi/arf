@@ -5,26 +5,25 @@
 //!
 //! 1. [`validate`] checks the whole document in pure Rust (limits, NUL
 //!    characters, number ranges) and produces the detailed, located errors.
-//! 2. The validated document is then built in a single `R_ToplevelExec`
-//!    callback whose frames hold only borrowed data and raw `SEXP`s. If R
-//!    raises an error (for example out of memory) the callback is abandoned
-//!    and the failure is reported as [`JsonErrorKind::RError`].
-//! 3. Only after that callback has returned is the finished value wrapped in
-//!    a protected [`RObject`].
+//! 2. The validated document is then built inside a single
+//!    [`top_level_exec`] whose closure only touches borrowed data and raw
+//!    `SEXP`s. If R raises an error (for example out of memory) the build is
+//!    abandoned and the failure is reported as [`JsonErrorKind::RError`].
+//! 3. Only after that has returned is the finished value wrapped in a
+//!    protected [`RObject`].
 
 use super::error::{JsonError, JsonErrorKind};
 use super::limits::{Budget, MAX_EXACT_INTEGER, PathStack, check_depth};
-use super::parse::parse;
+use crate::ffi::top_level_exec;
 use crate::object::RObject;
 use arf_libr::{CE_UTF8, RLibrary, SEXP, SexpType, r_library};
 use serde_json::{Number, Value};
-use std::ffi::c_void;
 use std::os::raw::c_int;
 
 /// Convert a JSON value to a protected R value.
 ///
-/// See the [module documentation](super) for the mapping. Must be called on
-/// the R thread.
+/// See the [module documentation](super) for the mapping and the checks made.
+/// Must be called on the R thread.
 pub fn json_to_r(value: &Value) -> Result<RObject, JsonError> {
     let lib =
         r_library().map_err(|e| JsonError::at_root(JsonErrorKind::RUnavailable(e.to_string())))?;
@@ -33,39 +32,14 @@ pub fn json_to_r(value: &Value) -> Result<RObject, JsonError> {
     let mut path = PathStack::default();
     validate(value, 0, &mut budget, &mut path)?;
 
-    let mut payload = BuildPayload {
-        lib,
-        value,
-        result: std::ptr::null_mut(),
-    };
-    // SAFETY: the callback only reads `payload.value` and writes
-    // `payload.result`; both outlive the call. Its frames own nothing that
-    // needs dropping (see `build`).
-    let completed = unsafe {
-        (lib.r_toplevelexec)(
-            Some(build_callback),
-            &mut payload as *mut BuildPayload<'_> as *mut c_void,
-        )
-    };
-    if completed == 0 || payload.result.is_null() {
-        return Err(JsonError::at_root(JsonErrorKind::RError));
-    }
-    // SAFETY: `payload.result` is a fresh R value. No R allocation can happen
-    // between the end of the callback (which released its own protections) and
-    // this call, and no other protection is held, so the new protection is the
-    // only one on the stack from this function.
-    Ok(unsafe { RObject::new(payload.result) })
-}
-
-/// Parse JSON text and convert it to a protected R value.
-///
-/// Unlike converting through [`serde_json::from_str`], this rejects objects
-/// with duplicate keys and integers beyond +/-2^53 instead of silently
-/// dropping or rounding them. See [`json_to_r`] for the mapping.
-/// Must be called on the R thread.
-pub fn json_text_to_r(text: &str) -> Result<RObject, JsonError> {
-    let value = parse(text)?;
-    json_to_r(&value)
+    // SAFETY: the closure holds a reference and a `'static` reference only,
+    // and `build` keeps its own intermediate objects protected.
+    let built = unsafe { top_level_exec(move || build(lib, value)) }
+        .map_err(|_| JsonError::at_root(JsonErrorKind::RError))?;
+    // SAFETY: `built` is a fresh R value. No R allocation can happen between
+    // the end of the build (which released its own protections) and this call,
+    // so the value is still alive; this is the only protection held here.
+    Ok(unsafe { RObject::new(built) })
 }
 
 /// Check everything about `value` that can be checked without R.
@@ -127,21 +101,9 @@ fn validate_number(number: &Number) -> Result<(), JsonErrorKind> {
     Ok(())
 }
 
-struct BuildPayload<'a> {
-    lib: &'static RLibrary,
-    value: &'a Value,
-    result: SEXP,
-}
-
-unsafe extern "C" fn build_callback(data: *mut c_void) {
-    // SAFETY: `data` is the `BuildPayload` set up by `json_to_r`.
-    let payload = unsafe { &mut *(data as *mut BuildPayload<'_>) };
-    payload.result = unsafe { build(payload.lib, payload.value) };
-}
-
 /// Build the R value for a validated document.
 ///
-/// This runs inside `R_ToplevelExec`, and any call into R may jump out of it.
+/// This runs inside [`top_level_exec`], and any call into R may jump out of it.
 /// Every frame on this path therefore holds only references, raw pointers and
 /// integers: no `String`, `Vec`, guard or iterator adaptor with a destructor.
 /// Intermediate R objects are protected with matching `Rf_protect` /
@@ -151,7 +113,7 @@ unsafe extern "C" fn build_callback(data: *mut c_void) {
 ///
 /// # Safety
 /// `value` must have passed [`validate`], and the call must be made under
-/// `R_ToplevelExec` on the R thread.
+/// [`top_level_exec`] on the R thread.
 unsafe fn build(lib: &'static RLibrary, value: &Value) -> SEXP {
     unsafe {
         match value {
