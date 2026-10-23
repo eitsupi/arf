@@ -22,10 +22,14 @@ const HTTP_METHOD_PREFIXES: [&[u8]; 3] = [b"POST ", b"GET ", b"PUT "];
 /// The first request frame read from a connection.
 struct FirstFrame {
     /// The JSON body of the frame. For HTTP the headers are already stripped.
-    /// Empty if the peer closed without sending anything. If the stream ended
-    /// or the data was malformed before a complete value, this holds whatever
-    /// was received so that parsing it reports the error.
+    /// Empty if the peer closed without sending anything, or if an HTTP
+    /// request carried no body. If the stream ended or the data was malformed
+    /// before a complete value, this holds whatever was received so that
+    /// parsing it reports the error.
     body: Vec<u8>,
+    /// How the frame was framed. A connection that sent nothing at all is
+    /// [`Framing::RawJson`].
+    framing: Framing,
     /// Bytes that arrived after the frame (for example the start of the next
     /// newline-delimited frame). Preserved exactly as received.
     #[allow(
@@ -59,6 +63,7 @@ enum FrameScan {
 }
 
 /// How the first bytes of a connection are framed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Framing {
     Http,
     RawJson,
@@ -83,7 +88,9 @@ where
         }
     };
 
-    if frame.body.is_empty() {
+    // Only a connection that sent no bytes closes silently. An HTTP request
+    // with an empty body still gets a parse error response.
+    if frame.body.is_empty() && frame.framing == Framing::RawJson {
         return Ok(());
     }
 
@@ -149,10 +156,17 @@ where
             FrameScan::Incomplete { .. } => continue,
         };
 
+        // A stream that ended before a method keyword was complete (including
+        // one that sent nothing) is treated as raw JSON.
+        let framing = match classify_framing(&buf) {
+            Framing::Http => Framing::Http,
+            Framing::RawJson | Framing::Undecided => Framing::RawJson,
+        };
         let remainder = buf.split_off(body_end);
         buf.drain(..body_start);
         return Ok(RequestRead::Complete(FirstFrame {
             body: buf,
+            framing,
             remainder,
         }));
     }
@@ -646,6 +660,50 @@ mod tests {
         let (body, rest) = read_frame(ChunkedReader::split(request.as_bytes(), 8192)).await;
         assert_eq!(body.len(), MAX_REQUEST_BYTES);
         assert!(rest.is_empty());
+    }
+
+    /// Run `handle_connection` over a client that sends `input` and then
+    /// closes its write side. Returns everything the server wrote back.
+    async fn respond_to(input: &[u8]) -> Vec<u8> {
+        let (mut client, server) = tokio::io::duplex(8192);
+        client.write_all(input).await.unwrap();
+        client.shutdown().await.unwrap();
+        // The request never reaches dispatch, so the receiver is not read.
+        let (tx, _rx) = mpsc::channel();
+        handle_connection(server, tx).await.unwrap();
+        let mut written = Vec::new();
+        client.read_to_end(&mut written).await.unwrap();
+        written
+    }
+
+    fn assert_parse_error_response(written: &[u8]) {
+        let text = std::str::from_utf8(written).unwrap();
+        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"), "{text}");
+        let (_, json) = text.split_once("\r\n\r\n").unwrap();
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(value["error"]["code"], PARSE_ERROR, "{text}");
+    }
+
+    #[tokio::test]
+    async fn test_http_with_zero_content_length_gets_a_parse_error() {
+        let written = respond_to(b"POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n").await;
+        assert_parse_error_response(&written);
+    }
+
+    #[tokio::test]
+    async fn test_http_headers_then_eof_gets_a_parse_error() {
+        let written = respond_to(b"POST / HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
+        assert_parse_error_response(&written);
+    }
+
+    #[tokio::test]
+    async fn test_whitespace_only_connection_gets_a_parse_error() {
+        assert_parse_error_response(&respond_to(b"  \n").await);
+    }
+
+    #[tokio::test]
+    async fn test_empty_connection_writes_nothing() {
+        assert!(respond_to(b"").await.is_empty());
     }
 
     #[test]
