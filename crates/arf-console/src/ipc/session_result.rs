@@ -6,6 +6,7 @@ use super::protocol::{RSessionInfo, SessionResult};
 use super::session;
 use super::state::r_is_at_prompt;
 use crate::sync::LockRecover;
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::sync::{Mutex, OnceLock, atomic::Ordering};
 
 /// In-memory session metadata, set once at IPC server startup.
@@ -22,11 +23,34 @@ struct SessionMeta {
 
 static SESSION_META: OnceLock<Mutex<SessionMeta>> = OnceLock::new();
 
+/// The random identifier of this process, as reported in `session_id`.
+///
+/// Built from two hashes seeded by the standard library's per-process random
+/// keys, mixed with the pid and the current time, so it is not guessable from
+/// the pid alone and differs between runs.
+pub(super) fn session_id() -> &'static str {
+    static SESSION_ID: OnceLock<String> = OnceLock::new();
+    SESSION_ID.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let part = || {
+            let mut hasher = RandomState::new().build_hasher();
+            hasher.write_u32(std::process::id());
+            hasher.write_u128(nanos);
+            hasher.finish()
+        };
+        format!("{:016x}{:016x}", part(), part())
+    })
+}
+
 /// Build arf-side info that is always available (no R needed).
 fn arf_session_base(meta: &SessionMeta) -> SessionResult {
     SessionResult {
         arf_version: env!("CARGO_PKG_VERSION").to_string(),
         pid: std::process::id(),
+        session_id: session_id().to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         r_home: meta.r_home.clone(),
@@ -324,5 +348,16 @@ mod tests {
             );
             assert!(json[field].is_null(), "{field} should be null when not set");
         }
+    }
+
+    #[test]
+    fn test_session_id_is_a_stable_random_token() {
+        let id = session_id();
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id}");
+        assert_eq!(id, session_id());
+
+        let json = serde_json::to_value(collect_session_result(false, "test")).unwrap();
+        assert_eq!(json["session_id"], id);
     }
 }

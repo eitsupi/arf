@@ -1,23 +1,64 @@
 //! Per-connection request handling: HTTP framing, raw JSON-RPC, and response
 //! writing.
+//!
+//! A connection is single-shot (one request, one response, then close) unless
+//! its first request is an `attach` sent as newline-terminated raw JSON, which
+//! turns it into a long-lived connection (see [`super::attached`]).
 
+use super::attached;
 use super::dispatch::dispatch_request;
+use crate::ipc::events::EventBus;
 use crate::ipc::protocol::{
     INVALID_REQUEST, IpcRequest, JsonRpcRequest, JsonRpcResponse, PARSE_ERROR,
 };
 use crate::ipc::state::trigger_headless_shutdown;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_util::sync::CancellationToken;
 
 /// Maximum accepted request size (1MB).
-const MAX_REQUEST_BYTES: usize = 1_048_576;
+pub(super) const MAX_REQUEST_BYTES: usize = 1_048_576;
 
 /// Size of each read from the stream. The reader never buffers more than
 /// [`MAX_REQUEST_BYTES`] plus one chunk.
-const READ_CHUNK_BYTES: usize = 4096;
+pub(super) const READ_CHUNK_BYTES: usize = 4096;
 
 /// Method keywords (with the trailing space) that mark a request as HTTP.
 const HTTP_METHOD_PREFIXES: [&[u8]; 3] = [b"POST ", b"GET ", b"PUT "];
+
+/// Method that turns a connection into a long-lived one.
+pub(super) const ATTACH_METHOD: &str = "attach";
+
+/// What a connection handler needs from the server that accepted it.
+#[derive(Clone)]
+pub(super) struct ConnectionContext {
+    /// Channel to the main thread.
+    pub(super) tx: mpsc::Sender<IpcRequest>,
+    /// Bus that long-lived connections receive events from.
+    pub(super) bus: EventBus,
+    /// Cancelled when the server stops.
+    pub(super) cancel: CancellationToken,
+    /// Called once an accepted `shutdown` has been answered (or the answer
+    /// could not be delivered).
+    pub(super) request_shutdown: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl ConnectionContext {
+    pub(super) fn new(
+        tx: mpsc::Sender<IpcRequest>,
+        bus: EventBus,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self {
+            tx,
+            bus,
+            cancel,
+            request_shutdown: Arc::new(|| {
+                trigger_headless_shutdown();
+            }),
+        }
+    }
+}
 
 /// The first request frame read from a connection.
 struct FirstFrame {
@@ -32,10 +73,6 @@ struct FirstFrame {
     framing: Framing,
     /// Bytes that arrived after the frame (for example the start of the next
     /// newline-delimited frame). Preserved exactly as received.
-    #[allow(
-        dead_code,
-        reason = "single-shot connections discard everything after the first frame"
-    )]
     remainder: Vec<u8>,
 }
 
@@ -71,10 +108,11 @@ enum Framing {
     Undecided,
 }
 
-/// Handle a single connection: read request, dispatch, respond.
+/// Handle a connection: read the first request, then either dispatch it and
+/// respond (single-shot) or hand the connection to [`attached::serve`].
 pub(super) async fn handle_connection<S>(
     mut stream: S,
-    tx: mpsc::Sender<IpcRequest>,
+    ctx: ConnectionContext,
 ) -> std::io::Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
@@ -99,6 +137,30 @@ where
         Err(response) => return write_response(&mut stream, &response).await,
     };
 
+    if request.method == ATTACH_METHOD {
+        // A notification gets no response, whatever its framing.
+        if request.id.is_none() {
+            return Ok(());
+        }
+        if frame.framing == Framing::Http {
+            let response = JsonRpcResponse::error(
+                request.id,
+                INVALID_REQUEST,
+                "attach requires a raw newline-delimited connection".to_string(),
+            );
+            return write_response(&mut stream, &response).await;
+        }
+        match read_until_line_end(&mut stream, frame.body.len(), frame.remainder).await? {
+            LineEnd::Terminated(buffered) => {
+                return attached::serve(stream, request, buffered, &ctx).await;
+            }
+            // The same limit applies to every line of a long-lived connection.
+            LineEnd::TooLong => return Ok(()),
+            // Not newline-terminated: an ordinary single-shot request.
+            LineEnd::Unterminated => {}
+        }
+    }
+
     // JSON-RPC 2.0 notifications (absent id) must not yield a response.
     if request.id.is_none() {
         return Ok(());
@@ -106,21 +168,74 @@ where
 
     // Dispatch based on method
     let is_shutdown = request.method == "shutdown";
-    let response = dispatch_request(request, &tx).await;
+    let response = dispatch_request(request, &ctx.tx).await;
 
     // Send HTTP response (for curl compatibility)
-    let accepted_shutdown = is_shutdown
-        && response
-            .result
-            .as_ref()
-            .and_then(|result| result.get("accepted"))
-            .and_then(serde_json::Value::as_bool)
-            == Some(true);
+    let accepted_shutdown = is_shutdown && is_accepted_shutdown(&response);
     let result = write_response(&mut stream, &response).await;
     if accepted_shutdown {
-        trigger_headless_shutdown();
+        (ctx.request_shutdown)();
     }
     result
+}
+
+/// Whether `response` is the result of a `shutdown` request that was accepted.
+pub(super) fn is_accepted_shutdown(response: &JsonRpcResponse) -> bool {
+    response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("accepted"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+/// How the line holding the first request frame ends.
+enum LineEnd {
+    /// A newline follows; holds the bytes after it.
+    Terminated(Vec<u8>),
+    /// The line holds something other than the request, or the stream ended
+    /// before the newline.
+    Unterminated,
+    /// The line, not counting the newline, is longer than [`MAX_REQUEST_BYTES`].
+    TooLong,
+}
+
+/// Check that the first request frame ends its line, reading more if needed.
+///
+/// `line_len` is the length of the frame, and `pending` the bytes that were
+/// read after it. Only spaces, tabs and `\r` may precede the newline.
+async fn read_until_line_end<S>(
+    stream: &mut S,
+    mut line_len: usize,
+    mut pending: Vec<u8>,
+) -> std::io::Result<LineEnd>
+where
+    S: AsyncReadExt + Unpin,
+{
+    let mut chunk = [0u8; READ_CHUNK_BYTES];
+    loop {
+        let blanks = pending
+            .iter()
+            .take_while(|byte| matches!(**byte, b' ' | b'\t' | b'\r'))
+            .count();
+        line_len += blanks;
+        pending.drain(..blanks);
+        // Checked before looking at what ends the line, so that a newline
+        // cannot make an oversized line acceptable.
+        if line_len > MAX_REQUEST_BYTES {
+            return Ok(LineEnd::TooLong);
+        }
+        match pending.first() {
+            Some(b'\n') => return Ok(LineEnd::Terminated(pending.split_off(1))),
+            Some(_) => return Ok(LineEnd::Unterminated),
+            None => {}
+        }
+        let n = stream.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(LineEnd::Unterminated);
+        }
+        pending.extend_from_slice(&chunk[..n]);
+    }
 }
 
 /// Read the first request frame from the stream (up to 1MB).
@@ -321,6 +436,7 @@ fn parse_content_length(headers: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::events::Limits;
     use std::collections::VecDeque;
     use std::pin::Pin;
     use std::task::{Context, Poll};
@@ -670,7 +786,9 @@ mod tests {
         client.shutdown().await.unwrap();
         // The request never reaches dispatch, so the receiver is not read.
         let (tx, _rx) = mpsc::channel();
-        handle_connection(server, tx).await.unwrap();
+        let (bus, _dispatcher) = EventBus::new(Limits::default());
+        let ctx = ConnectionContext::new(tx, bus, CancellationToken::new());
+        handle_connection(server, ctx).await.unwrap();
         let mut written = Vec::new();
         client.read_to_end(&mut written).await.unwrap();
         written

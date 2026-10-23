@@ -435,6 +435,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
 {
   "arf_version": "0.2.6",
   "pid": 12345,
+  "session_id": "9f3c1a07d25b4e68a1c0b7e45d2f8a13",
   "os": "linux",
   "arch": "x86_64",
   "r_home": "/opt/R/4.4.2/lib/R",
@@ -456,7 +457,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
 }
 ```
 
-All top-level keys are always present. `ipc_policy` is the complete policy object described in
+All top-level keys are always present. `session_id` is a random identifier generated when the arf process starts. It stays the same across `:ipc stop` and `:ipc start`, so it tells a restarted arf apart from a restarted server. `ipc_policy` is the complete policy object described in
 the evaluation section; it is present even when R is busy. `r_home` is the R installation the
 session is using, or `null` when the session has no R. The `r` object contains information collected by evaluating R
 and may be `null` while R is busy or unavailable. `arch` is the architecture of the arf process,
@@ -716,6 +717,9 @@ Connection: close
 | `session` | *(none)* | Get session information |
 | `history` | `limit` (int, default 50), `all_sessions` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
+| `attach` | `client` (object, optional), `subscribe` (array of patterns, optional), `protocol` (int, optional) | Turn the connection into a [long-lived connection](#long-lived-connections) (raw newline-delimited JSON only) |
+| `subscribe` | `patterns` (array of strings) | Long-lived connections only: add event subscriptions |
+| `unsubscribe` | `patterns` (array of strings) | Long-lived connections only: remove event subscriptions |
 
 ### Response Examples
 
@@ -774,6 +778,49 @@ REPL evaluation and do not return evaluation results.
 - **`value` / `error` (structured result)**: For silent `evaluate`, the evaluated result (or error) is captured separately using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). Printed values appear here rather than in `stdout`/`stderr`. Visible evaluation uses normal REPL output and leaves both fields `null`.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
+
+### Long-lived Connections
+
+A client that wants to receive events, or to keep one connection for many requests, opens the connection with `attach`. The request must be raw JSON (not HTTP) and must end with a newline:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"attach","params":{"client":{"name":"my-tool","version":"0.1"},"subscribe":["demo.*"],"protocol":1}}
+```
+
+All `params` are optional. `client` is informational only and is never used for authentication or authorization. `subscribe` lists the initial [subscription patterns](#events). `protocol` is the version of the line protocol described here; it defaults to 1, and any other value is refused. If `attach` is refused (unsupported protocol, an invalid pattern, or more subscriptions than a connection may hold), the server sends an error response and closes the connection. An `attach` sent over HTTP is refused with `INVALID_REQUEST`, and an `attach` without an `id` closes the connection without a response. If the first line does not end right after the request, the request is treated as an ordinary single-shot request instead.
+
+The response is:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
+```
+
+`session` is the same object the `session` method returns, but it never waits for R: `r` is `null` and `r_unavailable_reason` says so. Call `session` to get R's details. `session_id` identifies the arf process and is the same after the server is restarted within it.
+
+After the response, each line in either direction is one JSON-RPC 2.0 message:
+
+- A line longer than 1 MiB, or a line that is not valid JSON, closes the connection. Empty lines are ignored. Valid JSON that is not a valid JSON-RPC request is answered with an `INVALID_REQUEST` error (with the `id` if it has one).
+- Requests without an `id` are notifications: they get no response and are not carried out.
+- Every method listed above can be used, with the same parameters, results and errors as on a single-shot connection, plus `subscribe` and `unsubscribe`. A second `attach` is answered with an error, and the connection stays open.
+- Requests run concurrently and their responses arrive in completion order, so match them by `id`. At most 32 requests may be outstanding; further ones are answered immediately with `R_BUSY` until one finishes. `subscribe` and `unsubscribe` are applied in the order they arrive.
+- Clients must keep their write side open for the life of the connection. When the server sees end-of-file it cancels outstanding requests and closes the connection, so responses after a half-close are not guaranteed.
+- When the connection ends, requests that R has not started yet are cancelled. A request that R is already running continues, but its result is discarded.
+- The server closes a connection to which it cannot write a line within 30 seconds.
+- `shutdown` behaves as on a single-shot connection; the shutdown begins after its response has been written, or after the write has failed or timed out.
+
+#### Events
+
+`subscribe` and `unsubscribe` take `patterns`, a list of topic names or `prefix.*` wildcards (`prefix.*` matches every topic starting with `prefix.`, not `prefix` itself). A topic is dot-separated; each segment is made of ASCII letters, digits, `_` and `-`, and the whole name is at most 128 bytes. All patterns in a request are validated first, and the request is applied entirely or not at all. A connection may hold at most 64 subscriptions. The results are `{"added": n}` and `{"removed": n}`, counting patterns that were not subscribed before and patterns that were, respectively.
+
+Matching events arrive as notifications:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"seq":42,"topic":"demo.finished","data":{},"execution":null}}
+```
+
+`execution` is `null` unless the event belongs to an execution. Events on one connection arrive in increasing `seq` order. `seq` exists only to compare order: it is shared by all events of the arf process, so gaps are normal and do not mean that events were lost. No event is sent before the `attach` response.
+
+Events are never dropped silently. A connection that cannot keep up, or that may have missed an event because the server's own queue overflowed, is disconnected instead. After such a disconnect, attach again and fetch the state you need again. To avoid missing changes at the start, attach with `subscribe` first and only then fetch the initial state: an event may then describe something the fetched state already contains, but nothing is lost unless the connection is disconnected.
 
 ### Error Codes
 

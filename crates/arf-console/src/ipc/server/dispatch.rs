@@ -71,7 +71,7 @@ fn alternate_mode_rejection(
 }
 
 /// Deserialize request params, or build the INVALID_PARAMS response.
-fn parse_params<T: serde::de::DeserializeOwned>(
+pub(super) fn parse_params<T: serde::de::DeserializeOwned>(
     id: &Option<serde_json::Value>,
     params: serde_json::Value,
 ) -> Result<T, Box<JsonRpcResponse>> {

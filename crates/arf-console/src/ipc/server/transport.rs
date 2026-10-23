@@ -1,20 +1,17 @@
 //! Listener setup and accept loops for the Unix socket / Windows named pipe.
 
-use super::connection::handle_connection;
-use crate::ipc::protocol::IpcRequest;
+use super::connection::{ConnectionContext, handle_connection};
 use crate::ipc::session::SessionType;
 use crate::ipc::session_result::set_session_meta;
-use std::sync::mpsc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_util::sync::CancellationToken;
 
 /// Serve one accepted connection on its own task.
-fn spawn_connection<S>(stream: S, tx: mpsc::Sender<IpcRequest>)
+fn spawn_connection<S>(stream: S, ctx: ConnectionContext)
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     tokio::spawn(async move {
-        if let Err(e) = handle_connection(stream, tx).await {
+        if let Err(e) = handle_connection(stream, ctx).await {
             log::debug!("IPC connection error: {}", e);
         }
     });
@@ -30,8 +27,7 @@ pub(super) async fn run_server(
     log_file: Option<String>,
     history_session_id: Option<i64>,
     session_type: SessionType,
-    tx: mpsc::Sender<IpcRequest>,
-    cancel: CancellationToken,
+    ctx: ConnectionContext,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
 ) -> std::io::Result<()> {
     let listener = match tokio::net::UnixListener::bind(socket_path) {
@@ -81,18 +77,17 @@ pub(super) async fn run_server(
             result = listener.accept() => {
                 match result {
                     Ok((stream, _addr)) => {
-                        let tx = tx.clone();
-                        spawn_connection(stream, tx);
+                        spawn_connection(stream, ctx.clone());
                     }
                     Err(e) => {
-                        if cancel.is_cancelled() {
+                        if ctx.cancel.is_cancelled() {
                             break;
                         }
                         log::warn!("IPC accept error: {}", e);
                     }
                 }
             }
-            _ = cancel.cancelled() => {
+            _ = ctx.cancel.cancelled() => {
                 log::info!("IPC server shutting down");
                 break;
             }
@@ -110,8 +105,7 @@ pub(super) async fn run_server(
     log_file: Option<String>,
     history_session_id: Option<i64>,
     session_type: SessionType,
-    tx: mpsc::Sender<IpcRequest>,
-    cancel: CancellationToken,
+    ctx: ConnectionContext,
     bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
 ) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
@@ -147,23 +141,22 @@ pub(super) async fn run_server(
             result = server.connect() => {
                 match result {
                     Ok(()) => {
-                        let tx = tx.clone();
                         let connected = server;
 
                         // Create a new pipe instance for the next connection
                         server = ServerOptions::new().create(socket_path)?;
 
-                        spawn_connection(connected, tx);
+                        spawn_connection(connected, ctx.clone());
                     }
                     Err(e) => {
-                        if cancel.is_cancelled() {
+                        if ctx.cancel.is_cancelled() {
                             break;
                         }
                         log::warn!("IPC accept error: {}", e);
                     }
                 }
             }
-            _ = cancel.cancelled() => {
+            _ = ctx.cancel.cancelled() => {
                 log::info!("IPC server shutting down");
                 break;
             }

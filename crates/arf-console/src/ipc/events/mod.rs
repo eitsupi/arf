@@ -35,16 +35,17 @@
 //! Subscriptions apply from the moment the dispatcher routes an event, not
 //! from when it was published. Connection ids and `seq` are shared across
 //! the whole process, so they keep increasing even if the bus is recreated.
-
-// Nothing outside this module and its tests uses the event bus yet; the
-// expectation fails (and must be removed) once a caller exists.
-#![expect(
-    dead_code,
-    unused_imports,
-    reason = "the bus is not yet wired into the IPC server"
-)]
+//!
+//! ## The current bus
+//!
+//! Each run of the IPC server owns one bus. Producers without a handle to it
+//! publish through `publish_event`, which reaches the bus of the server that
+//! is running, or fails if there is none. A stopping server removes only the
+//! bus it installed itself (identified by a generation number), so it can
+//! never remove the bus of a server started after it.
 
 mod bus;
+mod current;
 mod dispatcher;
 mod event;
 mod pattern;
@@ -52,10 +53,32 @@ mod queue;
 #[cfg(test)]
 mod tests;
 
-pub use bus::{
-    ConnectionId, DisconnectReason, EventBus, EventStream, Limits, PublishError, SubscribeError,
-};
-pub use dispatcher::EventDispatcher;
-pub use event::{Event, ExecutionId, Topic, TopicError};
+pub use bus::{ConnectionId, EventBus, EventStream, Limits, SubscribeError};
+pub(crate) use current::{clear_current_bus, install_current_bus};
+pub use event::Event;
 pub use pattern::SubscriptionPattern;
-pub use queue::QueueLimits;
+
+// Used by event producers, which are added separately from the server.
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "only used by producers outside the server, which are added separately"
+    )
+)]
+pub use {
+    bus::{DisconnectReason, PublishError},
+    event::{ExecutionId, Topic, TopicError},
+    queue::QueueLimits,
+};
+
+#[expect(
+    unused_imports,
+    reason = "only used by producers outside the server, which are added separately"
+)]
+pub(crate) use current::publish_event;
+#[expect(
+    unused_imports,
+    reason = "the server names the dispatcher only through the bus constructor"
+)]
+pub use dispatcher::EventDispatcher;

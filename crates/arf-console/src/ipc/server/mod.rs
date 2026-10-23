@@ -3,15 +3,27 @@
 //! Runs in a dedicated thread with a tokio current_thread runtime.
 //! Each connection is handled as a simple HTTP-like JSON-RPC endpoint:
 //! read one request, dispatch via mpsc channel, await oneshot reply, respond.
+//! A client that opens with a newline-terminated raw `attach` request instead
+//! keeps the connection and receives events (see `attached`).
+//!
+//! Each server run owns an event bus whose dispatcher runs on the server's
+//! runtime. The bus is also published as the process-wide current bus for
+//! the lifetime of the run.
 
+mod attached;
 mod connection;
 mod dispatch;
 mod socket_path;
 mod transport;
 
+#[cfg(test)]
+pub(in crate::ipc) use attached::EventNotification;
+
+use crate::ipc::events::{EventBus, Limits, clear_current_bus, install_current_bus};
 use crate::ipc::protocol::IpcRequest;
 use crate::ipc::session::{SessionInfo, SessionType, remove_session, write_session};
 use crate::sync::LockRecover;
+use connection::ConnectionContext;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
@@ -118,6 +130,14 @@ pub fn start_server(
                 .expect("Failed to create tokio runtime for IPC server");
 
             rt.block_on(async move {
+                // The bus lives exactly as long as this run of the server. It
+                // is created before the bind is confirmed, so it is in place
+                // before any client can connect.
+                let (bus, dispatcher) = EventBus::new(Limits::default());
+                let dispatcher_task = tokio::spawn(dispatcher.run());
+                let generation = install_current_bus(bus.clone());
+                let ctx = ConnectionContext::new(tx, bus.clone(), token_clone);
+
                 if let Err(e) = transport::run_server(
                     &path,
                     &started_at_owned,
@@ -125,14 +145,19 @@ pub fn start_server(
                     log_file_clone,
                     history_session_id_clone,
                     session_type_clone,
-                    tx,
-                    token_clone,
+                    ctx,
                     bind_tx,
                 )
                 .await
                 {
                     log::error!("IPC server error: {}", e);
                 }
+
+                // Only remove our own bus: a server started after this one
+                // may already have installed another.
+                clear_current_bus(generation);
+                bus.close();
+                let _ = dispatcher_task.await;
             });
         })?;
 
