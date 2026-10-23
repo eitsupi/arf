@@ -53,7 +53,8 @@ static PUBLISHER: OnceLock<EventPublisher> = OnceLock::new();
 ///
 /// The publisher is set once for the process. Returns `false`, keeping the
 /// existing publisher, if one is already installed. Until one is installed,
-/// `arf_publish_event` returns `FALSE`.
+/// `arf_publish_event` returns `FALSE`. Topic rules and size limits are the
+/// publisher's to enforce, so without one they are not checked either.
 pub fn set_event_publisher(publisher: EventPublisher) -> bool {
     PUBLISHER.set(publisher).is_ok()
 }
