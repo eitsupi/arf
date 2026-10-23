@@ -840,8 +840,10 @@ arf_publish <- function(topic, data = NULL) {
   invisible(.Call("arf_publish_event", topic, data, PACKAGE = "(embedding)"))
 }
 
-has_arf_events <- is.loaded("arf_api_version", PACKAGE = "(embedding)", type = ".Call") &&
-  identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L)
+has_arf_events <- function() {
+  is.loaded("arf_api_version", PACKAGE = "(embedding)", type = ".Call") &&
+    identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L)
+}
 ```
 
 The check detects the interface for feature detection only; it is not authentication. On Windows the routines exist before startup profiles run. On Unix they are registered only after R has finished starting, so `.Rprofile` and `Rprofile.site` cannot use them: detect lazily, on first use rather than at load time, and do not cache a `FALSE` obtained during startup.
