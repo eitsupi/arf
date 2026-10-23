@@ -5,7 +5,7 @@ use super::protocol::{
     HANDLER_R_ERROR, HANDLER_RESULT_ERROR, IpcMethod, IpcRequest, IpcResponse,
 };
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
 const MAX_QUEUED_CALLS: usize = 64;
@@ -46,11 +46,39 @@ static STATUS: RwLock<HandlerApiStatus> = RwLock::new(HandlerApiStatus {
     handlers: Vec::new(),
 });
 
-/// A reservation held while a call waits for the R thread.
-///
-/// It is released when the call starts or when its queued request is dropped.
-pub struct HandlerQueuePermit {
+/// A reservation whose accounting can be released before stale queue entries
+/// are drained. The atomic makes explicit cancellation and final drop safe to
+/// race without decrementing another call's reservation.
+struct QueueLease {
     bytes: usize,
+    released: std::sync::atomic::AtomicBool,
+}
+
+impl QueueLease {
+    fn release(&self) {
+        if self
+            .released
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            let mut usage = QUEUE_USAGE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            usage.count = usage.count.saturating_sub(1);
+            usage.bytes = usage.bytes.saturating_sub(self.bytes);
+        }
+    }
+}
+
+impl Drop for QueueLease {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// A shared reservation for one pending handler call.
+pub struct HandlerQueuePermit {
+    lease: QueueLease,
 }
 
 impl HandlerQueuePermit {
@@ -69,27 +97,82 @@ impl HandlerQueuePermit {
         }
         usage.count += 1;
         usage.bytes += bytes;
-        Some(Self { bytes })
+        Some(Self {
+            lease: QueueLease {
+                bytes,
+                released: std::sync::atomic::AtomicBool::new(false),
+            },
+        })
     }
 
-    /// Mark the call as started unless its queue deadline already cancelled it.
-    /// Dropping this permit releases its count and byte reservation.
-    pub fn start(self, state: &AtomicU8) -> bool {
-        let started = state
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok();
-        drop(self);
-        started
+    fn release(&self) {
+        self.lease.release();
     }
 }
 
-impl Drop for HandlerQueuePermit {
-    fn drop(&mut self) {
-        let mut usage = QUEUE_USAGE
+struct HandlerCallPayload {
+    handler: String,
+    args: serde_json::Value,
+}
+
+/// Shared state for a call while it is queued. Cancellation frees both its
+/// admission reservation and user-supplied payload immediately, even if the
+/// cheap tombstone remains in a channel until the R thread next drains it.
+pub struct HandlerCallTicket {
+    state: AtomicU8,
+    queue: HandlerQueuePermit,
+    payload: Mutex<Option<HandlerCallPayload>>,
+}
+
+impl HandlerCallTicket {
+    pub fn new(queue: HandlerQueuePermit, handler: String, args: serde_json::Value) -> Self {
+        Self {
+            state: AtomicU8::new(0),
+            queue,
+            payload: Mutex::new(Some(HandlerCallPayload { handler, args })),
+        }
+    }
+
+    /// Cancel if still queued, releasing its admission budget and payload.
+    /// Repeated cancellation is safe; a started call retains its payload.
+    pub fn cancel(&self) -> bool {
+        let cancelled = self
+            .state
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        if cancelled || self.state.load(Ordering::Acquire) == 2 {
+            self.payload
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            self.queue.release();
+        }
+        cancelled
+    }
+
+    /// Mark as started and move its payload to the R thread.
+    pub fn start(&self) -> Option<(String, serde_json::Value)> {
+        if self
+            .state
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return None;
+        }
+        self.queue.release();
+        self.payload
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        usage.count = usage.count.saturating_sub(1);
-        usage.bytes = usage.bytes.saturating_sub(self.bytes);
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .map(|payload| (payload.handler, payload.args))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn payload_is_empty(&self) -> bool {
+        self.payload
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_none()
     }
 }
 
@@ -109,6 +192,11 @@ pub fn handler_status() -> HandlerApiStatus {
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()
+}
+
+#[cfg(test)]
+pub(crate) fn set_handler_status_for_test(status: HandlerApiStatus) {
+    replace_status(status);
 }
 
 /// Evaluate and atomically expose the named functions returned by `expression`.
@@ -158,20 +246,13 @@ pub fn call_handler(
     })
 }
 
-pub fn timeout_error_state() -> Arc<AtomicU8> {
-    Arc::new(AtomicU8::new(0))
-}
-
 /// Execute a call that has reached the R thread. Returns immediately for a
 /// closed reply or a call whose queue deadline expired before it started.
 pub(crate) fn execute_handler_request(request: IpcRequest) {
     let IpcRequest { method, reply } = request;
     let IpcMethod::Call {
-        handler,
-        args,
         queue_deadline,
-        queue,
-        state,
+        ticket,
         ..
     } = method
     else {
@@ -179,13 +260,11 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
         return;
     };
     if reply.is_closed() {
+        ticket.cancel();
         return;
     }
     if Instant::now() >= queue_deadline {
-        if state
-            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
+        if ticket.cancel() {
             let _ = reply.send(IpcResponse::error(
                 HANDLER_QUEUE_TIMEOUT,
                 "Handler call expired before it started".to_string(),
@@ -193,9 +272,9 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
         }
         return;
     }
-    if !queue.start(&state) {
+    let Some((handler, args)) = ticket.start() else {
         return;
-    }
+    };
 
     struct PromptGuard;
     impl Drop for PromptGuard {

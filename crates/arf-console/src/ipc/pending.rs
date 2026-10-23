@@ -459,11 +459,12 @@ mod tests {
         (
             IpcRequest {
                 method: IpcMethod::Call {
-                    handler: "demo/read".to_owned(),
-                    args,
                     queue_deadline: std::time::Instant::now(),
-                    queue,
-                    state: super::super::handlers::timeout_error_state(),
+                    ticket: std::sync::Arc::new(super::super::handlers::HandlerCallTicket::new(
+                        queue,
+                        "demo/read".to_owned(),
+                        args,
+                    )),
                 },
                 reply,
             },

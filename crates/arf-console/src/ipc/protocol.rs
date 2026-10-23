@@ -270,12 +270,8 @@ pub enum IpcMethod {
     },
     /// Call one handler exposed by the R startup expression.
     Call {
-        handler: String,
-        args: serde_json::Value,
         queue_deadline: std::time::Instant,
-        queue: super::handlers::HandlerQueuePermit,
-        /// 0 = queued, 1 = started, 2 = cancelled by expiry.
-        state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+        ticket: std::sync::Arc<super::handlers::HandlerCallTicket>,
     },
     /// Collect session information (arf + R if available).
     Session,

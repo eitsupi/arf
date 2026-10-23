@@ -839,7 +839,7 @@ Start arf with `--with-ipc --ipc-expose '<R expression>'` in the interactive REP
 arf headless --ipc-expose 'list("demo/add" = function(args) list(sum = sum(args$x)))'
 ```
 
-The complete list is checked before any handler becomes available. An evaluation or validation error aborts startup with a diagnostic. The functions are kept alive for the session. On Unix, startup profiles run during R initialization, before arf can register the handlers; do not test for this API in `.Rprofile`, and do not cache an unavailable result from startup. On Windows, arf runs profiles manually and registers the handlers before sourcing them.
+The complete list is checked before any handler becomes available. An evaluation or validation error aborts startup with a diagnostic. The functions are kept alive for the session.
 
 Use the `call` method to invoke one exposed selector with JSON arguments:
 

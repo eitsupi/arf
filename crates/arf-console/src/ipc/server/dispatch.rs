@@ -3,7 +3,7 @@
 
 use crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
 use crate::ipc::handlers::{
-    HandlerApiState, HandlerQueuePermit, handler_status, timeout_error_state,
+    HandlerApiState, HandlerCallTicket, HandlerQueuePermit, handler_status,
 };
 use crate::ipc::history_query::{HistoryQueryError, query_history};
 use crate::ipc::protocol::{
@@ -205,11 +205,8 @@ fn parse_handler_call(
     let queued_at = std::time::Instant::now();
     let queue_deadline = queued_at.checked_add(timeout).unwrap_or(queued_at);
     Ok(IpcMethod::Call {
-        handler: params.handler,
-        args: params.args,
         queue_deadline,
-        queue,
-        state: timeout_error_state(),
+        ticket: std::sync::Arc::new(HandlerCallTicket::new(queue, params.handler, params.args)),
     })
 }
 
@@ -274,27 +271,22 @@ pub(super) async fn dispatch_request(
 
     if let IpcMethod::Call {
         ref queue_deadline,
-        ref state,
+        ref ticket,
         ..
     } = method
     {
         let remaining = queue_deadline.saturating_duration_since(std::time::Instant::now());
-        let state = std::sync::Arc::clone(state);
         // Connection teardown drops this future. Race cancellation against
         // the R thread's queued -> started transition, rather than relying
         // only on a reply-channel check immediately before that transition.
-        struct CancelQueuedCall(std::sync::Arc<std::sync::atomic::AtomicU8>);
+        struct CancelQueuedCall(std::sync::Arc<HandlerCallTicket>);
         impl Drop for CancelQueuedCall {
             fn drop(&mut self) {
-                let _ = self.0.compare_exchange(
-                    0,
-                    2,
-                    std::sync::atomic::Ordering::AcqRel,
-                    std::sync::atomic::Ordering::Acquire,
-                );
+                self.0.cancel();
             }
         }
-        let _cancel_queued = CancelQueuedCall(std::sync::Arc::clone(&state));
+        let ticket = std::sync::Arc::clone(ticket);
+        let _cancel_queued = CancelQueuedCall(std::sync::Arc::clone(&ticket));
         let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
         if tx
             .send(IpcRequest {
@@ -317,15 +309,7 @@ pub(super) async fn dispatch_request(
                 "Handler request was dropped".to_string(),
             ),
             Err(_) => {
-                if state
-                    .compare_exchange(
-                        0,
-                        2,
-                        std::sync::atomic::Ordering::AcqRel,
-                        std::sync::atomic::Ordering::Acquire,
-                    )
-                    .is_ok()
-                {
+                if ticket.cancel() {
                     JsonRpcResponse::error(
                         id,
                         HANDLER_QUEUE_TIMEOUT,
@@ -383,6 +367,7 @@ pub(super) async fn dispatch_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::handlers::{HandlerApiState, HandlerApiStatus, set_handler_status_for_test};
     use crate::ipc::protocol::SessionResult;
     use crate::ipc::set_in_alternate_mode;
 
@@ -393,6 +378,176 @@ mod tests {
         fn drop(&mut self) {
             set_in_alternate_mode(false);
         }
+    }
+
+    struct HandlerStatusGuard;
+
+    impl Drop for HandlerStatusGuard {
+        fn drop(&mut self) {
+            set_handler_status_for_test(HandlerApiStatus::default());
+        }
+    }
+
+    fn enable_test_handlers() -> HandlerStatusGuard {
+        set_handler_status_for_test(HandlerApiStatus {
+            state: HandlerApiState::Locked,
+            handlers: vec!["test/read".to_string()],
+        });
+        HandlerStatusGuard
+    }
+
+    async fn timed_out_call(
+        id: u64,
+        args: serde_json::Value,
+        timeout_ms: u64,
+        tx: &mpsc::Sender<IpcRequest>,
+    ) -> JsonRpcResponse {
+        dispatch_request(
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(id)),
+                method: "call".to_string(),
+                params: serde_json::json!({
+                    "handler": "test/read",
+                    "args": args,
+                    "queue_timeout_ms": timeout_ms,
+                }),
+            },
+            tx,
+        )
+        .await
+    }
+
+    async fn abort_queued_call(
+        id: u64,
+        args: serde_json::Value,
+        tx: &mpsc::Sender<IpcRequest>,
+        rx: &mpsc::Receiver<IpcRequest>,
+    ) -> IpcRequest {
+        let tx = tx.clone();
+        let task = tokio::spawn(async move {
+            dispatch_request(
+                JsonRpcRequest {
+                    jsonrpc: "2.0".to_string(),
+                    id: Some(serde_json::json!(id)),
+                    method: "call".to_string(),
+                    params: serde_json::json!({
+                        "handler": "test/read",
+                        "args": args,
+                        "queue_timeout_ms": 300_000,
+                    }),
+                },
+                &tx,
+            )
+            .await
+        });
+        let queued = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match rx.try_recv() {
+                    Ok(request) => break request,
+                    Err(mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        panic!("request channel disconnected")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("call should reach the main-thread queue");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        queued
+    }
+
+    fn ticket_from(request: &IpcRequest) -> &std::sync::Arc<HandlerCallTicket> {
+        match &request.method {
+            IpcMethod::Call { ticket, .. } => ticket,
+            _ => panic!("expected queued handler call"),
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn timed_out_calls_release_count_admission_while_requests_remain_queued() {
+        let _status = enable_test_handlers();
+        let (tx, rx) = mpsc::channel();
+
+        // Keep canceled requests alive to simulate a busy R thread.
+        for id in 0..63 {
+            let response = timed_out_call(id, serde_json::Value::Null, 1, &tx).await;
+            assert_eq!(response.error.unwrap().code, HANDLER_QUEUE_TIMEOUT);
+        }
+        let mut timed_out = Vec::new();
+        for _ in 0..63 {
+            timed_out.push(rx.try_recv().expect("timed-out request remains queued"));
+        }
+        let aborted = abort_queued_call(63, serde_json::Value::Null, &tx, &rx).await;
+        assert!(ticket_from(&aborted).payload_is_empty());
+        assert!(
+            timed_out
+                .iter()
+                .all(|request| ticket_from(request).payload_is_empty())
+        );
+
+        let response = timed_out_call(64, serde_json::Value::Null, 1, &tx).await;
+        assert_eq!(
+            response.error.unwrap().code,
+            HANDLER_QUEUE_TIMEOUT,
+            "expired requests should release count permits before the R thread drains them"
+        );
+
+        let mut fresh_permits = Vec::new();
+        for _ in 0..64 {
+            fresh_permits.push(
+                HandlerQueuePermit::try_acquire("h", &serde_json::Value::Null)
+                    .expect("fresh reservations fit after cancellation"),
+            );
+        }
+        assert!(HandlerQueuePermit::try_acquire("h", &serde_json::Value::Null).is_none());
+        drop((aborted, timed_out));
+        assert!(
+            HandlerQueuePermit::try_acquire("h", &serde_json::Value::Null).is_none(),
+            "dropping a stale ticket must not release a fresh ticket's reservation"
+        );
+        drop(rx);
+        drop(fresh_permits);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn timed_out_calls_release_byte_admission_while_requests_remain_queued() {
+        let _status = enable_test_handlers();
+        let (tx, rx) = mpsc::channel();
+        // The serialized argument plus handler name reaches the 8 MiB limit.
+        let large_args = serde_json::Value::String("x".repeat(8 * 1024 * 1024 - 11));
+        let response = timed_out_call(1, large_args, 1, &tx).await;
+        assert_eq!(response.error.unwrap().code, HANDLER_QUEUE_TIMEOUT);
+        let stale = rx.try_recv().expect("timed-out request remains queued");
+        assert!(ticket_from(&stale).payload_is_empty());
+
+        let response = timed_out_call(2, serde_json::Value::Null, 1, &tx).await;
+        assert_eq!(
+            response.error.unwrap().code,
+            HANDLER_QUEUE_TIMEOUT,
+            "expired request payload should release byte permits before the R thread drains it"
+        );
+        drop(stale);
+        drop(rx);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn aborted_large_call_releases_byte_admission_and_payload() {
+        let _status = enable_test_handlers();
+        let (tx, rx) = mpsc::channel();
+        let large_args = serde_json::Value::String("x".repeat(8 * 1024 * 1024 - 11));
+        let stale = abort_queued_call(1, large_args, &tx, &rx).await;
+        assert!(ticket_from(&stale).payload_is_empty());
+
+        let response = timed_out_call(2, serde_json::Value::Null, 1, &tx).await;
+        assert_eq!(response.error.unwrap().code, HANDLER_QUEUE_TIMEOUT);
+        drop(stale);
+        drop(rx);
     }
 
     /// Tests that dispatch_request rejects both evaluate and user_input
