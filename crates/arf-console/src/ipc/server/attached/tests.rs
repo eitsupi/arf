@@ -843,24 +843,30 @@ async fn overflowing_the_event_queue_closes_the_connection() {
     f.client
         .send_request(0, "attach", json!({"subscribe": ["flood.*"]}))
         .await;
-    wait_for(|| f.bus.connection_count() == 1).await;
+    assert_eq!(f.client.recv().await["id"], 0);
 
-    // The attach response is stuck, so nothing is taken off the queue.
+    // The first event cannot be written because the client reads nothing, so
+    // the queue behind it overflows.
     for n in 0..20 {
         f.publish("flood.x", json!(n));
         tokio::task::yield_now().await;
     }
     wait_for(|| f.bus.connection_count() == 0).await;
 
-    // What was queued before the cut-off still arrives, then the stream ends.
+    // The connection is cut, possibly in the middle of a line; the lines
+    // that did arrive are whole events, and fewer than were published.
     let written = f.client.read_to_end().await;
-    let lines: Vec<&str> = written.lines().collect();
-    assert!(lines[0].contains(r#""id":0"#), "{written}");
+    let complete = written.rsplit_once('\n').map_or("", |(whole, _)| whole);
+    let lines: Vec<&str> = complete.lines().collect();
     assert!(lines.len() < 20, "{written}");
-    for line in &lines[1..] {
+    for line in lines {
         assert!(line.contains(r#""method":"event""#), "{line}");
     }
-    f.finished().await.unwrap();
+    tokio::time::timeout(WAIT, f.task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
 }
 
 #[tokio::test]
@@ -923,6 +929,17 @@ async fn shutdown_is_carried_out_only_after_its_response_is_written() {
     assert_eq!(response["id"], 1);
     assert_eq!(response["result"]["accepted"], true);
     wait_for(|| f.shutdowns.load(Ordering::SeqCst) == 1).await;
+
+    // Ending the connection does not carry the shutdown out a second time.
+    let shutdowns = Arc::clone(&f.shutdowns);
+    let Fixture { client, task, .. } = f;
+    drop(client);
+    tokio::time::timeout(WAIT, task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test(start_paused = true)]
@@ -953,6 +970,7 @@ async fn a_long_line_received_in_tiny_pieces_is_reassembled_in_linear_time() {
     let (tx, _rx) = std::sync::mpsc::channel();
     let ctx = ConnectionContext::new(tx, bus.clone(), CancellationToken::new());
     let cancel = CancellationToken::new();
+    let shutdown = Arc::new(ShutdownLatch::new(Arc::clone(&ctx.request_shutdown)));
     let (responses, mut received) = mpsc::channel(RESPONSE_QUEUE_CAPACITY);
     let mut lines = RequestLoop {
         line: Vec::new(),
@@ -960,6 +978,7 @@ async fn a_long_line_received_in_tiny_pieces_is_reassembled_in_linear_time() {
         responses,
         connection: bus.register_connection().id(),
         ctx: &ctx,
+        shutdown: &shutdown,
         cancel: &cancel,
     };
 
@@ -990,4 +1009,139 @@ async fn a_long_line_received_in_tiny_pieces_is_reassembled_in_linear_time() {
         outgoing.response.error.map(|error| error.code),
         Some(METHOD_NOT_FOUND)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_accepted_shutdown_is_carried_out_when_an_earlier_write_stalls() {
+    enable_shutdown_method();
+    let mut f = Fixture::with(Limits::default(), TINY);
+    f.client
+        .send_request(0, "attach", json!({"subscribe": ["a.*"]}))
+        .await;
+    assert_eq!(f.client.recv().await["id"], 0);
+
+    // The writer stalls on this event, so the shutdown response behind it is
+    // never written.
+    f.publish("a.stuck", json!("x".repeat(100)));
+    f.client.send_request(1, "shutdown", json!({})).await;
+
+    let error = f.task.await.unwrap().unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(f.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_bus_disconnect_cancels_requests_even_while_a_write_is_stalled() {
+    let limits = Limits {
+        connection_queue: QueueLimits {
+            max_events: 2,
+            max_bytes: 1024 * 1024,
+        },
+        ..Limits::default()
+    };
+    let mut f = Fixture::with(limits, TINY);
+    f.client
+        .send_request(0, "attach", json!({"subscribe": ["flood.*"]}))
+        .await;
+    assert_eq!(f.client.recv().await["id"], 0);
+    f.client.send_line(&user_input(1)).await;
+    f.client.send_line(&user_input(2)).await;
+    let mut first = f.next_request().await;
+    let mut second = f.next_request().await;
+
+    // The client reads nothing, so the writer stalls on the first event and
+    // the queue behind it overflows.
+    for n in 0..20 {
+        f.publish("flood.x", json!(n));
+        tokio::task::yield_now().await;
+    }
+    wait_for(|| f.bus.connection_count() == 0).await;
+
+    // Far sooner than the write timeout.
+    for request in [&mut first, &mut second] {
+        tokio::time::timeout(Duration::from_secs(5), request.reply.closed())
+            .await
+            .expect("the request was not cancelled after the bus disconnected the connection");
+    }
+}
+
+#[tokio::test]
+async fn a_bus_disconnect_ends_a_stalled_attach_response_write() {
+    let limits = Limits {
+        connection_queue: QueueLimits {
+            max_events: 2,
+            max_bytes: 1024 * 1024,
+        },
+        ..Limits::default()
+    };
+    let f = Fixture::with(limits, TINY);
+    let Fixture {
+        mut client,
+        bus,
+        task,
+        ..
+    } = f;
+    client
+        .send_request(0, "attach", json!({"subscribe": ["flood.*"]}))
+        .await;
+    wait_for(|| bus.connection_count() == 1).await;
+    for n in 0..20 {
+        bus.publish(Topic::internal("flood.x").unwrap(), json!(n), None)
+            .unwrap();
+        tokio::task::yield_now().await;
+    }
+    wait_for(|| bus.connection_count() == 0).await;
+
+    // The client has read nothing; the write of the attach response is still
+    // stalled and would otherwise last until the write timeout.
+    let error = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("the stalled write was not cut short")
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+}
+
+/// An `attach` request line of exactly `len` bytes, without the newline.
+fn attach_line_of_len(len: usize) -> String {
+    let head = r#"{"jsonrpc":"2.0","id":1,"method":"attach","params":{"client":{"name":""#;
+    let tail = r#""}}}"#;
+    let line = format!("{head}{}{tail}", "a".repeat(len - head.len() - tail.len()));
+    assert_eq!(line.len(), len);
+    line
+}
+
+#[tokio::test]
+async fn an_attach_line_at_the_limit_is_accepted() {
+    let mut f = Fixture::new();
+    let line = attach_line_of_len(MAX_REQUEST_BYTES);
+    f.client.send_line(&line).await;
+    assert_eq!(f.client.recv().await["result"]["api_version"], 1);
+}
+
+#[tokio::test]
+async fn an_attach_line_made_too_long_by_trailing_whitespace_closes_the_connection() {
+    for trailing in [&b" \n"[..], b"\t\r\n"] {
+        let mut f = Fixture::new();
+        let mut data = attach_line_of_len(MAX_REQUEST_BYTES).into_bytes();
+        data.extend_from_slice(trailing);
+        f.client.send_raw(&data).await.unwrap();
+
+        // Closed without a response, not served as a single-shot request.
+        assert_eq!(f.client.read_to_end().await, "");
+        assert_eq!(f.bus.connection_count(), 0);
+        f.finished().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_attach_line_made_too_long_by_whitespace_sent_later_closes_the_connection() {
+    let mut f = Fixture::new();
+    let line = attach_line_of_len(MAX_REQUEST_BYTES);
+    f.client.send_raw(line.as_bytes()).await.unwrap();
+    f.client.send_raw(b" ").await.unwrap();
+    f.client.send_raw(b" \n").await.unwrap();
+    assert_eq!(f.client.read_to_end().await, "");
+    assert_eq!(f.bus.connection_count(), 0);
 }

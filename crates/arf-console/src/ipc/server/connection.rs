@@ -150,12 +150,15 @@ where
             );
             return write_response(&mut stream, &response).await;
         }
-        if let Some(buffered) =
-            read_until_line_end(&mut stream, frame.body.len(), frame.remainder).await?
-        {
-            return attached::serve(stream, request, buffered, &ctx).await;
+        match read_until_line_end(&mut stream, frame.body.len(), frame.remainder).await? {
+            LineEnd::Terminated(buffered) => {
+                return attached::serve(stream, request, buffered, &ctx).await;
+            }
+            // The same limit applies to every line of a long-lived connection.
+            LineEnd::TooLong => return Ok(()),
+            // Not newline-terminated: an ordinary single-shot request.
+            LineEnd::Unterminated => {}
         }
-        // Not newline-terminated: an ordinary single-shot request.
     }
 
     // JSON-RPC 2.0 notifications (absent id) must not yield a response.
@@ -186,17 +189,26 @@ pub(super) fn is_accepted_shutdown(response: &JsonRpcResponse) -> bool {
         == Some(true)
 }
 
+/// How the line holding the first request frame ends.
+enum LineEnd {
+    /// A newline follows; holds the bytes after it.
+    Terminated(Vec<u8>),
+    /// The line holds something other than the request, or the stream ended
+    /// before the newline.
+    Unterminated,
+    /// The line, not counting the newline, is longer than [`MAX_REQUEST_BYTES`].
+    TooLong,
+}
+
 /// Check that the first request frame ends its line, reading more if needed.
 ///
 /// `line_len` is the length of the frame, and `pending` the bytes that were
-/// read after it. Only spaces, tabs and `\r` may precede the newline. Returns
-/// the bytes following the newline, or `None` if the line holds anything else,
-/// is longer than [`MAX_REQUEST_BYTES`], or the stream ended first.
+/// read after it. Only spaces, tabs and `\r` may precede the newline.
 async fn read_until_line_end<S>(
     stream: &mut S,
     mut line_len: usize,
     mut pending: Vec<u8>,
-) -> std::io::Result<Option<Vec<u8>>>
+) -> std::io::Result<LineEnd>
 where
     S: AsyncReadExt + Unpin,
 {
@@ -208,17 +220,19 @@ where
             .count();
         line_len += blanks;
         pending.drain(..blanks);
-        match pending.first() {
-            Some(b'\n') => return Ok(Some(pending.split_off(1))),
-            Some(_) => return Ok(None),
-            None => {}
-        }
+        // Checked before looking at what ends the line, so that a newline
+        // cannot make an oversized line acceptable.
         if line_len > MAX_REQUEST_BYTES {
-            return Ok(None);
+            return Ok(LineEnd::TooLong);
+        }
+        match pending.first() {
+            Some(b'\n') => return Ok(LineEnd::Terminated(pending.split_off(1))),
+            Some(_) => return Ok(LineEnd::Unterminated),
+            None => {}
         }
         let n = stream.read(&mut chunk).await?;
         if n == 0 {
-            return Ok(None);
+            return Ok(LineEnd::Unterminated);
         }
         pending.extend_from_slice(&chunk[..n]);
     }

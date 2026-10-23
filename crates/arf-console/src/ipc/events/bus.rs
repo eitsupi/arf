@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::error::TryRecvError;
+use tokio_util::sync::CancellationToken;
 
 use super::dispatcher::EventDispatcher;
 use super::event::{Event, ExecutionId, Topic, json_len_within};
@@ -148,6 +149,8 @@ impl std::error::Error for SubscribeError {}
 /// State shared between the registry and the connection's [`EventStream`].
 struct ConnectionShared {
     reason: OnceLock<DisconnectReason>,
+    /// Cancelled when `reason` is set, so the owner can wait for a disconnect.
+    disconnected: CancellationToken,
 }
 
 struct ConnectionEntry {
@@ -171,6 +174,7 @@ impl Registry {
         match self.connections.remove(&id) {
             Some(entry) => {
                 let _ = entry.shared.reason.set(reason);
+                entry.shared.disconnected.cancel();
                 log::debug!("event connection {id} disconnected: {reason:?}");
                 true
             }
@@ -423,11 +427,13 @@ impl EventBus {
         let (sender, receiver) = queue(self.inner.limits.connection_queue);
         let shared = Arc::new(ConnectionShared {
             reason: OnceLock::new(),
+            disconnected: CancellationToken::new(),
         });
         {
             let mut registry = self.inner.registry.lock_recover();
             if registry.shut_down {
                 let _ = shared.reason.set(DisconnectReason::Shutdown);
+                shared.disconnected.cancel();
             } else {
                 registry.connections.insert(
                     id,
@@ -576,6 +582,13 @@ impl EventStream {
             Err(TryRecvError::Empty) => Err(()),
             Err(TryRecvError::Disconnected) => Ok(None),
         }
+    }
+
+    /// A token that is cancelled as soon as the bus disconnects this
+    /// connection, for waiting on a disconnect while the stream itself is
+    /// busy elsewhere.
+    pub fn disconnected_token(&self) -> CancellationToken {
+        self.shared.disconnected.clone()
     }
 
     /// Why the connection was disconnected, once it has been.

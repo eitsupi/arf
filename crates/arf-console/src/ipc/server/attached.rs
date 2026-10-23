@@ -29,6 +29,8 @@ use crate::ipc::protocol::{
 };
 use crate::ipc::session_result::{collect_session_result, session_id};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -123,19 +125,80 @@ where
         Err(response) => return write_line(&mut writer, &*response, &cancel).await,
     };
     let connection = events.id();
-    // Everything the client asked to subscribe to is registered by now, so no
-    // event published from here on is missed; the events queue up behind
-    // this response.
-    write_line(&mut writer, &response, &cancel).await?;
-    log::debug!("IPC connection {connection} attached");
+    let bus_disconnected = events.disconnected_token();
+    let shutdown = Arc::new(ShutdownLatch::new(Arc::clone(&ctx.request_shutdown)));
 
-    let (responses_tx, responses_rx) = mpsc::channel(RESPONSE_QUEUE_CAPACITY);
-    let (read_result, write_result) = tokio::join!(
-        read_requests(reader, buffered, responses_tx, connection, ctx, &cancel),
-        write_outgoing(writer, responses_rx, events, ctx, &cancel),
-    );
+    // Cuts the connection short when the bus disconnects it, wherever the
+    // connection is at that moment, including in the middle of a write.
+    let watch_bus = async {
+        tokio::select! {
+            () = bus_disconnected.cancelled() => cancel.cancel(),
+            () = cancel.cancelled() => {}
+        }
+    };
+    let run = async {
+        // However this ends, the watcher must too.
+        let _stop_watching = cancel.clone().drop_guard();
+        // Everything the client asked to subscribe to is registered by now,
+        // so no event published from here on is missed; the events queue up
+        // behind this response.
+        write_line(&mut writer, &response, &cancel).await?;
+        log::debug!("IPC connection {connection} attached");
+
+        let (responses_tx, responses_rx) = mpsc::channel(RESPONSE_QUEUE_CAPACITY);
+        let (read_result, write_result) = tokio::join!(
+            read_requests(
+                reader,
+                buffered,
+                responses_tx,
+                connection,
+                ctx,
+                &shutdown,
+                &cancel
+            ),
+            write_outgoing(writer, responses_rx, events, &shutdown, &cancel),
+        );
+        read_result.and(write_result)
+    };
+    let ((), result) = tokio::join!(watch_bus, run);
+    // An accepted shutdown is carried out even if its response never got
+    // written, for example because an earlier write timed out.
+    shutdown.fire();
     log::debug!("IPC connection {connection} closed");
-    read_result.and(write_result)
+    result
+}
+
+/// Carries out an accepted `shutdown` exactly once.
+///
+/// The request records its acceptance when it finishes. The hook then runs
+/// when the response has been written, or, if the connection ends first, when
+/// the connection ends, so that a client that does not read cannot hold the
+/// shutdown back.
+struct ShutdownLatch {
+    hook: Arc<dyn Fn() + Send + Sync>,
+    accepted: AtomicBool,
+    fired: AtomicBool,
+}
+
+impl ShutdownLatch {
+    fn new(hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+        Self {
+            hook,
+            accepted: AtomicBool::new(false),
+            fired: AtomicBool::new(false),
+        }
+    }
+
+    fn accept(&self) {
+        self.accepted.store(true, Ordering::SeqCst);
+    }
+
+    /// Run the hook if a shutdown was accepted and has not been carried out.
+    fn fire(&self) {
+        if self.accepted.load(Ordering::SeqCst) && !self.fired.swap(true, Ordering::SeqCst) {
+            (self.hook)();
+        }
+    }
 }
 
 /// Validate `attach`, register the connection with the bus and build the
@@ -223,6 +286,7 @@ async fn read_requests<R>(
     responses: mpsc::Sender<Outgoing>,
     connection: ConnectionId,
     ctx: &ConnectionContext,
+    shutdown: &Arc<ShutdownLatch>,
     cancel: &CancellationToken,
 ) -> std::io::Result<()>
 where
@@ -234,6 +298,7 @@ where
         responses,
         connection,
         ctx,
+        shutdown,
         cancel,
     };
     if !lines.feed(&buffered).await {
@@ -270,6 +335,7 @@ struct RequestLoop<'a> {
     responses: mpsc::Sender<Outgoing>,
     connection: ConnectionId,
     ctx: &'a ConnectionContext,
+    shutdown: &'a Arc<ShutdownLatch>,
     cancel: &'a CancellationToken,
 }
 
@@ -432,11 +498,16 @@ impl RequestLoop<'_> {
             return self.respond(response).await;
         }
         let tx = self.ctx.tx.clone();
+        let shutdown = Arc::clone(self.shutdown);
         self.requests.spawn(async move {
             let is_shutdown = request.method == "shutdown";
             let response = dispatch_request(request, &tx).await;
+            let shutdown_accepted = is_shutdown && is_accepted_shutdown(&response);
+            if shutdown_accepted {
+                shutdown.accept();
+            }
             Outgoing {
-                shutdown_accepted: is_shutdown && is_accepted_shutdown(&response),
+                shutdown_accepted,
                 response,
             }
         });
@@ -477,7 +548,7 @@ async fn write_outgoing<W>(
     mut writer: W,
     mut responses: mpsc::Receiver<Outgoing>,
     mut events: EventStream,
-    ctx: &ConnectionContext,
+    shutdown: &ShutdownLatch,
     cancel: &CancellationToken,
 ) -> std::io::Result<()>
 where
@@ -495,7 +566,7 @@ where
                 // Whether or not the client got the answer, it must not be
                 // able to hold the shutdown back by not reading it.
                 if outgoing.shutdown_accepted {
-                    (ctx.request_shutdown)();
+                    shutdown.fire();
                 }
                 written?;
             }
