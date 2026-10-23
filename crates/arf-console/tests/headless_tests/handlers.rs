@@ -119,7 +119,6 @@ fn session_socket_path(process: &HeadlessProcess) -> String {
         .to_owned()
 }
 
-#[cfg(unix)]
 fn single_shot_call(path: &str, request: Value) -> Value {
     use tokio::io::AsyncReadExt;
 
@@ -128,7 +127,7 @@ fn single_shot_call(path: &str, request: Value) -> Value {
         .build()
         .expect("create Tokio runtime");
     let response = runtime.block_on(async {
-        let mut stream = Stream::connect(path).await.expect("connect to IPC socket");
+        let mut stream = connect(path).await;
         let body = request.to_string();
         let http_request = format!(
             "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -150,31 +149,6 @@ fn single_shot_call(path: &str, request: Value) -> Value {
         .split_once("\r\n\r\n")
         .map_or(response.as_ref(), |(_, body)| body);
     serde_json::from_str(body).unwrap_or_else(|error| panic!("{error}: {body:?}"))
-}
-
-#[cfg(windows)]
-fn single_shot_call(path: &str, request: Value) -> Value {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("create Tokio runtime");
-    let response = runtime.block_on(async {
-        let mut stream = connect(path).await;
-        let mut line = request.to_string();
-        line.push('\n');
-        tokio::time::timeout(IO_TIMEOUT, async {
-            stream.write_all(line.as_bytes()).await?;
-            stream.flush().await?;
-            let mut reader = BufReader::new(stream);
-            let mut response = String::new();
-            reader.read_line(&mut response).await?;
-            std::io::Result::Ok(response)
-        })
-        .await
-        .expect("timed out waiting for a single-shot IPC response")
-        .expect("read single-shot IPC response")
-    });
-    serde_json::from_str(&response).expect("parse single-shot response")
 }
 
 fn exposed(expression: &str) -> HeadlessProcess {
