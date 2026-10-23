@@ -64,6 +64,11 @@ Options:
       --ipc-eval-unrestricted
           Disable the IPC evaluate allowlist for this server startup only
 
+      --ipc-expose <EXPRESSION>
+          Expose a named list of R functions to IPC clients.
+          
+          Evaluate EXPRESSION after startup profiles; it must return a named list of functions. Exposure failures abort startup.
+
       --quiet
           Suppress status messages on stderr (IPC path, ready, shutdown)
 

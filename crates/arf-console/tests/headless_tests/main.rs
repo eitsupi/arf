@@ -3,6 +3,7 @@ mod attach;
 mod common;
 mod error_codes;
 mod eval;
+mod handlers;
 mod history;
 mod lifecycle_flags;
 mod output_encoding;

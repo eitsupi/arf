@@ -59,6 +59,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
         log_file: meta.log_file.clone(),
         history_session_id: meta.history_session_id,
         ipc_policy: policy::policy(meta.session_type),
+        handler_api: super::handlers::handler_status(),
         r: None,
         r_unavailable_reason: None,
         hint: None,

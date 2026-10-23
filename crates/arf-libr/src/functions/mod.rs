@@ -37,6 +37,10 @@ pub struct RLibrary {
     pub r_parsevector: unsafe extern "C" fn(SEXP, c_int, *mut ParseStatus, SEXP) -> SEXP,
     pub rf_protect: unsafe extern "C" fn(SEXP) -> SEXP,
     pub rf_unprotect: unsafe extern "C" fn(c_int),
+    /// Keep an object reachable across top-level R calls.
+    pub r_preserve_object: unsafe extern "C" fn(SEXP),
+    /// Release a root installed by `R_PreserveObject`.
+    pub r_release_object: unsafe extern "C" fn(SEXP),
     pub r_tryeval: unsafe extern "C" fn(SEXP, SEXP, *mut c_int) -> SEXP,
 
     // String functions
@@ -307,6 +311,8 @@ impl RLibrary {
             load_symbol!(r_parsevector, b"R_ParseVector\0");
             load_symbol!(rf_protect, b"Rf_protect\0");
             load_symbol!(rf_unprotect, b"Rf_unprotect\0");
+            load_symbol!(r_preserve_object, b"R_PreserveObject\0");
+            load_symbol!(r_release_object, b"R_ReleaseObject\0");
             load_symbol!(r_tryeval, b"R_tryEval\0");
 
             // Load string functions
@@ -630,6 +636,8 @@ impl RLibrary {
                 r_parsevector,
                 rf_protect,
                 rf_unprotect,
+                r_preserve_object,
+                r_release_object,
                 r_tryeval,
                 rf_mkchar,
                 rf_mkstring,

@@ -66,6 +66,7 @@ the next request.
 | `--log-file <PATH>` | Redirect log output to file instead of stderr |
 | `--history-dir <PATH>` | Override history database directory |
 | `--no-history` | Keep command history in memory for this session only (no disk load/save) |
+| `--ipc-expose <EXPR>` | Expose a named list of R functions to IPC clients at startup |
 | `--quiet` | Suppress status messages on stderr |
 | `--config <PATH>` | Path to configuration file |
 | `--with-r-version <VER>` | R version to use via rig |
@@ -601,6 +602,10 @@ arf --with-ipc
 
 This starts the REPL normally and also starts the IPC server. External tools can then interact with your session while you continue working interactively.
 
+Pass `--ipc-expose '<R expression>'` with `--with-ipc` to publish handlers at
+startup. The same `--ipc-expose` option is available as a subcommand option to
+`arf headless`.
+
 ### Using Meta Commands
 
 Within a running session, you can start and stop the IPC server:
@@ -610,6 +615,9 @@ Within a running session, you can start and stop the IPC server:
 :ipc stop     # Stop the IPC server
 :ipc status   # Show server status
 ```
+
+When handlers have been exposed, `:ipc` or `:ipc status` also shows their API
+state and names. `:ipc revoke` permanently revokes them for the session.
 
 ### Interactive + IPC: Mutual Exclusion
 
@@ -720,6 +728,7 @@ Connection: close
 | `attach` | `client` (object, optional), `subscribe` (array of patterns, optional), `protocol` (int, optional) | Turn the connection into a [long-lived connection](#long-lived-connections) (raw newline-delimited JSON only) |
 | `subscribe` | `patterns` (array of strings) | Long-lived connections only: add event subscriptions |
 | `unsubscribe` | `patterns` (array of strings) | Long-lived connections only: remove event subscriptions |
+| `call` | `handler` (string), `args` (JSON, optional), `queue_timeout_ms` (int, optional) | Call a handler exposed by the session; available on single-shot and long-lived connections |
 
 ### Response Examples
 
@@ -821,6 +830,30 @@ Matching events arrive as notifications:
 `execution` is `null` unless the event belongs to an execution. Events on one connection arrive in increasing `seq` order. `seq` exists only to compare order: it is shared by all events of the arf process, so gaps are normal and do not mean that events were lost. No event is sent before the `attach` response.
 
 Events are never dropped silently. A connection that cannot keep up, or that may have missed an event because the server's own queue overflowed, is disconnected instead. After such a disconnect, attach again and fetch the state you need again. To avoid missing changes at the start, attach with `subscribe` first and only then fetch the initial state: an event may then describe something the fetched state already contains, but nothing is lost unless the connection is disconnected.
+
+#### Exposing and calling R handlers
+
+Start arf with `--with-ipc --ipc-expose '<R expression>'` in the interactive REPL, or `arf headless --ipc-expose '<R expression>'` in a headless session, to expose handlers. The expression runs after R startup profiles and before the IPC server accepts requests. It must return a named list whose values are functions. Each name is a selector in `<namespace>/<method>` form; the `arf/` namespace is reserved. For example:
+
+```sh
+arf headless --ipc-expose 'list("demo/add" = function(args) list(sum = sum(args$x)))'
+```
+
+The complete list is checked before any handler becomes available. An evaluation or validation error aborts startup with a diagnostic. The functions are kept alive for the session.
+
+Use the `call` method to invoke one exposed selector with JSON arguments:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"call","params":{"handler":"demo/add","args":{"x":[2,3]}}}
+```
+
+If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, and `stderr`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
+
+Call requests from all clients share one FIFO queue with a limit of 64 waiting calls and 8 MiB of queued handler names and compact JSON arguments. A full queue is rejected immediately. `queue_timeout_ms` sets how long a call may wait before it starts (default 30,000 ms; allowed range 1–300,000 ms). A call that expires before starting is not run. Closing an attached connection also drops a call that has not started; an already running R function continues and its response is discarded if the client has disconnected. Single-shot connections preserve write-half-close compatibility: a disconnect while waiting is not detected until the response is written, so use an attached connection when cancellation on disconnect is required. Calls do not interrupt one another once running.
+
+Errors distinguish an unpublished or revoked handler (`-32010`), a full queue (`-32011`), a queue timeout (`-32012`), argument conversion (`-32013`), an R error (`-32014`), return conversion (`-32015`), and an interrupt (`-32016`). R errors include the condition message and class; errors include captured `stdout` and `stderr` when available. An error does not roll back side effects or trigger a retry.
+
+`session` reports `handler_api.state` as `unexposed`, `locked`, or `revoked`, along with the available handler names. `:ipc status` (or `:ipc`) displays the same state and `:ipc revoke` permanently revokes all handlers for that session. Revocation also prevents queued calls from starting, and cannot stop a handler that is already running. In the interactive REPL, at most one queued call starts per idle poll; calls can run while the user is editing a line without changing the input buffer or input history. Calls wait while R is evaluating or the editor is in an alternate mode, and may expire before starting. A locked handler list reveals its names and interface to every IPC client. The function's enclosing environment, bindings, and S3/S4 methods can change later, so the published list does not freeze the function's behavior. The lock prevents changing which selectors are published; it does not sandbox their code or environment.
 
 ##### Publishing events from R
 

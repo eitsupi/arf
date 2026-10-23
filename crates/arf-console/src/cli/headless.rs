@@ -34,6 +34,13 @@ pub(crate) struct HeadlessArgs {
     #[arg(long = "ipc-eval-unrestricted")]
     pub(crate) ipc_eval_unrestricted: bool,
 
+    /// Expose a named list of R functions to IPC clients.
+    ///
+    /// Evaluate EXPRESSION after startup profiles; it must return a named list
+    /// of functions. Exposure failures abort startup.
+    #[arg(long = "ipc-expose", value_name = "EXPRESSION")]
+    pub(crate) ipc_expose: Option<String>,
+
     /// Suppress status messages on stderr (IPC path, ready, shutdown)
     #[arg(long)]
     pub(crate) quiet: bool,

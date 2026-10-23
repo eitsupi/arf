@@ -76,6 +76,24 @@ pub const INCOMPLETE_INPUT: i32 = -32004;
 pub const R_EVAL_NOT_ALLOWED: i32 = -32005;
 /// Interactive user input was not explicitly approved.
 pub const INPUT_NOT_APPROVED: i32 = -32006;
+/// The requested handler is not exposed or has been revoked.
+pub const HANDLER_NOT_FOUND: i32 = -32010;
+/// The call could not be queued because the shared handler queue is full.
+pub const HANDLER_QUEUE_FULL: i32 = -32011;
+/// The call expired before it started on the R thread.
+pub const HANDLER_QUEUE_TIMEOUT: i32 = -32012;
+/// The handler's arguments could not be converted from JSON to R.
+pub const HANDLER_ARGUMENT_ERROR: i32 = -32013;
+/// The handler raised an R error.
+pub const HANDLER_R_ERROR: i32 = -32014;
+/// The handler's return value could not be converted from R to JSON.
+pub const HANDLER_RESULT_ERROR: i32 = -32015;
+/// The call was interrupted while running on the R thread.
+pub const HANDLER_INTERRUPTED: i32 = -32016;
+
+/// Maximum time a handler call may wait to start on the R thread.
+pub const DEFAULT_HANDLER_QUEUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub const MAX_HANDLER_QUEUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Parameters for the `evaluate` method.
 #[derive(Debug, Deserialize)]
@@ -106,6 +124,16 @@ pub struct EvaluateResult {
 #[derive(Debug, Deserialize)]
 pub struct UserInputParams {
     pub code: String,
+}
+
+/// Parameters for a published handler call.
+#[derive(Debug, Deserialize)]
+pub struct HandlerCallParams {
+    pub handler: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+    #[serde(default)]
+    pub queue_timeout_ms: Option<u64>,
 }
 
 /// Result of the `user_input` method.
@@ -163,6 +191,8 @@ pub struct SessionResult {
     pub history_session_id: Option<i64>,
     /// Complete IPC policy advertised by this session.
     pub ipc_policy: IpcPolicy,
+    /// Whether R startup handlers are exposed or have been revoked.
+    pub handler_api: super::handlers::HandlerApiStatus,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
     /// Reason why R information is unavailable, or `null` if available.
@@ -238,6 +268,11 @@ pub enum IpcMethod {
     UserInput {
         code: String,
     },
+    /// Call one handler exposed by the R startup expression.
+    Call {
+        queue_deadline: std::time::Instant,
+        ticket: std::sync::Arc<super::handlers::HandlerCallTicket>,
+    },
     /// Collect session information (arf + R if available).
     Session,
 }
@@ -245,6 +280,7 @@ pub enum IpcMethod {
 /// Internal response type sent from main thread back to IPC server thread.
 pub enum IpcResponse {
     Evaluate(EvaluateResult),
+    Call(serde_json::Value),
     UserInput(UserInputResult),
     Session(Box<SessionResult>),
     Error {

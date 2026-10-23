@@ -484,6 +484,7 @@ fn test_meta_command_ipc_subcommands_and_send_policy() {
             ("start", false),
             ("stop", false),
             ("status", false),
+            ("revoke", false),
             ("send-policy", true)
         ]
     );

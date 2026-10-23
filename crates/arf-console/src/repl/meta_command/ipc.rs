@@ -36,6 +36,15 @@ pub(super) fn handle_ipc(ctx: &MetaCommandContext<'_>, parts: &[&str]) -> MetaCo
             } else {
                 arf_println!("IPC server is not running. Use :ipc start or --with-ipc flag.");
             }
+            let status = crate::ipc::handlers::handler_status();
+            arf_println!("IPC handlers: {:?}", status.state);
+            for name in status.handlers {
+                arf_println!("  {}", name.escape_debug());
+            }
+        }
+        "revoke" => {
+            crate::ipc::handlers::revoke_handlers();
+            arf_println!("IPC handlers revoked for this process.");
         }
         "send-policy" => match parts.get(2).copied() {
             Some("allow") => {
