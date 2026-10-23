@@ -2,11 +2,15 @@
 //! and conversion of the main-thread reply into a JSON-RPC response.
 
 use crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
+use crate::ipc::handlers::{
+    HandlerApiState, HandlerQueuePermit, handler_status, timeout_error_state,
+};
 use crate::ipc::history_query::{HistoryQueryError, query_history};
 use crate::ipc::protocol::{
-    EvaluateParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS, IpcMethod, IpcRequest,
-    IpcResponse, JsonRpcRequest, JsonRpcResponse, METHOD_NOT_FOUND, R_NOT_AT_PROMPT,
-    ShutdownResult, UserInputParams,
+    DEFAULT_HANDLER_QUEUE_TIMEOUT, EvaluateParams, HANDLER_NOT_FOUND, HANDLER_QUEUE_FULL,
+    HANDLER_QUEUE_TIMEOUT, HandlerCallParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS,
+    IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, MAX_HANDLER_QUEUE_TIMEOUT,
+    METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, UserInputParams,
 };
 use crate::ipc::session_result::collect_session_result;
 use crate::ipc::state::{has_headless_shutdown_handler, is_in_alternate_mode};
@@ -154,6 +158,7 @@ fn parse_method(
             Ok(IpcMethod::UserInput { code: params.code })
         }
         "session" => Ok(IpcMethod::Session),
+        "call" => parse_handler_call(id, params),
         "history" => Err(Box::new(handle_history(id.clone(), params))),
         _ => Err(Box::new(JsonRpcResponse::error(
             id.clone(),
@@ -161,6 +166,51 @@ fn parse_method(
             format!("Method not found: {method}"),
         ))),
     }
+}
+
+fn parse_handler_call(
+    id: &Option<serde_json::Value>,
+    params: serde_json::Value,
+) -> Result<IpcMethod, Box<JsonRpcResponse>> {
+    let params: HandlerCallParams = parse_params(id, params)?;
+    let timeout = params.queue_timeout_ms.map_or(
+        DEFAULT_HANDLER_QUEUE_TIMEOUT,
+        std::time::Duration::from_millis,
+    );
+    if timeout.is_zero() || timeout > MAX_HANDLER_QUEUE_TIMEOUT {
+        return Err(Box::new(JsonRpcResponse::error(
+            id.clone(),
+            INVALID_PARAMS,
+            format!(
+                "queue_timeout_ms must be between 1 and {}",
+                MAX_HANDLER_QUEUE_TIMEOUT.as_millis()
+            ),
+        )));
+    }
+    if handler_status().state != HandlerApiState::Locked {
+        return Err(Box::new(JsonRpcResponse::error(
+            id.clone(),
+            HANDLER_NOT_FOUND,
+            format!("Handler API is not available: {:?}", handler_status().state),
+        )));
+    }
+    let queue =
+        HandlerQueuePermit::try_acquire(&params.handler, &params.args).ok_or_else(|| {
+            Box::new(JsonRpcResponse::error(
+                id.clone(),
+                HANDLER_QUEUE_FULL,
+                "Handler call queue is full".to_string(),
+            ))
+        })?;
+    let queued_at = std::time::Instant::now();
+    let queue_deadline = queued_at.checked_add(timeout).unwrap_or(queued_at);
+    Ok(IpcMethod::Call {
+        handler: params.handler,
+        args: params.args,
+        queue_deadline,
+        queue,
+        state: timeout_error_state(),
+    })
 }
 
 /// Extract the reply timeout from a validated method.
@@ -180,6 +230,7 @@ fn map_ipc_response(id: Option<serde_json::Value>, response: IpcResponse) -> Jso
         IpcResponse::Evaluate(result) => {
             JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
         }
+        IpcResponse::Call(result) => JsonRpcResponse::success(id, result),
         IpcResponse::UserInput(result) => {
             JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
         }
@@ -207,8 +258,10 @@ pub(super) async fn dispatch_request(
     let id = request.id.clone();
     let is_session = request.method == "session";
     let is_history = request.method == "history";
+    let is_call = request.method == "call";
 
-    if let Some(response) = alternate_mode_rejection(id.clone(), is_session, is_history) {
+    if !is_call && let Some(response) = alternate_mode_rejection(id.clone(), is_session, is_history)
+    {
         return response;
     }
 
@@ -218,6 +271,79 @@ pub(super) async fn dispatch_request(
     };
 
     let timeout = timeout_for(&method);
+
+    if let IpcMethod::Call {
+        ref queue_deadline,
+        ref state,
+        ..
+    } = method
+    {
+        let remaining = queue_deadline.saturating_duration_since(std::time::Instant::now());
+        let state = std::sync::Arc::clone(state);
+        // Connection teardown drops this future. Race cancellation against
+        // the R thread's queued -> started transition, rather than relying
+        // only on a reply-channel check immediately before that transition.
+        struct CancelQueuedCall(std::sync::Arc<std::sync::atomic::AtomicU8>);
+        impl Drop for CancelQueuedCall {
+            fn drop(&mut self) {
+                let _ = self.0.compare_exchange(
+                    0,
+                    2,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                );
+            }
+        }
+        let _cancel_queued = CancelQueuedCall(std::sync::Arc::clone(&state));
+        let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
+        if tx
+            .send(IpcRequest {
+                method,
+                reply: reply_tx,
+            })
+            .is_err()
+        {
+            return JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                "Main thread unavailable".to_string(),
+            );
+        }
+        return match tokio::time::timeout(remaining, &mut reply_rx).await {
+            Ok(Ok(response)) => map_ipc_response(id, response),
+            Ok(Err(_)) => JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                "Handler request was dropped".to_string(),
+            ),
+            Err(_) => {
+                if state
+                    .compare_exchange(
+                        0,
+                        2,
+                        std::sync::atomic::Ordering::AcqRel,
+                        std::sync::atomic::Ordering::Acquire,
+                    )
+                    .is_ok()
+                {
+                    JsonRpcResponse::error(
+                        id,
+                        HANDLER_QUEUE_TIMEOUT,
+                        "Handler call expired before it started".to_string(),
+                    )
+                } else {
+                    match reply_rx.await {
+                        Ok(response) => map_ipc_response(id, response),
+                        Err(_) => JsonRpcResponse::error(
+                            id,
+                            INTERNAL_ERROR,
+                            "Handler request was dropped".to_string(),
+                        ),
+                    }
+                }
+            }
+        };
+    }
 
     // Send to main thread and await response
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();

@@ -240,6 +240,10 @@ fn start_request(request: IpcRequest) -> RequestStart {
             let _ = reply.send(IpcResponse::Session(Box::new(result)));
             RequestStart::Continue
         }
+        IpcMethod::Call { .. } => {
+            super::handlers::execute_handler_request(IpcRequest { method, reply });
+            RequestStart::Continue
+        }
     }
 }
 

@@ -46,6 +46,7 @@ pub(crate) fn run_headless(
     no_r_source_overrides: bool,
     ipc_eval_allow_function: &[String],
     ipc_eval_unrestricted: bool,
+    ipc_expose: Option<&str>,
 ) -> Result<()> {
     if let Some(path) = pid_file {
         // Resolve before R startup can change the working directory.
@@ -84,6 +85,11 @@ pub(crate) fn run_headless(
     }
 
     let r_home = initialize_r(r_args_builder)?;
+
+    if let Some(expression) = ipc_expose {
+        ipc::handlers::expose_handlers(expression)
+            .map_err(|error| anyhow::anyhow!("Could not expose IPC handlers: {error}"))?;
+    }
 
     // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
     let shutdown = Arc::new(AtomicBool::new(false));

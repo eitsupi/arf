@@ -140,6 +140,11 @@ pub struct Cli {
     #[arg(long = "with-ipc")]
     pub with_ipc: bool,
 
+    /// Evaluate an expression returning named functions to expose over IPC.
+    /// Requires --with-ipc; exposure failures abort startup.
+    #[arg(long = "ipc-expose", value_name = "EXPRESSION")]
+    pub ipc_expose: Option<String>,
+
     /// Bind IPC socket to a specific path instead of the default (requires --with-ipc)
     ///
     /// Unix: filesystem path (e.g. /tmp/my-arf.sock)

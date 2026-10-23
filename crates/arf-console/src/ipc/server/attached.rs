@@ -24,6 +24,7 @@ use super::connection::{
 };
 use super::dispatch::{dispatch_request, parse_params};
 use crate::ipc::events::{ConnectionId, Event, EventStream, SubscribeError, SubscriptionPattern};
+use crate::ipc::handlers::{HandlerApiState, handler_status};
 use crate::ipc::protocol::{
     INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, JsonRpcRequest, JsonRpcResponse, R_BUSY,
 };
@@ -265,10 +266,14 @@ fn attach_connection(
                 format!("Session info error: {e}"),
             ))
         })?;
+    let mut capabilities = vec!["events"];
+    if handler_status().state == HandlerApiState::Locked {
+        capabilities.push("handlers");
+    }
     let result = serde_json::json!({
         "connection_id": events.id(),
         "api_version": API_VERSION,
-        "capabilities": ["events"],
+        "capabilities": capabilities,
         "session_id": session_id(),
         "session": session,
     });

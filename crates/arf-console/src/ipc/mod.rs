@@ -25,6 +25,7 @@ mod capture;
 pub mod client;
 mod events;
 mod execution;
+pub mod handlers;
 mod headless;
 mod history_query;
 mod pending;

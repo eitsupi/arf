@@ -184,6 +184,7 @@ pub(crate) const IPC_SUBCOMMANDS: &[ArgumentChoice] = &[
     choice("start", "Start the IPC server"),
     choice("stop", "Stop the IPC server"),
     choice("status", "Show IPC server status"),
+    choice("revoke", "Permanently revoke exposed IPC handlers"),
     choice(
         "send-policy",
         "Change interactive send approval for this process",
@@ -248,7 +249,7 @@ mod tests {
         assert_eq!(join_choice_names(IPC_SEND_POLICIES, "|"), "prompt|allow");
         assert_eq!(
             join_choice_names(IPC_SUBCOMMANDS, ", "),
-            "start, stop, status, send-policy"
+            "start, stop, status, revoke, send-policy"
         );
     }
 }

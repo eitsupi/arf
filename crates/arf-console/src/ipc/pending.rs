@@ -13,7 +13,56 @@ use super::protocol::{
 use super::session_result::collect_session_result;
 use super::state::{drain_requests, fire_break_signal, is_in_alternate_mode, r_is_at_prompt};
 use crate::sync::LockRecover;
+use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock, atomic::Ordering};
+
+/// Calls can run without touching the editor buffer. A barrier keeps an
+/// accepted legacy operation in FIFO order while preserving its single-slot
+/// admission rule. Later calls wait until that operation has started.
+#[derive(Default)]
+struct InteractiveCalls {
+    requests: VecDeque<IpcRequest>,
+    before_pending: Option<usize>,
+}
+
+static INTERACTIVE_CALLS: OnceLock<Mutex<InteractiveCalls>> = OnceLock::new();
+
+fn interactive_calls() -> &'static Mutex<InteractiveCalls> {
+    INTERACTIVE_CALLS.get_or_init(|| Mutex::new(InteractiveCalls::default()))
+}
+
+fn schedule_pending_operation() {
+    let mut calls = interactive_calls().lock_recover();
+    calls.before_pending = Some(calls.requests.len());
+    if calls.requests.is_empty() {
+        fire_break_signal();
+    }
+}
+
+/// Run at most one handler per idle callback, keeping reedline's buffer and
+/// history intact and returning to terminal input between handler calls.
+fn process_interactive_call() {
+    if !r_is_at_prompt().load(Ordering::Acquire) || is_in_alternate_mode() {
+        return;
+    }
+    let request = {
+        let mut calls = interactive_calls().lock_recover();
+        if calls.before_pending == Some(0) {
+            fire_break_signal();
+            return;
+        }
+        let request = calls.requests.pop_front();
+        if request.is_some()
+            && let Some(before) = calls.before_pending.as_mut()
+        {
+            *before -= 1;
+        }
+        request
+    };
+    if let Some(request) = request {
+        super::handlers::execute_handler_request(request);
+    }
+}
 
 /// Pending IPC operation waiting for ExternalBreak to check the editor buffer.
 /// At most one operation can be pending at a time.
@@ -100,6 +149,7 @@ pub(super) fn reply_error(
 /// Called when the IPC server stops so the REPL doesn't get stuck in a
 /// pending/capturing state.
 pub(super) fn cancel_in_flight_operations() {
+    *interactive_calls().lock_recover() = InteractiveCalls::default();
     // Reply to any pending operation with a cancellation error
     if let Some(pending) = take_pending_ipc_operation() {
         reply_error(
@@ -137,6 +187,7 @@ pub fn poll_ipc_requests() {
 
     // Process all pending requests
     drain_requests(handle_request);
+    process_interactive_call();
 }
 
 /// Check if a pending visible evaluate has completed.
@@ -236,6 +287,16 @@ fn handle_request(request: IpcRequest) {
         return;
     }
 
+    // Calls wait for a safe top-level prompt, including while the user is
+    // typing. They do not consume the legacy pending-operation slot.
+    if matches!(method, IpcMethod::Call { .. }) {
+        interactive_calls()
+            .lock_recover()
+            .requests
+            .push_back(IpcRequest { method, reply });
+        return;
+    }
+
     if matches!(method, IpcMethod::Session) {
         reply_session(reply);
         return;
@@ -274,7 +335,7 @@ fn handle_request(request: IpcRequest) {
                 kind: PendingIpcKind::SilentEvaluate { reply },
                 code,
             });
-            fire_break_signal();
+            schedule_pending_operation();
         }
         IpcMethod::VisibleEvaluate { code, timeout } => {
             if !r_is_at_prompt().load(Ordering::Acquire) {
@@ -285,7 +346,7 @@ fn handle_request(request: IpcRequest) {
                 kind: PendingIpcKind::VisibleEvaluate { reply, timeout },
                 code,
             });
-            fire_break_signal();
+            schedule_pending_operation();
         }
         IpcMethod::UserInput { code } => {
             // Check if R is at the prompt
@@ -299,9 +360,10 @@ fn handle_request(request: IpcRequest) {
                 kind: PendingIpcKind::UserInput { reply },
                 code,
             });
-            fire_break_signal();
+            schedule_pending_operation();
         }
         IpcMethod::Session => unreachable!("Session handled above"),
+        IpcMethod::Call { .. } => unreachable!("Calls handled above"),
     }
 }
 
@@ -310,6 +372,11 @@ fn handle_request(request: IpcRequest) {
 /// Called from the REPL's ExternalBreak handler and fast-path to process
 /// the stored operation after checking the editor buffer.
 pub fn take_pending_ipc_operation() -> Option<PendingIpcOperation> {
+    let mut calls = interactive_calls().lock_recover();
+    if calls.before_pending.is_some_and(|before| before > 0) {
+        return None;
+    }
+    calls.before_pending = None;
     pending_ipc_operation().lock_recover().take()
 }
 
@@ -378,7 +445,84 @@ mod tests {
         fn drop(&mut self) {
             set_in_alternate_mode(false);
             set_r_at_prompt(false);
+            *interactive_calls().lock_recover() = InteractiveCalls::default();
+            pending_ipc_operation().lock_recover().take();
+            super::super::state::break_signal().store(false, Ordering::Relaxed);
         }
+    }
+
+    fn expired_call() -> (IpcRequest, tokio::sync::oneshot::Receiver<IpcResponse>) {
+        let args = serde_json::Value::Null;
+        let queue = super::super::handlers::HandlerQueuePermit::try_acquire("demo/read", &args)
+            .expect("queue reservation");
+        let (reply, response) = tokio::sync::oneshot::channel();
+        (
+            IpcRequest {
+                method: IpcMethod::Call {
+                    handler: "demo/read".to_owned(),
+                    args,
+                    queue_deadline: std::time::Instant::now(),
+                    queue,
+                    state: super::super::handlers::timeout_error_state(),
+                },
+                reply,
+            },
+            response,
+        )
+    }
+
+    #[test]
+    #[serial]
+    fn handler_calls_keep_fifo_around_the_legacy_pending_slot() {
+        let _guard = GlobalStateGuard;
+        set_in_alternate_mode(false);
+        set_r_at_prompt(true);
+        let (first, first_reply) = expired_call();
+        handle_request(first);
+        let (reply, _response) = tokio::sync::oneshot::channel();
+        handle_request(IpcRequest {
+            method: IpcMethod::UserInput {
+                code: "1".to_owned(),
+            },
+            reply,
+        });
+        let (last, last_reply) = expired_call();
+        handle_request(last);
+        assert!(take_pending_ipc_operation().is_none());
+        process_interactive_call();
+        assert!(matches!(
+            first_reply.blocking_recv().unwrap(),
+            IpcResponse::Error {
+                code: protocol::HANDLER_QUEUE_TIMEOUT,
+                ..
+            }
+        ));
+        // A later handler must wait for the accepted input operation.
+        process_interactive_call();
+        assert_eq!(interactive_calls().lock_recover().requests.len(), 1);
+        assert!(take_pending_ipc_operation().is_some());
+        process_interactive_call();
+        assert!(matches!(
+            last_reply.blocking_recv().unwrap(),
+            IpcResponse::Error {
+                code: protocol::HANDLER_QUEUE_TIMEOUT,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn an_idle_callback_processes_only_one_handler_call() {
+        let _guard = GlobalStateGuard;
+        set_in_alternate_mode(false);
+        set_r_at_prompt(true);
+        let (first, _first_reply) = expired_call();
+        let (second, _second_reply) = expired_call();
+        handle_request(first);
+        handle_request(second);
+        process_interactive_call();
+        assert_eq!(interactive_calls().lock_recover().requests.len(), 1);
     }
 
     /// Tests for the IN_ALTERNATE_MODE flag and handle_request rejection.

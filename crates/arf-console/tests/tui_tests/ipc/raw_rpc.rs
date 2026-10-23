@@ -7,7 +7,7 @@ use std::fs;
 /// Send one raw JSON-RPC request over the platform IPC transport and return the
 /// parsed response. Unix sockets carry the request in an HTTP envelope; Windows
 /// named pipes carry the bare JSON body.
-fn raw_json_rpc(socket_path: &str, method: &str, params: Value) -> Result<Value> {
+pub(super) fn raw_json_rpc(socket_path: &str, method: &str, params: Value) -> Result<Value> {
     let body = serde_json::to_string(&serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -65,7 +65,7 @@ fn raw_transport(socket_path: &str, body: &str) -> Result<String> {
     })
 }
 
-fn session_socket_path(terminal: &Terminal) -> Result<String> {
+pub(super) fn session_socket_path(terminal: &Terminal) -> Result<String> {
     let metadata: Value =
         serde_json::from_str(&fs::read_to_string(session_metadata_path(terminal)?)?)?;
     metadata["socket_path"]

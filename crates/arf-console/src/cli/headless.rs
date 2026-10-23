@@ -34,6 +34,10 @@ pub(crate) struct HeadlessArgs {
     #[arg(long = "ipc-eval-unrestricted")]
     pub(crate) ipc_eval_unrestricted: bool,
 
+    /// Evaluate an expression returning named functions to expose over IPC.
+    #[arg(long = "ipc-expose", value_name = "EXPRESSION")]
+    pub(crate) ipc_expose: Option<String>,
+
     /// Suppress status messages on stderr (IPC path, ready, shutdown)
     #[arg(long)]
     pub(crate) quiet: bool,

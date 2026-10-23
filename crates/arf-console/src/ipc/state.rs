@@ -137,7 +137,9 @@ pub(super) fn drain_requests(mut handle: impl FnMut(IpcRequest)) -> bool {
     };
 
     let mut processed = false;
-    while let Ok(request) = rx.try_recv() {
+    // Do not let a continuously writing client monopolize the editor's idle
+    // callback. Remaining requests retain channel FIFO order for the next poll.
+    for request in rx.try_iter().take(128) {
         processed = true;
         handle(request);
     }

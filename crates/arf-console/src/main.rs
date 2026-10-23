@@ -177,14 +177,27 @@ fn run() -> Result<()> {
             .exit();
     }
 
+    if cli.ipc_expose.is_some()
+        && (cli.eval.is_some() || cli.script_file().is_some() || cli.command.is_some())
+    {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--ipc-expose is an interactive startup option; use 'arf headless --ipc-expose' for headless mode",
+            )
+            .exit();
+    }
+
     if cli.command.is_none()
         && !cli.with_ipc
-        && (cli.ipc_bind.is_some() || cli.ipc_pid_file.is_some())
+        && (cli.ipc_bind.is_some() || cli.ipc_pid_file.is_some() || cli.ipc_expose.is_some())
     {
         let flag = if cli.ipc_bind.is_some() {
             "--ipc-bind"
-        } else {
+        } else if cli.ipc_pid_file.is_some() {
             "--ipc-pid-file"
+        } else {
+            "--ipc-expose"
         };
         Cli::command()
             .error(
@@ -256,6 +269,7 @@ fn run() -> Result<()> {
                 args.r_source.no_r_source_overrides,
                 &args.ipc_eval_allow_function,
                 args.ipc_eval_unrestricted,
+                args.ipc_expose.as_deref(),
             );
         }
         Some(Commands::R(args)) => {
@@ -512,6 +526,16 @@ fn run() -> Result<()> {
     #[cfg(windows)]
     if r_initialized {
         source_r_profiles(&r_args);
+    }
+
+    // Exposure is explicit startup consent. Finish it atomically before a
+    // listener can accept requests, after profiles have finished on every OS.
+    if let Some(expression) = cli.ipc_expose.as_deref() {
+        if !r_initialized {
+            anyhow::bail!("Cannot expose IPC handlers: R initialization failed");
+        }
+        ipc::handlers::expose_handlers(expression)
+            .map_err(|error| anyhow::anyhow!("Could not expose IPC handlers: {error}"))?;
     }
 
     // Capture the library paths after R startup profiles (and Windows .First
