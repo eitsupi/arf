@@ -18,9 +18,11 @@ const RESERVED_PREFIX: &str = "arf.";
 /// Longest accepted topic or subscription pattern, in bytes.
 pub(super) const MAX_TOPIC_BYTES: usize = 128;
 
-/// Fixed allowance added to every event's size for the envelope fields
-/// (`seq`, `execution` and the surrounding JSON punctuation).
-const ENVELOPE_OVERHEAD_BYTES: usize = 96;
+/// Fixed allowance added to every event's size. It is a conservative upper
+/// bound for everything in the encoded notification line except the topic and
+/// the serialized data: the JSON-RPC wrapper, the field names, `seq` and
+/// `execution` (up to 20 digits each) and the trailing newline.
+const ENVELOPE_OVERHEAD_BYTES: usize = 128;
 
 /// Why a topic or subscription pattern was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,4 +239,44 @@ pub(super) fn json_len_within(value: &Value, limit: usize) -> Option<usize> {
     let mut counter = Counter { len: 0, limit };
     serde_json::to_writer(&mut counter, value).ok()?;
     Some(counter.len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::server::EventNotification;
+    use serde_json::json;
+
+    /// The accounted size must never be smaller than the line the writer
+    /// sends, even with the widest `seq` and `execution`.
+    #[test]
+    fn event_size_covers_the_encoded_notification_line() {
+        let topics = ["a".to_owned(), "a".repeat(MAX_TOPIC_BYTES)];
+        let payloads = [
+            json!(null),
+            json!({"k": "v", "n": [1, 2, 3]}),
+            json!("text"),
+        ];
+        for topic in &topics {
+            for data in &payloads {
+                let data_len = json_len_within(data, usize::MAX).unwrap();
+                let event = Event::new(
+                    u64::MAX,
+                    Topic::internal(topic).unwrap(),
+                    data.clone(),
+                    Some(ExecutionId(u64::MAX)),
+                    data_len,
+                );
+                let mut line = serde_json::to_string(&EventNotification::new(&event)).unwrap();
+                line.push('\n');
+                assert!(
+                    line.len() <= event.size(),
+                    "{} bytes written but only {} accounted: {line}",
+                    line.len(),
+                    event.size()
+                );
+                assert_eq!(event.size(), event_size(topic.len(), data_len));
+            }
+        }
+    }
 }

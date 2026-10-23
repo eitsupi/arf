@@ -291,7 +291,7 @@ async fn connection_byte_limit_disconnects_slow_connection() {
     let mut fast = subscribed(&bus, &["big"]);
 
     // Each event accounts for roughly 500 bytes, so three exceed 1024.
-    let payload = "x".repeat(400);
+    let payload = "x".repeat(350);
     for _ in 0..3 {
         publish(&bus, "big", json!(payload));
         next(&mut fast).await;
@@ -372,7 +372,7 @@ async fn publish_queue_byte_limit_counts_as_overflow() {
     };
     let (bus, dispatcher) = EventBus::new(limits);
     let mut subscriber = subscribed(&bus, &["big"]);
-    let payload = "x".repeat(400);
+    let payload = "x".repeat(350);
 
     bus.publish(internal("big"), json!(payload), None).unwrap();
     bus.publish(internal("big"), json!(payload), None).unwrap();
@@ -397,14 +397,14 @@ async fn event_size_limit_is_enforced_at_publish() {
     let _task = tokio::spawn(dispatcher.run());
     let mut stream = subscribed(&bus, &["t"]);
 
-    // 96 bytes of envelope allowance + 1 byte topic + (n + 2) bytes of JSON
-    // string leaves room for exactly 925 characters.
+    // 128 bytes of envelope allowance + 1 byte topic + (n + 2) bytes of JSON
+    // string leaves room for exactly 893 characters.
     assert_eq!(
-        bus.publish(internal("t"), json!("x".repeat(925)), None),
+        bus.publish(internal("t"), json!("x".repeat(893)), None),
         Ok(1)
     );
     assert!(matches!(
-        bus.publish(internal("t"), json!("x".repeat(926)), None),
+        bus.publish(internal("t"), json!("x".repeat(894)), None),
         Err(PublishError::TooLarge { max: 1024, .. })
     ));
     // A huge value is rejected too, and the failed attempts used no seq.
@@ -793,7 +793,7 @@ fn publishing_after_dispatcher_drop_reports_closed_even_when_queue_is_full() {
         ..Limits::default()
     };
     let (bus, dispatcher) = EventBus::new(limits);
-    let payload = "x".repeat(400);
+    let payload = "x".repeat(350);
     bus.publish(internal("big"), json!(payload), None).unwrap();
     bus.publish(internal("big"), json!(payload), None).unwrap();
     assert_eq!(

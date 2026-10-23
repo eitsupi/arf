@@ -16,6 +16,9 @@ mod dispatch;
 mod socket_path;
 mod transport;
 
+#[cfg(test)]
+pub(in crate::ipc) use attached::EventNotification;
+
 use crate::ipc::events::{EventBus, Limits, clear_current_bus, install_current_bus};
 use crate::ipc::protocol::IpcRequest;
 use crate::ipc::session::{SessionInfo, SessionType, remove_session, write_session};

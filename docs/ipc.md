@@ -803,6 +803,7 @@ After the response, each line in either direction is one JSON-RPC 2.0 message:
 - Requests without an `id` are notifications: they get no response and are not carried out.
 - Every method listed above can be used, with the same parameters, results and errors as on a single-shot connection, plus `subscribe` and `unsubscribe`. A second `attach` is answered with an error, and the connection stays open.
 - Requests run concurrently and their responses arrive in completion order, so match them by `id`. At most 32 requests may be outstanding; further ones are answered immediately with `R_BUSY` until one finishes. `subscribe` and `unsubscribe` are applied in the order they arrive.
+- Clients must keep their write side open for the life of the connection. When the server sees end-of-file it cancels outstanding requests and closes the connection, so responses after a half-close are not guaranteed.
 - When the connection ends, requests that R has not started yet are cancelled. A request that R is already running continues, but its result is discarded.
 - The server closes a connection to which it cannot write a line within 30 seconds.
 - `shutdown` behaves as on a single-shot connection; the shutdown begins after its response has been written, or after the write has failed or timed out.

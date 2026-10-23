@@ -99,10 +99,20 @@ impl Outgoing {
 
 /// Notification carrying one event to the client.
 #[derive(Serialize)]
-struct EventNotification<'a> {
+pub(in crate::ipc) struct EventNotification<'a> {
     jsonrpc: &'static str,
     method: &'static str,
     params: &'a Event,
+}
+
+impl<'a> EventNotification<'a> {
+    pub(in crate::ipc) fn new(event: &'a Event) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            method: "event",
+            params: event,
+        }
+    }
 }
 
 /// Serve a connection whose first request, `attach`, has been read.
@@ -588,11 +598,7 @@ where
                     );
                     return Ok(());
                 };
-                let notification = EventNotification {
-                    jsonrpc: "2.0",
-                    method: "event",
-                    params: &event,
-                };
+                let notification = EventNotification::new(&event);
                 write_line(&mut writer, &notification, cancel).await?;
             }
         }
