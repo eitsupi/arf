@@ -2,68 +2,103 @@
 
 use super::support::{HeadlessProcess, parse_ipc_json};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
-use std::sync::mpsc;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
+use tokio::runtime::Runtime;
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(unix)]
+type Stream = tokio::net::UnixStream;
+#[cfg(windows)]
+type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
+
+/// Open the session's socket or pipe.
+#[cfg(unix)]
+async fn open_stream(socket_path: &str) -> Stream {
+    Stream::connect(socket_path)
+        .await
+        .expect("connect to the IPC socket")
+}
+
+/// Open the session's pipe, waiting while every server instance is busy.
+#[cfg(windows)]
+async fn open_stream(socket_path: &str) -> Stream {
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    // `ERROR_PIPE_BUSY`: all instances of the pipe are connected to other
+    // clients, so the server has not yet created the next one.
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match ClientOptions::new().open(socket_path) {
+            Ok(pipe) => return pipe,
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_PIPE_BUSY)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("open the IPC pipe: {error}"),
+        }
+    }
+}
 
 /// A newline-delimited JSON-RPC client over the session's socket or pipe.
+///
+/// Reads and writes are asynchronous and time-limited, so a connection that
+/// stops making progress fails the test instead of hanging it. One buffered
+/// reader serves the whole connection so that bytes read ahead of a line are
+/// never lost.
 struct AttachedClient {
-    writer: Box<dyn Write>,
-    lines: mpsc::Receiver<std::io::Result<String>>,
+    runtime: Runtime,
+    reader: BufReader<ReadHalf<Stream>>,
+    writer: WriteHalf<Stream>,
 }
 
 impl AttachedClient {
     fn connect(socket_path: &str) -> Self {
-        #[cfg(unix)]
-        let (reader, writer) = {
-            let stream = std::os::unix::net::UnixStream::connect(socket_path)
-                .expect("connect to the IPC socket");
-            (stream.try_clone().expect("clone the stream"), stream)
-        };
-        #[cfg(windows)]
-        let (reader, writer) = {
-            let pipe = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(socket_path)
-                .expect("open the IPC pipe");
-            (pipe.try_clone().expect("clone the pipe"), pipe)
-        };
-
-        // Reads block without a timeout, so a thread feeds a channel that
-        // the test can wait on with one.
-        let (tx, lines) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(reader).lines() {
-                let failed = line.is_err();
-                if tx.send(line).is_err() || failed {
-                    break;
-                }
-            }
-        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("create a tokio runtime");
+        let stream = runtime.block_on(open_stream(socket_path));
+        let (reader, writer) = tokio::io::split(stream);
         Self {
-            writer: Box::new(writer),
-            lines,
+            runtime,
+            reader: BufReader::new(reader),
+            writer,
         }
     }
 
     fn send(&mut self, value: &Value) {
         let mut line = value.to_string();
         line.push('\n');
-        self.writer
-            .write_all(line.as_bytes())
-            .and_then(|()| self.writer.flush())
+        let writer = &mut self.writer;
+        self.runtime
+            .block_on(async {
+                tokio::time::timeout(WRITE_TIMEOUT, async {
+                    writer.write_all(line.as_bytes()).await?;
+                    writer.flush().await
+                })
+                .await
+            })
+            .expect("timed out writing to the IPC connection")
             .expect("write to the IPC connection");
     }
 
     fn recv(&mut self) -> Value {
-        let line = self
-            .lines
-            .recv_timeout(REPLY_TIMEOUT)
+        let reader = &mut self.reader;
+        let mut line = String::new();
+        let read = self
+            .runtime
+            .block_on(async {
+                tokio::time::timeout(REPLY_TIMEOUT, reader.read_line(&mut line)).await
+            })
             .expect("timed out waiting for a reply")
             .expect("read from the IPC connection");
+        assert_ne!(read, 0, "the IPC connection closed before a reply");
         serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}"))
     }
 }
