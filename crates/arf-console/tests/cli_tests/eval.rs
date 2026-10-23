@@ -223,3 +223,44 @@ fn test_eval_reprex_mode() {
         );
     }
 }
+
+/// The embedding routines exist in `-e` mode, where no IPC server runs, so
+/// publishing reports that there is nowhere to send the event.
+#[test]
+fn test_eval_publishing_without_an_ipc_server_returns_false() {
+    let output = sanitized_arf_command()
+        .args([
+            "-e",
+            r#"
+cat("version:", .Call("arf_api_version", PACKAGE = "(embedding)"), "\n")
+cat("published:", .Call("arf_publish_event", "demo.topic", list(a = 1), PACKAGE = "(embedding)"), "\n")
+"#,
+        ])
+        .output()
+        .expect("Failed to run arf -e");
+
+    assert!(
+        output.status.success(),
+        "arf -e should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("version: 1"), "{stdout}");
+    assert!(stdout.contains("published: FALSE"), "{stdout}");
+}
+
+/// Invalid events are R errors even when there is no IPC server.
+#[test]
+fn test_eval_publishing_a_reserved_topic_is_an_r_error() {
+    let output = sanitized_arf_command()
+        .args([
+            "-e",
+            r#".Call("arf_publish_event", "arf.reserved", NULL, PACKAGE = "(embedding)")"#,
+        ])
+        .output()
+        .expect("Failed to run arf -e");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("reserved"), "{stderr}");
+}

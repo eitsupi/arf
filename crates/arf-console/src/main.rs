@@ -470,6 +470,12 @@ fn run() -> Result<()> {
         }
     };
 
+    // Make arf's native routines available to R code. This precedes the
+    // profiles sourced below on Windows; on Unix they have already run.
+    if r_initialized {
+        app::embedding_api::register_embedding_api();
+    }
+
     // If R initialization failed or the interrupt flag could not be
     // resolved, the handler installed above can never forward interrupts to
     // anything that consumes them and would swallow Ctrl+C forever; fall

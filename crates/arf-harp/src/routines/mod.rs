@@ -8,14 +8,19 @@ static EMBEDDING_ROUTINES_REGISTERED: OnceCell<()> = OnceCell::new();
 
 /// Register arf's complete `.Call` table once with initialized embedded R.
 ///
-/// Call this on the R thread. Successful registration lasts for the process's
-/// single R runtime; subsequent calls are no-ops. Failed attempts may be retried.
+/// Call this on the R thread after R is initialized. Successful registration
+/// lasts for the process's single R runtime; subsequent calls are no-ops.
+/// Failed attempts may be retried.
 /// Add future embedding callbacks to this table rather than registering them
 /// separately from their feature modules.
-pub(crate) fn register_embedding_routines() -> HarpResult<()> {
+pub fn register_embedding_routines() -> HarpResult<()> {
     EMBEDDING_ROUTINES_REGISTERED
         .get_or_try_init(|| {
-            let definitions = [crate::help_bridge::help_submit_definition()];
+            let definitions = [
+                crate::help_bridge::help_submit_definition(),
+                crate::embedding_api::publish_event_definition(),
+                crate::embedding_api::api_version_definition(),
+            ];
             // SAFETY: All definitions belong to arf, have static names and code,
             // and declare the arity of their `.Call` callbacks.
             unsafe { register_complete_call_table(&definitions) }

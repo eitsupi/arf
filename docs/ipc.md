@@ -822,6 +822,32 @@ Matching events arrive as notifications:
 
 Events are never dropped silently. A connection that cannot keep up, or that may have missed an event because the server's own queue overflowed, is disconnected instead. After such a disconnect, attach again and fetch the state you need again. To avoid missing changes at the start, attach with `subscribe` first and only then fetch the initial state: an event may then describe something the fetched state already contains, but nothing is lost unless the connection is disconnected.
 
+##### Publishing events from R
+
+R code running in the session can publish events to subscribed connections with two `.Call` routines, registered under `PACKAGE = "(embedding)"`:
+
+- `arf_publish_event(topic, data)` takes exactly two arguments. `topic` is a non-`NA` character string. `data` is any value that converts to JSON under the strict rules below, and `NULL` becomes JSON `null`. It returns `TRUE` when the event was queued on a running IPC server and `FALSE` when there is nowhere to publish it (no IPC server is running). `TRUE` is not a delivery guarantee: an event nobody is subscribed to is dropped.
+- `arf_api_version()` takes no arguments and returns `1L`.
+
+Publishing never waits: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` is `null` in these events for now.
+
+R values convert to JSON as follows: `NULL` is `null`; a length-1 logical, integer, double or character vector is a boolean, number or string; an unnamed list is an array; a named list is an object. Longer atomic vectors, `NA`, `NaN`, infinite numbers, objects with a `class` attribute (factors, dates and data frames included), duplicate or `NA` names, and every other type are errors. Wrap vectors in `as.list()` to send them as arrays.
+
+Detect the routines, and call them through a small wrapper:
+
+```r
+arf_publish <- function(topic, data = NULL) {
+  invisible(.Call("arf_publish_event", topic, data, PACKAGE = "(embedding)"))
+}
+
+has_arf_events <- function() {
+  is.loaded("arf_api_version", PACKAGE = "(embedding)", type = ".Call") &&
+    identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L)
+}
+```
+
+The check detects the interface for feature detection only; it is not authentication. On Windows the routines exist before startup profiles run. On Unix they are registered only after R has finished starting, so `.Rprofile` and `Rprofile.site` cannot use them: detect lazily, on first use rather than at load time, and do not cache a `FALSE` obtained during startup.
+
 ### Error Codes
 
 | Code | Name | Description |

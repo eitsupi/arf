@@ -126,6 +126,22 @@ impl fmt::Display for PublishError {
 
 impl std::error::Error for PublishError {}
 
+/// Encoded size of `data` if an event with this topic and data fits in
+/// `max` bytes, or [`PublishError::TooLarge`].
+pub(super) fn check_event_size(
+    topic: &Topic,
+    data: &Value,
+    max: usize,
+) -> Result<usize, PublishError> {
+    let overhead = super::event::event_size(topic.as_str().len(), 0);
+    max.checked_sub(overhead)
+        .and_then(|room| json_len_within(data, room))
+        .ok_or(PublishError::TooLarge {
+            size_at_least: max.saturating_add(1),
+            max,
+        })
+}
+
 /// Why a subscription change was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscribeError {
@@ -368,17 +384,7 @@ impl EventBus {
         data: Value,
         execution: Option<ExecutionId>,
     ) -> Result<u64, PublishError> {
-        let max = self.inner.limits.max_event_bytes;
-        let overhead = super::event::event_size(topic.as_str().len(), 0);
-        let Some(data_len) = max
-            .checked_sub(overhead)
-            .and_then(|room| json_len_within(&data, room))
-        else {
-            return Err(PublishError::TooLarge {
-                size_at_least: max.saturating_add(1),
-                max,
-            });
-        };
+        let data_len = check_event_size(&topic, &data, self.inner.limits.max_event_bytes)?;
 
         let state = self.inner.publish.lock_recover();
         // Lock order is always bus publish lock, then the sequence source.
