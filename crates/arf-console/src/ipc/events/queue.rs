@@ -85,6 +85,13 @@ impl QueueReceiver {
         Some(event)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     pub(super) fn try_recv(&mut self) -> Result<Arc<Event>, TryRecvError> {
         let event = self.rx.try_recv()?;
         self.release(&event);

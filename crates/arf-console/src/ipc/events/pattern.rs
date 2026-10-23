@@ -35,6 +35,13 @@ impl SubscriptionPattern {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     pub fn matches(&self, topic: &Topic) -> bool {
         match self {
             Self::Exact(name) => name == topic.as_str(),

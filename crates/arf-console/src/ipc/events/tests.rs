@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use tokio::task::JoinHandle;
 
 use super::bus::SeqSource;
+use super::current::CurrentBus;
 use super::*;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -589,6 +590,90 @@ async fn subscription_count_is_limited_per_connection() {
     );
     assert!(bus.unsubscribe(stream.id(), &pattern("a")));
     assert_eq!(bus.subscribe(stream.id(), pattern("c")), Ok(true));
+}
+
+#[tokio::test]
+async fn subscribe_many_is_all_or_nothing() {
+    let limits = Limits {
+        max_subscriptions_per_connection: 3,
+        ..Limits::default()
+    };
+    let (bus, _task) = spawn_bus(limits);
+    let stream = bus.register_connection();
+    let id = stream.id();
+
+    // Duplicates within the request and patterns already held count once.
+    assert_eq!(
+        bus.subscribe_many(id, vec![pattern("a"), pattern("b.*"), pattern("a")]),
+        Ok(2)
+    );
+    assert_eq!(bus.subscribe_many(id, vec![pattern("a")]), Ok(0));
+    assert_eq!(bus.subscribe_many(id, Vec::new()), Ok(0));
+
+    // Two new patterns would make four: nothing is added.
+    assert_eq!(
+        bus.subscribe_many(id, vec![pattern("c"), pattern("d")]),
+        Err(SubscribeError::TooManySubscriptions { max: 3 })
+    );
+    assert_eq!(bus.subscription_count(id), Some(2));
+    assert_eq!(
+        bus.subscribe_many(id, vec![pattern("a"), pattern("c")]),
+        Ok(1)
+    );
+    assert_eq!(bus.subscription_count(id), Some(3));
+
+    drop(stream);
+    assert_eq!(
+        bus.subscribe_many(id, vec![pattern("a")]),
+        Err(SubscribeError::UnknownConnection)
+    );
+}
+
+#[test]
+fn the_current_bus_is_only_cleared_by_the_server_that_installed_it() {
+    let current = CurrentBus::new();
+    let publish_current = |current: &CurrentBus| current.publish(internal("t"), Value::Null, None);
+
+    // No server running.
+    assert_eq!(publish_current(&current), Err(PublishError::Closed));
+
+    let (old_bus, _old_dispatcher) = EventBus::new(Limits::default());
+    let old = current.install(old_bus);
+    assert!(publish_current(&current).is_ok());
+
+    // A new server starts before the old one has finished stopping.
+    let (new_bus, _new_dispatcher) = EventBus::new(Limits::default());
+    let new = current.install(new_bus.clone());
+    assert!(!current.clear(old), "the old server removed the new bus");
+    assert!(publish_current(&current).is_ok());
+
+    assert!(current.clear(new));
+    assert_eq!(publish_current(&current), Err(PublishError::Closed));
+    assert!(!current.clear(new));
+}
+
+#[tokio::test]
+async fn events_published_through_the_current_bus_reach_its_subscribers() {
+    let current = CurrentBus::new();
+    let (bus, task) = spawn_bus(Limits::default());
+    let mut stream = subscribed(&bus, &["t"]);
+    let generation = current.install(bus.clone());
+
+    let seq = current
+        .publish(internal("t"), json!("hello"), Some(ExecutionId(3)))
+        .unwrap();
+    let event = next(&mut stream).await;
+    assert_eq!(event.seq, seq);
+    assert_eq!(event.data, json!("hello"));
+    assert_eq!(event.execution, Some(ExecutionId(3)));
+
+    current.clear(generation);
+    bus.close();
+    task.await.unwrap();
+    assert_eq!(
+        current.publish(internal("t"), Value::Null, None),
+        Err(PublishError::Closed)
+    );
 }
 
 #[tokio::test]

@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -61,7 +62,8 @@ impl Limits {
 }
 
 /// Identifier of a registered connection. Never reused within a process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct ConnectionId(u64);
 
 impl fmt::Display for ConnectionId {
@@ -79,6 +81,13 @@ pub enum DisconnectReason {
     /// this connection's subscriptions were dropped.
     PublishQueueOverflow,
     /// The owner of the connection asked for it to be closed.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     Requested,
     /// The receiving end of the connection was dropped.
     ReceiverDropped,
@@ -97,7 +106,8 @@ pub enum PublishError {
     /// The publish queue was full; the event was dropped and subscribed
     /// connections are being disconnected.
     QueueOverflow,
-    /// The bus is closed or its dispatcher is gone.
+    /// The bus is closed or its dispatcher is gone, or, when publishing
+    /// through the current bus, no server is running.
     Closed,
 }
 
@@ -438,6 +448,13 @@ impl EventBus {
     }
 
     /// Add a subscription. Returns `false` if the pattern was already present.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     pub fn subscribe(
         &self,
         id: ConnectionId,
@@ -453,6 +470,34 @@ impl EventBus {
             return Err(SubscribeError::TooManySubscriptions { max });
         }
         Ok(entry.subscriptions.insert(pattern))
+    }
+
+    /// Add several subscriptions at once, all or nothing: if the connection
+    /// would exceed its limit, none is added. Returns how many patterns were
+    /// newly added; duplicates, in the request or already held, count once.
+    pub fn subscribe_many(
+        &self,
+        id: ConnectionId,
+        patterns: Vec<SubscriptionPattern>,
+    ) -> Result<usize, SubscribeError> {
+        let max = self.inner.limits.max_subscriptions_per_connection;
+        let mut registry = self.inner.registry.lock_recover();
+        let entry = registry
+            .connections
+            .get_mut(&id)
+            .ok_or(SubscribeError::UnknownConnection)?;
+        let fresh: HashSet<SubscriptionPattern> = patterns
+            .into_iter()
+            .filter(|pattern| !entry.subscriptions.contains(pattern))
+            .collect();
+        if entry.subscriptions.len().saturating_add(fresh.len()) > max {
+            return Err(SubscribeError::TooManySubscriptions { max });
+        }
+        let added = fresh.len();
+        for pattern in fresh {
+            entry.subscriptions.insert(pattern);
+        }
+        Ok(added)
     }
 
     /// Remove a subscription. Returns whether it was present.
@@ -473,12 +518,12 @@ impl EventBus {
     }
 
     #[cfg(test)]
-    pub(super) fn connection_count(&self) -> usize {
+    pub(in crate::ipc) fn connection_count(&self) -> usize {
         self.inner.registry.lock_recover().connections.len()
     }
 
     #[cfg(test)]
-    pub(super) fn subscription_count(&self, id: ConnectionId) -> Option<usize> {
+    pub(in crate::ipc) fn subscription_count(&self, id: ConnectionId) -> Option<usize> {
         self.inner
             .registry
             .lock_recover()
@@ -515,6 +560,13 @@ impl EventStream {
 
     /// Non-waiting variant of [`recv`](Self::recv). `Ok(None)` means the
     /// connection is disconnected, `Err(())` that nothing is queued right now.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     pub fn try_recv(&mut self) -> Result<Option<Arc<Event>>, ()> {
         if self.shared.reason.get().is_some() {
             return Ok(None);
@@ -532,6 +584,13 @@ impl EventStream {
     }
 
     /// Disconnect this connection from the bus.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the bus API that the IPC server does not use"
+        )
+    )]
     pub fn disconnect(&self) -> bool {
         self.bus.disconnect(self.id, DisconnectReason::Requested)
     }

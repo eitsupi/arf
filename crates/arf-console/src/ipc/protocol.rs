@@ -145,6 +145,11 @@ pub struct RSessionInfo {
 pub struct SessionResult {
     pub arf_version: String,
     pub pid: u32,
+    /// Random identifier of this arf process, generated once at startup. It
+    /// is the same for every `session` result and `attach` result of the
+    /// process, including across `:ipc stop` / `:ipc start`, so a client can
+    /// tell a restarted arf from a restarted server.
+    pub session_id: String,
     pub os: String,
     pub arch: String,
     /// R installation path selected by arf at startup, or `null` if no R was resolved.

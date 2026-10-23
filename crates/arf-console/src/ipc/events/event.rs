@@ -6,6 +6,13 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Prefix reserved for events that originate inside arf itself.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only used by producers outside the server, which are added separately"
+    )
+)]
 const RESERVED_PREFIX: &str = "arf.";
 
 /// Longest accepted topic or subscription pattern, in bytes.
@@ -28,6 +35,13 @@ pub enum TopicError {
     /// Only ASCII letters, digits, `_` and `-` are allowed within a segment.
     InvalidCharacter(char),
     /// The topic is in the `arf.` namespace, which only arf itself may publish.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only used by producers outside the server, which are added separately"
+        )
+    )]
     Reserved,
 }
 
@@ -73,6 +87,13 @@ fn validate_name(name: &str) -> Result<(), TopicError> {
 }
 
 /// Whether `name` (already validated) lies in the arf-reserved namespace.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only used by producers outside the server, which are added separately"
+    )
+)]
 fn is_reserved_name(name: &str) -> bool {
     name.starts_with(RESERVED_PREFIX)
 }
@@ -103,6 +124,13 @@ impl Topic {
     /// Parse a topic chosen by an external party (R code, clients).
     ///
     /// Fails with [`TopicError::Reserved`] for names in the `arf.` namespace.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only used by producers outside the server, which are added separately"
+        )
+    )]
     pub fn external(name: &str) -> Result<Self, TopicError> {
         validate_name(name)?;
         if is_reserved_name(name) {
@@ -116,6 +144,13 @@ impl Topic {
     }
 
     /// Whether this topic is in the arf-reserved namespace.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only used by producers outside the server, which are added separately"
+        )
+    )]
     pub fn is_reserved(&self) -> bool {
         is_reserved_name(&self.0)
     }
