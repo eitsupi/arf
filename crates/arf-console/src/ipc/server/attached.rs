@@ -5,9 +5,9 @@
 //! then on every line in either direction is one JSON value:
 //!
 //! * The reader (see [`read_requests`]) parses lines, applies `subscribe` and
-//!   `unsubscribe` itself in arrival order, and runs every other method as a
-//!   task owned by the connection, at most [`MAX_OUTSTANDING_REQUESTS`] at a
-//!   time.
+//!   `unsubscribe` itself in arrival order, decides `shutdown` itself, and
+//!   runs every other method as a task owned by the connection, at most
+//!   [`MAX_OUTSTANDING_REQUESTS`] at a time.
 //! * The writer (see [`write_outgoing`]) is the only code that writes. It
 //!   takes responses from a bounded queue and events from the connection's
 //!   [`EventStream`], one line at a time, choosing between the two at random
@@ -170,7 +170,8 @@ where
 
 /// Carries out an accepted `shutdown` exactly once.
 ///
-/// The request records its acceptance when it finishes. The hook then runs
+/// The reader records the acceptance as soon as it has decided the request,
+/// before the response is queued. The hook then runs
 /// when the response has been written, or, if the connection ends first, when
 /// the connection ends, so that a client that does not read cannot hold the
 /// shutdown back.
@@ -433,7 +434,26 @@ impl RequestLoop<'_> {
                 let response = self.unsubscribe(request.id, request.params);
                 self.respond(response).await
             }
+            "shutdown" => {
+                let outgoing = self.shutdown(request).await;
+                self.send(outgoing).await
+            }
             _ => self.start_request(request).await,
+        }
+    }
+
+    /// Decide a `shutdown` request on the spot (it does not involve R) and
+    /// record an acceptance before its response is queued, so the connection
+    /// cannot end between the decision and the record.
+    async fn shutdown(&self, request: JsonRpcRequest) -> Outgoing {
+        let response = dispatch_request(request, &self.ctx.tx).await;
+        let shutdown_accepted = is_accepted_shutdown(&response);
+        if shutdown_accepted {
+            self.shutdown.accept();
+        }
+        Outgoing {
+            response,
+            shutdown_accepted,
         }
     }
 
@@ -498,19 +518,8 @@ impl RequestLoop<'_> {
             return self.respond(response).await;
         }
         let tx = self.ctx.tx.clone();
-        let shutdown = Arc::clone(self.shutdown);
-        self.requests.spawn(async move {
-            let is_shutdown = request.method == "shutdown";
-            let response = dispatch_request(request, &tx).await;
-            let shutdown_accepted = is_shutdown && is_accepted_shutdown(&response);
-            if shutdown_accepted {
-                shutdown.accept();
-            }
-            Outgoing {
-                shutdown_accepted,
-                response,
-            }
-        });
+        self.requests
+            .spawn(async move { Outgoing::respond(dispatch_request(request, &tx).await) });
         true
     }
 
