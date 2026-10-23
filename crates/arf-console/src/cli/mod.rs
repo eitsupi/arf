@@ -140,8 +140,10 @@ pub struct Cli {
     #[arg(long = "with-ipc")]
     pub with_ipc: bool,
 
-    /// Evaluate an expression returning named functions to expose over IPC.
-    /// Requires --with-ipc; exposure failures abort startup.
+    /// Expose a named list of R functions to IPC clients.
+    ///
+    /// Evaluate EXPRESSION after startup profiles; it must return a named list
+    /// of functions. Requires --with-ipc. Exposure failures abort startup.
     #[arg(long = "ipc-expose", value_name = "EXPRESSION")]
     pub ipc_expose: Option<String>,
 
