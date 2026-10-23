@@ -7,6 +7,7 @@ pub mod completion;
 pub mod embedding_api;
 mod error;
 mod ffi;
+pub mod handlers;
 pub mod help;
 pub mod help_bridge;
 pub mod json;
