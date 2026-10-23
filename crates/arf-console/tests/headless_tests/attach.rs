@@ -151,3 +151,157 @@ fn test_attach_serves_several_requests_on_one_connection() {
     assert!(eval.success, "{}", eval.stderr);
     assert_eq!(parse_ipc_json(&eval)["value"], "[1] 4");
 }
+
+/// Publish `topic` with `data_expr` (an R expression) and return `TRUE` or `FALSE`.
+fn publish_call(topic: &str, data_expr: &str) -> String {
+    format!(r#".Call("arf_publish_event", "{topic}", {data_expr}, PACKAGE = "(embedding)")"#)
+}
+
+/// Attach with `patterns` subscribed and require the attach to succeed.
+fn attach_subscribed(socket_path: &str, patterns: &[&str]) -> AttachedClient {
+    let mut client = AttachedClient::connect(socket_path);
+    client.send(&request(
+        1,
+        "attach",
+        json!({"client": {"name": "integration-test"}, "subscribe": patterns}),
+    ));
+    let attached = client.recv();
+    assert_eq!(attached["id"], 1, "{attached}");
+    assert!(attached["result"].is_object(), "{attached}");
+    client
+}
+
+fn socket_path_of(process: &HeadlessProcess) -> String {
+    let session = process.ipc_session().expect("session should run");
+    assert!(session.success, "{}", session.stderr);
+    parse_ipc_json(&session)["socket_path"]
+        .as_str()
+        .expect("socket_path")
+        .to_owned()
+}
+
+#[test]
+fn test_r_code_publishes_events_to_subscribed_connections() {
+    // The help viewer is not involved in headless sessions, so this also shows
+    // that the routines are registered without it.
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["demo.*"]);
+
+    client.send(&request(
+        2,
+        "evaluate",
+        json!({"code": r#"
+stopifnot(is.loaded("arf_api_version", PACKAGE = "(embedding)", type = ".Call"))
+stopifnot(identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L))
+.Call("arf_publish_event", "demo.hello", list(n = 1L, tags = list("a", NULL), ok = TRUE),
+      PACKAGE = "(embedding)")
+"#}),
+    ));
+
+    // The event and the response travel separately, so either may come first.
+    let mut event = None;
+    let mut response = None;
+    while event.is_none() || response.is_none() {
+        let message = client.recv();
+        if message["method"] == "event" {
+            event = Some(message);
+        } else {
+            response = Some(message);
+        }
+    }
+    let (event, response) = (event.unwrap(), response.unwrap());
+    assert_eq!(response["id"], 2, "{response}");
+    assert_eq!(response["result"]["value"], "[1] TRUE", "{response}");
+    assert_eq!(response["result"]["error"], Value::Null, "{response}");
+    let params = &event["params"];
+    assert_eq!(params["topic"], "demo.hello", "{event}");
+    assert_eq!(
+        params["data"],
+        json!({"n": 1, "tags": ["a", null], "ok": true}),
+        "{event}"
+    );
+    assert_eq!(params["execution"], Value::Null, "{event}");
+    assert!(params["seq"].is_u64(), "{event}");
+}
+
+#[test]
+fn test_r_events_reach_clients_while_r_keeps_computing() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["demo.*"]);
+
+    // R keeps running until the client has seen the event, so the event can
+    // only have been delivered while the evaluation was still in progress.
+    let release = tempfile::tempdir().expect("create a temporary directory");
+    let release_file = release
+        .path()
+        .join("received")
+        .to_string_lossy()
+        .replace('\\', "/");
+    client.send(&request(
+        2,
+        "evaluate",
+        json!({"code": format!(
+            r#"
+{publish}
+deadline <- Sys.time() + 25
+while (!file.exists("{release_file}") && Sys.time() < deadline) Sys.sleep(0.02)
+file.exists("{release_file}")
+"#,
+            publish = publish_call("demo.early", "NULL")
+        )}),
+    ));
+
+    let event = client.recv();
+    assert_eq!(
+        event["method"], "event",
+        "the event must come first: {event}"
+    );
+    assert_eq!(event["params"]["topic"], "demo.early", "{event}");
+    assert_eq!(event["params"]["data"], Value::Null, "{event}");
+
+    std::fs::write(release.path().join("received"), "").expect("release R");
+    let response = client.recv();
+    assert_eq!(response["id"], 2, "{response}");
+    assert_eq!(response["result"]["value"], "[1] TRUE", "{response}");
+}
+
+#[test]
+fn test_r_publishing_errors_are_r_errors_and_leave_the_session_usable() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["demo.*"]);
+
+    let cases = [
+        (publish_call("arf.internal", "NULL"), "reserved"),
+        (publish_call("bad topic", "NULL"), "invalid character"),
+        (publish_call("demo.ok", "1:2"), "(at JSON Pointer"),
+    ];
+    for (offset, (code, expected)) in cases.iter().enumerate() {
+        let id = 10 + offset as i64;
+        client.send(&request(id, "evaluate", json!({"code": code})));
+        let response = client.recv();
+        assert_eq!(response["id"], id, "{response}");
+        let error = response["result"]["error"].as_str().unwrap_or_else(|| {
+            panic!("expected an R error for {code}: {response}");
+        });
+        assert!(error.contains(expected), "{code}: {error}");
+    }
+
+    // The session still works and nothing was published by the failed calls.
+    client.send(&request(
+        20,
+        "evaluate",
+        json!({"code": publish_call("demo.after", "list(i = 1L)")}),
+    ));
+    let mut seen_event = None;
+    let mut seen_response = None;
+    while seen_event.is_none() || seen_response.is_none() {
+        let message = client.recv();
+        if message["method"] == "event" {
+            seen_event = Some(message);
+        } else {
+            seen_response = Some(message);
+        }
+    }
+    assert_eq!(seen_event.unwrap()["params"]["topic"], "demo.after");
+    assert_eq!(seen_response.unwrap()["result"]["value"], "[1] TRUE");
+}

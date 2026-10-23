@@ -217,6 +217,10 @@ fn initialize_r(r_args_builder: RArgsBuilder<'_>) -> Result<Option<std::path::Pa
     }
     let r_home = crate::capture_runtime_r_home(pre_init_dir.as_deref());
 
+    // Make arf's native routines available to R code, before the profiles
+    // sourced below on Windows.
+    crate::app::embedding_api::register_embedding_api();
+
     // Source R profile files (Windows only)
     #[cfg(windows)]
     source_r_profiles(&r_args);

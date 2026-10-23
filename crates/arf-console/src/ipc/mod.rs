@@ -41,6 +41,7 @@ pub use approval::{
     UserInputApproval, approve_user_input, reject_user_input_not_approved, send_policy_is_allow,
     set_send_policy_allow,
 };
+pub(crate) use events::install_r_event_publisher;
 pub(crate) use execution::{accept_user_input, run_silent_eval};
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;

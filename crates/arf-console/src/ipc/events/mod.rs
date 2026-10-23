@@ -50,6 +50,7 @@ mod dispatcher;
 mod event;
 mod pattern;
 mod queue;
+mod r_publisher;
 #[cfg(test)]
 mod tests;
 
@@ -57,6 +58,7 @@ pub use bus::{ConnectionId, EventBus, EventStream, Limits, SubscribeError};
 pub(crate) use current::{clear_current_bus, install_current_bus};
 pub use event::Event;
 pub use pattern::SubscriptionPattern;
+pub(crate) use r_publisher::install_r_event_publisher;
 
 // Used by event producers, which are added separately from the server.
 #[cfg_attr(
@@ -72,11 +74,6 @@ pub use {
     queue::QueueLimits,
 };
 
-#[expect(
-    unused_imports,
-    reason = "only used by producers outside the server, which are added separately"
-)]
-pub(crate) use current::publish_event;
 #[expect(
     unused_imports,
     reason = "the server names the dispatcher only through the bus constructor"

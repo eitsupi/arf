@@ -175,18 +175,23 @@ fn embedding_registration_calls_r_only_once_in_r() {
             crate::eval_string(
                 r#"
 registered_before <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
-registered_before[["arf_submit_help_request"]]$address <- NULL
-stopifnot(identical(names(registered_before), "arf_submit_help_request"))
+stopifnot(identical(
+  names(registered_before),
+  c("arf_submit_help_request", "arf_publish_event", "arf_api_version")
+))
 stopifnot(identical(registered_before[["arf_submit_help_request"]]$numParameters, 4L))
+stopifnot(identical(registered_before[["arf_publish_event"]]$numParameters, 2L))
+stopifnot(identical(registered_before[["arf_api_version"]]$numParameters, 0L))
+for (name in names(registered_before)) registered_before[[name]]$address <- NULL
 "#,
             )
-            .expect("the complete production table should contain the help callback");
+            .expect("the complete production table should contain every embedding callback");
             super::register_embedding_routines().expect("repeat registration should succeed");
             assert_eq!(REGISTRATION_CALLS.load(Ordering::Relaxed), 1);
             crate::eval_string(
                 r#"
 registered_after <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
-registered_after[["arf_submit_help_request"]]$address <- NULL
+for (name in names(registered_after)) registered_after[[name]]$address <- NULL
 stopifnot(identical(registered_before, registered_after))
 stopifnot(identical(.Call("arf_submit_help_request", character(), "mean", "text", FALSE,
                         PACKAGE = "(embedding)"), FALSE))

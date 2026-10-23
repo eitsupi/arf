@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Experimental:** IPC clients can open long-lived connections with `attach`, subscribe to event topics and receive events as they happen, and R code can publish events to them through `.Call("arf_publish_event", topic, data, PACKAGE = "(embedding)")`.
 - `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
 - **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`).
 

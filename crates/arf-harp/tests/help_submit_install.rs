@@ -57,7 +57,7 @@ registerS3method("print", "help_files_with_topic", standard_help_printer, envir 
             arf_harp::eval_string(
                 r#"
 embedding_routines_before <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
-embedding_routines_before[["arf_submit_help_request"]]$address <- NULL
+for (name in names(embedding_routines_before)) embedding_routines_before[[name]]$address <- NULL
 registerS3method("print", "help_files_with_topic", standard_help_printer, envir = utils_ns)
 "#,
             )
@@ -69,7 +69,7 @@ registerS3method("print", "help_files_with_topic", standard_help_printer, envir 
             arf_harp::eval_string(
                 r#"
 embedding_routines_after <- getDLLRegisteredRoutines("(embedding)")[[".Call"]]
-embedding_routines_after[["arf_submit_help_request"]]$address <- NULL
+for (name in names(embedding_routines_after)) embedding_routines_after[[name]]$address <- NULL
 stopifnot(identical(embedding_routines_before, embedding_routines_after))
 "#,
             )

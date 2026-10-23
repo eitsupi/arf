@@ -49,6 +49,10 @@ pub(crate) fn run_script(
         arf_libr::initialize_r_with_args(&r_args_refs).context("Failed to initialize R")?;
     }
 
+    // Make arf's native routines available to R code, before the profiles
+    // sourced below on Windows.
+    crate::app::embedding_api::register_embedding_api();
+
     // Source R profile files (Windows only)
     #[cfg(windows)]
     crate::app::r_profiles::source_r_profiles(&r_args);

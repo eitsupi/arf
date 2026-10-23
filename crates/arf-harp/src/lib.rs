@@ -4,6 +4,7 @@
 //! including automatic protection and type-safe access.
 
 pub mod completion;
+pub mod embedding_api;
 mod error;
 mod ffi;
 pub mod help;
@@ -23,6 +24,7 @@ pub use error::*;
 pub use object::*;
 pub use protect::*;
 pub use r_string::escape_r_string;
+pub use routines::register_embedding_routines;
 #[cfg(windows)]
 pub use startup::override_platform_gui;
 pub use startup::{

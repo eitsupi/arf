@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-use super::bus::{EventBus, PublishError};
+use super::bus::{EventBus, Limits, PublishError, check_event_size};
 use super::event::{ExecutionId, Topic};
 
 /// Identifies one installation of a bus in a [`CurrentBus`] slot.
@@ -76,7 +76,14 @@ impl CurrentBus {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match slot.as_ref() {
             Some(installed) => installed.bus.publish(topic, data, execution),
-            None => Err(PublishError::Closed),
+            None => {
+                // The limit belongs to the bus of a running server, which
+                // every server creates with the default limits. Refusing an
+                // event it would refuse keeps the outcome for the producer
+                // independent of whether a server happens to run.
+                check_event_size(&topic, &data, Limits::default().max_event_bytes)?;
+                Err(PublishError::Closed)
+            }
         }
     }
 }
@@ -96,12 +103,9 @@ pub(crate) fn clear_current_bus(generation: Generation) -> bool {
 
 /// Publish an event on the bus of the running IPC server, without blocking.
 ///
-/// Fails with [`PublishError::Closed`] when no server is running; see
-/// [`EventBus::publish`] for the other outcomes.
-#[expect(
-    dead_code,
-    reason = "producers on the R thread are added separately from the server"
-)]
+/// Fails with [`PublishError::Closed`] when no server is running, unless the
+/// event is too large for any server to accept; see [`EventBus::publish`] for
+/// the other outcomes.
 pub(crate) fn publish_event(
     topic: Topic,
     data: Value,

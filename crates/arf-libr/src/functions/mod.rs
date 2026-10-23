@@ -125,6 +125,13 @@ pub struct RLibrary {
     pub r_binding_is_locked: unsafe extern "C" fn(SEXP, SEXP) -> Rboolean,
     pub rf_definevar: unsafe extern "C" fn(SEXP, SEXP, SEXP),
     pub rf_scalarlogical: unsafe extern "C" fn(c_int) -> SEXP,
+    pub rf_scalarinteger: unsafe extern "C" fn(c_int) -> SEXP,
+    /// Raise an R error from `format` and its arguments; never returns.
+    ///
+    /// R unwinds with `longjmp`, so every Rust value with a destructor must
+    /// be dropped before calling this. Always pass a fixed `"%s"` format with
+    /// the message as its argument, so `%` in the message is not interpreted.
+    pub rf_errorcall: unsafe extern "C-unwind" fn(SEXP, *const c_char, ...) -> !,
     /// Get an R option directly without evaluating R code.
     pub rf_get_option1: unsafe extern "C" fn(SEXP) -> SEXP,
 
@@ -381,6 +388,8 @@ impl RLibrary {
             load_symbol!(r_binding_is_locked, b"R_BindingIsLocked\0");
             load_symbol!(rf_definevar, b"Rf_defineVar\0");
             load_symbol!(rf_scalarlogical, b"Rf_ScalarLogical\0");
+            load_symbol!(rf_scalarinteger, b"Rf_ScalarInteger\0");
+            load_symbol!(rf_errorcall, b"Rf_errorcall\0");
             load_symbol!(rf_get_option1, b"Rf_GetOption1\0");
 
             // Load stack limit pointer
@@ -668,6 +677,8 @@ impl RLibrary {
                 r_binding_is_locked,
                 rf_definevar,
                 rf_scalarlogical,
+                rf_scalarinteger,
+                rf_errorcall,
                 rf_get_option1,
                 r_cstacklimit,
                 #[cfg(unix)]
