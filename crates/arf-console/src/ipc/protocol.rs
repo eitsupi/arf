@@ -118,6 +118,9 @@ pub struct EvaluateResult {
     pub stderr: String,
     pub value: Option<String>,
     pub error: Option<String>,
+    /// Identifier of the user-code execution that produced this result.
+    #[serde(default)]
+    pub execution_id: Option<super::events::ExecutionId>,
 }
 
 /// Parameters for the `user_input` method.
@@ -140,6 +143,7 @@ pub struct HandlerCallParams {
 #[derive(Debug, Serialize)]
 pub struct UserInputResult {
     pub accepted: bool,
+    pub execution_id: Option<super::events::ExecutionId>,
 }
 
 /// Result of the `shutdown` method.
@@ -253,6 +257,10 @@ pub struct HistoryResult {
 pub struct IpcRequest {
     pub method: IpcMethod,
     pub reply: tokio::sync::oneshot::Sender<IpcResponse>,
+    /// Stable identifier shared by requests from the same IPC connection.
+    pub origin: u64,
+    /// Filled once the R thread has started the request's execution.
+    pub started_execution_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// IPC method variants for internal dispatch.

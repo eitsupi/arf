@@ -126,13 +126,18 @@ fn raw_json_rpc_responses_have_the_documented_shape() -> Result<()> {
                     result(Value::Null, "", "[1] 124".into()),
                 ),
             ];
-            for (case, code, expected) in cases {
+            for (case, code, mut expected) in cases {
                 let response = raw_json_rpc(
                     &socket_path,
                     "evaluate",
                     serde_json::json!({ "code": code }),
                 )
                 .with_context(|| format!("raw evaluate case `{case}`"))?;
+                ensure!(
+                    response["result"]["execution_id"].as_u64().is_some(),
+                    "raw evaluate case `{case}` lacks a numeric execution ID: {response}"
+                );
+                expected["result"]["execution_id"] = response["result"]["execution_id"].clone();
                 ensure!(
                     response == expected,
                     "raw evaluate case `{case}` has the wrong response: {response}"

@@ -249,7 +249,12 @@ pub fn call_handler(
 /// Execute a call that has reached the R thread. Returns immediately for a
 /// closed reply or a call whose queue deadline expired before it started.
 pub(crate) fn execute_handler_request(request: IpcRequest) {
-    let IpcRequest { method, reply } = request;
+    let IpcRequest {
+        method,
+        reply,
+        origin,
+        started_execution_id,
+    } = request;
     let IpcMethod::Call {
         queue_deadline,
         ticket,
@@ -275,6 +280,7 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
     let Some((handler, args)) = ticket.start() else {
         return;
     };
+    let execution_id = super::execution::begin_handler_execution(origin, &started_execution_id);
 
     struct PromptGuard;
     impl Drop for PromptGuard {
@@ -289,6 +295,7 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
             "value": result.value,
             "stdout": result.stdout,
             "stderr": result.stderr,
+            "execution_id": execution_id,
         })),
         Err(error) => {
             let (code, message) = match error.kind {
@@ -314,10 +321,12 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
                     "class": error.class,
                     "stdout": error.stdout,
                     "stderr": error.stderr,
+                    "execution_id": execution_id,
                 }),
             )
         }
     };
+    super::execution::clear_execution();
     let _ = reply.send(response);
 }
 

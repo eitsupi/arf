@@ -4,7 +4,7 @@
 use super::prompt_kind::PromptKind;
 use crate::history::HistoryRuntime;
 use crate::ipc::{
-    PendingIpcKind, accept_user_input, reject_operation_user_typing, run_silent_eval,
+    PendingIpcKind, accept_user_input, reject_operation_user_typing, run_silent_eval_from,
     setup_visible_eval,
 };
 use crate::repl::history::save_ipc_history;
@@ -53,7 +53,12 @@ fn approve_interactive_ipc_operation(
 ///
 /// Returns whether the approval step already wrote a newline, or `None` when
 /// the operation was rejected. Silent evaluation never reaches this function.
-fn approve_and_accept(code: &str, kind: PendingIpcKind) -> Option<AcceptedInteractiveIpcOperation> {
+fn approve_and_accept(
+    code: &str,
+    kind: PendingIpcKind,
+    origin: u64,
+    started_execution_id: &std::sync::atomic::AtomicU64,
+) -> Option<AcceptedInteractiveIpcOperation> {
     match kind {
         PendingIpcKind::VisibleEvaluate { reply, timeout } => {
             if reply.is_closed() {
@@ -67,7 +72,7 @@ fn approve_and_accept(code: &str, kind: PendingIpcKind) -> Option<AcceptedIntera
                 crate::ipc::set_r_at_prompt(true);
                 return None;
             }
-            setup_visible_eval(reply, timeout);
+            setup_visible_eval(reply, timeout, code, origin, started_execution_id);
             Some(AcceptedInteractiveIpcOperation {
                 wrote_newline,
                 accepted_reply: None,
@@ -159,12 +164,12 @@ pub(super) fn dispatch_pre_prompt_ipc(
         // Unlike visible eval / user_input, silent eval does not return
         // code to R. Keep this background operation out of the user's REPL
         // command history, then fall through to the editor loop.
-        let result = run_silent_eval(&op.code);
+        let result = run_silent_eval_from(&op.code, op.origin, &op.started_execution_id);
         let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
         return None;
     }
 
-    let accepted = approve_and_accept(&op.code, op.kind)?;
+    let accepted = approve_and_accept(&op.code, op.kind, op.origin, &op.started_execution_id)?;
     IpcCodeInjection {
         editor: &mut state.line_editor,
         history: &state.r_history,
@@ -177,7 +182,7 @@ pub(super) fn dispatch_pre_prompt_ipc(
         println!("{}{}", prompt_str.dark_cyan(), op.code);
     });
     if let Some(reply) = accepted.accepted_reply {
-        accept_user_input(reply);
+        accept_user_input(reply, &op.code, op.origin, &op.started_execution_id);
     }
     Some(op.code)
 }
@@ -228,7 +233,7 @@ pub(super) fn handle_external_break(
             let _ = out.flush();
         }
 
-        let result = run_silent_eval(&op.code);
+        let result = run_silent_eval_from(&op.code, op.origin, &op.started_execution_id);
         let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
 
         // Clear the indicator — reedline will repaint the prompt
@@ -239,7 +244,8 @@ pub(super) fn handle_external_break(
 
     // Visible evaluate / user input: accept, inject code into REPL.
     // Preserve whether approval already emitted its CRLF.
-    let Some(accepted) = approve_and_accept(&op.code, op.kind) else {
+    let Some(accepted) = approve_and_accept(&op.code, op.kind, op.origin, &op.started_execution_id)
+    else {
         return ControlFlow::Continue(());
     };
 
@@ -270,7 +276,7 @@ pub(super) fn handle_external_break(
         }
     });
     if let Some(reply) = accepted.accepted_reply {
-        accept_user_input(reply);
+        accept_user_input(reply, &op.code, op.origin, &op.started_execution_id);
     }
     ControlFlow::Break(Some(op.code))
 }

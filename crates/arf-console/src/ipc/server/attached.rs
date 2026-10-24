@@ -22,7 +22,7 @@
 use super::connection::{
     ATTACH_METHOD, ConnectionContext, MAX_REQUEST_BYTES, READ_CHUNK_BYTES, is_accepted_shutdown,
 };
-use super::dispatch::{dispatch_request, parse_params};
+use super::dispatch::{dispatch_request_for_connection, parse_params};
 use crate::ipc::events::{ConnectionId, Event, EventStream, SubscribeError, SubscriptionPattern};
 use crate::ipc::handlers::{HandlerApiState, handler_status};
 use crate::ipc::protocol::{
@@ -266,7 +266,7 @@ fn attach_connection(
                 format!("Session info error: {e}"),
             ))
         })?;
-    let mut capabilities = vec!["events"];
+    let mut capabilities = vec!["events", "execution_events"];
     if handler_status().state == HandlerApiState::Locked {
         capabilities.push("handlers");
     }
@@ -461,7 +461,8 @@ impl RequestLoop<'_> {
     /// record an acceptance before its response is queued, so the connection
     /// cannot end between the decision and the record.
     async fn shutdown(&self, request: JsonRpcRequest) -> Outgoing {
-        let response = dispatch_request(request, &self.ctx.tx).await;
+        let response =
+            dispatch_request_for_connection(request, &self.ctx.tx, self.connection.value()).await;
         let shutdown_accepted = is_accepted_shutdown(&response);
         if shutdown_accepted {
             self.shutdown.accept();
@@ -533,8 +534,10 @@ impl RequestLoop<'_> {
             return self.respond(response).await;
         }
         let tx = self.ctx.tx.clone();
-        self.requests
-            .spawn(async move { Outgoing::respond(dispatch_request(request, &tx).await) });
+        let connection_id = self.connection.value();
+        self.requests.spawn(async move {
+            Outgoing::respond(dispatch_request_for_connection(request, &tx, connection_id).await)
+        });
         true
     }
 

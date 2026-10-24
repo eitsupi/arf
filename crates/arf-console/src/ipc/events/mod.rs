@@ -54,7 +54,9 @@ mod r_publisher;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use bus::allocate_connection_id;
 pub use bus::{ConnectionId, EventBus, EventStream, Limits, SubscribeError};
+pub(crate) use current::publish_event;
 pub(crate) use current::{clear_current_bus, install_current_bus};
 pub use event::Event;
 pub use pattern::SubscriptionPattern;

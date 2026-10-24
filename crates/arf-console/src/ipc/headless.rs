@@ -189,14 +189,19 @@ enum RequestStart {
 }
 
 fn start_request(request: IpcRequest) -> RequestStart {
-    let IpcRequest { method, reply } = request;
+    let IpcRequest {
+        method,
+        reply,
+        origin,
+        started_execution_id,
+    } = request;
     if reply.is_closed() {
         return RequestStart::Continue;
     }
     match method {
         IpcMethod::SilentEvaluate { code, .. } => {
             let history_entry = begin_headless_history(&code);
-            let result = execution::run_silent_eval(&code);
+            let result = execution::run_silent_eval_from(&code, origin, &started_execution_id);
             let exit_status = if result.error.is_some() { 1 } else { 0 };
             if let Some(entry) = history_entry {
                 entry.finish(Some(exit_status));
@@ -205,7 +210,7 @@ fn start_request(request: IpcRequest) -> RequestStart {
             RequestStart::Continue
         }
         IpcMethod::VisibleEvaluate { code, .. } => {
-            execution::begin_visible_eval();
+            execution::begin_visible_eval(&code, origin, &started_execution_id);
             let generation = arf_libr::reset_console_generation();
             let history_entry = begin_headless_history(&code);
             *ACTIVE_REQUEST.lock().unwrap() = Some(ActiveRequest {
@@ -223,6 +228,7 @@ fn start_request(request: IpcRequest) -> RequestStart {
             let generation = arf_libr::reset_console_generation();
             r_is_at_prompt().store(false, Ordering::Release);
             let history_entry = begin_headless_history(&code);
+            let accepted_code = code.clone();
             *ACTIVE_REQUEST.lock().unwrap() = Some(ActiveRequest {
                 code,
                 offset: 0,
@@ -232,7 +238,7 @@ fn start_request(request: IpcRequest) -> RequestStart {
                 continuation_eof_sent: false,
                 history_entry,
             });
-            execution::accept_user_input(reply);
+            execution::accept_user_input(reply, &accepted_code, origin, &started_execution_id);
             RequestStart::Input
         }
         IpcMethod::Session => {
@@ -241,7 +247,12 @@ fn start_request(request: IpcRequest) -> RequestStart {
             RequestStart::Continue
         }
         IpcMethod::Call { .. } => {
-            super::handlers::execute_handler_request(IpcRequest { method, reply });
+            super::handlers::execute_handler_request(IpcRequest {
+                method,
+                reply,
+                origin,
+                started_execution_id,
+            });
             RequestStart::Continue
         }
     }
@@ -307,6 +318,11 @@ fn finish_active_request() {
     if let Some(entry) = request.history_entry {
         entry.finish(Some(if failed { 1 } else { 0 }));
     }
+    execution::finish_execution(if failed {
+        execution::ExecutionStatus::Error
+    } else {
+        execution::ExecutionStatus::Ok
+    });
     if let Some((reply, result)) = result {
         let _ = reply.send(IpcResponse::Evaluate(result));
     }
@@ -380,6 +396,8 @@ mod tests {
                 code: "headless_closed_reply_sentinel <- 1".to_string(),
             },
             reply,
+            origin: 0,
+            started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         });
 
         assert!(matches!(result, RequestStart::Continue));

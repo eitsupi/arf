@@ -183,7 +183,10 @@ impl Fixture {
 }
 
 fn accepted() -> IpcResponse {
-    IpcResponse::UserInput(UserInputResult { accepted: true })
+    IpcResponse::UserInput(UserInputResult {
+        accepted: true,
+        execution_id: None,
+    })
 }
 
 /// Wait until `condition` holds, letting other tasks run in between.
@@ -213,7 +216,10 @@ async fn attach_result_describes_the_connection_and_session() {
 
     assert!(result["connection_id"].as_u64().is_some(), "{result}");
     assert_eq!(result["api_version"], 1);
-    assert_eq!(result["capabilities"], json!(["events"]));
+    assert_eq!(
+        result["capabilities"],
+        json!(["events", "execution_events"])
+    );
     let session_id = result["session_id"].as_str().unwrap();
     assert_eq!(session_id.len(), 32);
     assert_eq!(result["session"]["session_id"], session_id);

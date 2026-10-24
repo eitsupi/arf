@@ -38,6 +38,7 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
                 stderr: String::new(),
                 value: None,
                 error: Some(format!("Failed to create temp file for IPC capture: {e}")),
+                execution_id: None,
             };
         }
     };
@@ -92,6 +93,7 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
                 stderr,
                 value: None,
                 error: Some(format!("Failed to evaluate: {e}")),
+                execution_id: None,
             }
         }
     }
@@ -107,6 +109,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
                 stderr: String::new(),
                 value: None,
                 error: Some(format!("Failed to read capture file: {e}")),
+                execution_id: None,
             };
         }
     };
@@ -120,6 +123,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
                 stderr: String::new(),
                 value: None,
                 error: Some("Malformed capture file: no header".to_string()),
+                execution_id: None,
             };
         }
     };
@@ -136,6 +140,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
             stderr: String::new(),
             value: None,
             error: Some(format!("Malformed capture header: {header}")),
+            execution_id: None,
         };
     }
 
@@ -168,6 +173,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
             stderr: String::new(),
             value: None,
             error: Some("Malformed capture file: truncated".to_string()),
+            execution_id: None,
         };
     }
 
@@ -176,6 +182,7 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
         stderr: String::new(),
         value,
         error: error_field,
+        execution_id: None,
     }
 }
 
