@@ -44,6 +44,12 @@
 
 ## Installation
 
+### Requirements
+
+arf does not bundle R; it starts an R installation already on your system.
+On Windows, R 4.2.0 or later is required, because arf uses an R embedding API
+introduced in that version. arf cannot start older R versions on Windows.
+
 ### Pre-built Binaries
 
 Pre-built binaries are available from [GitHub Releases](https://github.com/eitsupi/arf/releases).
