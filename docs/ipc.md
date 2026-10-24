@@ -336,7 +336,7 @@ arf ipc eval --pid 12345 'getwd()'
 | `--timeout <MS>` | Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
-**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), and `error` (string or null). All four fields are always present. For visible evaluation, `value` and `error` are `null`; normal REPL output and errors appear in `stdout` and `stderr`. Silent evaluation (the default) uses the direct evaluation path, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
+**Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), `error` (string or null), and `execution_id` (number). These fields are always present. For visible evaluation, `value` and `error` are `null`; normal REPL output and errors appear in `stdout` and `stderr`. Silent evaluation (the default) uses the direct evaluation path, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
 
 When the timeout fires, the server returns a JSON-RPC error response instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. The R evaluation continues, so the session stays busy until it finishes.
 
@@ -347,6 +347,7 @@ Example (silent eval, result captured in `value`):
   "stdout": "",
   "stderr": "",
   "value": "[1] 2",
+  "execution_id": 7,
   "error": null
 }
 ```
@@ -358,7 +359,8 @@ Example (R error):
   "stdout": "",
   "stderr": "",
   "value": null,
-  "error": "object 'x' not found"
+  "error": "object 'x' not found",
+  "execution_id": 8
 }
 ```
 
@@ -404,7 +406,7 @@ arf ipc send 'library(dplyr)'
 arf ipc send --pid 12345 'print(mtcars)'
 ```
 
-**Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`. `accepted: true` acknowledges that the request was accepted; it does not report whether evaluation succeeded or completed.
+**Output format:** JSON object with `accepted` (bool) and `execution_id` (number). Example: `{"accepted": true, "execution_id": 7}`. `accepted: true` acknowledges that the request was accepted; it does not report whether evaluation succeeded or completed.
 
 **When to use `eval` vs `send`:**
 
@@ -741,7 +743,8 @@ Connection: close
   "result": {
     "stdout": "",
     "stderr": "",
-    "value": "[1] 2"
+    "value": "[1] 2",
+    "execution_id": 7
   }
 }
 ```
@@ -755,7 +758,8 @@ Connection: close
   "result": {
     "stdout": "",
     "stderr": "",
-    "error": "object 'x' not found"
+    "error": "object 'x' not found",
+    "execution_id": 8
   }
 }
 ```
@@ -788,6 +792,15 @@ REPL evaluation and do not return evaluation results.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
 
+The results of `evaluate`, `user_input`, and `call` include an `execution_id`.
+It identifies the execution within this arf process, independently of the
+JSON-RPC request ID. `user_input` acknowledges acceptance with
+`{"accepted":true,"execution_id":7}`; it does not wait for completion.
+Errors after execution starts also include `data.execution_id` when available.
+A reply timeout limits waiting for a response; it does not end the execution or
+its event context. Use the [completion event](#execution-completion) to observe
+when user code actually finishes.
+
 ### Long-lived Connections
 
 A client that wants to receive events, or to keep one connection for many requests, opens the connection with `attach`. The request must be raw JSON (not HTTP) and must end with a newline:
@@ -801,7 +814,7 @@ All `params` are optional. `client` is informational only and is never used for 
 The response is:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
+{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events","execution_events"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
 ```
 
 `session` is the same object the `session` method returns, but it never waits for R: `r` is `null` and `r_unavailable_reason` says so. Call `session` to get R's details. `session_id` identifies the arf process and is the same after the server is restarted within it.
@@ -831,6 +844,36 @@ Matching events arrive as notifications:
 
 Events are never dropped silently. A connection that cannot keep up, or that may have missed an event because the server's own queue overflowed, is disconnected instead. After such a disconnect, attach again and fetch the state you need again. To avoid missing changes at the start, attach with `subscribe` first and only then fetch the initial state: an event may then describe something the fetched state already contains, but nothing is lost unless the connection is disconnected.
 
+#### Execution completion
+
+Subscribe to `arf.execution_completed` (or `arf.*`) to observe completed user
+code in interactive and headless sessions:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"seq":43,"topic":"arf.execution_completed","data":{"id":7,"origin":3,"kind":"user_code","visible":false,"status":"ok"},"execution":7}}
+```
+
+`data.id` matches the response's `execution_id`. `origin` is `"terminal"` for
+terminal input or the originating IPC connection's numeric ID (including
+single-shot connections). `kind` is `"user_code"`; `visible` distinguishes
+normal REPL execution from silent evaluation. `status` is `"ok"`, `"error"`, or
+`"unknown"` when a reliable outcome is unavailable.
+
+One completion event covers one submitted terminal input or one `evaluate` /
+`user_input` request, even if it contains multiple expressions. Silent evaluations
+also produce completion events. Initial prompts and returns to input without
+any evaluation do not. Handler `call` executions have IDs and their R-published
+events carry those IDs, but they do not produce completion events, allowing
+subscribers to fetch workspace state without triggering a refresh loop.
+
+Clients refreshing state on completion should use handler `call` rather than
+`evaluate`, which emits its own completion event, or use `origin` to recognize
+their own executions.
+
+Events published during an execution carry its ID in `execution` and have
+smaller `seq` values than its completion event. A reply timeout does not trigger
+completion: the event is published once, when the running user code finishes.
+
 #### Exposing and calling R handlers
 
 Start arf with `--with-ipc --ipc-expose '<R expression>'` in the interactive REPL, or `arf headless --ipc-expose '<R expression>'` in a headless session, to expose handlers. The expression runs after R startup profiles and before the IPC server accepts requests. It must return a named list whose values are functions. Each name is a selector in `<namespace>/<method>` form; the `arf/` namespace is reserved. For example:
@@ -847,7 +890,7 @@ Use the `call` method to invoke one exposed selector with JSON arguments:
 {"jsonrpc":"2.0","id":2,"method":"call","params":{"handler":"demo/add","args":{"x":[2,3]}}}
 ```
 
-If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, and `stderr`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
+If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, `stderr`, and `execution_id`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
 
 Call requests from all clients share one FIFO queue with a limit of 64 waiting calls and 8 MiB of queued handler names and compact JSON arguments. A full queue is rejected immediately. `queue_timeout_ms` sets how long a call may wait before it starts (default 30,000 ms; allowed range 1–300,000 ms). A call that expires before starting is not run. Closing an attached connection also drops a call that has not started; an already running R function continues and its response is discarded if the client has disconnected. Single-shot connections preserve write-half-close compatibility: a disconnect while waiting is not detected until the response is written, so use an attached connection when cancellation on disconnect is required. Calls do not interrupt one another once running.
 
@@ -862,7 +905,7 @@ R code running in the session can publish events to subscribed connections with 
 - `arf_publish_event(topic, data)` takes exactly two arguments. `topic` is a non-`NA` character string. `data` is any value that converts to JSON under the strict rules below, and `NULL` becomes JSON `null`. It returns `TRUE` when the event was queued on a running IPC server and `FALSE` when there is nowhere to publish it (no IPC server is running). `TRUE` is not a delivery guarantee: an event nobody is subscribed to is dropped.
 - `arf_api_version()` takes no arguments and returns `1L`.
 
-Publishing never waits: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` is `null` in these events for now.
+Publishing never waits: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` identifies the active user-code or handler execution, and is `null` when there is no active execution.
 
 R values convert to JSON as follows: `NULL` is `null`; a length-1 logical, integer, double or character vector is a boolean, number or string; an unnamed list is an array; a named list is an object. Longer atomic vectors, `NA`, `NaN`, infinite numbers, objects with a `class` attribute (factors, dates and data frames included), duplicate or `NA` names, and every other type are errors. Wrap vectors in `as.list()` to send them as arrays.
 

@@ -168,9 +168,11 @@ fn headless_long_utf8_request_survives_r_console_buffer_boundary() {
     let result = process.ipc_eval_visible(&code).expect("visible long eval");
     assert!(result.success, "long eval failed: {}", result.stderr);
     let response = parse_ipc_json(&result);
+    let execution_id = response["execution_id"].as_u64().expect("execution ID");
     assert_eq!(
         response,
         serde_json::json!({
+            "execution_id": execution_id,
             "stdout": payload,
             "stderr": "",
             "value": null,

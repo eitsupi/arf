@@ -6,7 +6,6 @@
 //! turns it into a long-lived connection (see [`super::attached`]).
 
 use super::attached;
-use super::dispatch::dispatch_request;
 use crate::ipc::events::EventBus;
 use crate::ipc::protocol::{
     INVALID_REQUEST, IpcRequest, JsonRpcRequest, JsonRpcResponse, PARSE_ERROR,
@@ -168,7 +167,8 @@ where
 
     // Dispatch based on method
     let is_shutdown = request.method == "shutdown";
-    let response = dispatch_request(request, &ctx.tx).await;
+    let origin = crate::ipc::events::allocate_connection_id().value();
+    let response = super::dispatch::dispatch_request_for_connection(request, &ctx.tx, origin).await;
 
     // Send HTTP response (for curl compatibility)
     let accepted_shutdown = is_shutdown && is_accepted_shutdown(&response);

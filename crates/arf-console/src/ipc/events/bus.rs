@@ -67,6 +67,16 @@ impl Limits {
 #[serde(transparent)]
 pub struct ConnectionId(u64);
 
+impl ConnectionId {
+    pub(crate) fn value(self) -> u64 {
+        self.0
+    }
+}
+
+pub(crate) fn allocate_connection_id() -> ConnectionId {
+    ConnectionId(NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed))
+}
+
 impl fmt::Display for ConnectionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -429,7 +439,7 @@ impl EventBus {
     /// registered and is already disconnected with
     /// [`DisconnectReason::Shutdown`], so `recv` returns `None` right away.
     pub fn register_connection(&self) -> EventStream {
-        let id = ConnectionId(NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed));
+        let id = allocate_connection_id();
         let (sender, receiver) = queue(self.inner.limits.connection_queue);
         let shared = Arc::new(ConnectionShared {
             reason: OnceLock::new(),

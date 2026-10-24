@@ -5,7 +5,6 @@
 //! editor buffer before accepting or rejecting the operation.
 
 use super::execution;
-use super::execution::DEFAULT_EVAL_TIMEOUT;
 use super::protocol::{
     INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
     USER_IS_TYPING,
@@ -79,11 +78,7 @@ static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceL
 
 struct PendingVisibleEval {
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
-    /// Absolute deadline — best-effort aligned with the server-side timeout so that
-    /// REPL-side cleanup should not outlive the server's oneshot wait under normal conditions.
-    deadline: std::time::Instant,
-    /// Original timeout duration, kept for diagnostic messages.
-    timeout: std::time::Duration,
+    execution_id: super::events::ExecutionId,
 }
 
 fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
@@ -94,6 +89,8 @@ fn pending_visible_eval() -> &'static Mutex<Option<PendingVisibleEval>> {
 pub struct PendingIpcOperation {
     pub kind: PendingIpcKind,
     pub code: String,
+    pub origin: u64,
+    pub started_execution_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The kind of pending IPC operation, carrying its reply channel.
@@ -196,40 +193,13 @@ pub fn poll_ipc_requests() {
 /// for the result. When R returns to the prompt, the evaluation is done and
 /// we can collect captured output and send the reply.
 fn check_visible_eval_completion() {
-    // Check prompt state for normal completion, and elapsed time for timeout cleanup.
+    // Reply deadlines belong to the server. Keep capture until R actually finishes.
     let at_prompt = r_is_at_prompt().load(Ordering::Acquire);
 
     let mut guard = match pending_visible_eval().try_lock() {
         Ok(g) => g,
         Err(_) => return,
     };
-
-    // Check for staleness/timeout regardless of prompt state.
-    // NOTE: In the timeout path, R may still be actively evaluating the injected code.
-    // Calling finish_ipc_capture() here races with R's WriteConsoleEx calls — some output
-    // may be lost or partial. This is a best-effort cleanup to avoid indefinite hangs;
-    // subsequent R output from the timed-out evaluation will go to the default handler.
-    if let Some(pending) = guard.as_ref()
-        && std::time::Instant::now() > pending.deadline
-    {
-        let pending = guard.take().unwrap();
-        // Best-effort capture cleanup (may race with active R evaluation)
-        let result = execution::finish_visible_eval();
-        reply_error(
-            pending.reply,
-            R_BUSY,
-            format!(
-                "Visible evaluate timed out after {}s (stdout: {} bytes, stderr: {} bytes)",
-                pending.timeout.as_secs(),
-                result.stdout.len(),
-                result.stderr.len(),
-            ),
-        );
-        // Do NOT set r_is_at_prompt(true) here — R may still be evaluating.
-        // The flag will be set when R actually returns to the prompt via
-        // set_r_at_prompt(true) in the normal REPL flow.
-        return;
-    }
 
     if !at_prompt {
         return;
@@ -240,7 +210,8 @@ fn check_visible_eval_completion() {
         r_is_at_prompt().store(false, Ordering::Release);
 
         // Finish WriteConsoleEx capture and collect output
-        let result = execution::finish_visible_eval();
+        let mut result = execution::finish_visible_eval();
+        result.execution_id = Some(pending.execution_id);
 
         let _ = pending.reply.send(IpcResponse::Evaluate(result));
 
@@ -281,7 +252,12 @@ fn reply_session(reply: tokio::sync::oneshot::Sender<IpcResponse>) {
 /// and fires the break signal. The actual processing happens in the ExternalBreak
 /// handler in the REPL, which can check the editor buffer for mutual exclusion.
 fn handle_request(request: IpcRequest) {
-    let IpcRequest { method, reply } = request;
+    let IpcRequest {
+        method,
+        reply,
+        origin,
+        started_execution_id,
+    } = request;
 
     if reply.is_closed() {
         return;
@@ -293,7 +269,12 @@ fn handle_request(request: IpcRequest) {
         interactive_calls()
             .lock_recover()
             .requests
-            .push_back(IpcRequest { method, reply });
+            .push_back(IpcRequest {
+                method,
+                reply,
+                origin,
+                started_execution_id,
+            });
         return;
     }
 
@@ -334,6 +315,8 @@ fn handle_request(request: IpcRequest) {
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
                 kind: PendingIpcKind::SilentEvaluate { reply },
                 code,
+                origin,
+                started_execution_id,
             });
             schedule_pending_operation();
         }
@@ -345,6 +328,8 @@ fn handle_request(request: IpcRequest) {
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
                 kind: PendingIpcKind::VisibleEvaluate { reply, timeout },
                 code,
+                origin,
+                started_execution_id,
             });
             schedule_pending_operation();
         }
@@ -359,6 +344,8 @@ fn handle_request(request: IpcRequest) {
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
                 kind: PendingIpcKind::UserInput { reply },
                 code,
+                origin,
+                started_execution_id,
             });
             schedule_pending_operation();
         }
@@ -415,19 +402,18 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
 /// sent later by `check_visible_eval_completion` when R returns to the prompt.
 pub fn setup_visible_eval(
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
-    timeout: std::time::Duration,
+    _timeout: std::time::Duration,
+    code: &str,
+    origin: u64,
+    started_execution_id: &std::sync::atomic::AtomicU64,
 ) {
-    execution::begin_visible_eval();
+    let execution_id = execution::begin_visible_eval(code, origin, started_execution_id);
 
     // Store reply channel — will be consumed by check_visible_eval_completion.
-    // The deadline is set from now + timeout, aligning with the server-side
-    // oneshot timeout that started slightly earlier in dispatch_request.
+    // A server-side reply timeout never ends this capture or execution context.
     *pending_visible_eval().lock_recover() = Some(PendingVisibleEval {
         reply,
-        deadline: std::time::Instant::now()
-            .checked_add(timeout)
-            .unwrap_or_else(|| std::time::Instant::now() + DEFAULT_EVAL_TIMEOUT),
-        timeout,
+        execution_id,
     });
 }
 
@@ -467,6 +453,8 @@ mod tests {
                     )),
                 },
                 reply,
+                origin: 0,
+                started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             },
             response,
         )
@@ -486,6 +474,8 @@ mod tests {
                 code: "1".to_owned(),
             },
             reply,
+            origin: 0,
+            started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         });
         let (last, last_reply) = expired_call();
         handle_request(last);
@@ -557,6 +547,8 @@ mod tests {
                     code: "1+1".to_string(),
                 },
                 reply: reply_tx,
+                origin: 0,
+                started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             };
             handle_request(request);
             match reply_rx.blocking_recv().unwrap() {
@@ -574,6 +566,8 @@ mod tests {
                     timeout: std::time::Duration::from_secs(1),
                 },
                 reply: reply_tx,
+                origin: 0,
+                started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             };
             handle_request(request);
             match reply_rx.blocking_recv().unwrap() {
@@ -602,6 +596,8 @@ mod tests {
             let request = IpcRequest {
                 method: IpcMethod::Session,
                 reply: reply_tx,
+                origin: 0,
+                started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             };
             handle_request(request);
             match reply_rx.blocking_recv().unwrap() {
@@ -640,6 +636,8 @@ mod tests {
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
                 kind: PendingIpcKind::SilentEvaluate { reply: dummy_tx },
                 code: "dummy".to_string(),
+                origin: 0,
+                started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             });
 
             let result = send_session();
