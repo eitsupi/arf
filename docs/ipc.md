@@ -126,12 +126,7 @@ When `--json` is specified, arf prints session connection info to stdout as a si
     "detail": null
   },
   "r_source_override": {
-    "state": "applied",
-    "provider": "toml-key",
-    "file": "rproject.toml",
-    "key": "project.r_version",
-    "requested_version": "4.4",
-    "resolved_version": "4.4.2"
+    "state": "applied"
   },
   "r_source_selection": {
     "provider": "rig",
@@ -153,11 +148,11 @@ When `--json` is specified, arf prints session connection info to stdout as a si
 }
 ```
 
-All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `source` is where the history directory came from: `default`, `legacy_default` (the previous default location, used because it holds history and the current default does not; a warning is added to `warnings`), `explicit` (`--history-dir`, `ARF_HISTORY_DIR`, or `history.mode`), or `volatile`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present; its state is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`, and its other fields are `null` unless an override was applied. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
+All keys are always present. `r_version`, `r_home`, and `log_file` may be `null`; `history_session_id` is `null` only when history initialization is unavailable. `ipc_policy` is always present in this readiness output: `silent` is either restricted with its complete sorted `allowed_functions` list (an empty restricted list still permits bare literals and identifiers) or unrestricted with no allowlist field. Because this is headless readiness output, `visible` has mode `approval_not_required` for both `send` and `eval --visible`. `history_runtime` reports `persistent`, configured `volatile`, fallback `volatile`, or `unavailable`; its `source` is where the history directory came from: `default`, `legacy_default` (the previous default location, used because it holds history and the current default does not; a warning is added to `warnings`), `explicit` (`--history-dir`, `ARF_HISTORY_DIR`, or `history.mode`), or `volatile`; its `path` is a diagnostic path when one was requested (for example, for a persistent or fallback open, or an unavailable initialization), and `detail` contains an optional human-readable failure diagnostic. `r_home` is the R installation the session is using, or `null` when the session has no R. The `r_source_override` object is always present and contains only `state`, which is one of `applied`, `not_configured`, `no_match`, `failed`, `disabled`, or `shadowed_by_cli`. `warnings` captures non-fatal startup issues (e.g., config parse errors or history fallback diagnostics) that would otherwise only appear on stderr.
 
 `r_source_selection` reports the actual selected provider, its provenance, and provider `metadata` using the same fields as [`arf r resolve`](r-resolve.md#json-descriptor), for both configured overrides and explicit `--r-provider` or `ARF_R_PROVIDER` requests. Provider details such as the Pixi environment or the rig project manifest appear only there.
 
-The legacy `r_source_override` object reports only the configured override chain. For a Pixi or rig-project override, `provider` is `"pixi"` or `"rig-project"`, and `file`, `key`, and `requested_version` are `null`. `resolved_version` may be `null` for Pixi and is always `null` for rig-project, whose installation name is not treated as an exact R version. An explicit provider request does not mark the override as applied (`shadowed_by_cli`, or `disabled` when overrides were disabled). Pixi warnings use the same `warnings` array and never require an interactive confirmation.
+The `r_source_override` object reports only the configured override chain state. Selection details are available in `r_source_selection`. An explicit provider request does not mark the override as applied (`shadowed_by_cli`, or `disabled` when overrides were disabled). Pixi warnings use the same `warnings` array and never require an interactive confirmation.
 
 The IPC `r_version` is measured from a live R session; `arf r resolve` reports `resolved_version`, a prediction made before R starts.
 

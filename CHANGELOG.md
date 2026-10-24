@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection`.
+
 ## [0.7.0-beta.1] - 2026-10-24
 
 ### Added

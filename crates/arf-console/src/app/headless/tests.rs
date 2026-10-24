@@ -38,12 +38,7 @@ fn r_source_override_json_object_is_always_present_for_each_state() {
     ] {
         let value =
             serde_json::to_value(HeadlessRSourceOverride::from_report(&report(state))).unwrap();
-        assert_eq!(value["state"], state.as_str());
-        assert!(value.get("provider").is_some());
-        assert!(value.get("file").is_some());
-        assert!(value.get("key").is_some());
-        assert!(value.get("requested_version").is_some());
-        assert!(value.get("resolved_version").is_some());
+        assert_eq!(value, serde_json::json!({"state": state.as_str()}));
     }
 }
 
@@ -223,24 +218,6 @@ fn headless_history_runtime_uses_stable_reason_and_separate_path() {
 }
 
 #[test]
-fn applied_r_source_override_json_contains_resolution_metadata() {
-    let mut report = report(RSourceOverrideState::Applied);
-    report.override_provider = Some("toml-key".to_string());
-    report.file = Some("rproject.toml".into());
-    report.key = Some("project.r_version".to_string());
-    report.requested_version = Some("4.4".to_string());
-    report.resolved_version = Some("4.4.2".to_string());
-
-    let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
-    assert_eq!(value["state"], "applied");
-    assert_eq!(value["provider"], "toml-key");
-    assert_eq!(value["file"], "rproject.toml");
-    assert_eq!(value["key"], "project.r_version");
-    assert_eq!(value["requested_version"], "4.4");
-    assert_eq!(value["resolved_version"], "4.4.2");
-}
-
-#[test]
 fn pixi_json_keeps_provider_specific_fields_inside_metadata() {
     let mut report = report(RSourceOverrideState::Applied);
     report.override_provider = Some("pixi".to_owned());
@@ -259,17 +236,7 @@ fn pixi_json_keeps_provider_specific_fields_inside_metadata() {
     };
 
     let value = serde_json::to_value(HeadlessRSourceOverride::from_report(&report)).unwrap();
-    assert_eq!(
-        value,
-        serde_json::json!({
-            "state": "applied",
-            "provider": "pixi",
-            "file": null,
-            "key": null,
-            "requested_version": null,
-            "resolved_version": null
-        })
-    );
+    assert_eq!(value, serde_json::json!({"state": "applied"}));
 
     let selection = RSourceSelection::from_report(std::path::Path::new("/"), &report, None);
     let selection_json = serde_json::to_value(selection).unwrap();
