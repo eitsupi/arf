@@ -1,7 +1,7 @@
 //! JSON payloads emitted by `arf headless --json`.
 
 use crate::app::r_source_selection::RSourceSelection;
-use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport, RSourceSelectionRoute};
+use crate::app::setup::{RSourceOverrideState, RSourceResolutionReport};
 use crate::config::{ConfigLoadProvenance, HistoryLocationSource};
 use crate::history::HistoryRuntime;
 use crate::ipc::policy::IpcPolicy;
@@ -57,26 +57,13 @@ impl HeadlessHistoryRuntime {
 #[derive(Debug, Serialize)]
 pub(super) struct HeadlessRSourceOverride {
     state: String,
-    provider: Option<String>,
-    file: Option<String>,
-    key: Option<String>,
-    requested_version: Option<String>,
-    resolved_version: Option<String>,
 }
 
 impl HeadlessRSourceOverride {
     pub(super) fn from_report(report: &RSourceResolutionReport) -> Self {
-        let applied = report.selection_route == RSourceSelectionRoute::Override;
         let override_state: RSourceOverrideState = report.override_state;
         Self {
             state: override_state.as_str().to_owned(),
-            provider: applied.then(|| report.override_provider.clone()).flatten(),
-            file: applied
-                .then(|| report.file.as_ref().map(|path| path.display().to_string()))
-                .flatten(),
-            key: applied.then(|| report.key.clone()).flatten(),
-            requested_version: applied.then(|| report.requested_version.clone()).flatten(),
-            resolved_version: applied.then(|| report.resolved_version.clone()).flatten(),
         }
     }
 }

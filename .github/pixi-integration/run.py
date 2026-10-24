@@ -104,13 +104,10 @@ def headless(expression, home, binary, json_mode, expected_descriptor=None, expl
                 assert metadata["environment"] == os.environ["PIXI_ENVIRONMENT_NAME"], metadata
                 assert Path(metadata["r_binary"]).samefile(binary), source
                 if explicit:
-                    assert source["state"] == "disabled", source
-                    assert source["provider"] is None, source
+                    assert source == {"state": "disabled"}, source
                     assert info["warnings"] == [], info
                 else:
-                    assert source["state"] == "applied" and source["provider"] == "pixi", source
-                    assert source["file"] is None, source
-                    assert source["requested_version"] is None, source
+                    assert source == {"state": "applied"}, source
                     assert len(info["warnings"]) == 1, info
                 assert not stderr, stderr
             else:
