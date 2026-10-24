@@ -103,6 +103,15 @@ pub(super) fn finish_previous_command(state: &mut ReplState, prompt_kind: Prompt
             PendingHistoryContext::None => None,
         };
 
+        if crate::ipc::current_execution_id().is_some() {
+            let execution_outcome = outcome.unwrap_or_else(arf_libr::command_outcome);
+            crate::ipc::finish_execution(match execution_outcome {
+                arf_libr::CommandOutcome::Success => crate::ipc::ExecutionStatus::Ok,
+                arf_libr::CommandOutcome::Failure => crate::ipc::ExecutionStatus::Error,
+                arf_libr::CommandOutcome::Unavailable => crate::ipc::ExecutionStatus::Unknown,
+            });
+        }
+
         // Update prompt status indicator for the next prompt
         if let Some(outcome) = outcome {
             match outcome_failure_projection(outcome) {

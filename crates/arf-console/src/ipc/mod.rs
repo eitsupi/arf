@@ -43,7 +43,10 @@ pub use approval::{
     set_send_policy_allow,
 };
 pub(crate) use events::install_r_event_publisher;
-pub(crate) use execution::{accept_user_input, run_silent_eval};
+pub(crate) use execution::{
+    ExecutionStatus, accept_user_input, begin_terminal_execution, current_execution_id,
+    finish_execution, run_silent_eval_from,
+};
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;
 pub use pending::{

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Prefix reserved for events that originate inside arf itself.
@@ -137,7 +137,7 @@ impl fmt::Display for Topic {
 }
 
 /// Identifier of the execution an event belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ExecutionId(pub u64);
 

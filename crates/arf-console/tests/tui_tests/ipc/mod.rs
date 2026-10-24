@@ -1,6 +1,7 @@
 //! IPC requests made through the real `arf ipc` client against a TUI session.
 
 mod approval;
+mod completion;
 mod expose;
 mod handlers;
 mod lifecycle;

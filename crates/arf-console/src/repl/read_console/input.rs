@@ -152,6 +152,9 @@ pub(super) fn handle_line(
     // context. Continuation prompts remain part of the outer
     // command, so preserve its context until evaluation ends.
     if prompt_kind.is_command() && !code.trim().is_empty() {
+        if crate::ipc::current_execution_id().is_none() {
+            crate::ipc::begin_terminal_execution(&code);
+        }
         let history_id = save_outcome.and_then(crate::history::HistorySaveOutcome::saved_id);
         state.pending_history_context = PendingHistoryContext::Command {
             store: history_handle.store(),

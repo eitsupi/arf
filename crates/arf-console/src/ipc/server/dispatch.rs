@@ -248,10 +248,40 @@ fn map_ipc_response(id: Option<serde_json::Value>, response: IpcResponse) -> Jso
     }
 }
 
+/// Keep an execution identifiable even when its reply channel disappears or
+/// the client's reply deadline expires after R has started running it.
+fn with_execution_id(
+    mut response: JsonRpcResponse,
+    started: &std::sync::atomic::AtomicU64,
+) -> JsonRpcResponse {
+    let execution_id = started.load(std::sync::atomic::Ordering::Acquire);
+    if execution_id != 0
+        && let Some(error) = response.error.as_mut()
+        && let Some(data) = error
+            .data
+            .get_or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+    {
+        data.insert("execution_id".to_string(), serde_json::json!(execution_id));
+    }
+    response
+}
+
+#[cfg(test)]
 pub(super) async fn dispatch_request(
     request: JsonRpcRequest,
     tx: &mpsc::Sender<IpcRequest>,
 ) -> JsonRpcResponse {
+    let origin = crate::ipc::events::allocate_connection_id().value();
+    dispatch_request_for_connection(request, tx, origin).await
+}
+
+pub(super) async fn dispatch_request_for_connection(
+    request: JsonRpcRequest,
+    tx: &mpsc::Sender<IpcRequest>,
+    origin: u64,
+) -> JsonRpcResponse {
+    let started_execution_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let id = request.id.clone();
     let is_session = request.method == "session";
     let is_history = request.method == "history";
@@ -292,6 +322,8 @@ pub(super) async fn dispatch_request(
             .send(IpcRequest {
                 method,
                 reply: reply_tx,
+                origin,
+                started_execution_id: std::sync::Arc::clone(&started_execution_id),
             })
             .is_err()
         {
@@ -301,7 +333,7 @@ pub(super) async fn dispatch_request(
                 "Main thread unavailable".to_string(),
             );
         }
-        return match tokio::time::timeout(remaining, &mut reply_rx).await {
+        let response = match tokio::time::timeout(remaining, &mut reply_rx).await {
             Ok(Ok(response)) => map_ipc_response(id, response),
             Ok(Err(_)) => JsonRpcResponse::error(
                 id,
@@ -327,6 +359,7 @@ pub(super) async fn dispatch_request(
                 }
             }
         };
+        return with_execution_id(response, &started_execution_id);
     }
 
     // Send to main thread and await response
@@ -334,6 +367,8 @@ pub(super) async fn dispatch_request(
     let ipc_request = IpcRequest {
         method,
         reply: reply_tx,
+        origin,
+        started_execution_id: std::sync::Arc::clone(&started_execution_id),
     };
 
     if tx.send(ipc_request).is_err() {
@@ -347,7 +382,7 @@ pub(super) async fn dispatch_request(
     }
 
     // Wait for response from main thread (with timeout)
-    match tokio::time::timeout(timeout, reply_rx).await {
+    let response = match tokio::time::timeout(timeout, reply_rx).await {
         Ok(Ok(response)) => map_ipc_response(id, response),
         Ok(Err(_)) => unavailable_response(
             id,
@@ -361,7 +396,8 @@ pub(super) async fn dispatch_request(
             "Timed out collecting R session information",
             "Request timed out",
         ),
-    }
+    };
+    with_execution_id(response, &started_execution_id)
 }
 
 #[cfg(test)]

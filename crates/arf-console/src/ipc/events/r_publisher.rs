@@ -25,8 +25,8 @@ fn publish_from_r(topic: &str, data: Value) -> PublishOutcome {
 /// Validate `topic` as one chosen by R code, publish with `publish` and map
 /// the result for R.
 ///
-/// The `execution` is always `None`: events from R are not tied to an
-/// execution yet.
+/// Events published while arf is evaluating user code or a handler inherit that execution's
+/// identifier. Other events have no execution context.
 fn publish_with(
     name: &str,
     data: Value,
@@ -38,7 +38,7 @@ fn publish_with(
             return PublishOutcome::Rejected(format!("invalid event topic {name:?}: {error}"));
         }
     };
-    match publish(topic, data, None) {
+    match publish(topic, data, crate::ipc::execution::current_execution_id()) {
         Ok(_) => PublishOutcome::Published,
         Err(PublishError::Closed) => PublishOutcome::NoTarget,
         Err(error @ (PublishError::TooLarge { .. } | PublishError::QueueOverflow)) => {

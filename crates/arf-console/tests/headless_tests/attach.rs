@@ -55,6 +55,7 @@ struct AttachedClient {
     runtime: Runtime,
     reader: BufReader<ReadHalf<Stream>>,
     writer: WriteHalf<Stream>,
+    connection_id: Option<u64>,
 }
 
 impl AttachedClient {
@@ -69,6 +70,7 @@ impl AttachedClient {
             runtime,
             reader: BufReader::new(reader),
             writer,
+            connection_id: None,
         }
     }
 
@@ -89,17 +91,140 @@ impl AttachedClient {
     }
 
     fn recv(&mut self) -> Value {
+        self.recv_timeout(REPLY_TIMEOUT)
+            .expect("timed out waiting for a reply")
+    }
+
+    fn recv_timeout(&mut self, timeout: Duration) -> Option<Value> {
         let reader = &mut self.reader;
         let mut line = String::new();
         let read = self
             .runtime
-            .block_on(async {
-                tokio::time::timeout(REPLY_TIMEOUT, reader.read_line(&mut line)).await
-            })
-            .expect("timed out waiting for a reply")
-            .expect("read from the IPC connection");
+            .block_on(async { tokio::time::timeout(timeout, reader.read_line(&mut line)).await })
+            .ok()?;
+        let read = read.expect("read from the IPC connection");
         assert_ne!(read, 0, "the IPC connection closed before a reply");
-        serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}"))
+        Some(serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}")))
+    }
+}
+
+#[test]
+fn headless_handler_call_does_not_emit_a_user_code_completion() {
+    let process = HeadlessProcess::spawn_with_args(&[
+        "--ipc-expose",
+        r#"list("demo/read" = function(args) {
+            .Call("arf_publish_event", "demo.handler", NULL, PACKAGE = "(embedding)")
+            if (isTRUE(args$fail)) stop("handler failure")
+            list(value = 42L)
+        })"#,
+    ])
+    .expect("headless process with exposed handler should start");
+    let mut client = attach_subscribed(
+        &socket_path_of(&process),
+        &["demo.handler", "arf.execution_completed"],
+    );
+
+    client.send(&request(
+        2,
+        "call",
+        json!({"handler": "demo/read", "args": {}}),
+    ));
+    let first = client.recv();
+    let second = client.recv();
+    let (response, event) = if first["id"] == 2 {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(response["id"], 2, "{response}");
+    assert_eq!(response["result"]["value"], json!({"value": 42}));
+    assert!(
+        response["result"]["execution_id"].as_u64().is_some(),
+        "handler call response should include an execution ID: {response}"
+    );
+    assert_eq!(event["params"]["topic"], "demo.handler");
+    assert_eq!(
+        event["params"]["execution"],
+        response["result"]["execution_id"]
+    );
+    assert_eq!(
+        client.recv_timeout(Duration::from_millis(250)),
+        None,
+        "handler calls must not emit completion events"
+    );
+
+    client.send(&request(
+        3,
+        "call",
+        json!({"handler": "demo/read", "args": {"fail": true}}),
+    ));
+    let first = client.recv();
+    let second = client.recv();
+    let (response, event) = if first["id"] == 3 {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(response["error"]["code"], -32014, "{response}");
+    let execution_id = response["error"]["data"]["execution_id"]
+        .as_u64()
+        .expect("failed handler execution ID");
+    assert_eq!(event["params"]["topic"], "demo.handler");
+    assert_eq!(event["params"]["execution"], execution_id);
+    assert_eq!(client.recv_timeout(Duration::from_millis(250)), None);
+}
+
+#[test]
+fn headless_evaluate_timeout_keeps_execution_context_until_completion() {
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let mut client = attach_subscribed(
+        &socket_path_of(&process),
+        &["demo.timeout", "arf.execution_completed"],
+    );
+    for visible in [false, true] {
+        // Allow R to start even while the workspace tests run in parallel,
+        // then keep it busy beyond the reply deadline.
+        client.send(&request(
+            2,
+            "evaluate",
+            json!({
+                "code": format!(
+                    "{}; Sys.sleep(2)",
+                    publish_call("demo.timeout", "NULL")
+                ),
+                "timeout_ms": 1000,
+                "visible": visible,
+            }),
+        ));
+
+        let published = client.recv();
+        let timed_out = client.recv();
+        let completion = client.recv();
+        assert_eq!(published["params"]["topic"], "demo.timeout", "{published}");
+        assert_eq!(timed_out["id"], 2, "{timed_out}");
+        assert!(
+            timed_out["error"].is_object(),
+            "expected reply timeout: {timed_out}"
+        );
+        let execution_id = timed_out["error"]["data"]["execution_id"]
+            .as_u64()
+            .expect("timeout response should preserve the started execution ID");
+        assert_eq!(published["params"]["execution"], json!(execution_id));
+        assert_eq!(
+            completion["params"]["topic"], "arf.execution_completed",
+            "{completion}"
+        );
+        assert_eq!(completion["params"]["data"]["id"], json!(execution_id));
+        assert_eq!(completion["params"]["data"]["status"], "ok");
+        assert!(
+            published["params"]["seq"].as_u64() < completion["params"]["seq"].as_u64(),
+            "published event must precede completion: published={published}, completion={completion}"
+        );
+        assert_eq!(
+            client.recv_timeout(Duration::from_millis(250)),
+            None,
+            "reply timeout must not complete an execution early or more than once"
+        );
     }
 }
 
@@ -125,8 +250,13 @@ fn test_attach_serves_several_requests_on_one_connection() {
     assert_eq!(attached["id"], 1, "{attached}");
     let result = &attached["result"];
     assert_eq!(result["api_version"], 1, "{attached}");
-    assert_eq!(result["capabilities"], json!(["events"]), "{attached}");
+    assert_eq!(
+        result["capabilities"],
+        json!(["events", "execution_events"]),
+        "{attached}"
+    );
     assert!(result["connection_id"].is_u64(), "{attached}");
+    client.connection_id = result["connection_id"].as_u64();
     // The attach result and the `session` method agree on the process.
     assert_eq!(result["session_id"], session["session_id"], "{attached}");
     assert_eq!(result["session"]["pid"], process.pid, "{attached}");
@@ -168,6 +298,7 @@ fn attach_subscribed(socket_path: &str, patterns: &[&str]) -> AttachedClient {
     let attached = client.recv();
     assert_eq!(attached["id"], 1, "{attached}");
     assert!(attached["result"].is_object(), "{attached}");
+    client.connection_id = attached["result"]["connection_id"].as_u64();
     client
 }
 
@@ -185,7 +316,10 @@ fn test_r_code_publishes_events_to_subscribed_connections() {
     // The help viewer is not involved in headless sessions, so this also shows
     // that the routines are registered without it.
     let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
-    let mut client = attach_subscribed(&socket_path_of(&process), &["demo.*"]);
+    let mut client = attach_subscribed(
+        &socket_path_of(&process),
+        &["demo.*", "arf.execution_completed"],
+    );
 
     client.send(&request(
         2,
@@ -201,18 +335,26 @@ stopifnot(identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L))
     // The event and the response travel separately, so either may come first.
     let mut event = None;
     let mut response = None;
-    while event.is_none() || response.is_none() {
+    let mut completion = None;
+    while event.is_none() || response.is_none() || completion.is_none() {
         let message = client.recv();
         if message["method"] == "event" {
-            event = Some(message);
+            if message["params"]["topic"] == "demo.hello" {
+                event = Some(message);
+            } else if message["params"]["topic"] == "arf.execution_completed" {
+                completion = Some(message);
+            }
         } else {
             response = Some(message);
         }
     }
-    let (event, response) = (event.unwrap(), response.unwrap());
+    let (event, response, completion) = (event.unwrap(), response.unwrap(), completion.unwrap());
     assert_eq!(response["id"], 2, "{response}");
     assert_eq!(response["result"]["value"], "[1] TRUE", "{response}");
     assert_eq!(response["result"]["error"], Value::Null, "{response}");
+    let execution_id = response["result"]["execution_id"]
+        .as_u64()
+        .expect("evaluation response should include its execution ID");
     let params = &event["params"];
     assert_eq!(params["topic"], "demo.hello", "{event}");
     assert_eq!(
@@ -220,8 +362,209 @@ stopifnot(identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L))
         json!({"n": 1, "tags": ["a", null], "ok": true}),
         "{event}"
     );
-    assert_eq!(params["execution"], Value::Null, "{event}");
+    assert_eq!(params["execution"], json!(execution_id), "{event}");
     assert!(params["seq"].is_u64(), "{event}");
+
+    let completion_params = &completion["params"];
+    assert_eq!(
+        completion_params["topic"], "arf.execution_completed",
+        "{completion}"
+    );
+    assert_eq!(completion_params["execution"], json!(execution_id));
+    assert_eq!(completion_params["data"]["id"], json!(execution_id));
+    assert_eq!(
+        completion_params["data"]["origin"],
+        attached_connection_id(&client)
+    );
+    assert_eq!(completion_params["data"]["kind"], "user_code");
+    assert_eq!(completion_params["data"]["visible"], false);
+    assert_eq!(completion_params["data"]["status"], "ok");
+    assert!(
+        params["seq"].as_u64() < completion_params["seq"].as_u64(),
+        "execution notification must precede completion: event={event}, completion={completion}"
+    );
+
+    // `user_input` acknowledges acceptance before the R code finishes. Its
+    // completion is still emitted exactly once after the request has run.
+    client.send(&request(
+        3,
+        "user_input",
+        json!({
+            "code": format!("{}; 1 + 2", publish_call("demo.user_input", "NULL"))
+        }),
+    ));
+    let mut accepted = None;
+    let mut user_event = None;
+    let mut user_completion = None;
+    while accepted.is_none() || user_event.is_none() || user_completion.is_none() {
+        let message = client.recv();
+        if message["method"] == "event" {
+            match message["params"]["topic"].as_str() {
+                Some("demo.user_input") => user_event = Some(message),
+                Some("arf.execution_completed") => user_completion = Some(message),
+                _ => {}
+            }
+        } else {
+            accepted = Some(message);
+        }
+    }
+    let accepted = accepted.unwrap();
+    let user_event = user_event.unwrap();
+    let user_completion = user_completion.unwrap();
+    assert_eq!(accepted["id"], 3, "{accepted}");
+    assert_eq!(accepted["result"]["accepted"], true, "{accepted}");
+    let user_execution_id = accepted["result"]["execution_id"]
+        .as_u64()
+        .expect("user_input response should include its execution ID");
+    assert_eq!(user_event["params"]["execution"], json!(user_execution_id));
+    assert_eq!(
+        user_completion["params"]["data"]["id"],
+        json!(user_execution_id)
+    );
+    assert_eq!(
+        user_completion["params"]["data"]["visible"], true,
+        "user_input is visible REPL evaluation"
+    );
+    assert!(
+        user_event["params"]["seq"].as_u64() < user_completion["params"]["seq"].as_u64(),
+        "the R notification should precede completion"
+    );
+    assert_eq!(
+        client.recv_timeout(Duration::from_millis(250)),
+        None,
+        "one input request must produce only one completion event"
+    );
+}
+
+fn attached_connection_id(client: &AttachedClient) -> Value {
+    json!(client.connection_id.expect("attached connection ID"))
+}
+
+#[test]
+fn headless_evaluation_errors_complete_once_and_recover_with_a_new_id() {
+    let history_dir = tempfile::tempdir().expect("create isolated history directory");
+    let process = HeadlessProcess::spawn_with_args(&[
+        "--history-dir",
+        history_dir.path().to_str().expect("history path is UTF-8"),
+    ])
+    .expect("headless process should start");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["arf.execution_completed"]);
+
+    for (error_request_id, visible) in [(2, false), (4, true)] {
+        client.send(&request(
+            error_request_id,
+            "evaluate",
+            json!({
+                "code": "stop('EXPECTED_EXECUTION_FAILURE')",
+                "visible": visible,
+            }),
+        ));
+        let (failed_response, failed_completion) =
+            receive_evaluation_completion(&mut client, error_request_id);
+        assert!(failed_response["error"].is_null(), "{failed_response}");
+        if visible {
+            assert!(
+                failed_response["result"]["stderr"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("EXPECTED_EXECUTION_FAILURE")),
+                "visible eval should capture the R error: {failed_response}"
+            );
+        } else {
+            assert!(
+                failed_response["result"]["error"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("EXPECTED_EXECUTION_FAILURE")),
+                "silent eval should expose the caught R error: {failed_response}"
+            );
+        }
+        let failed_id = failed_response["result"]["execution_id"]
+            .as_u64()
+            .expect("failed evaluation response should include an execution ID");
+        assert_eq!(
+            failed_completion["params"]["data"]["id"],
+            json!(failed_id),
+            "{failed_completion}"
+        );
+        assert_eq!(failed_completion["params"]["execution"], json!(failed_id));
+        assert_eq!(failed_completion["params"]["data"]["visible"], visible);
+        assert_eq!(
+            failed_completion["params"]["data"]["status"], "error",
+            "{failed_completion}"
+        );
+        assert_eq!(
+            client.recv_timeout(Duration::from_millis(250)),
+            None,
+            "one failed evaluation must emit exactly one completion"
+        );
+
+        let success_request_id = error_request_id + 1;
+        client.send(&request(
+            success_request_id,
+            "evaluate",
+            json!({"code": "42", "visible": visible}),
+        ));
+        let (success_response, success_completion) =
+            receive_evaluation_completion(&mut client, success_request_id);
+        let success_id = success_response["result"]["execution_id"]
+            .as_u64()
+            .expect("successful evaluation response should include an execution ID");
+        assert_ne!(success_id, failed_id);
+        assert_eq!(
+            success_completion["params"]["data"]["id"],
+            json!(success_id)
+        );
+        assert_eq!(success_completion["params"]["execution"], json!(success_id));
+        assert_eq!(success_completion["params"]["data"]["visible"], visible);
+        assert_eq!(
+            success_completion["params"]["data"]["status"], "ok",
+            "{success_completion}"
+        );
+        assert_eq!(
+            client.recv_timeout(Duration::from_millis(250)),
+            None,
+            "one successful evaluation must emit exactly one completion"
+        );
+    }
+
+    let history = process.ipc_history(&[]).expect("query session history");
+    assert!(history.success, "{}", history.stderr);
+    let history = parse_ipc_json(&history);
+    let entries = history["entries"]
+        .as_array()
+        .expect("history entries should be an array");
+    for (command, expected_status) in [("stop('EXPECTED_EXECUTION_FAILURE')", 1), ("42", 0)] {
+        let matching_entries: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry["command"].as_str() == Some(command))
+            .collect();
+        assert_eq!(matching_entries.len(), 2, "history entries for {command:?}");
+        assert!(
+            matching_entries
+                .iter()
+                .all(|entry| entry["exit_status"].as_i64() == Some(expected_status)),
+            "history exit_status for {command:?} should be {expected_status}: {matching_entries:?}"
+        );
+    }
+}
+
+fn receive_evaluation_completion(client: &mut AttachedClient, request_id: i64) -> (Value, Value) {
+    let mut response = None;
+    let mut completion = None;
+    while response.is_none() || completion.is_none() {
+        let message = client.recv();
+        if message["method"] == "event" {
+            assert_eq!(
+                message["params"]["topic"], "arf.execution_completed",
+                "{message}"
+            );
+            assert!(completion.is_none(), "duplicate completion: {message}");
+            completion = Some(message);
+        } else {
+            assert_eq!(message["id"], request_id, "{message}");
+            response = Some(message);
+        }
+    }
+    (response.unwrap(), completion.unwrap())
 }
 
 #[test]

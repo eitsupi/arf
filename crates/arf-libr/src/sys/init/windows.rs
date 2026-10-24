@@ -140,8 +140,10 @@ pub(super) unsafe fn initialize_r_windows(
         let mut params: MaybeUninit<Rstart> = MaybeUninit::uninit();
         let params_ptr = params.as_mut_ptr();
 
-        // Initialize with defaults (version 0 for compatibility)
-        (lib.r_defparamsex)(params_ptr, 0);
+        // Version 1 initializes and enables the extended console callbacks.
+        // Version 0 ignores our ResetConsole callback, so headless completion
+        // events and history would miss R evaluation errors.
+        (lib.r_defparamsex)(params_ptr, 1);
 
         // Step 3: Process command line arguments via R_common_command_line (ark pattern)
         // This sets params fields like R_Quiet, R_Verbose, SaveAction, RestoreAction
