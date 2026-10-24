@@ -194,6 +194,74 @@ pub fn handler_status() -> HandlerApiStatus {
         .clone()
 }
 
+/// A validated set of handlers that has not yet been made available to IPC.
+///
+/// Dropping this value releases the candidate registry and its preserved R
+/// objects. It must remain on the R thread, like `HandlerRegistry` itself.
+pub struct PreparedHandlers {
+    registry: Option<arf_harp::handlers::HandlerRegistry>,
+    names: Vec<String>,
+}
+
+impl PreparedHandlers {
+    /// Names that will become available if this candidate is published.
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+}
+
+/// Evaluate and validate a candidate handler list without making it available
+/// to IPC. The returned candidate owns the preserved R objects until dropped
+/// or published.
+///
+/// This must be called on the R thread after startup profiles have completed.
+pub fn prepare_handlers(expression: &str) -> Result<PreparedHandlers, String> {
+    match handler_status().state {
+        HandlerApiState::Unexposed => {}
+        HandlerApiState::Locked => return Err("handlers have already been exposed".to_string()),
+        HandlerApiState::Revoked => {
+            return Err("handlers have been permanently revoked for this session".to_string());
+        }
+    }
+    let already_exposed = REGISTRY.with(|slot| slot.borrow().is_some());
+    if already_exposed {
+        return Err("handlers have already been exposed".to_string());
+    }
+
+    let mut registry = arf_harp::handlers::HandlerRegistry::new()?;
+    let names = registry.expose(expression)?;
+    Ok(PreparedHandlers {
+        registry: Some(registry),
+        names,
+    })
+}
+
+/// Publish a previously prepared candidate if handlers are still unexposed.
+///
+/// The state check and status update share the status write lock, so readers
+/// cannot observe the locked state before the candidate has entered the
+/// R-thread registry. A rejected candidate is dropped and releases its R roots.
+pub fn publish_handlers(mut prepared: PreparedHandlers) -> Result<(), String> {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let mut status = STATUS
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match status.state {
+            HandlerApiState::Unexposed if slot.is_none() => {}
+            HandlerApiState::Revoked => {
+                return Err("handlers have been permanently revoked for this session".to_string());
+            }
+            _ => return Err("handlers have already been exposed".to_string()),
+        }
+
+        *slot = prepared.registry.take();
+        status.state = HandlerApiState::Locked;
+        status.handlers = prepared.names;
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn set_handler_status_for_test(status: HandlerApiStatus) {
     replace_status(status);
@@ -203,23 +271,8 @@ pub(crate) fn set_handler_status_for_test(status: HandlerApiStatus) {
 ///
 /// This must be called on the R thread after startup profiles have completed.
 pub fn expose_handlers(expression: &str) -> Result<(), String> {
-    REGISTRY.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if handler_status().state == HandlerApiState::Revoked {
-            return Err("handlers have been permanently revoked for this session".to_string());
-        }
-        if slot.is_some() {
-            return Err("handlers have already been exposed".to_string());
-        }
-        let mut registry = arf_harp::handlers::HandlerRegistry::new()?;
-        let names = registry.expose(expression)?;
-        replace_status(HandlerApiStatus {
-            state: HandlerApiState::Locked,
-            handlers: names,
-        });
-        *slot = Some(registry);
-        Ok(())
-    })
+    let prepared = prepare_handlers(expression)?;
+    publish_handlers(prepared)
 }
 
 /// Permanently revoke handler calls for this R session.

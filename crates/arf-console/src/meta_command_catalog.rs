@@ -126,7 +126,7 @@ pub(crate) const META_COMMANDS: &[MetaCommandDef] = &[
     def("popd", "Pop directory from stack", false, MetaCommand::Popd),
     def(
         "ipc",
-        "IPC server and send-policy management",
+        "IPC server, send-policy, and handler management",
         true,
         MetaCommand::Ipc,
     ),
@@ -185,6 +185,7 @@ pub(crate) const IPC_SUBCOMMANDS: &[ArgumentChoice] = &[
     choice("stop", "Stop the IPC server"),
     choice("status", "Show IPC server status"),
     choice("revoke", "Permanently revoke exposed IPC handlers"),
+    choice("expose", "Evaluate and approve IPC handlers for exposure"),
     choice(
         "send-policy",
         "Change interactive send approval for this process",
@@ -249,7 +250,7 @@ mod tests {
         assert_eq!(join_choice_names(IPC_SEND_POLICIES, "|"), "prompt|allow");
         assert_eq!(
             join_choice_names(IPC_SUBCOMMANDS, ", "),
-            "start, stop, status, revoke, send-policy"
+            "start, stop, status, revoke, expose, send-policy"
         );
     }
 }

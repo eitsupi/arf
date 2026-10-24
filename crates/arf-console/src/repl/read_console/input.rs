@@ -6,7 +6,7 @@ use crate::history::HistoryRuntime;
 use crate::repl::history::finalize_history;
 use crate::repl::meta_command::{
     MetaAction, MetaCommandContext, SessionInfoContext, dir_command_hint,
-    handle_meta_command_result, process_meta_command,
+    handle_meta_command_result, process_meta_command_with_ipc_expose,
 };
 use crate::repl::state::{PendingHistoryContext, ReplState};
 use crate::repl::{arf_println, clear_input_lines, execute_shell_command, strip_reprex_output};
@@ -56,7 +56,11 @@ pub(super) fn handle_line(
         history_session_id: state.history_session_id.map(i64::from),
         r_home: state.r_home.as_deref(),
     };
-    if let Some(result) = process_meta_command(&line, &mut meta_ctx) {
+    if let Some(result) = process_meta_command_with_ipc_expose(
+        &line,
+        &mut meta_ctx,
+        prompt_kind.is_command() && !is_shell_mode,
+    ) {
         finalize_history(Some(history_handle), save_outcome, true);
         // Clear duration so the previous R command's time
         // does not persist in the prompt after a meta command.

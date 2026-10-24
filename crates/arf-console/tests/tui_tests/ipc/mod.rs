@@ -2,6 +2,7 @@
 
 mod approval;
 mod completion;
+mod expose;
 mod handlers;
 mod lifecycle;
 mod raw_rpc;

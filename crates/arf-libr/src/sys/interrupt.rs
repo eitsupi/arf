@@ -118,6 +118,50 @@ impl AwaitConsoleInputGuard {
     }
 }
 
+/// Temporarily allow SIGINT to reach an R evaluation initiated while
+/// ReadConsole is active.
+///
+/// Interactive evaluation normally happens after the ReadConsole callback has
+/// returned, so `R_AWAITING_CONSOLE_INPUT` is zero. A small number of prompt
+/// actions evaluate R while the callback remains on the stack. In that case
+/// this guard lets the regular R interrupt handler deliver Ctrl+C to a
+/// protected top-level evaluation. It must be held only outside the
+/// `R_ToplevelExec` callback so R's longjmp cannot skip this Rust destructor.
+pub struct ConsoleEvaluationInterruptGuard {
+    previous_count: usize,
+    _not_send_or_sync: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ConsoleEvaluationInterruptGuard {
+    /// Temporarily mark ReadConsole as not waiting for input.
+    ///
+    /// # Safety
+    /// The caller must be on R's main thread and must keep this guard outside
+    /// any R top-level jump callback. The guarded work must enter R only
+    /// through protected evaluation, so a longjmp cannot skip this guard's
+    /// destructor. Guards must be scoped in LIFO order, without input-waiting
+    /// loops or event polling while held.
+    pub unsafe fn new() -> Self {
+        let previous_count = R_AWAITING_CONSOLE_INPUT.swap(0, Ordering::AcqRel);
+        Self {
+            previous_count,
+            _not_send_or_sync: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for ConsoleEvaluationInterruptGuard {
+    fn drop(&mut self) {
+        // Restore the input-waiting state before clearing flags. A concurrent
+        // signal that observes the restored count is ignored by the handler;
+        // clear flags from the protected evaluation before returning to input.
+        // The preexisting race with a signal handler delayed between its
+        // counter read and flag write can still leave one stale interrupt.
+        R_AWAITING_CONSOLE_INPUT.store(self.previous_count, Ordering::Release);
+        clear_r_interrupt_pending();
+    }
+}
+
 impl Drop for AwaitConsoleInputGuard {
     fn drop(&mut self) {
         R_AWAITING_CONSOLE_INPUT.fetch_sub(1, Ordering::AcqRel);
@@ -281,5 +325,36 @@ pub(super) fn clear_r_interrupt_pending() {
                 std::ptr::write_volatile(ptr, 0);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AwaitConsoleInputGuard, ConsoleEvaluationInterruptGuard, is_r_awaiting_console_input,
+    };
+
+    #[test]
+    fn protected_evaluation_restores_nested_console_waits() {
+        assert!(!is_r_awaiting_console_input());
+        let outer = AwaitConsoleInputGuard::new();
+        let inner = AwaitConsoleInputGuard::new();
+        assert!(is_r_awaiting_console_input());
+        {
+            // SAFETY: this test runs no R code or event polling. It checks the
+            // input-count transitions with guards scoped in LIFO order.
+            let _evaluation = unsafe { ConsoleEvaluationInterruptGuard::new() };
+            assert!(!is_r_awaiting_console_input());
+            {
+                let _nested_read = AwaitConsoleInputGuard::new();
+                assert!(is_r_awaiting_console_input());
+            }
+            assert!(!is_r_awaiting_console_input());
+        }
+        assert!(is_r_awaiting_console_input());
+        drop(inner);
+        assert!(is_r_awaiting_console_input());
+        drop(outer);
+        assert!(!is_r_awaiting_console_input());
     }
 }
