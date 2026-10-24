@@ -183,6 +183,11 @@ pub struct Rstart {
     pub ppsize: usize,
     // Bitfield: NoRenviron (16 bits) + RstartVersion (16 bits)
     pub bitfield: u32,
+    /// R 4.4.0+ (`--max-connections`). Before R 4.4.0 this slot is the
+    /// padding before `rhome`, so the later fields keep their offsets on every
+    /// supported (64-bit) Windows R. arf never reads or writes it: R 4.4.0+
+    /// initializes it in R_DefParamsEx, while older R leaves the padding as is.
+    pub nconnections: c_int,
     /// R_HOME path
     pub rhome: *mut c_char,
     /// HOME path
@@ -205,3 +210,22 @@ pub struct Rstart {
     pub reset_console: Option<unsafe extern "C" fn()>,
     pub suicide: Option<unsafe extern "C" fn(*const c_char)>,
 }
+
+// Windows R is 64-bit only since R 4.2.0, the oldest version arf can embed
+// there. These offsets and the size follow R's RStartup.h for 64-bit Windows.
+// They are the same for R 4.2.x through current R, because R 4.4.0 placed
+// `nconnections` in the padding that preceded `rhome`.
+#[cfg(windows)]
+const _: () = {
+    use std::mem::{offset_of, size_of};
+    assert!(
+        size_of::<*mut c_char>() == 8,
+        "Windows R requires a 64-bit target"
+    );
+    assert!(offset_of!(Rstart, bitfield) == 80);
+    assert!(offset_of!(Rstart, nconnections) == 84);
+    assert!(offset_of!(Rstart, rhome) == 88);
+    assert!(offset_of!(Rstart, write_console_ex) == 160);
+    assert!(offset_of!(Rstart, cleanup) == 176);
+    assert!(size_of::<Rstart>() == 216);
+};
