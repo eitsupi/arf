@@ -2,51 +2,43 @@
 
 ## [Unreleased]
 
-### Added
-
-- **Experimental:** IPC subscribers receive `arf.execution_completed` after terminal input and visible or silent IPC user-code execution finishes. Evaluation, input, and handler responses include execution IDs that match events published during the execution.
-- **Experimental:** IPC clients can open long-lived connections with `attach`, subscribe to event topics and receive events as they happen, and R code can publish events to them through `.Call("arf_publish_event", topic, data, PACKAGE = "(embedding)")`. Sessions can also expose named R handlers at startup, or later with `:ipc expose` and a separate confirmation, for IPC clients to call with JSON arguments.
-- `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview.
-- **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`).
-
-### Fixed
-
-- On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).
-- On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
-- The help and history browsers show their header row again instead of scrolling it off the screen (#433).
-
-### Changed
-
-- **Experimental/Breaking:** Headless IPC history records each non-whitespace external code request, including silent `evaluate`. Rows appear when execution begins with start metadata captured before evaluation, and exit status is updated before the evaluation response when a reliable result is available. Interactive history continues to record visible `send` and `eval --visible`; silent eval is omitted so background queries do not enter the user's command recall. Requests rejected before execution and IPC queries are not recorded.
-- **Experimental/Breaking:** IPC rejects code containing a NUL character consistently before dispatch in both interactive and headless sessions.
-- **Breaking:** Headless IPC `send` and `eval --visible` now use R's normal REPL. R's parser determines expression boundaries (a braced block is one expression), with task callbacks for successfully evaluated top-level expressions, normal autoprinting, and `.Last.value` semantics. Visible `eval` responses now leave `value` and `error` null; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. Silent eval remains direct evaluation without top-level task callbacks.
-- **Breaking:** Headless IPC `send` now returns an `accepted` acknowledgment rather than reporting evaluation success or completion.
-- Headless standard nested console reads (`parse()` from the console, `readline()`, menus, and browser prompts) receive EOF instead of consuming further IPC requests. Main and continuation prompt options must be readable, non-empty, distinct strings and must not resemble browser prompts; `--no-echo` is unsupported. Invalid or ambiguous prompt conditions are diagnosed and stop the session without consuming the next request.
-- **Breaking:** On Linux, the default history location is now `$XDG_STATE_HOME/arf/history` (`~/.local/state/arf/history`) instead of `$XDG_DATA_HOME/arf/history` (`~/.local/share/arf/history`), because the XDG Base Directory Specification classifies command history as state data.
-  - If only the old location has history, arf keeps using it and shows a startup warning listing both locations.
-  - Run `arf history migrate` to copy it to the new location; arf then uses the new location and the old one is left unchanged.
-  - Explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) and the macOS default are not affected.
-- **Breaking:** On Windows, the default history location is now `%LOCALAPPDATA%\arf\history` instead of `%APPDATA%\arf\history`, because the roaming profile is meant for data synchronized across machines and command history is per-machine. The same fallback to the old location, startup warning, and `arf history migrate` apply as on Linux.
-
-## [0.7.0-alpha.1] - 2026-10-11
+## [0.7.0-beta.1] - 2026-10-24
 
 ### Added
 
-- **Experimental:** `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
-- **Experimental:** `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420).
-  - With rig 0.11.0, `:switch` to another R minor version can leave an incompatible project library active ([rig#450](https://github.com/r-lib/rig/issues/450)); use a rig release with the fix and run `rig proj sync` first.
-- **Experimental:** `--r-provider` and `ARF_R_PROVIDER` select `pixi` or `rig-project` explicitly. Unlike configured overrides, an unavailable provider is an error rather than a fallback (#411, #420).
-- **Experimental:** `arf r resolve` and `arf headless --json` report the selected provider, where it was requested, and its details; failed explicit provider requests include a `reason_code` (#412, #423).
+- `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview (#454, #455).
+- **Experimental:** IPC clients can keep a connection open with `attach` and receive events from the session as they happen, so editors and other tools can follow it without polling (#465, #466, #468, #469, #470, #471, #472).
+  - R code can publish its own events with `arf_publish_event`.
+  - Subscribers receive `arf.execution_completed` when terminal input or IPC user code finishes. Responses include an execution ID that matches it.
+  - Sessions can expose named R functions ("handlers") for IPC clients to call with JSON arguments, with `--ipc-expose` at startup or later with `:ipc expose` after the user confirms. Handlers are not subject to the code evaluation policy, so expose only functions that validate their arguments.
+- **Experimental:** arf can start R from a Pixi environment or a rig project (#407, #411, #412, #419, #420, #423).
+  - `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
+  - `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420). With rig 0.11.0, `:switch` to another R minor version can leave an incompatible project library active ([rig#450](https://github.com/r-lib/rig/issues/450)); use a rig release with the fix and run `rig proj sync` first.
+  - `--r-provider` and `ARF_R_PROVIDER` select `pixi` or `rig-project` explicitly. Unlike configured overrides, an unavailable provider is an error rather than a fallback (#411, #420).
+  - `arf r resolve` and `arf headless --json` report the selected provider, where it was requested, and its details; failed explicit provider requests include a `reason_code` (#412, #423).
+- **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`) (#455).
 
 ### Changed
 
-- **Experimental/Breaking:** `experimental.r_source_overrides` entries use the `provider` key instead of `type` (#409).
-- `--r-home` and `--with-r-version` now take precedence over `ARF_R_HOME` and `ARF_R_VERSION`; setting both environment variables is an error (#408).
+- **Breaking:** The default history location has moved on Linux and Windows (#455, #456).
+  - Linux: `$XDG_STATE_HOME/arf/history` (`~/.local/state/arf/history`), previously `$XDG_DATA_HOME/arf/history` (`~/.local/share/arf/history`).
+  - Windows: `%LOCALAPPDATA%\arf\history`, previously `%APPDATA%\arf\history`.
+  - Existing history is kept. While only the old location has history, arf keeps using it and warns at startup. Run `arf history migrate` to copy it; arf then uses the new location. If both locations have history, the new one is used. The old files are left in place, and older arf versions keep using them.
+  - macOS and explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) are not affected.
+- **Breaking:** `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, as Rscript does. Previously they printed the error and exited with status 0 (#422).
+- **Breaking:** `--r-home` and `--with-r-version` now take precedence over `ARF_R_HOME` and `ARF_R_VERSION`, and setting both environment variables without either option is an error. Unset one of them or pass the option instead (#408).
 - `:switch` now replaces earlier R version and provider options instead of adding to them, and the new session applies rig project activation afresh (#417).
 - R source overrides now try later entries when rig is unavailable, and show a single notice if all of them fail (#407).
 - Checking an R installation's home directory during startup and `arf r resolve` now times out instead of waiting indefinitely (#407).
 - The interactive help browser stays responsive while searching large help indexes (#404).
-- `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, as Rscript does (#422).
+- **Experimental/Breaking:** Headless IPC `send` and `eval --visible` now run code through R's normal REPL, so task callbacks (`addTaskCallback()`), autoprinting, and `.Last.value` behave as in interactive R (#450).
+  - Visible `eval` responses leave `value` and `error` null; printed output appears in `stdout` and errors in `stderr`. Use silent `eval` to get a value.
+  - `send` returns an `accepted` acknowledgment instead of reporting evaluation success. Subscribe to `arf.execution_completed` to learn when it finishes.
+  - `readline()`, menus, `browser()`, and other nested console reads receive EOF instead of consuming further IPC requests.
+  - The session stops with a diagnostic if the main and continuation prompt options are not distinct, non-empty strings or resemble `browser()` prompts. `--no-echo` is unsupported.
+- **Experimental/Breaking:** Headless IPC history records every code request, including silent `evaluate`. Rows appear when execution begins and get their exit status once it is known. Interactive history still records only visible `send` and `eval --visible` (#451).
+- **Experimental/Breaking:** IPC now rejects code containing a NUL character with an error in both interactive and headless sessions (#451).
+- **Experimental/Breaking:** `experimental.r_source_overrides` entries use the `provider` key instead of `type`. Rename `type` to `provider` in your configuration (#409).
 
 ### Fixed
 
@@ -55,6 +47,9 @@
 - R's documentation, share, and include directories are found for installations whose `R` script refers to `${R_HOME}` (#415).
 - On macOS, the selected R's own libraries take priority when loading, and switching R versions restores the original library search path (#416).
 - After changing directories, `:restart` no longer keeps stale R directory paths from the previous R installation (#421).
+- The help and history browsers show their header row again instead of scrolling it off the screen (#433).
+- **Experimental:** On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).
+- **Experimental:** On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
 
 ## [0.6.0] - 2026-10-08
 
