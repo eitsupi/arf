@@ -210,3 +210,144 @@ fn interactive_exposure_errors_and_ipc_code_cannot_publish_handlers() -> Result<
         },
     )
 }
+
+#[cfg(unix)]
+#[test]
+fn exposure_does_not_leak_execution_context_into_terminal_or_handler_events() -> Result<()> {
+    use super::completion::read_notification_timeout;
+    use anyhow::Context;
+    use std::io::{BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    run_case(
+        "ipc-expose-execution-context",
+        &["--with-ipc", "--no-auto-match"],
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let socket = session_socket_path(terminal)?;
+            let mut stream = UnixStream::connect(&socket)?;
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            writeln!(
+                stream,
+                "{}",
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "attach",
+                    "params": {"subscribe": ["demo.*", "arf.execution_completed"]}
+                })
+            )?;
+            stream.flush()?;
+            let mut reader = BufReader::new(stream);
+            let attached = read_notification_timeout(&mut reader)?.context("attach response")?;
+            ensure!(attached["id"] == 1, "attach failed: {attached}");
+
+            terminal.enter(
+                r#":ipc expose { .Call("arf_publish_event", "demo.expose", NULL, PACKAGE = "(embedding)"); list("demo/context" = function(args) { .Call("arf_publish_event", "demo.handler", NULL, PACKAGE = "(embedding)"); list(value = 42L) }) }"#,
+            )?;
+            wait_for_expose_confirmation(terminal)?;
+            let expose_event = read_notification_timeout(&mut reader)?.context("exposure event")?;
+            ensure!(
+                expose_event["params"]["topic"] == "demo.expose",
+                "unexpected exposure notification: {expose_event}"
+            );
+            ensure!(
+                expose_event["params"]["execution"].is_null(),
+                "exposure evaluation inherited an execution context: {expose_event}"
+            );
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_millis(250)))?;
+            ensure!(
+                read_notification_timeout(&mut reader)?.is_none(),
+                "exposure emitted a completion"
+            );
+            let checkpoint = terminal.checkpoint()?;
+            terminal.key("y")?;
+            wait_for_message_prompt(terminal, "IPC handlers exposed.", checkpoint)?;
+
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_secs(10)))?;
+            terminal.submit(
+                r#"cat("EXPOSE_CONTEXT_TERMINAL\n"); .Call("arf_publish_event", "demo.terminal", NULL, PACKAGE = "(embedding)" )"#,
+                "EXPOSE_CONTEXT_TERMINAL",
+                PROMPT,
+            )?;
+            let terminal_event =
+                read_notification_timeout(&mut reader)?.context("terminal event")?;
+            let completion =
+                read_notification_timeout(&mut reader)?.context("terminal completion")?;
+            ensure!(
+                terminal_event["params"]["topic"] == "demo.terminal",
+                "unexpected terminal event: {terminal_event}"
+            );
+            ensure!(
+                completion["params"]["topic"] == "arf.execution_completed",
+                "terminal execution did not complete: {completion}"
+            );
+            let terminal_id = completion["params"]["data"]["id"]
+                .as_u64()
+                .context("terminal completion lacks execution ID")?;
+            ensure!(
+                terminal_id > 0,
+                "invalid terminal execution ID: {terminal_id}"
+            );
+            ensure!(completion["params"]["execution"] == json!(terminal_id));
+            ensure!(terminal_event["params"]["execution"] == json!(terminal_id));
+            ensure!(completion["params"]["data"]["origin"] == "terminal");
+
+            let call = raw_json_rpc(&socket, "call", json!({"handler":"demo/context"}))?;
+            ensure!(call["result"]["value"] == json!({"value": 42}), "{call}");
+            let handler_id = call["result"]["execution_id"]
+                .as_u64()
+                .context("handler response lacks execution ID")?;
+            ensure!(handler_id != terminal_id, "{call}");
+            let handler_event = read_notification_timeout(&mut reader)?.context("handler event")?;
+            ensure!(
+                handler_event["params"]["topic"] == "demo.handler",
+                "unexpected handler event: {handler_event}"
+            );
+            ensure!(handler_event["params"]["execution"] == json!(handler_id));
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_millis(250)))?;
+            ensure!(
+                read_notification_timeout(&mut reader)?.is_none(),
+                "handler call emitted a completion"
+            );
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_secs(10)))?;
+            terminal.submit(
+                r#"cat("AFTER_HANDLER_CONTEXT\n"); .Call("arf_publish_event", "demo.after_handler", NULL, PACKAGE = "(embedding)")"#,
+                "AFTER_HANDLER_CONTEXT",
+                PROMPT,
+            )?;
+            let after_event =
+                read_notification_timeout(&mut reader)?.context("event after handler")?;
+            let after_completion =
+                read_notification_timeout(&mut reader)?.context("completion after handler")?;
+            let after_id = after_completion["params"]["data"]["id"]
+                .as_u64()
+                .context("execution ID after handler")?;
+            ensure!(
+                after_id != handler_id && after_id != terminal_id,
+                "context was reused: {after_completion}"
+            );
+            ensure!(
+                after_completion["params"]["topic"] == "arf.execution_completed",
+                "{after_completion}"
+            );
+            ensure!(
+                after_event["params"]["topic"] == "demo.after_handler",
+                "{after_event}"
+            );
+            ensure!(after_event["params"]["execution"] == json!(after_id));
+            ensure!(after_completion["params"]["execution"] == json!(after_id));
+            ensure!(after_completion["params"]["data"]["origin"] == "terminal");
+            Ok(())
+        },
+    )
+}

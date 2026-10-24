@@ -320,7 +320,7 @@ fn assert_completion(
 }
 
 #[cfg(unix)]
-fn read_notification_timeout(
+pub(super) fn read_notification_timeout(
     reader: &mut BufReader<std::os::unix::net::UnixStream>,
 ) -> Result<Option<Value>> {
     let mut line = String::new();
