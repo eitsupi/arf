@@ -866,6 +866,10 @@ any evaluation do not. Handler `call` executions have IDs and their R-published
 events carry those IDs, but they do not produce completion events, allowing
 subscribers to fetch workspace state without triggering a refresh loop.
 
+Clients refreshing state on completion should use handler `call` rather than
+`evaluate`, which emits its own completion event, or use `origin` to recognize
+their own executions.
+
 Events published during an execution carry its ID in `execution` and have
 smaller `seq` values than its completion event. A reply timeout does not trigger
 completion: the event is published once, when the running user code finishes.

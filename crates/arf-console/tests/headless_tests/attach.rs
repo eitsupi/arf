@@ -182,15 +182,17 @@ fn headless_evaluate_timeout_keeps_execution_context_until_completion() {
         &["demo.timeout", "arf.execution_completed"],
     );
     for visible in [false, true] {
+        // Allow R to start even while the workspace tests run in parallel,
+        // then keep it busy beyond the reply deadline.
         client.send(&request(
             2,
             "evaluate",
             json!({
                 "code": format!(
-                    "{}; Sys.sleep(0.8)",
+                    "{}; Sys.sleep(2)",
                     publish_call("demo.timeout", "NULL")
                 ),
-                "timeout_ms": 150,
+                "timeout_ms": 1000,
                 "visible": visible,
             }),
         ));
@@ -436,6 +438,108 @@ stopifnot(identical(.Call("arf_api_version", PACKAGE = "(embedding)"), 1L))
 
 fn attached_connection_id(client: &AttachedClient) -> Value {
     json!(client.connection_id.expect("attached connection ID"))
+}
+
+#[test]
+fn headless_evaluation_errors_complete_once_and_recover_with_a_new_id() {
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["arf.execution_completed"]);
+
+    for (error_request_id, visible) in [(2, false), (4, true)] {
+        client.send(&request(
+            error_request_id,
+            "evaluate",
+            json!({
+                "code": "stop('EXPECTED_EXECUTION_FAILURE')",
+                "visible": visible,
+            }),
+        ));
+        let (failed_response, failed_completion) =
+            receive_evaluation_completion(&mut client, error_request_id);
+        assert!(failed_response["error"].is_null(), "{failed_response}");
+        if visible {
+            assert!(
+                failed_response["result"]["stderr"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("EXPECTED_EXECUTION_FAILURE")),
+                "visible eval should capture the R error: {failed_response}"
+            );
+        } else {
+            assert!(
+                failed_response["result"]["error"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("EXPECTED_EXECUTION_FAILURE")),
+                "silent eval should expose the caught R error: {failed_response}"
+            );
+        }
+        let failed_id = failed_response["result"]["execution_id"]
+            .as_u64()
+            .expect("failed evaluation response should include an execution ID");
+        assert_eq!(
+            failed_completion["params"]["data"]["id"],
+            json!(failed_id),
+            "{failed_completion}"
+        );
+        assert_eq!(failed_completion["params"]["execution"], json!(failed_id));
+        assert_eq!(failed_completion["params"]["data"]["visible"], visible);
+        assert_eq!(
+            failed_completion["params"]["data"]["status"], "error",
+            "{failed_completion}"
+        );
+        assert_eq!(
+            client.recv_timeout(Duration::from_millis(250)),
+            None,
+            "one failed evaluation must emit exactly one completion"
+        );
+
+        let success_request_id = error_request_id + 1;
+        client.send(&request(
+            success_request_id,
+            "evaluate",
+            json!({"code": "42", "visible": visible}),
+        ));
+        let (success_response, success_completion) =
+            receive_evaluation_completion(&mut client, success_request_id);
+        let success_id = success_response["result"]["execution_id"]
+            .as_u64()
+            .expect("successful evaluation response should include an execution ID");
+        assert_ne!(success_id, failed_id);
+        assert_eq!(
+            success_completion["params"]["data"]["id"],
+            json!(success_id)
+        );
+        assert_eq!(success_completion["params"]["execution"], json!(success_id));
+        assert_eq!(success_completion["params"]["data"]["visible"], visible);
+        assert_eq!(
+            success_completion["params"]["data"]["status"], "ok",
+            "{success_completion}"
+        );
+        assert_eq!(
+            client.recv_timeout(Duration::from_millis(250)),
+            None,
+            "one successful evaluation must emit exactly one completion"
+        );
+    }
+}
+
+fn receive_evaluation_completion(client: &mut AttachedClient, request_id: i64) -> (Value, Value) {
+    let mut response = None;
+    let mut completion = None;
+    while response.is_none() || completion.is_none() {
+        let message = client.recv();
+        if message["method"] == "event" {
+            assert_eq!(
+                message["params"]["topic"], "arf.execution_completed",
+                "{message}"
+            );
+            assert!(completion.is_none(), "duplicate completion: {message}");
+            completion = Some(message);
+        } else {
+            assert_eq!(message["id"], request_id, "{message}");
+            response = Some(message);
+        }
+    }
+    (response.unwrap(), completion.unwrap())
 }
 
 #[test]

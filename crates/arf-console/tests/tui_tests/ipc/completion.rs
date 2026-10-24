@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use super::super::support::{PROMPT, run_case};
+use super::super::support::{ERROR_PROMPT, PROMPT, run_case};
 use super::raw_rpc::session_socket_path;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -191,6 +191,59 @@ fn terminal_code_completes_once_and_empty_input_does_not_complete() -> Result<()
             ensure!(
                 connection_id > 0,
                 "unexpected connection ID: {connection_id}"
+            );
+
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_secs(10)))?;
+            terminal.submit(
+                "stop('TERMINAL_EXECUTION_ERROR')",
+                "Error: TERMINAL_EXECUTION_ERROR",
+                ERROR_PROMPT,
+            )?;
+            let failed = read_notification_timeout(&mut reader)?
+                .context("terminal error completion event was not published")?;
+            ensure!(
+                failed["params"]["topic"] == "arf.execution_completed",
+                "{failed}"
+            );
+            ensure!(failed["params"]["data"]["origin"] == "terminal");
+            ensure!(failed["params"]["data"]["status"] == "error", "{failed}");
+            let failed_id = failed["params"]["data"]["id"]
+                .as_u64()
+                .context("terminal error completion lacks execution ID")?;
+            ensure!(failed["params"]["execution"] == json!(failed_id));
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_millis(250)))?;
+            ensure!(
+                read_notification_timeout(&mut reader)?.is_none(),
+                "terminal error emitted duplicate completion events"
+            );
+
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_secs(10)))?;
+            terminal.submit("2 + 3", "[1] 5", PROMPT)?;
+            let recovered = read_notification_timeout(&mut reader)?
+                .context("terminal recovery completion event was not published")?;
+            ensure!(
+                recovered["params"]["topic"] == "arf.execution_completed",
+                "{recovered}"
+            );
+            let recovered_id = recovered["params"]["data"]["id"]
+                .as_u64()
+                .context("recovery completion lacks execution ID")?;
+            ensure!(recovered_id != failed_id, "{failed}; {recovered}");
+            ensure!(recovered["params"]["execution"] == json!(recovered_id));
+            ensure!(recovered["params"]["data"]["origin"] == "terminal");
+            ensure!(recovered["params"]["data"]["status"] == "ok", "{recovered}");
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_millis(250)))?;
+            ensure!(
+                read_notification_timeout(&mut reader)?.is_none(),
+                "terminal recovery emitted duplicate completion events"
             );
             Ok(())
         },
