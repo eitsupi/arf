@@ -614,10 +614,14 @@ Within a running session, you can start and stop the IPC server:
 :ipc start    # Start the IPC server
 :ipc stop     # Stop the IPC server
 :ipc status   # Show server status
+:ipc expose list("demo/add" = function(args) list(sum = sum(args$x)))
 ```
 
 When handlers have been exposed, `:ipc` or `:ipc status` also shows their API
 state and names. `:ipc revoke` permanently revokes them for the session.
+Use `:ipc expose <R expression>` to publish handlers after startup; see
+[Exposing and calling R handlers](#exposing-and-calling-r-handlers) for its
+confirmation and evaluation semantics.
 
 ### Interactive + IPC: Mutual Exclusion
 
@@ -840,6 +844,22 @@ arf headless --ipc-expose 'list("demo/add" = function(args) list(sum = sum(args$
 ```
 
 The complete list is checked before any handler becomes available. An evaluation or validation error aborts startup with a diagnostic. The functions are kept alive for the session.
+
+In an already-running interactive session, use the terminal meta command
+`:ipc expose <R expression>`. It requires initialized R at the top-level prompt
+and an `unexposed` handler API; `locked` and `revoked` sessions reject it before
+evaluating the expression. It is unavailable through IPC-injected code and in
+headless mode. Use `:ipc start` to enable IPC if it is not already running.
+
+The expression is evaluated and its complete named function list is validated
+before arf shows the candidate names and asks for independent `y/N`
+confirmation. This confirms publication: the expression has already run, and
+declining does not undo its side effects. The confirmation is required even
+with `:ipc send-policy allow`. While evaluating and confirming, arf does not
+start IPC requests that execute R. Approval publishes the fixed candidate list
+atomically and locks it; rejection, an error, or an interrupt leaves it
+unexposed so you can retry. Published functions remain protected from garbage
+collection until revoked or the session ends.
 
 Use the `call` method to invoke one exposed selector with JSON arguments:
 

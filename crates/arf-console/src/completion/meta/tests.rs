@@ -34,7 +34,7 @@ fn test_meta_command_completer_lists_all_commands() {
     h append_whitespace=false description="Search R help (alias)"
     r append_whitespace=false description="Return to R mode"
     cd append_whitespace=true description="Change working directory"
-    ipc append_whitespace=true description="IPC server and send-policy management"
+    ipc append_whitespace=true description="IPC server, send-policy, and handler management"
     help append_whitespace=false description="Search R help"
     info append_whitespace=false description="Show session information"
     cmds append_whitespace=false description="Show available commands (alias)"
@@ -485,6 +485,7 @@ fn test_meta_command_ipc_subcommands_and_send_policy() {
             ("stop", false),
             ("status", false),
             ("revoke", false),
+            ("expose", true),
             ("send-policy", true)
         ]
     );

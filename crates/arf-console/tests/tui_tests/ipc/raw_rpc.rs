@@ -22,6 +22,53 @@ pub(super) fn raw_json_rpc(socket_path: &str, method: &str, params: Value) -> Re
     serde_json::from_str(json).with_context(|| format!("parse raw `{method}` response: {json}"))
 }
 
+/// Open an attached JSON-RPC connection and read its initial capability result.
+pub(super) fn raw_attach(socket_path: &str) -> Result<Value> {
+    let request = r#"{"jsonrpc":"2.0","id":1,"method":"attach","params":{}}"#;
+    let response = raw_attach_transport(socket_path, request)?;
+    serde_json::from_str(&response).context("parse raw attach response")
+}
+
+#[cfg(unix)]
+fn raw_attach_transport(socket_path: &str, request: &str) -> Result<String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    let mut stream =
+        UnixStream::connect(socket_path).context("connect to IPC socket for attach")?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    writeln!(stream, "{request}")?;
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response)?;
+    Ok(response)
+}
+
+#[cfg(windows)]
+fn raw_attach_transport(socket_path: &str, request: &str) -> Result<String> {
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("create tokio runtime")?;
+    runtime.block_on(async {
+        let mut pipe = ClientOptions::new()
+            .open(socket_path)
+            .context("connect to IPC pipe for attach")?;
+        pipe.write_all(format!("{request}\n").as_bytes()).await?;
+        pipe.flush().await?;
+        let mut reader = BufReader::new(pipe);
+        let mut response = String::new();
+        tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut response))
+            .await
+            .context("attach response timed out")??;
+        Ok(response)
+    })
+}
+
 #[cfg(unix)]
 fn raw_transport(socket_path: &str, body: &str) -> Result<String> {
     use std::io::{Read, Write};

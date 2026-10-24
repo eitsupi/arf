@@ -99,11 +99,12 @@ impl MetaCommandCompleter {
         suggestions
     }
 
-    /// Complete IPC subcommands (start, stop, status, send-policy).
+    /// Complete IPC subcommands (start, stop, status, expose, send-policy).
     pub(super) fn complete_ipc_subcommands(&self, pos: usize, partial: &str) -> Vec<Suggestion> {
         let mut suggestions = self.complete_targets(pos, partial, IPC_SUBCOMMANDS);
         for suggestion in &mut suggestions {
-            suggestion.append_whitespace = suggestion.value == "send-policy";
+            suggestion.append_whitespace =
+                matches!(suggestion.value.as_str(), "send-policy" | "expose");
         }
         suggestions
     }

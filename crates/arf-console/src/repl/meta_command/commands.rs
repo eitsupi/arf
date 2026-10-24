@@ -210,7 +210,9 @@ pub(super) fn handle_commands() -> MetaCommandResult {
     println!("#   :restart!      - Restart without confirmation");
     println!("#   :switch <ver>  - Restart with different R version (requires rig)");
     println!("#   :switch! <ver> - Switch without confirmation");
-    println!("#   :ipc           - IPC server management (start, stop, status, send-policy)");
+    println!(
+        "#   :ipc           - IPC server, send-policy, and handler management (start, stop, status, revoke, expose)"
+    );
     println!("#   :changelog     - Show arf changelog");
     println!("#   :commands      - Show this list");
     println!("#   :quit          - Exit arf");

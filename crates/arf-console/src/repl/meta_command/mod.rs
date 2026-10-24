@@ -67,6 +67,18 @@ pub(super) fn process_meta_command(
     input: &str,
     ctx: &mut MetaCommandContext<'_>,
 ) -> Option<MetaCommandResult> {
+    process_meta_command_with_ipc_expose(input, ctx, false)
+}
+
+/// Process a meta command from a verified interactive R prompt.
+///
+/// Exposing handlers can evaluate R code, so callers outside the ReadConsole
+/// command prompt must leave this capability disabled.
+pub(super) fn process_meta_command_with_ipc_expose(
+    input: &str,
+    ctx: &mut MetaCommandContext<'_>,
+    allow_ipc_expose: bool,
+) -> Option<MetaCommandResult> {
     let trimmed = input.trim();
     if !trimmed.starts_with(':') {
         return None;
@@ -99,7 +111,7 @@ pub(super) fn process_meta_command(
         MetaCommand::Cd => commands::handle_cd(after_colon),
         MetaCommand::Pushd => commands::handle_pushd(ctx, after_colon),
         MetaCommand::Popd => commands::handle_popd(ctx),
-        MetaCommand::Ipc => ipc::handle_ipc(ctx, &parts),
+        MetaCommand::Ipc => ipc::handle_ipc(ctx, &parts, input, allow_ipc_expose),
         MetaCommand::Commands => commands::handle_commands(),
         MetaCommand::Quit => MetaCommandResult::Exit,
     })
