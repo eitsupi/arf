@@ -185,7 +185,8 @@ pub struct Rstart {
     pub bitfield: u32,
     /// R 4.4.0+ (`--max-connections`). Before R 4.4.0 this slot is the
     /// padding before `rhome`, so the later fields keep their offsets on every
-    /// supported (64-bit) Windows R. Leave it as R_DefParamsEx initialized it.
+    /// supported (64-bit) Windows R. arf never reads or writes it: R 4.4.0+
+    /// initializes it in R_DefParamsEx, while older R leaves the padding as is.
     pub nconnections: c_int,
     /// R_HOME path
     pub rhome: *mut c_char,
@@ -211,8 +212,9 @@ pub struct Rstart {
 }
 
 // Windows R is 64-bit only since R 4.2.0, the oldest version arf can embed
-// there. `nconnections` must exactly fill the padding that preceded `rhome`
-// in R 4.2.x and 4.3.x so one layout matches every supported version.
+// there. These offsets and the size follow R's RStartup.h for 64-bit Windows.
+// They are the same for R 4.2.x through current R, because R 4.4.0 placed
+// `nconnections` in the padding that preceded `rhome`.
 #[cfg(windows)]
 const _: () = {
     use std::mem::{offset_of, size_of};
@@ -220,12 +222,10 @@ const _: () = {
         size_of::<*mut c_char>() == 8,
         "Windows R requires a 64-bit target"
     );
-    assert!(
-        offset_of!(Rstart, nconnections) == offset_of!(Rstart, bitfield) + size_of::<u32>(),
-        "nconnections must directly follow the Rstart bitfield"
-    );
-    assert!(
-        offset_of!(Rstart, rhome) == offset_of!(Rstart, nconnections) + size_of::<c_int>(),
-        "nconnections must occupy the former padding before rhome"
-    );
+    assert!(offset_of!(Rstart, bitfield) == 80);
+    assert!(offset_of!(Rstart, nconnections) == 84);
+    assert!(offset_of!(Rstart, rhome) == 88);
+    assert!(offset_of!(Rstart, write_console_ex) == 160);
+    assert!(offset_of!(Rstart, cleanup) == 176);
+    assert!(size_of::<Rstart>() == 216);
 };
