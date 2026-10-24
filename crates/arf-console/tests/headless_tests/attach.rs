@@ -442,7 +442,12 @@ fn attached_connection_id(client: &AttachedClient) -> Value {
 
 #[test]
 fn headless_evaluation_errors_complete_once_and_recover_with_a_new_id() {
-    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let history_dir = tempfile::tempdir().expect("create isolated history directory");
+    let process = HeadlessProcess::spawn_with_args(&[
+        "--history-dir",
+        history_dir.path().to_str().expect("history path is UTF-8"),
+    ])
+    .expect("headless process should start");
     let mut client = attach_subscribed(&socket_path_of(&process), &["arf.execution_completed"]);
 
     for (error_request_id, visible) in [(2, false), (4, true)] {
@@ -518,6 +523,26 @@ fn headless_evaluation_errors_complete_once_and_recover_with_a_new_id() {
             client.recv_timeout(Duration::from_millis(250)),
             None,
             "one successful evaluation must emit exactly one completion"
+        );
+    }
+
+    let history = process.ipc_history(&[]).expect("query session history");
+    assert!(history.success, "{}", history.stderr);
+    let history = parse_ipc_json(&history);
+    let entries = history["entries"]
+        .as_array()
+        .expect("history entries should be an array");
+    for (command, expected_status) in [("stop('EXPECTED_EXECUTION_FAILURE')", 1), ("42", 0)] {
+        let matching_entries: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry["command"].as_str() == Some(command))
+            .collect();
+        assert_eq!(matching_entries.len(), 2, "history entries for {command:?}");
+        assert!(
+            matching_entries
+                .iter()
+                .all(|entry| entry["exit_status"].as_i64() == Some(expected_status)),
+            "history exit_status for {command:?} should be {expected_status}: {matching_entries:?}"
         );
     }
 }
