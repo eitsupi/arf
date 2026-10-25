@@ -138,6 +138,8 @@ pub struct RLibrary {
     pub rf_errorcall: unsafe extern "C-unwind" fn(SEXP, *const c_char, ...) -> !,
     /// Get an R option directly without evaluating R code.
     pub rf_get_option1: unsafe extern "C" fn(SEXP) -> SEXP,
+    /// Invoke R's standard interrupt handler. This can longjmp to an enclosing R context.
+    pub rf_onintr: unsafe extern "C-unwind" fn(),
 
     // Stack limit (for embedded R)
     pub r_cstacklimit: *mut usize,
@@ -397,6 +399,7 @@ impl RLibrary {
             load_symbol!(rf_scalarinteger, b"Rf_ScalarInteger\0");
             load_symbol!(rf_errorcall, b"Rf_errorcall\0");
             load_symbol!(rf_get_option1, b"Rf_GetOption1\0");
+            load_symbol!(rf_onintr, b"Rf_onintr\0");
 
             // Load stack limit pointer
             load_ptr!(r_cstacklimit, b"R_CStackLimit\0", usize);
@@ -688,6 +691,7 @@ impl RLibrary {
                 rf_scalarinteger,
                 rf_errorcall,
                 rf_get_option1,
+                rf_onintr,
                 r_cstacklimit,
                 #[cfg(unix)]
                 ptr_r_readconsole,

@@ -10,6 +10,7 @@ mod tests;
 use super::state::ReplState;
 use super::{REPL_STATE, RPrompt, arf_eprintln};
 use crate::history::HistoryRuntime;
+use arf_libr::ReadConsoleResult;
 use input::{handle_ctrl_c, handle_ctrl_d, handle_line};
 use ipc::{dispatch_pre_prompt_ipc, handle_external_break};
 use lifecycle::{finish_previous_command, initialize_error_handler_once};
@@ -28,7 +29,7 @@ use std::ops::ControlFlow;
 pub(super) fn read_console_callback(
     r_prompt: &str,
     prompt_info: arf_libr::ReadConsolePromptInfo,
-) -> Option<String> {
+) -> ReadConsoleResult {
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
         // This is a defensive measure in case R unexpectedly calls ReadConsole
@@ -40,15 +41,17 @@ pub(super) fn read_console_callback(
             Ok(guard) => guard,
             Err(_) => {
                 // Re-entrant call detected - RefCell already borrowed.
-                // Return None (EOF) to terminate the nested call.
+                // Return EOF to terminate the nested call.
                 // This prevents panic from double borrow.
-                return None;
+                return ReadConsoleResult::Eof;
             }
         };
-        let state = guard.as_mut()?;
+        let Some(state) = guard.as_mut() else {
+            return ReadConsoleResult::Eof;
+        };
 
         if state.should_exit {
-            return None;
+            return ReadConsoleResult::Eof;
         }
 
         if should_warn_prompt_ambiguity(
@@ -64,7 +67,7 @@ pub(super) fn read_console_callback(
         // supplies their metadata here. Classify the prompt once so every
         // lifecycle, IPC, display, menu, formatter, and history decision shares
         // one value.
-        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation);
+        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation, prompt_info.hist);
 
         initialize_error_handler_once(state, prompt_kind);
 
@@ -84,7 +87,7 @@ pub(super) fn read_console_callback(
         }
 
         if let Some(code) = dispatch_pre_prompt_ipc(state, prompt_kind) {
-            return Some(code);
+            return ReadConsoleResult::Input(code);
         }
 
         read_input_loop(state, r_prompt, prompt_kind)
@@ -115,7 +118,7 @@ fn read_input_loop(
     state: &mut ReplState,
     r_prompt: &str,
     prompt_kind: PromptKind,
-) -> Option<String> {
+) -> ReadConsoleResult {
     loop {
         // Build prompt dynamically from config.
         let prompt = build_prompt(state, r_prompt, prompt_kind);
@@ -147,12 +150,18 @@ fn read_input_loop(
         {
             eprintln!("Error: {}", error);
             state.should_exit = true;
-            return None;
+            return ReadConsoleResult::Eof;
         }
 
         let step = match read_result {
             Ok(Signal::Success(line)) => {
                 handle_line(state, &history_handle, prompt_kind, is_shell_mode, line)
+            }
+            Ok(Signal::CtrlC) if prompt_kind.is_other() && !is_shell_mode => {
+                // Keep the familiar terminal echo, then let R handle this
+                // interrupt after the callback's Rust frames have returned.
+                let _ = handle_ctrl_c(state);
+                return ReadConsoleResult::Interrupt;
             }
             Ok(Signal::CtrlC) => handle_ctrl_c(state),
             Ok(Signal::CtrlD) => handle_ctrl_d(state),
@@ -164,11 +173,11 @@ fn read_input_loop(
             Err(err) => {
                 eprintln!("Error: {}", err);
                 state.should_exit = true;
-                return None;
+                return ReadConsoleResult::Eof;
             }
         };
         if let ControlFlow::Break(result) = step {
-            return result;
+            return result.map_or(ReadConsoleResult::Eof, ReadConsoleResult::Input);
         }
     }
 }

@@ -9,6 +9,7 @@
 ### Fixed
 
 - **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit (#477).
+- Ctrl+C during `readline()`, `menu()`, or `browser()` now follows R's interrupt behavior (#478).
 
 ## [0.7.0-beta.1] - 2026-10-24
 
