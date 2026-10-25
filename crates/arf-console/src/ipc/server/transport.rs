@@ -1,5 +1,6 @@
 //! Listener setup and accept loops for the Unix socket / Windows named pipe.
 
+use super::SocketIdentity;
 use super::connection::{ConnectionContext, handle_connection};
 use crate::ipc::session::SessionType;
 use crate::ipc::session_result::set_session_meta;
@@ -28,8 +29,10 @@ pub(super) async fn run_server(
     history_session_id: Option<i64>,
     session_type: SessionType,
     ctx: ConnectionContext,
-    bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
+    bind_tx: std::sync::mpsc::SyncSender<Result<Option<SocketIdentity>, std::io::Error>>,
 ) -> std::io::Result<()> {
+    #[cfg(unix)]
+    let mut _socket_path_guard = None;
     let listener = match tokio::net::UnixListener::bind(socket_path) {
         Ok(l) => {
             // Restrict socket permissions so only the owner can connect.
@@ -52,6 +55,17 @@ pub(super) async fn run_server(
                     );
                 }
             }
+            let identity = match super::SocketIdentity::from_path(socket_path) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    let _ = bind_tx.send(Err(std::io::Error::new(error.kind(), error.to_string())));
+                    return Err(error);
+                }
+            };
+            #[cfg(unix)]
+            {
+                _socket_path_guard = Some(super::SocketPathGuard::new(socket_path, identity));
+            }
             // Cache session metadata BEFORE signalling bind success, so it
             // is guaranteed to be available when the first request arrives.
             set_session_meta(
@@ -62,7 +76,7 @@ pub(super) async fn run_server(
                 history_session_id,
                 session_type,
             );
-            let _ = bind_tx.send(Ok(()));
+            let _ = bind_tx.send(Ok(Some(identity)));
             l
         }
         Err(e) => {
@@ -106,7 +120,7 @@ pub(super) async fn run_server(
     history_session_id: Option<i64>,
     session_type: SessionType,
     ctx: ConnectionContext,
-    bind_tx: std::sync::mpsc::SyncSender<Result<(), std::io::Error>>,
+    bind_tx: std::sync::mpsc::SyncSender<Result<Option<SocketIdentity>, std::io::Error>>,
 ) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
@@ -126,7 +140,7 @@ pub(super) async fn run_server(
                 history_session_id,
                 session_type,
             );
-            let _ = bind_tx.send(Ok(()));
+            let _ = bind_tx.send(Ok(None));
             s
         }
         Err(e) => {

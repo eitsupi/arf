@@ -6,6 +6,10 @@
 
 - **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection` (#476).
 
+### Fixed
+
+- **Experimental:** Interactive Unix IPC sessions remove their socket on exit without deleting a replacement file or socket at the same path.
+
 ## [0.7.0-beta.1] - 2026-10-24
 
 ### Added
