@@ -74,6 +74,72 @@ fn spam_ctrl_c(terminal: &Terminal) -> Result<()> {
 }
 
 #[test]
+fn ctrl_c_interrupts_readline_without_assigning_a_value() -> Result<()> {
+    run_case("ctrl-c-readline", &["--no-auto-match"], |terminal| {
+        terminal.submit_quiet(r#"answer <- readline("ask> ")"#, "ask>")?;
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for("top-level prompt after readline interrupt", |_, line| {
+            matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+        })?;
+        terminal.submit(r#"exists("answer")"#, "[1] FALSE", PROMPT)
+    })
+}
+
+#[test]
+fn ctrl_c_interrupts_menu_and_returns_to_top_level() -> Result<()> {
+    run_case("ctrl-c-menu", &["--no-auto-match"], |terminal| {
+        terminal.submit_quiet(r#"menu(c("a", "b"))"#, "Selection:")?;
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for("top-level prompt after menu interrupt", |_, line| {
+            matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+        })?;
+        terminal.submit("sum(1:10)", "[1] 55", PROMPT)
+    })
+}
+
+#[test]
+fn ctrl_c_in_browser_keeps_the_current_step() -> Result<()> {
+    run_case("ctrl-c-browser", &["--no-auto-match"], |terminal| {
+        terminal.submit_quiet(
+            "advanced <- FALSE; f <- function() { browser(); advanced <<- TRUE }; f()",
+            "Browse[1]>",
+        )?;
+        let row = terminal.state()?.cursor.y;
+        let checkpoint = terminal.checkpoint()?;
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for("browser prompt after interrupt", |state, line| {
+            state.cursor.y > row && line.trim_end() == "Browse[1]>"
+        })?;
+        ensure!(
+            !terminal.output_since(checkpoint)?.contains("debug at"),
+            "Ctrl+C advanced the browser to the next statement"
+        );
+        terminal.enter("Q")?;
+        terminal.wait_for("top-level prompt after leaving browser", |_, line| {
+            matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+        })
+    })
+}
+
+#[test]
+fn ctrl_c_in_direct_browser_stays_at_the_browser_prompt() -> Result<()> {
+    run_case("ctrl-c-direct-browser", &["--no-auto-match"], |terminal| {
+        terminal.submit_quiet("browser()", "Browse[1]>")?;
+        let row = terminal.state()?.cursor.y;
+        terminal.key("Ctrl+C")?;
+        terminal.wait_for("direct browser prompt after interrupt", |state, line| {
+            state.cursor.y > row && line.trim_end() == "Browse[1]>"
+        })?;
+        terminal.submit("sum(1:10)", "[1] 55", "Browse[1]>")?;
+        terminal.enter("Q")?;
+        terminal.wait_for(
+            "top-level prompt after leaving direct browser",
+            |_, line| matches!(line.trim_end(), PROMPT | ERROR_PROMPT),
+        )
+    })
+}
+
+#[test]
 // This is the portable user-input path; the Unix SIGINT profile case below
 // remains separate because it exercises an OS signal while R initializes.
 fn ctrl_c_interrupts_slow_startup_profile_before_its_end() -> Result<()> {

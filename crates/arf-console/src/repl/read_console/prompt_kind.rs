@@ -32,6 +32,14 @@ impl PromptKind {
 /// every other prompt, call sys.nframe() once to distinguish a top-level command
 /// prompt from input requested by user code (readline(), menu(), browser(), …).
 pub(super) fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
+    // R's browser() is primitive and can expose a browser prompt with
+    // sys.nframe() == 0, just like the ordinary command prompt. The raw
+    // Browse[n]> prompt is the reliable distinction; arf-libr uses the same
+    // predicate when validating the prompt options.
+    if arf_libr::is_browse_prompt(prompt) {
+        return PromptKind::Other;
+    }
+
     if is_continuation {
         return PromptKind::Continuation;
     }

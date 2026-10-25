@@ -81,8 +81,16 @@ pub struct ReadConsolePromptInfo {
 }
 
 /// ReadConsole callback receives the raw R prompt and option-derived metadata.
-type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<String>;
+type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> ReadConsoleResult;
 pub type HeadlessReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<ReadConsoleInput>;
+
+/// Result from the interactive ReadConsole callback.
+#[derive(Debug)]
+pub enum ReadConsoleResult {
+    Input(String),
+    Interrupt,
+    Eof,
+}
 
 /// One request-owned chunk for R's ReadConsole buffer.
 #[derive(Debug)]
@@ -240,6 +248,49 @@ pub(super) unsafe extern "C" fn r_read_console(
     buflen: c_int,
     hist: c_int,
 ) -> c_int {
+    // Keep the full callback implementation, including its owned values and
+    // input-wait guard, in a helper frame. Rf_onintr() can longjmp to an
+    // enclosing R context, so it must run only after that frame has returned
+    // and dropped all Rust values with destructors.
+    loop {
+        let result = unsafe { r_read_console_inner(prompt, buf, buflen, hist) };
+        if result != READ_CONSOLE_INTERRUPT {
+            return result;
+        }
+        let Ok(library) = crate::r_library() else {
+            return 0;
+        };
+        // R's standard terminal enables interrupts while reading console
+        // input, even inside suspendInterrupts(). Do the same only here,
+        // after the Rust input frames have returned. R restores its context's
+        // suspension state on a jump; if a handler resumes, restore it here.
+        let suspended = library.r_interrupts_suspended;
+        let previous = if suspended.is_null() {
+            0
+        } else {
+            unsafe {
+                let previous = std::ptr::read_volatile(suspended);
+                std::ptr::write_volatile(suspended, 0);
+                previous
+            }
+        };
+        unsafe { (library.rf_onintr)() };
+        if !suspended.is_null() {
+            unsafe { std::ptr::write_volatile(suspended, previous) };
+        }
+        // An interrupt handler can invoke the resume restart. Read again
+        // rather than submitting EOF or an empty browser step to R.
+    }
+}
+
+const READ_CONSOLE_INTERRUPT: c_int = 2;
+
+unsafe fn r_read_console_inner(
+    prompt: *const c_char,
+    buf: *mut c_char,
+    buflen: c_int,
+    hist: c_int,
+) -> c_int {
     log::info!("r_read_console: called with buflen={}", buflen);
 
     // Stop the spinner when a new prompt is displayed
@@ -343,11 +394,12 @@ pub(super) unsafe extern "C" fn r_read_console(
             if let Some(callback) = unsafe { READ_CONSOLE_CALLBACK } {
                 log::debug!("r_read_console: calling callback");
                 match callback(prompt_str, prompt_info) {
-                    Some(s) => {
+                    ReadConsoleResult::Input(s) => {
                         log::debug!("r_read_console: got input len={}", s.len());
                         s
                     }
-                    None => {
+                    ReadConsoleResult::Interrupt => return READ_CONSOLE_INTERRUPT,
+                    ReadConsoleResult::Eof => {
                         log::debug!("r_read_console: callback returned None (EOF)");
                         return 0; // EOF
                     }
@@ -412,7 +464,8 @@ unsafe fn write_read_console_input(
     1
 }
 
-fn is_browse_prompt(prompt: &str) -> bool {
+/// Whether a raw prompt is one of R's browser prompts (`Browse[n]>`).
+pub fn is_browse_prompt(prompt: &str) -> bool {
     let prompt = prompt.trim_end();
     let Some(number) = prompt
         .strip_prefix("Browse[")
@@ -428,7 +481,7 @@ fn is_browse_prompt(prompt: &str) -> bool {
 /// The callback receives the raw R prompt and option-derived metadata. The
 /// current `options(prompt)` and `options(continue)` values are read once for
 /// each ReadConsole invocation before the callback is called. The callback
-/// should return the user's input, or None to signal EOF (exit R).
+/// should return input, an interrupt, or EOF (exit R).
 pub fn set_read_console_callback(callback: ReadConsoleCallback) {
     unsafe {
         READ_CONSOLE_CALLBACK = Some(callback);
