@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- **Experimental:** Interactive Unix IPC sessions remove their socket on exit without deleting a replacement file or socket at the same path.
+- **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit.
 
 ## [0.7.0-beta.1] - 2026-10-24
 
