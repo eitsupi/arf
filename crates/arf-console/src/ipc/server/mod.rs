@@ -71,17 +71,22 @@ pub(super) struct SocketIdentity {
 #[cfg(unix)]
 impl SocketIdentity {
     fn from_path(path: &str) -> std::io::Result<Self> {
-        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        use std::os::unix::fs::FileTypeExt;
         let metadata = std::fs::symlink_metadata(path)?;
         if !metadata.file_type().is_socket() {
             return Err(std::io::Error::other(
                 "IPC socket path does not refer to a Unix socket",
             ));
         }
-        Ok(Self {
+        Ok(Self::from_metadata(&metadata))
+    }
+
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
             device: metadata.dev(),
             inode: metadata.ino(),
-        })
+        }
     }
 }
 
@@ -95,9 +100,9 @@ fn remove_owned_socket(path: &str, expected: Option<SocketIdentity>) {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return;
     };
-    // The caller keeps the listener open so other arf instances reject this
-    // path as active. A non-arf process forcibly replacing it between this
-    // check and unlink can still race; POSIX has no conditional unlink.
+    // Preserve paths already replaced since the identity was captured. A
+    // replacement between this check and unlink can still race; POSIX has
+    // no conditional unlink.
     if metadata.file_type().is_socket()
         && metadata.dev() == expected.device
         && metadata.ino() == expected.inode
@@ -296,8 +301,9 @@ pub fn stop_server() {
 
     let state = handle_store.lock().unwrap().take();
     if let Some(state) = state {
-        // Unlink while the listener is still accepting, before cancellation.
-        // Other arf instances then reject this path as active when probing it.
+        // Unlink before cancellation, keeping the old listener alive through
+        // cleanup. A later server may bind the freed path; the identity check
+        // in the old listener's guard preserves that new socket.
         // For auto-created directories (not custom --ipc-bind), also remove
         // the parent directory if it is now empty.
         #[cfg(unix)]
