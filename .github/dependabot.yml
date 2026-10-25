@@ -32,6 +32,9 @@ updates:
         - "rd-*"
         - "rd2qmd-*"
     groups:
+      patch:
+        update-types:
+          - patch
       reedline-rusqlite:
         patterns:
           - "reedline"
