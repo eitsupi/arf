@@ -150,28 +150,47 @@ fn select_socket_dir(pid: u32, candidates: &[std::path::PathBuf]) -> Option<(Str
 /// take over.
 #[cfg(unix)]
 pub(super) fn probe_stale_socket(socket_path: &str, custom_bind: bool) -> std::io::Result<()> {
-    use std::os::unix::fs::FileTypeExt;
     use std::os::unix::net::UnixStream;
-    match std::fs::symlink_metadata(socket_path) {
+
+    probe_stale_socket_with(
+        socket_path,
+        custom_bind,
+        std::fs::symlink_metadata(socket_path),
+        |path| UnixStream::connect(path).map(drop),
+    )
+}
+
+#[cfg(unix)]
+fn probe_stale_socket_with(
+    socket_path: &str,
+    custom_bind: bool,
+    metadata: std::io::Result<std::fs::Metadata>,
+    connect: impl FnOnce(&str) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use super::{SocketIdentity, remove_owned_socket};
+    use std::os::unix::fs::FileTypeExt;
+
+    match metadata {
         Ok(meta) if meta.file_type().is_socket() => {
             if custom_bind {
                 // Custom bind path: verify the socket is stale before removing
-                match UnixStream::connect(socket_path) {
+                match connect(socket_path) {
                     Ok(_) => {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::AlreadyExists,
                             format!("IPC socket already in use at path: {}", socket_path),
                         ));
                     }
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::ConnectionRefused
-                            || e.kind() == std::io::ErrorKind::NotFound =>
-                    {
-                        // ConnectionRefused: no listener (stale socket).
-                        // NotFound: socket disappeared between metadata
-                        // check and connect (race); safe to proceed.
-                        let _ = std::fs::remove_file(socket_path);
+                    Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                        // Only remove the socket observed before connecting.
+                        // The final identity check and unlink are not atomic.
+                        remove_owned_socket(
+                            socket_path,
+                            Some(SocketIdentity::from_metadata(&meta)),
+                        );
                     }
+                    // The socket disappeared. Do not unlink a later replacement.
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => {
                         return Err(std::io::Error::new(
                             e.kind(),
@@ -180,8 +199,8 @@ pub(super) fn probe_stale_socket(socket_path: &str, custom_bind: bool) -> std::i
                     }
                 }
             } else {
-                // Default PID-based path — safe to remove (same PID reuse)
-                let _ = std::fs::remove_file(socket_path);
+                // Retain PID-reuse cleanup, but preserve a replacement socket.
+                remove_owned_socket(socket_path, Some(SocketIdentity::from_metadata(&meta)));
             }
         }
         Ok(_) if custom_bind => {
@@ -193,9 +212,15 @@ pub(super) fn probe_stale_socket(socket_path: &str, custom_bind: bool) -> std::i
                 ),
             ));
         }
-        Ok(_) => {
-            // Default path (PID-based) — safe to remove
-            let _ = std::fs::remove_file(socket_path);
+        Ok(meta) => {
+            // Preserve cleanup of non-sockets at default PID-based paths,
+            // but only while the original entry still occupies the path.
+            // As with socket cleanup, this check and unlink are not atomic.
+            if let Ok(current) = std::fs::symlink_metadata(socket_path)
+                && SocketIdentity::from_metadata(&current) == SocketIdentity::from_metadata(&meta)
+            {
+                let _ = std::fs::remove_file(socket_path);
+            }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // Does not exist
         Err(e) => return Err(e), // Propagate unexpected errors (e.g. EACCES)
@@ -208,6 +233,41 @@ pub(super) fn probe_stale_socket(socket_path: &str, custom_bind: bool) -> std::i
 mod tests {
     use super::{is_dir_safe, random_hex_suffix, select_socket_dir};
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn probe_preserves_socket_replaced_after_metadata() {
+        use std::io::{Error, ErrorKind};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        for (custom_bind, connect_error, original_is_socket) in [
+            (true, ErrorKind::NotFound, true),
+            (true, ErrorKind::ConnectionRefused, true),
+            (false, ErrorKind::ConnectionRefused, true),
+            (false, ErrorKind::ConnectionRefused, false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("probe.sock");
+            // Keep the original inode alive so replacement cannot reuse it.
+            let _original_socket = original_is_socket.then(|| UnixListener::bind(&path).unwrap());
+            let _original_file =
+                (!original_is_socket).then(|| std::fs::File::create(&path).unwrap());
+            let metadata = std::fs::symlink_metadata(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            let _replacement = UnixListener::bind(&path).unwrap();
+
+            super::probe_stale_socket_with(
+                path.to_str().unwrap(),
+                custom_bind,
+                Ok(metadata),
+                |_| Err(Error::from(connect_error)),
+            )
+            .unwrap();
+
+            UnixStream::connect(&path).unwrap_or_else(|error| {
+                panic!("replacement lost (custom={custom_bind}, {connect_error:?}): {error}")
+            });
+        }
+    }
 
     #[test]
     fn random_hex_suffix_has_expected_format() {

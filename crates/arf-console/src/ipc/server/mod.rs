@@ -56,6 +56,82 @@ struct ServerState {
     /// path).  Only auto-created directories are cleaned up on shutdown.
     #[cfg_attr(windows, allow(dead_code))]
     auto_created_dir: bool,
+    #[cfg(unix)]
+    socket_identity: Option<SocketIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SocketIdentity {
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+#[cfg(unix)]
+impl SocketIdentity {
+    fn from_path(path: &str) -> std::io::Result<Self> {
+        use std::os::unix::fs::FileTypeExt;
+        let metadata = std::fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_socket() {
+            return Err(std::io::Error::other(
+                "IPC socket path does not refer to a Unix socket",
+            ));
+        }
+        Ok(Self::from_metadata(&metadata))
+    }
+
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn remove_owned_socket(path: &str, expected: Option<SocketIdentity>) {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let Some(expected) = expected else {
+        return;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    // Preserve paths already replaced since the identity was captured. A
+    // replacement between this check and unlink can still race; POSIX has
+    // no conditional unlink.
+    if metadata.file_type().is_socket()
+        && metadata.dev() == expected.device
+        && metadata.ino() == expected.inode
+    {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(unix)]
+pub(super) struct SocketPathGuard {
+    path: String,
+    identity: SocketIdentity,
+}
+
+#[cfg(unix)]
+impl SocketPathGuard {
+    pub(super) fn new(path: &str, identity: SocketIdentity) -> Self {
+        Self {
+            path: path.to_string(),
+            identity,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SocketPathGuard {
+    fn drop(&mut self) {
+        remove_owned_socket(&self.path, Some(self.identity));
+    }
 }
 
 /// Start the IPC server in a background thread.
@@ -119,7 +195,8 @@ pub fn start_server(
 
     // Channel for the server thread to confirm successful bind before we
     // write the session file.
-    let (bind_tx, bind_rx) = std::sync::mpsc::sync_channel::<Result<(), std::io::Error>>(1);
+    let (bind_tx, bind_rx) =
+        std::sync::mpsc::sync_channel::<Result<Option<SocketIdentity>, std::io::Error>>(1);
 
     let join_handle = std::thread::Builder::new()
         .name("arf-ipc-server".into())
@@ -162,8 +239,8 @@ pub fn start_server(
         })?;
 
     // Wait for the server thread to confirm that bind succeeded.
-    match bind_rx.recv() {
-        Ok(Ok(())) => {}
+    let _socket_identity = match bind_rx.recv() {
+        Ok(Ok(identity)) => identity,
         Ok(Err(e)) => {
             let _ = join_handle.join();
             return Err(e);
@@ -172,7 +249,7 @@ pub fn start_server(
             let _ = join_handle.join();
             return Err(std::io::Error::other("IPC server thread failed to start"));
         }
-    }
+    };
 
     // Store handle for later shutdown (lock is still held — no TOCTOU)
     *guard = Some(ServerState {
@@ -180,6 +257,8 @@ pub fn start_server(
         join_handle,
         socket_path: socket_path.clone(),
         auto_created_dir: dir_created,
+        #[cfg(unix)]
+        socket_identity: _socket_identity,
     });
 
     // Note: session metadata is cached in the server thread right before
@@ -222,17 +301,14 @@ pub fn stop_server() {
 
     let state = handle_store.lock().unwrap().take();
     if let Some(state) = state {
-        // Signal the server to stop; in-flight connection handlers will be
-        // dropped when the tokio runtime shuts down (acceptable for local IPC).
-        log::debug!("Shutting down IPC server, in-flight connections will be dropped");
-        state.cancel_token.cancel();
-
-        // Remove the socket pathname to prevent new clients from connecting
-        // during shutdown.  For auto-created directories (not custom --ipc-bind),
-        // also remove the parent directory if it is now empty.
+        // Unlink before cancellation, keeping the old listener alive through
+        // cleanup. A later server may bind the freed path; the identity check
+        // in the old listener's guard preserves that new socket.
+        // For auto-created directories (not custom --ipc-bind), also remove
+        // the parent directory if it is now empty.
         #[cfg(unix)]
         {
-            let _ = std::fs::remove_file(&state.socket_path);
+            remove_owned_socket(&state.socket_path, state.socket_identity);
             if state.auto_created_dir
                 && let Some(parent) = std::path::Path::new(&state.socket_path).parent()
             {
@@ -244,10 +320,80 @@ pub fn stop_server() {
             }
         }
 
+        // Signal the server to stop only after unlinking. In-flight connection
+        // handlers are dropped when the tokio runtime shuts down.
+        log::debug!("Shutting down IPC server, in-flight connections will be dropped");
+        state.cancel_token.cancel();
+
         // Wait for the server thread to finish
         let _ = state.join_handle.join();
 
         // Remove session metadata
         remove_session(std::process::id());
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_preserves_replacement_at_socket_path() {
+        use super::{SocketIdentity, remove_owned_socket};
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owned.sock");
+        let _listener = UnixListener::bind(&path).unwrap();
+        let identity = SocketIdentity::from_path(path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "replacement sentinel").unwrap();
+
+        remove_owned_socket(path.to_str().unwrap(), Some(identity));
+
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "replacement sentinel"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_guard_removes_its_socket_when_dropped() {
+        use super::{SocketIdentity, SocketPathGuard};
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owned.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let identity = SocketIdentity::from_path(path.to_str().unwrap()).unwrap();
+        let guard = SocketPathGuard::new(path.to_str().unwrap(), identity);
+        assert_eq!(
+            super::socket_path::probe_stale_socket(path.to_str().unwrap(), true)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        drop(guard);
+        assert!(!path.exists(), "owned socket remained after guard drop");
+        drop(listener);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_guard_preserves_replacement_after_prior_cleanup() {
+        use super::{SocketIdentity, SocketPathGuard, remove_owned_socket};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owned.sock");
+        let _listener = UnixListener::bind(&path).unwrap();
+        let identity = SocketIdentity::from_path(path.to_str().unwrap()).unwrap();
+        let guard = SocketPathGuard::new(path.to_str().unwrap(), identity);
+
+        remove_owned_socket(path.to_str().unwrap(), Some(identity));
+        let _replacement = UnixListener::bind(&path).unwrap();
+        drop(guard);
+
+        UnixStream::connect(&path).expect("guard removed the replacement socket");
     }
 }

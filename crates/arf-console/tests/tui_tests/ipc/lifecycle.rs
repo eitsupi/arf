@@ -90,20 +90,62 @@ fn custom_ipc_bind_uses_cli_transport_and_cleans_up_metadata() -> Result<()> {
             .as_deref()
             .context("custom-bind metadata path was not captured")?,
     )?;
-    // The interactive exit path removes session metadata, but currently
-    // leaves a custom Unix socket pathname behind. Do not delete or hide that
-    // product lifecycle gap in this migration test.
+    #[cfg(unix)]
+    ensure!(
+        !Path::new(&bind_path).exists(),
+        "custom Unix IPC socket remained after interactive exit: {bind_path}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_ipc_cleanup_preserves_replacement_socket() -> Result<()> {
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::net::UnixListener;
+
+    let temp = tempfile::tempdir()?;
+    let bind_path = custom_bind_path(temp.path());
+    let mut replacement_listener = None;
+    run_case_with(
+        Terminal::builder("ipc-custom-bind-replacement").args([
+            "--with-ipc",
+            "--ipc-bind",
+            bind_path.as_str(),
+        ]),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            fs::remove_file(&bind_path)?;
+            replacement_listener = Some(UnixListener::bind(&bind_path)?);
+            terminal.key("Ctrl+D")?;
+            ensure!(
+                terminal.wait_for_exit()? == 0,
+                "custom-bind Ctrl+D did not exit successfully"
+            );
+            Ok(())
+        },
+    )?;
+    let metadata = fs::symlink_metadata(&bind_path)?;
+    ensure!(
+        metadata.file_type().is_socket(),
+        "replacement socket was removed during IPC cleanup"
+    );
+    drop(replacement_listener);
+    fs::remove_file(bind_path)?;
     Ok(())
 }
 
 #[test]
 fn ipc_pid_file_is_created_and_removed_after_q_exit() -> Result<()> {
     let temp = tempfile::tempdir()?;
+    let bind_path = custom_bind_path(temp.path());
     let pid_path = temp.path().join("arf.pid");
     let mut metadata_path = None;
     run_case_with(
         Terminal::builder("ipc-pid-file-q").args([
             "--with-ipc",
+            "--ipc-bind",
+            bind_path.as_str(),
             "--ipc-pid-file",
             pid_path.to_string_lossy().as_ref(),
         ]),
@@ -124,6 +166,8 @@ fn ipc_pid_file_is_created_and_removed_after_q_exit() -> Result<()> {
             .as_deref()
             .context("q() metadata path was not captured")?,
     )?;
+    #[cfg(unix)]
+    wait_for_path_absent(Path::new(&bind_path))?;
     Ok(())
 }
 
@@ -161,6 +205,7 @@ fn ipc_pid_file_is_removed_after_ctrl_d_exit() -> Result<()> {
 #[test]
 fn existing_ipc_pid_file_is_rejected_without_mutation() -> Result<()> {
     let temp = tempfile::tempdir()?;
+    let bind_path = custom_bind_path(temp.path());
     let pid_path = temp.path().join("arf.pid");
     let sentinel = "existing-pid-file-sentinel";
     fs::write(&pid_path, sentinel)?;
@@ -168,6 +213,8 @@ fn existing_ipc_pid_file_is_rejected_without_mutation() -> Result<()> {
     run_case_with(
         Terminal::builder("ipc-pid-file-existing").args([
             "--with-ipc",
+            "--ipc-bind",
+            bind_path.as_str(),
             "--ipc-pid-file",
             pid_path.to_string_lossy().as_ref(),
         ]),
@@ -195,5 +242,7 @@ fn existing_ipc_pid_file_is_rejected_without_mutation() -> Result<()> {
             .as_deref()
             .context("rejected-startup metadata path was not captured")?,
     )?;
+    #[cfg(unix)]
+    wait_for_path_absent(Path::new(&bind_path))?;
     Ok(())
 }
