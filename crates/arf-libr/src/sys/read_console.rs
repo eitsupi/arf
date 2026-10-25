@@ -242,7 +242,7 @@ static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 ///
 /// # Safety
 /// This function is called by R and must match the expected signature.
-pub(super) unsafe extern "C" fn r_read_console(
+pub(super) unsafe extern "C-unwind" fn r_read_console(
     prompt: *const c_char,
     buf: *mut c_char,
     buflen: c_int,

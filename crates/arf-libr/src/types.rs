@@ -113,7 +113,7 @@ pub const CE_BYTES: c_int = 3;
 
 /// Pointer to C function for console read callback.
 pub type ReadConsoleFunc = Option<
-    unsafe extern "C" fn(
+    unsafe extern "C-unwind" fn(
         prompt: *const c_char,
         buf: *mut c_char,
         buflen: c_int,

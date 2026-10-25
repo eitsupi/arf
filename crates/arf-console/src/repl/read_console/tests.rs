@@ -53,16 +53,16 @@ fn prepared_help_is_drained_only_at_a_command_prompt_outside_shell_mode() {
 
 #[test]
 fn prompt_classification_prioritizes_low_level_continuation_status() {
-    assert_eq!(classify_prompt("... ", true), PromptKind::Continuation,);
+    assert_eq!(classify_prompt("... ", true, 1), PromptKind::Continuation,);
 }
 
 #[test]
 fn prompt_classification_falls_back_for_uninitialized_r() {
-    let prompt_kind = classify_prompt("> ", false);
+    let prompt_kind = classify_prompt("> ", false, 1);
     assert_eq!(prompt_kind, PromptKind::UnverifiedCommand);
     assert!(prompt_kind.is_command());
     assert!(!prompt_kind.is_verified_command());
-    assert_eq!(classify_prompt("Selection: ", false), PromptKind::Other,);
+    assert_eq!(classify_prompt("Selection: ", false, 1), PromptKind::Other,);
 }
 
 #[test]

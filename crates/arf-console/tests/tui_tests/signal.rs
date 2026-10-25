@@ -86,6 +86,32 @@ fn ctrl_c_interrupts_readline_without_assigning_a_value() -> Result<()> {
 }
 
 #[test]
+fn ctrl_c_interrupts_readline_with_the_continuation_prompt() -> Result<()> {
+    // Match R's prompt spacing so the old classification reaches the
+    // assignment check instead of failing on a different cursor position.
+    run_case_with(
+        Terminal::builder("ctrl-c-readline-continuation")
+            .args(["--no-auto-match"])
+            .config(
+                r#"[prompt]
+format = '{status}ARF> '
+continuation = '+ '
+[prompt.status.symbol]
+error = 'ERR '
+"#,
+            ),
+        |terminal| {
+            terminal.submit_quiet(r#"answer <- readline(getOption("continue"))"#, "+")?;
+            terminal.key("Ctrl+C")?;
+            terminal.wait_for("top-level prompt after readline interrupt", |_, line| {
+                matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+            })?;
+            terminal.submit(r#"exists("answer")"#, "[1] FALSE", PROMPT)
+        },
+    )
+}
+
+#[test]
 fn ctrl_c_interrupts_menu_and_returns_to_top_level() -> Result<()> {
     run_case("ctrl-c-menu", &["--no-auto-match"], |terminal| {
         terminal.submit_quiet(r#"menu(c("a", "b"))"#, "Selection:")?;

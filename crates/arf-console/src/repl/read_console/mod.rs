@@ -67,7 +67,7 @@ pub(super) fn read_console_callback(
         // supplies their metadata here. Classify the prompt once so every
         // lifecycle, IPC, display, menu, formatter, and history decision shares
         // one value.
-        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation);
+        let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation, prompt_info.hist);
 
         initialize_error_handler_once(state, prompt_kind);
 

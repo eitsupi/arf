@@ -28,10 +28,15 @@ impl PromptKind {
 
 /// Classify a ReadConsole prompt once per callback.
 ///
-/// Continuation status comes directly from R's low-level option lookup. For
-/// every other prompt, call sys.nframe() once to distinguish a top-level command
-/// prompt from input requested by user code (readline(), menu(), browser(), …).
-pub(super) fn classify_prompt(prompt: &str, is_continuation: bool) -> PromptKind {
+/// Reads with hist == 0 are input requests from R code, even when their prompt
+/// matches the continuation option. Continuation status otherwise comes from
+/// R's low-level option lookup. Browser prompts are recognized explicitly; for
+/// other prompts, sys.nframe() distinguishes command input from R input requests.
+pub(super) fn classify_prompt(prompt: &str, is_continuation: bool, hist: i32) -> PromptKind {
+    if hist == 0 {
+        return PromptKind::Other;
+    }
+
     // R's browser() is primitive and can expose a browser prompt with
     // sys.nframe() == 0, just like the ordinary command prompt. The raw
     // Browse[n]> prompt is the reliable distinction; arf-libr uses the same

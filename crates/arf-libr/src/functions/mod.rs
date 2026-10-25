@@ -139,7 +139,7 @@ pub struct RLibrary {
     /// Get an R option directly without evaluating R code.
     pub rf_get_option1: unsafe extern "C" fn(SEXP) -> SEXP,
     /// Invoke R's standard interrupt handler. This can longjmp to an enclosing R context.
-    pub rf_onintr: unsafe extern "C" fn(),
+    pub rf_onintr: unsafe extern "C-unwind" fn(),
 
     // Stack limit (for embedded R)
     pub r_cstacklimit: *mut usize,
