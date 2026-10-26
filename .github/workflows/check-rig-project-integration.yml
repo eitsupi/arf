@@ -91,7 +91,7 @@ jobs:
           working_directory: .github/rig-project-integration
           version: 2026.4.22
           install_args: --locked
-      - name: Install isolated R versions with rig 0.11.0
+      - name: Install isolated R versions with rig 0.11.1
         run: |
           versions=(4.6.1)
           # All OSes validate provider startup; keep the full switch proof on macOS to cover DYLD
