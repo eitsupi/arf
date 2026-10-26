@@ -2,7 +2,7 @@
 lockfile = true
 
 [tools."github:r-lib/rig"]
-version = "0.11.0"
+version = "0.11.1"
 bin_path = "bin"
 
 [tools."github:r-lib/rig".platforms]

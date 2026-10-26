@@ -729,13 +729,11 @@ def compare_switch_proofs(homes, baselines):
                     errors.append(f"{stage}: jsonlite package did not load from the project library")
                 elif not observed["jsonlite_dll"].replace("\\", "/").casefold().startswith(project_lib + "/"):
                     errors.append(f"{stage}: jsonlite DLL did not load from the project library")
-            # TODO: Restore the mismatch assertions after https://github.com/r-lib/rig/issues/450
-            # is fixed: RVENV should be unset and the incompatible project library absent.
-            # else:
-            #     if observed["rvenv"]:
-            #         errors.append(f"{stage}: stale RVENV was retained after the R minor mismatch")
-            #     if any(item.replace("\\", "/").casefold() == project_lib for item in observed["lib_paths"]):
-            #         errors.append(f"{stage}: incompatible project library remains in .libPaths()")
+            else:
+                if observed["rvenv"]:
+                    errors.append(f"{stage}: stale RVENV was retained after the R minor mismatch")
+                if any(item.replace("\\", "/").casefold() == project_lib for item in observed["lib_paths"]):
+                    errors.append(f"{stage}: incompatible project library remains in .libPaths()")
             if stage in ("switch-same-minor", "switch-different-minor", "restart-different-minor"):
                 target_lib = str((Path(homes[version]) / "lib").resolve()).replace("\\", "/").casefold()
                 loader_paths = [item.replace("\\", "/").casefold() for item in observed["dyld_library_path"].split(os.pathsep) if item]
@@ -752,17 +750,13 @@ def compare_switch_proofs(homes, baselines):
         "same-minor-after-invalid": ("xxx", "xx"),
         "switch-same-minor": ("xxx", "xx"),
         "switch-different-minor": ("xxxx", "xxx"),
-        # TODO: Restore the `xxxx` home .Renviron read-count expectation after rig issue #450
-        # (https://github.com/r-lib/rig/issues/450) is fixed. RVENV incorrectly remains active
-        # after the mismatch, so rig skips rereading home .Renviron.
-        # "restart-different-minor": ("xxxxx", "xxxx"),
-        "restart-different-minor": ("xxxxx", None),
+        "restart-different-minor": ("xxxxx", "xxxx"),
     }
     for stage, (project_reads, home_reads) in read_counts.items():
         if stage in records:
             if records[stage]["renviron_reads"] != project_reads:
                 errors.append(f"{stage}: project .Renviron read marker is not {project_reads!r}")
-            if home_reads is not None and records[stage]["home_renviron_reads"] != home_reads:
+            if records[stage]["home_renviron_reads"] != home_reads:
                 errors.append(f"{stage}: home .Renviron read marker is not {home_reads!r}")
     return records, errors
 
@@ -770,11 +764,11 @@ def compare_switch_proofs(homes, baselines):
 def main():
     rig = shutil.which("rig")
     if not rig:
-        raise RuntimeError("rig 0.11.0 is not on PATH")
+        raise RuntimeError("rig 0.11.1 is not on PATH")
     version_result, version_record = run("rig-version", [rig, "--version"], cwd=ROOT)
     require(version_result, "rig version")
-    if "0.11.0" not in version_record["stdout"]:
-        raise RuntimeError(f"this experiment requires released rig 0.11.0: {version_record['stdout']}")
+    if "0.11.1" not in version_record["stdout"]:
+        raise RuntimeError(f"this experiment requires released rig 0.11.1: {version_record['stdout']}")
 
     mode = "user" if ENV["RIG_MODE"] == "user" else "admin"
     init, init_record = run("rig-project-init", rig_command(mode, "proj", "init", "--r-version", R_VERSION))
@@ -791,14 +785,16 @@ jsonlite = "*"
 ''',
         encoding="utf-8",
     )
+    # Rig 0.11.1 changed the generated R_LIBS_USER quoting. Recreate its
+    # generated .Renviron from the lock before adding the proof markers.
+    (PROJECT / ".Renviron").unlink(missing_ok=True)
+    lock, lock_record = run("rig-project-lock", rig_command(mode, "proj", "lock", "--r-version", R_VERSION))
+    require(lock, "rig proj lock")
     with (PROJECT / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(
             f'\nRIG_PROJECT_MARKER={MARKER}\n'
             'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
         )
-
-    lock, lock_record = run("rig-project-lock", rig_command(mode, "proj", "lock", "--r-version", R_VERSION))
-    require(lock, "rig proj lock")
     sync, sync_record = run("rig-project-sync", rig_command(mode, "proj", "sync", "--no-install-r"))
     require(sync, "rig proj sync")
     status, status_record = run("rig-project-status", rig_command(mode, "proj", "status", "--json"))
@@ -846,7 +842,7 @@ jsonlite = "*"
 
     outcomes = {
         "rig_version": version_record["stdout"].strip(),
-        "version_context": "released rig 0.11.0 user-mode fixture",
+        "version_context": "released rig 0.11.1 user-mode fixture",
         "arf_startup": "explicit rig-project provider startup, script mode, and headless IPC package loading; macOS also checks version switching and project-CWD restart",
         "comparison": "startup compares the native rig wrapper with arf; project-CWD restart compares inherited and clean native baselines; switch baselines use arf-resolved native R binaries",
         "rig_project_resolution": resolution_records,
@@ -1025,17 +1021,18 @@ R = "=4.6.0"
 ''',
             encoding="utf-8",
         )
-        with (PROJECT_B / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(
-                '\nRIG_PROJECT_MARKER=rig-project-b-renviron-loaded\n'
-                'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
-            )
+        (PROJECT_B / ".Renviron").unlink(missing_ok=True)
         lock_b, lock_b_record = run(
             "rig-project-b-lock",
             rig_command(mode, "proj", "lock", "--r-version", "4.6.0"),
             cwd=PROJECT_B,
         )
         require(lock_b, "rig proj lock for project B")
+        with (PROJECT_B / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(
+                '\nRIG_PROJECT_MARKER=rig-project-b-renviron-loaded\n'
+                'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
+            )
         sync_b, sync_b_record = run(
             "rig-project-b-sync", rig_command(mode, "proj", "sync", "--no-install-r"),
             cwd=PROJECT_B,

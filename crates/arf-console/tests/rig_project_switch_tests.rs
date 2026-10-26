@@ -44,7 +44,7 @@ fn capture_proof(terminal: &Terminal, script: &Path, directory: &Path, stage: &s
 }
 
 #[test]
-#[ignore = "requires rig 0.11.0 and three isolated R installations"]
+#[ignore = "requires rig 0.11.1 and three isolated R installations"]
 fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()> {
     let state = state()?;
     let project = required_path(&state, "project")?;
@@ -145,7 +145,7 @@ fn rig_project_restart_and_switch_preserve_the_selected_r_context() -> Result<()
 }
 
 #[test]
-#[ignore = "requires rig 0.11.0 and synchronized project roots using R 4.6.1 and 4.6.0"]
+#[ignore = "requires rig 0.11.1 and synchronized project roots using R 4.6.1 and 4.6.0"]
 fn rig_project_restart_reevaluates_the_current_working_directory() -> Result<()> {
     let state = state()?;
     let project = required_path(&state, "project")?;
