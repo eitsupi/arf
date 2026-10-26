@@ -4,7 +4,6 @@
 
 ### Changed
 
-- **Experimental:** Rig project integration now targets rig 0.11.1, which fixes incompatible project libraries remaining active after switching R minor versions. Existing projects must run `rig proj sync` with the updated rig; updating the binary alone does not repair project activation.
 - **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection` (#476).
 
 ### Fixed

@@ -785,16 +785,14 @@ jsonlite = "*"
 ''',
         encoding="utf-8",
     )
-    # Rig 0.11.1 changed the generated R_LIBS_USER quoting. Recreate its
-    # generated .Renviron from the lock before adding the proof markers.
-    (PROJECT / ".Renviron").unlink(missing_ok=True)
-    lock, lock_record = run("rig-project-lock", rig_command(mode, "proj", "lock", "--r-version", R_VERSION))
-    require(lock, "rig proj lock")
     with (PROJECT / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(
             f'\nRIG_PROJECT_MARKER={MARKER}\n'
             'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
         )
+
+    lock, lock_record = run("rig-project-lock", rig_command(mode, "proj", "lock", "--r-version", R_VERSION))
+    require(lock, "rig proj lock")
     sync, sync_record = run("rig-project-sync", rig_command(mode, "proj", "sync", "--no-install-r"))
     require(sync, "rig proj sync")
     status, status_record = run("rig-project-status", rig_command(mode, "proj", "status", "--json"))
@@ -1021,18 +1019,17 @@ R = "=4.6.0"
 ''',
             encoding="utf-8",
         )
-        (PROJECT_B / ".Renviron").unlink(missing_ok=True)
+        with (PROJECT_B / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(
+                '\nRIG_PROJECT_MARKER=rig-project-b-renviron-loaded\n'
+                'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
+            )
         lock_b, lock_b_record = run(
             "rig-project-b-lock",
             rig_command(mode, "proj", "lock", "--r-version", "4.6.0"),
             cwd=PROJECT_B,
         )
         require(lock_b, "rig proj lock for project B")
-        with (PROJECT_B / ".Renviron").open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(
-                '\nRIG_PROJECT_MARKER=rig-project-b-renviron-loaded\n'
-                'ARF_RIG_RENVIRON_READS="${ARF_RIG_RENVIRON_READS}x"\n'
-            )
         sync_b, sync_b_record = run(
             "rig-project-b-sync", rig_command(mode, "proj", "sync", "--no-install-r"),
             cwd=PROJECT_B,
