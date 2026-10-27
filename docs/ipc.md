@@ -178,7 +178,7 @@ All `arf ipc` subcommands connect to a running arf session. If only one session 
 
 ### Output Format
 
-All IPC action subcommands (`list`, `eval`, `send`, `session`, `shutdown`, `history`) output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
+All IPC action subcommands (`list`, `eval`, `send`, `session`, `shutdown`, `interrupt`, `history`) output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
 
 ```json
 {
@@ -278,6 +278,9 @@ are always rejected in restricted mode. Syntax errors and policy violations
 are rejected before R evaluation and history recording.
 `evaluate` and `user_input` also reject code containing a NUL character before
 dispatch in both interactive and headless sessions.
+An interrupted `arf ipc eval` returns its usual JSON result with an `error`
+message identifying the interruption; check `execution_id` to correlate it
+with `arf.execution_completed`.
 `--ipc-eval-unrestricted` is a startup-only escape hatch. This policy is not an
 R sandbox and does not promise that an allowed function is non-mutating. Evaluating
 a bare identifier can itself run code by forcing a promise or triggering an active
@@ -587,6 +590,30 @@ arf ipc shutdown --pid 12345
 
 **Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`
 
+### `arf ipc interrupt` — Interrupt an IPC Evaluation
+
+Request interruption of the active IPC-originated user-code evaluation in a
+headless or interactive session. The request is handled while R is busy and
+does not shut down the session. It cannot interrupt terminal-originated
+commands or handler calls. An optional execution ID prevents a stale client
+from interrupting a later evaluation; without one, the server targets the
+execution active when it receives the request.
+
+Interruption is cooperative: R and native code may not check for an interrupt
+immediately, so this command does not guarantee an immediate stop.
+
+```sh
+arf ipc interrupt
+arf ipc interrupt --pid 12345
+arf ipc interrupt --execution-id 7
+```
+
+**Output format:** JSON object with `accepted` and `execution_id`. A false
+`accepted` means there was no eligible active execution matching the optional
+ID; `execution_id` is null. A true value means the request was registered and
+`execution_id` identifies its target; the evaluation response and
+`arf.execution_completed` event report its final outcome.
+
 ## IPC in Interactive REPL
 
 You can enable IPC in the interactive REPL without headless mode:
@@ -723,6 +750,7 @@ Connection: close
 |--------|-----------|-------------|
 | `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
 | `user_input` | `code` (string) | Send code as user input |
+| `interrupt` | `execution_id` (int, optional) | Request interruption of the active IPC user-code execution |
 | `session` | *(none)* | Get session information |
 | `history` | `limit` (int, default 50), `all_sessions` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
@@ -856,7 +884,13 @@ code in interactive and headless sessions:
 terminal input or the originating IPC connection's numeric ID (including
 single-shot connections). `kind` is `"user_code"`; `visible` distinguishes
 normal REPL execution from silent evaluation. `status` is `"ok"`, `"error"`, or
-`"unknown"` when a reliable outcome is unavailable.
+`"interrupted"` when an IPC interrupt stopped the execution, or `"unknown"`
+when a reliable outcome is unavailable. An interrupted `evaluate` result also
+contains an `error` message identifying the interruption. Requests are
+cooperative, so an accepted interrupt can race with normal completion. If
+visible or `send` code handles the interrupt condition and then raises another
+error, the execution is still reported as `"interrupted"`; the original error
+message remains in `stderr`.
 
 One completion event covers one submitted terminal input or one `evaluate` /
 `user_input` request, even if it contains multiple expressions. Silent evaluations
