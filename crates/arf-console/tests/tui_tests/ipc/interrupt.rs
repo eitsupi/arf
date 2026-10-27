@@ -101,6 +101,77 @@ fn ipc_interrupt_stops_visible_evaluation_and_preserves_the_repl() -> Result<()>
 }
 
 #[test]
+fn ipc_interrupt_after_a_handled_nested_read_interrupt_still_stops_evaluation() -> Result<()> {
+    run_case(
+        "ipc-interrupt-handled-nested-read",
+        &["--with-ipc", "--ipc-eval-unrestricted"],
+        |terminal| {
+            let evaluation = terminal.start_ipc(&[
+                "eval",
+                r#"tryCatch(readline("HANDLED_READLINE? "), interrupt = function(e) NULL); cat("HANDLED_RESUMED\n"); Sys.sleep(30)"#,
+                "--visible",
+                "--timeout",
+                "30000",
+            ])?;
+            terminal.wait_for("visible IPC approval", |state, line| {
+                state.text.contains("IPC send request:") && line.contains("Press y to approve")
+            })?;
+            terminal.key("y")?;
+            terminal.wait_for("nested readline prompt", |state, _| {
+                state
+                    .text
+                    .lines()
+                    .any(|line| line.trim().starts_with("HANDLED_READLINE?"))
+            })?;
+
+            // The first interrupt is caught by the handler, so the evaluation
+            // continues past the readline() call.
+            let first = terminal.start_ipc(&["interrupt"])?.finish()?;
+            ensure!(
+                first["accepted"] == true,
+                "nested read interrupt was not accepted: {first}"
+            );
+            terminal.wait_for(
+                "evaluation resumes after the handled interrupt",
+                |state, _| {
+                    state
+                        .text
+                        .lines()
+                        .any(|line| line.trim() == "HANDLED_RESUMED")
+                },
+            )?;
+
+            // The evaluation is now computing again, so a second interrupt must
+            // reach R and stop the sleep.
+            let started = Instant::now();
+            let second = terminal.start_ipc(&["interrupt"])?.finish()?;
+            ensure!(
+                second["accepted"] == true,
+                "second interrupt was not accepted: {second}"
+            );
+            let result = evaluation.finish_with_status()?;
+            ensure!(
+                started.elapsed() < Duration::from_secs(15),
+                "second interrupt did not stop the evaluation promptly: {:?}",
+                started.elapsed()
+            );
+            ensure!(
+                result.json["error"]
+                    .as_str()
+                    .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
+                "evaluation did not report interruption: {}",
+                result.json
+            );
+
+            terminal.wait_for("prompt after the second interrupt", |_, line| {
+                matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+            })?;
+            terminal.submit("6 * 7", "[1] 42", PROMPT)
+        },
+    )
+}
+
+#[test]
 fn ipc_interrupt_targets_silent_send_and_not_terminal_code() -> Result<()> {
     run_case(
         "ipc-interrupt-origins",

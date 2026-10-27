@@ -265,7 +265,7 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     // input-wait guard, in a helper frame. Rf_onintr() can longjmp to an
     // enclosing R context, so it must run only after that frame has returned
     // and dropped all Rust values with destructors.
-    let previous_execution = begin_read_console_input();
+    let mut previous_execution = begin_read_console_input();
     loop {
         let result = unsafe { r_read_console_inner(prompt, buf, buflen, hist) };
         if result != READ_CONSOLE_INTERRUPT {
@@ -281,6 +281,11 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
         if discarded_input {
             mark_ipc_interrupt_discarded();
         }
+        // Rf_onintr() may longjmp out of this frame when a handler exits, and
+        // the code that continues from there never reaches the normal return
+        // path above. Leave the input phase before handing control to R, so
+        // later IPC interrupt requests reach R's flag while the evaluation runs.
+        finish_read_console_input(previous_execution, false);
         let Ok(library) = crate::r_library() else {
             return 0;
         };
@@ -303,7 +308,9 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
             unsafe { std::ptr::write_volatile(suspended, previous) };
         }
         // An interrupt handler can invoke the resume restart. Read again
-        // rather than submitting EOF or an empty browser step to R.
+        // rather than submitting EOF or an empty browser step to R, and
+        // re-enter the input phase for that read.
+        previous_execution = begin_read_console_input();
     }
 }
 
