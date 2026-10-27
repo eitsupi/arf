@@ -152,6 +152,23 @@ pub struct ShutdownResult {
     pub accepted: bool,
 }
 
+/// Parameters for the `interrupt` method.
+#[derive(Debug, Deserialize)]
+pub struct InterruptParams {
+    /// Interrupt only the execution with this ID, if it is still active.
+    #[serde(default)]
+    pub execution_id: Option<u64>,
+}
+
+/// Result of the `interrupt` method.
+#[derive(Debug, Serialize)]
+pub struct InterruptResult {
+    /// Whether an interrupt request was registered for an active IPC execution.
+    pub accepted: bool,
+    /// ID of the execution targeted at acceptance time, when one was active.
+    pub execution_id: Option<super::events::ExecutionId>,
+}
+
 use super::policy::IpcPolicy;
 
 /// R session information collected from base R functions.

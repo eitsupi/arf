@@ -27,8 +27,12 @@ pub use error_state::{
 };
 pub use init::{initialize_r, initialize_r_for_tests, initialize_r_with_args, run_r_mainloop};
 pub use interrupt::{
-    ConsoleEvaluationInterruptGuard, is_r_awaiting_console_input, is_r_interrupt_flag_available,
-    process_r_events, process_r_events_protected, set_r_interrupt_pending,
+    ConsoleEvaluationInterruptGuard, InterruptPhase, begin_ipc_execution,
+    begin_ipc_execution_finishing, begin_read_console_input, finish_ipc_execution,
+    is_r_awaiting_console_input, is_r_interrupt_flag_available, mark_ipc_interrupt_discarded,
+    mark_ipc_interrupt_observed, process_r_events, process_r_events_protected,
+    request_ipc_interrupt, set_ipc_execution_phase, set_r_interrupt_pending,
+    take_ipc_interrupt_request,
 };
 pub use output::{
     finish_ipc_capture, flush_reprex_buffer, set_reprex_mode, set_write_console_callback,

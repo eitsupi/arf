@@ -212,6 +212,9 @@ fn check_visible_eval_completion() {
         // Finish WriteConsoleEx capture and collect output
         let mut result = execution::finish_visible_eval();
         result.execution_id = Some(pending.execution_id);
+        if execution::was_execution_interrupted(pending.execution_id) {
+            result.error = Some("Evaluation interrupted".to_string());
+        }
 
         let _ = pending.reply.send(IpcResponse::Evaluate(result));
 

@@ -65,6 +65,27 @@ fn test_ipc_send_stdin_fallback() {
 }
 
 #[test]
+fn test_ipc_interrupt_accepts_pid_and_execution_id() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+    let output = sanitized_arf_command()
+        .args(["ipc", "interrupt", "--pid", "12345", "--execution-id", "7"])
+        .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
+        .output()
+        .expect("Failed to run arf ipc interrupt");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+        "interrupt options should parse before session resolution: stdout={stdout}, stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains("unexpected argument") && !stderr.contains("invalid value"),
+        "interrupt CLI arguments should be accepted: {stderr}"
+    );
+}
+
+#[test]
 fn test_ipc_list_ignores_empty_arf_config() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
 

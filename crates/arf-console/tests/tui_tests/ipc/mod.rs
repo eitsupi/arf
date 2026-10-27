@@ -4,6 +4,7 @@ mod approval;
 mod completion;
 mod expose;
 mod handlers;
+mod interrupt;
 mod lifecycle;
 mod raw_rpc;
 mod silent_visible;

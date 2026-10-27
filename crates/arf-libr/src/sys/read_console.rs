@@ -58,7 +58,10 @@ unsafe extern "C-unwind" fn frame_depth_callback(payload: *mut std::ffi::c_void)
 
 #[cfg(unix)]
 use super::askpass::{ASKPASS_PROMPT_PREFIX, read_password_from_tty, recover_pending_termios};
-use super::interrupt::{AwaitConsoleInputGuard, clear_r_interrupt_pending};
+use super::interrupt::{
+    AwaitConsoleInputGuard, begin_read_console_input, finish_read_console_input,
+    mark_ipc_interrupt_discarded, take_ipc_interrupt_request,
+};
 use super::output::REPREX_SETTINGS;
 use super::spinner::stop_spinner;
 
@@ -98,6 +101,8 @@ pub struct ReadConsoleInput {
     pub text: String,
     /// True when R should call ReadConsole again for the rest of this line.
     pub has_more: bool,
+    /// Return through the interrupt path after the callback's Rust frames end.
+    pub interrupt: bool,
 }
 
 /// Find the end of the next UTF-8-safe ReadConsole chunk.
@@ -236,7 +241,15 @@ fn read_console_prompt_info(raw_prompt: &str) -> ReadConsolePromptInfo {
 /// and returned on subsequent ReadConsole calls.
 ///
 /// Note: This is accessed only from R's main thread in the ReadConsole callback.
-static PENDING_INPUT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+struct PendingConsoleInput {
+    text: String,
+    depth: c_int,
+    nested_prompt: bool,
+    generation: u64,
+}
+
+static PENDING_INPUT: std::sync::Mutex<Vec<PendingConsoleInput>> =
+    std::sync::Mutex::new(Vec::new());
 
 /// R's ReadConsole callback.
 ///
@@ -252,10 +265,21 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     // input-wait guard, in a helper frame. Rf_onintr() can longjmp to an
     // enclosing R context, so it must run only after that frame has returned
     // and dropped all Rust values with destructors.
+    let previous_execution = begin_read_console_input();
     loop {
         let result = unsafe { r_read_console_inner(prompt, buf, buflen, hist) };
         if result != READ_CONSOLE_INTERRUPT {
+            finish_read_console_input(previous_execution, result == 1);
             return result;
+        }
+        let discarded_input = {
+            let mut pending = PENDING_INPUT.lock().unwrap();
+            let discarded = !pending.is_empty();
+            pending.clear();
+            discarded
+        };
+        if discarded_input {
+            mark_ipc_interrupt_discarded();
         }
         let Ok(library) = crate::r_library() else {
             return 0;
@@ -300,7 +324,6 @@ unsafe fn r_read_console_inner(
     // Clear any pending interrupt flag at the start of every ReadConsole
     // invocation (including nested prompts such as readline(), browser(), etc.).
     // This prevents stale Ctrl+C signals from interrupting the next input read.
-    clear_r_interrupt_pending();
 
     // Safety net: if a previous password read (via rpassword) was interrupted
     // by longjmp (SIGINT), the terminal settings snapshot stored in
@@ -374,19 +397,38 @@ unsafe fn r_read_console_inner(
         let Some(input) = callback(prompt_str, prompt_info) else {
             return 0;
         };
+        if input.interrupt {
+            return READ_CONSOLE_INTERRUPT;
+        }
         return unsafe { write_read_console_input(input, buf, buflen) };
     }
 
-    // Get input - either from pending buffer or from callback
-    let input = {
+    // Nested input owns its own chunks: an outer request's remaining code
+    // must never become the answer to readline() or a browser command.
+    let input_depth = frame_depth_protected().ok();
+    let nested_prompt = hist == 0 || is_browse_prompt(prompt_str);
+    let buffered = {
         let mut pending = PENDING_INPUT.lock().unwrap();
-        if !pending.is_empty() {
-            // Use pending input from previous call
-            log::debug!("r_read_console: using pending input");
-            std::mem::take(&mut *pending)
+        let generation = reset_console_generation();
+        pending.retain(|input| input.generation == generation);
+        let index = pending.iter().position(|input| {
+            Some(input.depth) == input_depth && input.nested_prompt == nested_prompt
+        });
+        if let Some(index) = index {
+            if take_ipc_interrupt_request() {
+                pending.clear();
+                mark_ipc_interrupt_discarded();
+                return READ_CONSOLE_INTERRUPT;
+            }
+            Some(pending.remove(index).text)
         } else {
-            drop(pending); // Release lock before callback
-
+            None
+        }
+    };
+    // Release the pending-input lock before invoking any callback or R code.
+    let input = match buffered {
+        Some(input) => input,
+        None => {
             log::debug!("r_read_console: prompt={:?}", prompt_str);
 
             // Call the callback to get new input
@@ -424,14 +466,24 @@ unsafe fn r_read_console_inner(
             ReadConsoleInput {
                 text: input[..chunk_end].to_owned(),
                 has_more,
+                interrupt: false,
             },
             buf,
             buflen,
         )
     };
     if result == 1 && has_more {
+        let Some(depth) = input_depth else {
+            log::error!("Cannot retain console input without a verified R frame depth");
+            return 0;
+        };
         let mut pending = PENDING_INPUT.lock().unwrap();
-        *pending = input[chunk_end..].to_owned();
+        pending.push(PendingConsoleInput {
+            text: input[chunk_end..].to_owned(),
+            depth,
+            nested_prompt,
+            generation: reset_console_generation(),
+        });
     }
     result
 }
@@ -493,7 +545,7 @@ pub fn set_headless_read_console_callback(callback: HeadlessReadConsoleCallback)
     unsafe {
         HEADLESS_READ_CONSOLE_CALLBACK = Some(callback);
         READ_CONSOLE_CALLBACK = None;
-        *PENDING_INPUT.lock().unwrap() = String::new();
+        PENDING_INPUT.lock().unwrap().clear();
     }
 }
 
@@ -546,6 +598,7 @@ mod tests {
                 ReadConsoleInput {
                     text: "abc".to_string(),
                     has_more: false,
+                    interrupt: false,
                 },
                 buffer.as_mut_ptr().cast(),
                 buffer.len() as c_int,
@@ -564,6 +617,7 @@ mod tests {
                 ReadConsoleInput {
                     text: "abc".to_string(),
                     has_more: true,
+                    interrupt: false,
                 },
                 buffer.as_mut_ptr().cast(),
                 buffer.len() as c_int,

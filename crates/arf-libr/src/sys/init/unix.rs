@@ -77,6 +77,13 @@ pub(super) unsafe fn initialize_r_unix(
             *lib.ptr_r_writeconsoleex = Some(r_write_console_ex);
         }
 
+        // Like ark, bound Rsleep's wait so an IPC interrupt flag is checked
+        // without an OS signal waking select(). This also keeps R's polled
+        // events responsive during a long Sys.sleep().
+        if !lib.r_wait_usec.is_null() {
+            *lib.r_wait_usec = 10_000;
+        }
+
         // Setup R main loop (but don't run it)
         (lib.setup_rmainloop)();
     }

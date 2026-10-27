@@ -229,6 +229,9 @@ pub struct RLibrary {
     // R_PolledEvents callback pointer (called by R periodically)
     #[cfg(unix)]
     pub ptr_r_polledevents: *mut Option<unsafe extern "C" fn()>,
+    // Unix sleep interval between R_CheckUserInterrupt calls, in microseconds.
+    #[cfg(unix)]
+    pub r_wait_usec: *mut c_int,
 }
 
 // Safety: RLibrary contains only function pointers and raw pointers that are
@@ -627,6 +630,11 @@ impl RLibrary {
                 b"R_PolledEvents\0",
                 Option<unsafe extern "C" fn()>
             );
+            #[cfg(unix)]
+            let r_wait_usec = library
+                .get::<usize>(b"R_wait_usec\0")
+                .map(|symbol| symbol.into_raw().into_raw() as *mut c_int)
+                .unwrap_or(std::ptr::null_mut());
 
             Ok(RLibrary {
                 _library: library,
@@ -739,6 +747,8 @@ impl RLibrary {
                 r_inputhandlers,
                 #[cfg(unix)]
                 ptr_r_polledevents,
+                #[cfg(unix)]
+                r_wait_usec,
             })
         }
     }

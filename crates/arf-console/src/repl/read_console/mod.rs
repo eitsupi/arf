@@ -78,6 +78,13 @@ pub(super) fn read_console_callback(
 
         finish_previous_command(state, prompt_kind);
 
+        // Command prompts finalize the previous execution above. A request
+        // still pending at a continuation or nested prompt must unwind through
+        // ReadConsole so R performs the interrupt after these Rust frames end.
+        if !prompt_kind.is_command() && arf_libr::take_ipc_interrupt_request() {
+            return ReadConsoleResult::Interrupt;
+        }
+
         // Prepared help is consumed only at a verified command prompt, after
         // the previous command's lifecycle has been finalized and before IPC
         // dispatch or reedline starts reading the next command.
@@ -167,6 +174,9 @@ fn read_input_loop(
             Ok(Signal::CtrlD) => handle_ctrl_d(state),
             // IPC operation triggered a break signal.
             Ok(Signal::ExternalBreak(buffer)) => {
+                if arf_libr::take_ipc_interrupt_request() {
+                    return ReadConsoleResult::Interrupt;
+                }
                 handle_external_break(state, &history_handle, is_shell_mode, &buffer)
             }
             Ok(_) => ControlFlow::Continue(()),

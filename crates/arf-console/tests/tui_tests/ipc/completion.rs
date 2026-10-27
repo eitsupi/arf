@@ -251,7 +251,7 @@ fn terminal_code_completes_once_and_empty_input_does_not_complete() -> Result<()
 }
 
 #[cfg(unix)]
-fn send_json_line(
+pub(super) fn send_json_line(
     reader: &mut BufReader<std::os::unix::net::UnixStream>,
     request: Value,
 ) -> Result<()> {

@@ -134,6 +134,9 @@ pub(crate) fn handle_ipc_command(action: &IpcAction) {
         } => ipc::client::cmd_eval(code.as_deref(), *pid, *visible, *timeout),
         IpcAction::Send { code, pid } => ipc::client::cmd_send(code.as_deref(), *pid),
         IpcAction::Shutdown { pid } => ipc::client::cmd_shutdown(*pid),
+        IpcAction::Interrupt { pid, execution_id } => {
+            ipc::client::cmd_interrupt(*pid, *execution_id)
+        }
         IpcAction::Session { pid } => ipc::client::cmd_session(*pid),
         IpcAction::History {
             limit,

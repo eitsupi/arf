@@ -10,7 +10,7 @@ use super::protocol::{EvaluateResult, IpcResponse, UserInputResult};
 use super::state::r_is_at_prompt;
 
 /// Origin recorded for one evaluated unit of user code.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ExecutionOrigin {
     Terminal(&'static str),
@@ -32,6 +32,7 @@ thread_local! {
     /// The R thread executes one top-level command at a time. Keep its context
     /// installed across ReadConsole callbacks so notifications inherit the ID.
     static CURRENT_EXECUTION: std::cell::Cell<Option<ExecutionContext>> = const { std::cell::Cell::new(None) };
+    static LAST_FINISHED_EXECUTION: std::cell::Cell<Option<(u64, bool)>> = const { std::cell::Cell::new(None) };
 }
 
 fn begin_execution_kind(
@@ -86,12 +87,15 @@ pub(crate) fn current_execution_id() -> Option<super::events::ExecutionId> {
 
 /// Publish one completion and clear the active context. This must run on the
 /// R thread after all notifications produced by the evaluation were queued.
-pub(crate) fn finish_execution(status: ExecutionStatus) {
+pub(crate) fn finish_execution(status: ExecutionStatus) -> bool {
     let Some(context) = CURRENT_EXECUTION.take() else {
-        return;
+        return false;
     };
+    arf_libr::begin_ipc_execution_finishing();
+    let interrupted = arf_libr::finish_ipc_execution() || status == ExecutionStatus::Interrupted;
+    LAST_FINISHED_EXECUTION.set(Some((context.id.0, interrupted)));
     if !context.emit_completion {
-        return;
+        return interrupted;
     }
     let topic = super::events::Topic::internal("arf.execution_completed")
         .expect("the built-in execution topic is valid");
@@ -100,19 +104,39 @@ pub(crate) fn finish_execution(status: ExecutionStatus) {
         "origin": context.origin,
         "kind": context.kind,
         "visible": context.visible,
-        "status": status,
+        "status": if interrupted { ExecutionStatus::Interrupted } else { status },
     });
     if let Err(error) = super::events::publish_event(topic, data, Some(context.id)) {
         log::debug!("Could not publish execution completion: {error}");
     }
+    interrupted
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+pub(crate) fn was_execution_interrupted(execution_id: super::events::ExecutionId) -> bool {
+    LAST_FINISHED_EXECUTION.get() == Some((execution_id.0, true))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ExecutionStatus {
     Ok,
     Error,
     Unknown,
+    Interrupted,
+}
+
+/// Request an interrupt for the active IPC-originated user-code evaluation.
+pub(crate) fn request_interrupt(execution_id: Option<u64>) -> super::protocol::InterruptResult {
+    let (accepted, active_id) = arf_libr::request_ipc_interrupt(execution_id);
+    if accepted {
+        super::state::fire_break_signal();
+    }
+    super::protocol::InterruptResult {
+        accepted,
+        execution_id: accepted.then(|| {
+            super::events::ExecutionId(active_id.expect("accepted interrupt has an execution ID"))
+        }),
+    }
 }
 
 pub(super) const DEFAULT_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -127,6 +151,7 @@ pub(crate) fn run_silent_eval_from(
     origin_id: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
 ) -> EvaluateResult {
+    arf_libr::reset_command_error_state();
     let execution_id = begin_ipc_execution(
         ExecutionOrigin::Connection(origin_id),
         "user_code",
@@ -134,15 +159,28 @@ pub(crate) fn run_silent_eval_from(
         started_execution_id,
         has_user_code(code),
     );
+    arf_libr::begin_ipc_execution(execution_id.0, has_user_code(code));
     r_is_at_prompt().store(false, Ordering::Release);
-    let mut result = capture::evaluate_with_capture(code);
+    arf_libr::set_ipc_execution_phase(arf_libr::InterruptPhase::ProtectedEvaluation);
+    // SAFETY: evaluate_with_capture enters R only through the protected harp
+    // evaluation helper; this guard remains outside its top-level callbacks.
+    let _interrupt_guard = unsafe { arf_libr::ConsoleEvaluationInterruptGuard::new() };
+    let captured = capture::evaluate_with_capture(code);
+    let mut result = captured.result;
     r_is_at_prompt().store(true, Ordering::Release);
     result.execution_id = Some(execution_id);
-    finish_execution(if result.error.is_some() {
+    let status = if captured.interrupted {
+        arf_libr::mark_ipc_interrupt_observed();
+        ExecutionStatus::Interrupted
+    } else if result.error.is_some() {
         ExecutionStatus::Error
     } else {
         ExecutionStatus::Ok
-    });
+    };
+    let interrupted = finish_execution(status);
+    if interrupted {
+        result.error = Some("Evaluation interrupted".to_string());
+    }
     result
 }
 
@@ -152,6 +190,7 @@ pub(super) fn begin_visible_eval(
     origin: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
 ) -> super::events::ExecutionId {
+    arf_libr::reset_command_error_state();
     let id = begin_ipc_execution(
         ExecutionOrigin::Connection(origin),
         "user_code",
@@ -159,6 +198,7 @@ pub(super) fn begin_visible_eval(
         started_execution_id,
         has_user_code(code),
     );
+    arf_libr::begin_ipc_execution(id.0, has_user_code(code));
     r_is_at_prompt().store(false, Ordering::Release);
     arf_libr::start_ipc_capture(true);
     id
@@ -184,6 +224,7 @@ pub(crate) fn accept_user_input(
     origin: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
 ) {
+    arf_libr::reset_command_error_state();
     let execution_id = begin_ipc_execution(
         ExecutionOrigin::Connection(origin),
         "user_code",
@@ -191,6 +232,7 @@ pub(crate) fn accept_user_input(
         started_execution_id,
         has_user_code(code),
     );
+    arf_libr::begin_ipc_execution(execution_id.0, has_user_code(code));
     let _ = reply.send(IpcResponse::UserInput(UserInputResult {
         accepted: true,
         execution_id: Some(execution_id),

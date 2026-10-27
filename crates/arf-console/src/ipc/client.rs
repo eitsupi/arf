@@ -368,6 +368,23 @@ pub fn cmd_shutdown(pid: Option<u32>) {
     handle_response(response);
 }
 
+/// Request interruption of the active IPC execution in a running session.
+pub fn cmd_interrupt(pid: Option<u32>, execution_id: Option<u64>) {
+    let session = resolve_session(pid);
+    let mut params = serde_json::json!({});
+    if let Some(execution_id) = execution_id {
+        params["execution_id"] = serde_json::json!(execution_id);
+    }
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "interrupt",
+        "params": params
+    });
+    let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
+    handle_response(response);
+}
+
 /// Get session information as JSON via the `session` IPC method.
 ///
 /// Output is pretty-printed when stdout is a terminal, compact when piped.

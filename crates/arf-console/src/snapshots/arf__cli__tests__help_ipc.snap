@@ -1,0 +1,45 @@
+---
+source: crates/arf-console/src/cli/mod.rs
+expression: help
+---
+Interact with a running arf session via IPC
+
+Evaluate R code, send user input, or query session info in a running arf instance. The target session must have IPC enabled — via `arf headless`, `arf --with-ipc`, or the `:ipc start` meta command.
+
+Usage: ipc <COMMAND>
+
+Commands:
+  list       List active arf sessions as JSON
+  eval       Evaluate R code and return captured output as JSON
+  send       Send code as user input to a running session
+  session    Get session information as JSON (arf + R environment)
+  shutdown   Shut down a running arf headless session (returns JSON `{"accepted": true}`)
+  interrupt  Interrupt the active IPC evaluation in a running session
+  history    Query command history from a running session
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Quick start:
+  # 1. Start a headless session (or use --with-ipc with the REPL)
+  $ arf headless --ipc-eval-allow-function '+' &
+
+  # 2. Check the session is running
+  $ arf ipc list
+
+  # 3. Evaluate R code and get structured JSON output
+  $ arf ipc eval '1 + 1'
+
+  # 4. Check session status (R version, loaded packages, etc.)
+  $ arf ipc session
+
+  # 5. Shut down when done
+  $ arf ipc shutdown
+
+All commands output JSON to stdout (pretty-printed on terminal, compact when piped). Errors are written to stderr as JSON. Exit codes: 0 = success, 2 = client-side failure (transport error or missing/unreadable code input), 3 = session error, 4 = protocol error.
+
+Session discovery:
+  By default, sessions are discovered from the platform cache directory.
+  Set ARF_IPC_SESSIONS_DIR to explicitly override the session metadata directory for all IPC writers (`arf headless`, `--with-ipc`, `:ipc start`) and `arf ipc` readers.

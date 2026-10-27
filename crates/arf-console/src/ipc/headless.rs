@@ -55,16 +55,13 @@ pub fn headless_read_console(
     prompt: &str,
     info: arf_libr::ReadConsolePromptInfo,
 ) -> Option<arf_libr::ReadConsoleInput> {
-    if info.hist == 0 {
-        return None;
+    if info.hist == 0 || is_browse_prompt(prompt) {
+        return arf_libr::take_ipc_interrupt_request().then(interrupt_input);
     }
     if !info.prompt_options_are_valid {
         log::error!("Headless R prompt and continuation options are missing or ambiguous");
         set_headless_shutdown();
         shutdown_before_eof(1);
-    }
-    if is_browse_prompt(prompt) {
-        return None;
     }
     match arf_libr::frame_depth_protected() {
         Ok(0) => {}
@@ -111,6 +108,14 @@ pub fn headless_read_console(
             if should_finish {
                 finish_active_request();
                 continue;
+            }
+            if arf_libr::take_ipc_interrupt_request() {
+                if let Some(request) = ACTIVE_REQUEST.lock().unwrap().as_mut() {
+                    request.offset = request.code.len();
+                    request.exhausted = true;
+                }
+                arf_libr::mark_ipc_interrupt_discarded();
+                return Some(interrupt_input());
             }
             let continuation_eof = if info.is_continuation {
                 let mut active = ACTIVE_REQUEST.lock().unwrap();
@@ -272,6 +277,7 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
             return Some(arf_libr::ReadConsoleInput {
                 text: String::new(),
                 has_more: false,
+                interrupt: false,
             });
         }
     }
@@ -300,7 +306,19 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
     let text = remaining[..end].to_owned();
     request.offset += end;
     request.exhausted = !has_more;
-    Some(arf_libr::ReadConsoleInput { text, has_more })
+    Some(arf_libr::ReadConsoleInput {
+        text,
+        has_more,
+        interrupt: false,
+    })
+}
+
+fn interrupt_input() -> arf_libr::ReadConsoleInput {
+    arf_libr::ReadConsoleInput {
+        text: String::new(),
+        has_more: false,
+        interrupt: true,
+    }
 }
 
 fn is_horizontal_ascii_whitespace(byte: u8) -> bool {
@@ -315,13 +333,19 @@ fn finish_active_request() {
         ActiveKind::Evaluate(reply) => Some((reply, execution::finish_visible_eval())),
         ActiveKind::UserInput => None,
     };
-    if let Some(entry) = request.history_entry {
-        entry.finish(Some(if failed { 1 } else { 0 }));
-    }
-    execution::finish_execution(if failed {
+    let interrupted = execution::finish_execution(if failed {
         execution::ExecutionStatus::Error
     } else {
         execution::ExecutionStatus::Ok
+    });
+    if let Some(entry) = request.history_entry {
+        entry.finish(Some(if failed || interrupted { 1 } else { 0 }));
+    }
+    let result = result.map(|(reply, mut result)| {
+        if interrupted {
+            result.error = Some("Evaluation interrupted".to_string());
+        }
+        (reply, result)
     });
     if let Some((reply, result)) = result {
         let _ = reply.send(IpcResponse::Evaluate(result));
