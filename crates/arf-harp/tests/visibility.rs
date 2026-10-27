@@ -8,7 +8,7 @@
 
 mod common;
 
-use arf_harp::eval_string_with_visibility;
+use arf_harp::{eval_string, eval_string_with_visibility};
 use common::with_r;
 
 #[test]
@@ -60,6 +60,31 @@ fn test_print_function_is_visible() {
         let result = eval_string_with_visibility("print(1)").expect("eval should succeed");
         // print() returns its argument invisibly
         assert!(!result.visible, "print() returns its argument invisibly");
+    });
+}
+
+#[test]
+fn test_print_errors_return_to_rust_and_r_remains_usable() {
+    with_r!(test_print_errors_return_to_rust_and_r_remains_usable, {
+        eval_string(
+            r#"print.interrupt_probe <- function(x) {
+                   if (x == 1L) stop("print failed")
+                   stop(structure(list(message = "print interrupted"),
+                                  class = c("interrupt", "condition")))
+               }"#,
+        )
+        .expect("print method should be installed");
+
+        assert!(
+            eval_string(r#"structure(1L, class = "interrupt_probe")"#).is_err(),
+            "an error from print should be returned"
+        );
+        assert!(
+            eval_string(r#"structure(2L, class = "interrupt_probe")"#).is_err(),
+            "an interrupt condition from print should be returned"
+        );
+
+        eval_string("40 + 2").expect("R should remain usable after a print error");
     });
 }
 
