@@ -1,6 +1,6 @@
 //! Long-lived (`attach`) connections against a real headless session.
 
-use super::support::{HeadlessProcess, parse_ipc_json};
+use super::support::{HeadlessProcess, parse_ipc_json, run_ipc_command};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
@@ -93,6 +93,23 @@ impl AttachedClient {
     fn recv(&mut self) -> Value {
         self.recv_timeout(REPLY_TIMEOUT)
             .expect("timed out waiting for a reply")
+    }
+
+    /// Evaluate `code` and wait for both its response and its completion
+    /// event, so no stray completion reaches later assertions.
+    fn evaluate_to_completion(&mut self, id: i64, code: &str) -> Value {
+        self.send(&request(id, "evaluate", json!({"code": code})));
+        let mut response = None;
+        let mut completed = false;
+        while response.is_none() || !completed {
+            let message = self.recv();
+            if message["id"] == id {
+                response = Some(message);
+            } else if message["params"]["topic"] == "arf.execution_completed" {
+                completed = true;
+            }
+        }
+        response.expect("evaluation response")
     }
 
     fn recv_timeout(&mut self, timeout: Duration) -> Option<Value> {
@@ -226,6 +243,190 @@ fn headless_evaluate_timeout_keeps_execution_context_until_completion() {
             "reply timeout must not complete an execution early or more than once"
         );
     }
+}
+
+#[test]
+fn headless_interrupt_emits_interrupted_completion_distinct_from_error() {
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let mut client = attach_subscribed(
+        &socket_path_of(&process),
+        &["demo.interrupt", "arf.execution_completed"],
+    );
+    let mut next_id = 100;
+    for visible in [false, true] {
+        let code = format!(
+            "kept_value <- 42L; {}; Sys.sleep(30)",
+            publish_call("demo.interrupt", "NULL")
+        );
+        let id = next_id;
+        next_id += 1;
+        client.send(&request(
+            id,
+            "evaluate",
+            json!({"code": code, "visible": visible, "timeout_ms": 30000}),
+        ));
+        let started = client.recv();
+        assert_eq!(started["params"]["topic"], "demo.interrupt", "{started}");
+        interrupt_headless(&process);
+
+        let mut evaluation = None;
+        let mut completion = None;
+        while evaluation.is_none() || completion.is_none() {
+            let message = client.recv();
+            if message["id"] == id {
+                evaluation = Some(message);
+            } else if message["params"]["topic"] == "arf.execution_completed" {
+                completion = Some(message);
+            }
+        }
+        let evaluation = evaluation.expect("evaluation response");
+        let completion = completion.expect("completion event");
+        assert!(
+            evaluation["result"]["error"]
+                .as_str()
+                .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
+            "evaluation response should report interruption (visible={visible}): {evaluation}"
+        );
+        assert_eq!(
+            completion["params"]["data"]["status"], "interrupted",
+            "visible={visible}: {completion}"
+        );
+        assert_eq!(completion["params"]["data"]["visible"], visible);
+        let execution_id = completion["params"]["data"]["id"]
+            .as_u64()
+            .expect("completion execution ID");
+        assert_eq!(evaluation["result"]["execution_id"], execution_id);
+
+        let id = next_id;
+        next_id += 1;
+        let kept = client.evaluate_to_completion(id, "kept_value");
+        assert_eq!(kept["result"]["value"], "[1] 42", "{kept}");
+    }
+
+    // `user_input` acknowledges acceptance first; the interrupt then ends the
+    // visible REPL evaluation and the remaining lines of the input never run.
+    let id = next_id;
+    next_id += 1;
+    let send_code = format!(
+        "send_kept_value <- 42L; {}; Sys.sleep(30)\nsend_remainder <- TRUE",
+        publish_call("demo.interrupt", "NULL")
+    );
+    client.send(&request(id, "user_input", json!({"code": send_code})));
+    let mut accepted = None;
+    let mut started = None;
+    let mut completion = None;
+    let mut interrupted_requested = false;
+    while completion.is_none() {
+        let message = client.recv();
+        if message["id"] == id {
+            accepted = Some(message);
+        } else if message["params"]["topic"] == "demo.interrupt" {
+            started = Some(message);
+        } else if message["params"]["topic"] == "arf.execution_completed" {
+            completion = Some(message);
+        }
+        if started.is_some() && !interrupted_requested {
+            interrupted_requested = true;
+            interrupt_headless(&process);
+        }
+    }
+    let accepted = accepted.expect("user_input acknowledgement");
+    let completion = completion.expect("send completion event");
+    assert_eq!(
+        completion["params"]["data"]["status"], "interrupted",
+        "{completion}"
+    );
+    assert_eq!(
+        completion["params"]["data"]["id"], accepted["result"]["execution_id"],
+        "{completion}"
+    );
+    let id = next_id;
+    let kept = client.evaluate_to_completion(
+        id,
+        "c(send_kept_value, exists('send_remainder', envir = .GlobalEnv))",
+    );
+    assert_eq!(kept["result"]["value"], "[1] 42  0", "{kept}");
+
+    client.send(&request(
+        3,
+        "evaluate",
+        json!({"code": r#"stop('ordinary completion error')"#}),
+    ));
+    let mut error_response = None;
+    let mut error_completion = None;
+    while error_response.is_none() || error_completion.is_none() {
+        let message = client.recv();
+        if message["id"] == 3 {
+            error_response = Some(message);
+        } else if message["params"]["topic"] == "arf.execution_completed" {
+            error_completion = Some(message);
+        }
+    }
+    let error_response = error_response.expect("ordinary error response");
+    let error_completion = error_completion.expect("ordinary error completion");
+    assert!(
+        error_response["result"]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("ordinary completion error")),
+        "ordinary evaluation error was lost: {error_response}"
+    );
+    assert_eq!(
+        error_completion["params"]["data"]["status"], "error",
+        "ordinary errors must not be reported as interrupted: {error_completion}"
+    );
+
+    let suspended_code = format!(
+        r#"tryCatch({{ {}; Sys.sleep(30) }}, interrupt = function(e) stop('ordinary error after handled interrupt'))"#,
+        publish_call("demo.interrupt", "NULL")
+    );
+    client.send(&request(
+        4,
+        "evaluate",
+        json!({"code": suspended_code, "timeout_ms": 30000}),
+    ));
+    let started = client.recv();
+    assert_eq!(started["params"]["topic"], "demo.interrupt", "{started}");
+    let output = run_ipc_command(&["ipc", "interrupt", "--pid", &process.pid.to_string()]);
+    assert!(
+        output.status.success(),
+        "interrupt request failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let accepted: Value = serde_json::from_slice(&output.stdout).expect("interrupt JSON");
+    assert_eq!(accepted["accepted"], true, "{accepted}");
+    let mut suspended_response = None;
+    let mut suspended_completion = None;
+    while suspended_response.is_none() || suspended_completion.is_none() {
+        let message = client.recv();
+        if message["id"] == 4 {
+            suspended_response = Some(message);
+        } else if message["params"]["topic"] == "arf.execution_completed" {
+            suspended_completion = Some(message);
+        }
+    }
+    let suspended_response = suspended_response.expect("suspended error response");
+    let suspended_completion = suspended_completion.expect("suspended error completion");
+    assert!(
+        suspended_response["result"]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("ordinary error after handled interrupt")),
+        "ordinary error after handled interrupt was misreported: {suspended_response}"
+    );
+    assert_eq!(
+        suspended_completion["params"]["data"]["status"], "error",
+        "pending interrupt must not relabel an ordinary R error: {suspended_completion}"
+    );
+}
+
+fn interrupt_headless(process: &HeadlessProcess) {
+    let output = run_ipc_command(&["ipc", "interrupt", "--pid", &process.pid.to_string()]);
+    assert!(
+        output.status.success(),
+        "interrupt request failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let accepted: Value = serde_json::from_slice(&output.stdout).expect("interrupt JSON");
+    assert_eq!(accepted["accepted"], true, "{accepted}");
 }
 
 fn request(id: i64, method: &str, params: Value) -> Value {

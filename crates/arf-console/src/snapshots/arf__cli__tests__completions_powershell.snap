@@ -206,6 +206,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
+            [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
@@ -241,6 +242,13 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'arf;ipc;interrupt' {
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
+            [CompletionResult]::new('--execution-id', '--execution-id', [CompletionResultType]::ParameterName, 'Interrupt only this active execution ID')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'arf;ipc;history' {
             [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of entries to return (must be positive)')
             [CompletionResult]::new('--cwd', '--cwd', [CompletionResultType]::ParameterName, 'Filter entries by exact working directory')
@@ -258,6 +266,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
+            [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
@@ -275,6 +284,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;shutdown' {
+            break
+        }
+        'arf;ipc;help;interrupt' {
             break
         }
         'arf;ipc;help;history' {
@@ -392,6 +404,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
+            [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
             break
         }
@@ -408,6 +421,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;shutdown' {
+            break
+        }
+        'arf;help;ipc;interrupt' {
             break
         }
         'arf;help;ipc;history' {

@@ -9,8 +9,8 @@ use crate::ipc::history_query::{HistoryQueryError, query_history};
 use crate::ipc::protocol::{
     DEFAULT_HANDLER_QUEUE_TIMEOUT, EvaluateParams, HANDLER_NOT_FOUND, HANDLER_QUEUE_FULL,
     HANDLER_QUEUE_TIMEOUT, HandlerCallParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS,
-    IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse, MAX_HANDLER_QUEUE_TIMEOUT,
-    METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, UserInputParams,
+    InterruptParams, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
+    MAX_HANDLER_QUEUE_TIMEOUT, METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, UserInputParams,
 };
 use crate::ipc::session_result::collect_session_result;
 use crate::ipc::state::{has_headless_shutdown_handler, is_in_alternate_mode};
@@ -105,6 +105,22 @@ fn handle_shutdown(id: Option<serde_json::Value>) -> JsonRpcResponse {
     }
 }
 
+/// Interrupt is handled directly on the server thread so it can reach an
+/// evaluation while the R thread is busy.
+fn handle_interrupt(id: Option<serde_json::Value>, params: serde_json::Value) -> JsonRpcResponse {
+    let raw_params = if params.is_null() {
+        serde_json::Value::Object(Default::default())
+    } else {
+        params
+    };
+    let params: InterruptParams = match parse_params(&id, raw_params) {
+        Ok(params) => params,
+        Err(response) => return *response,
+    };
+    let result = crate::ipc::execution::request_interrupt(params.execution_id);
+    JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+}
+
 /// History is handled directly on the server thread — it only reads the
 /// SQLite database and does not touch R state.
 fn handle_history(id: Option<serde_json::Value>, params: serde_json::Value) -> JsonRpcResponse {
@@ -152,6 +168,7 @@ fn parse_method(
             validated_method(id, params.code, params.visible, params.timeout_ms)
         }
         "shutdown" => Err(Box::new(handle_shutdown(id.clone()))),
+        "interrupt" => Err(Box::new(handle_interrupt(id.clone(), params))),
         "user_input" => {
             let params: UserInputParams = parse_params(id, params)?;
             validate_code(id, &params.code)?;
@@ -286,8 +303,11 @@ pub(super) async fn dispatch_request_for_connection(
     let is_session = request.method == "session";
     let is_history = request.method == "history";
     let is_call = request.method == "call";
+    let is_interrupt = request.method == "interrupt";
 
-    if !is_call && let Some(response) = alternate_mode_rejection(id.clone(), is_session, is_history)
+    if !is_call
+        && !is_interrupt
+        && let Some(response) = alternate_mode_rejection(id.clone(), is_session, is_history)
     {
         return response;
     }
@@ -493,6 +513,56 @@ mod tests {
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         queued
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn interrupt_is_direct_and_idle_or_null_request_is_rejected() {
+        set_in_alternate_mode(true);
+        let _guard = Guard;
+        let (tx, rx) = mpsc::channel();
+        let response = dispatch_request(
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(1)),
+                method: "interrupt".to_string(),
+                params: serde_json::Value::Null,
+            },
+            &tx,
+        )
+        .await;
+
+        assert!(response.error.is_none());
+        assert_eq!(
+            response.result,
+            Some(serde_json::json!({ "accepted": false, "execution_id": null }))
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "interrupt must not enter the R queue"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn interrupt_rejects_invalid_parameters() {
+        let (tx, rx) = mpsc::channel();
+        let response = dispatch_request(
+            JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(1)),
+                method: "interrupt".to_string(),
+                params: serde_json::json!({ "execution_id": "not-a-number" }),
+            },
+            &tx,
+        )
+        .await;
+
+        assert_eq!(response.error.unwrap().code, INVALID_PARAMS);
+        assert!(
+            rx.try_recv().is_err(),
+            "interrupt must not enter the R queue"
+        );
     }
 
     fn ticket_from(request: &IpcRequest) -> &std::sync::Arc<HandlerCallTicket> {

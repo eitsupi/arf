@@ -5,6 +5,7 @@ mod error_codes;
 mod eval;
 mod handlers;
 mod history;
+mod interrupt;
 mod lifecycle_flags;
 mod output_encoding;
 mod platform;

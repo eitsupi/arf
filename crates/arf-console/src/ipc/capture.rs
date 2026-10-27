@@ -7,6 +7,11 @@
 
 use crate::ipc::protocol::EvaluateResult;
 
+pub(crate) struct CaptureEvaluation {
+    pub result: EvaluateResult,
+    pub interrupted: bool,
+}
+
 /// Evaluate R code with output capture, returning stdout, stderr, value, and error.
 ///
 /// Runs on the R main thread (called from idle callback).
@@ -19,7 +24,7 @@ use crate::ipc::protocol::EvaluateResult;
 ///   `<header_line>\n<value><error>`
 /// Header format: `value_len error_len`
 /// A length of -1 means the field is NULL/absent.
-pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
+pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
     let escaped = code
         .replace('\\', "\\\\")
         .replace('\'', "\\'")
@@ -33,33 +38,39 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
     {
         Ok(f) => f,
         Err(e) => {
-            return EvaluateResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                value: None,
-                error: Some(format!("Failed to create temp file for IPC capture: {e}")),
-                execution_id: None,
+            return CaptureEvaluation {
+                result: EvaluateResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    value: None,
+                    error: Some(format!("Failed to create temp file for IPC capture: {e}")),
+                    execution_id: None,
+                },
+                interrupted: false,
             };
         }
     };
     let tmppath = tmpfile.path().display().to_string().replace('\\', "/");
 
-    // R code: tryCatch + withVisible for value/error, stdout/stderr via callback.
+    // The outer handler includes both evaluation and printing. Interrupts
+    // caught by user code never reach this handler and remain ordinary results.
     let capture_code = format!(
         r#"local({{
     .res <- tryCatch(
-        withVisible(eval(parse(text = '{escaped}'), envir = globalenv())),
-        error = function(e) list(value = NULL, visible = FALSE, error = conditionMessage(e))
+        {{
+            .visible <- withVisible(eval(parse(text = '{escaped}'), envir = globalenv()))
+            .s_val <- if (.visible$visible) paste(utils::capture.output(print(.visible$value)), collapse = "\n") else NULL
+            list(value = .s_val, error = NULL, interrupted = FALSE)
+        }},
+        interrupt = function(e) list(value = NULL, error = conditionMessage(e), interrupted = TRUE),
+        error = function(e) list(value = NULL, error = conditionMessage(e), interrupted = FALSE)
     )
-    .s_val <- if (is.null(.res$error) && .res$visible) {{
-        paste(utils::capture.output(print(.res$value)), collapse = "\n")
-    }} else {{
-        NULL
-    }}
+    .s_val <- .res$value
     .s_err <- .res$error
     .header <- paste(
         if (is.null(.s_val)) -1L else nchar(.s_val, type = "bytes"),
-        if (is.null(.s_err)) -1L else nchar(.s_err, type = "bytes")
+        if (is.null(.s_err)) -1L else nchar(.s_err, type = "bytes"),
+        if (.res$interrupted) 1L else 0L
     )
     .con <- file('{tmppath}', open = "wb")
     writeLines(.header, .con, sep = "\n")
@@ -79,38 +90,52 @@ pub fn evaluate_with_capture(code: &str) -> EvaluateResult {
 
     match eval_result {
         Ok(_) => {
-            let mut result = parse_capture_file(tmpfile.path());
+            let (mut result, interrupted) = parse_capture_file_with_status(tmpfile.path());
             // tmpfile is dropped automatically (and deleted) at scope end
             drop(tmpfile);
             result.stdout = stdout;
             result.stderr = stderr;
-            result
+            CaptureEvaluation {
+                result,
+                interrupted,
+            }
         }
         Err(e) => {
             drop(tmpfile);
-            EvaluateResult {
-                stdout,
-                stderr,
-                value: None,
-                error: Some(format!("Failed to evaluate: {e}")),
-                execution_id: None,
+            CaptureEvaluation {
+                result: EvaluateResult {
+                    stdout,
+                    stderr,
+                    value: None,
+                    error: Some(format!("Failed to evaluate: {e}")),
+                    execution_id: None,
+                },
+                interrupted: false,
             }
         }
     }
 }
 
 /// Parse the capture file into an EvaluateResult (value + error only).
+#[cfg(test)]
 fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
+    parse_capture_file_with_status(path).0
+}
+
+fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bool) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {
-            return EvaluateResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                value: None,
-                error: Some(format!("Failed to read capture file: {e}")),
-                execution_id: None,
-            };
+            return (
+                EvaluateResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    value: None,
+                    error: Some(format!("Failed to read capture file: {e}")),
+                    execution_id: None,
+                },
+                false,
+            );
         }
     };
 
@@ -118,13 +143,16 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
     let newline_pos = match data.iter().position(|&b| b == b'\n') {
         Some(p) => p,
         None => {
-            return EvaluateResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                value: None,
-                error: Some("Malformed capture file: no header".to_string()),
-                execution_id: None,
-            };
+            return (
+                EvaluateResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    value: None,
+                    error: Some("Malformed capture file: no header".to_string()),
+                    execution_id: None,
+                },
+                false,
+            );
         }
     };
 
@@ -134,14 +162,17 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
         .filter_map(|s| s.parse().ok())
         .collect();
 
-    if lengths.len() != 2 {
-        return EvaluateResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            value: None,
-            error: Some(format!("Malformed capture header: {header}")),
-            execution_id: None,
-        };
+    if !(lengths.len() == 2 || lengths.len() == 3) {
+        return (
+            EvaluateResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                value: None,
+                error: Some(format!("Malformed capture header: {header}")),
+                execution_id: None,
+            },
+            false,
+        );
     }
 
     let body = &data[newline_pos + 1..];
@@ -168,22 +199,28 @@ fn parse_capture_file(path: &std::path::Path) -> EvaluateResult {
     let truncated =
         (lengths[0] >= 0 && value.is_none()) || (lengths[1] >= 0 && error_field.is_none());
     if truncated {
-        return EvaluateResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            value: None,
-            error: Some("Malformed capture file: truncated".to_string()),
-            execution_id: None,
-        };
+        return (
+            EvaluateResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                value: None,
+                error: Some("Malformed capture file: truncated".to_string()),
+                execution_id: None,
+            },
+            false,
+        );
     }
 
-    EvaluateResult {
-        stdout: String::new(),
-        stderr: String::new(),
-        value,
-        error: error_field,
-        execution_id: None,
-    }
+    (
+        EvaluateResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            value,
+            error: error_field,
+            execution_id: None,
+        },
+        lengths.get(2).copied() == Some(1),
+    )
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 use super::RObject;
 use crate::error::{HarpError, HarpResult};
-use crate::ffi::{EvalPayload, eval_callback, install_symbol};
+use crate::ffi::{EvalPayload, eval_callback, top_level_exec};
 use crate::protect::RProtect;
 use arf_libr::{ParseStatus, SEXP, r_library, r_nil_value};
 use std::ffi::CString;
@@ -34,8 +34,10 @@ fn eval_string_in_env(code: &str, eval_env: SEXP) -> HarpResult<RObject> {
             expected: "valid UTF-8".to_string(),
             actual: "string with null byte".to_string(),
         })?;
+        let code_ptr = code_cstring.as_ptr();
 
-        let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
+        // Keep the potentially longjumping allocation inside R_ToplevelExec.
+        let code_sexp = protect.protect(top_level_exec(move || (lib.rf_mkstring)(code_ptr))?);
 
         // Parse the code using R_ToplevelExec for safe error handling
         let mut parse_payload = ParsePayload {
@@ -77,17 +79,19 @@ fn eval_string_in_env(code: &str, eval_env: SEXP) -> HarpResult<RObject> {
             }
         }
 
-        let n_expr = (lib.rf_length)(parsed);
+        let n_expr = top_level_exec(move || (lib.rf_length)(parsed))?;
         let mut last_result = r_nil_value()?;
 
         for i in 0..n_expr as isize {
-            let expr = (lib.vector_elt)(parsed, i);
+            let expr = top_level_exec(move || (lib.vector_elt)(parsed, i))?;
             let with_visible_result = eval_with_visible(expr, eval_env, &mut protect)?;
 
             if let Some((value, visible)) = with_visible_result {
                 last_result = value;
                 if visible && value != r_nil_value()? {
-                    (lib.rf_printvalue)(value);
+                    // Printing can dispatch user-defined methods, so it must
+                    // also stay within a protected R call boundary.
+                    top_level_exec(move || (lib.rf_printvalue)(value))?;
                 }
             }
         }
@@ -129,13 +133,17 @@ pub(super) unsafe fn eval_with_visible(
     let lib = r_library()?;
 
     unsafe {
-        // Build the call: withVisible(expr)
-        // We need to use Rf_lcons to build a call
-        let with_visible_sym = install_symbol("withVisible")?;
-        let call = protect.protect((lib.rf_lcons)(
-            with_visible_sym,
-            (lib.rf_lcons)(expr, r_nil_value()?),
-        ));
+        // Symbol installation and call construction can allocate in R. Keep
+        // all of them in one callback with no Rust-owned values on its stack.
+        let nil = r_nil_value()?;
+        let call = top_level_exec(move || {
+            let with_visible_sym = (lib.rf_install)(c"withVisible".as_ptr());
+            let argument = (lib.rf_protect)((lib.rf_lcons)(expr, nil));
+            let call = (lib.rf_lcons)(with_visible_sym, argument);
+            (lib.rf_unprotect)(1);
+            call
+        })?;
+        let call = protect.protect(call);
 
         // Use R_ToplevelExec for safe error handling
         let mut payload = EvalPayload {
@@ -159,12 +167,12 @@ pub(super) unsafe fn eval_with_visible(
         let result = protect.protect(payload.result.unwrap());
 
         // withVisible returns a list with $value and $visible
-        let value = (lib.vector_elt)(result, 0);
-        let visible_sexp = (lib.vector_elt)(result, 1);
+        let value = top_level_exec(move || (lib.vector_elt)(result, 0))?;
+        let visible_sexp = top_level_exec(move || (lib.vector_elt)(result, 1))?;
 
         // Get the visibility boolean
         // visible_sexp is a logical vector of length 1
-        let visible = *(lib.logical)(visible_sexp) != 0;
+        let visible = top_level_exec(move || *(lib.logical)(visible_sexp))? != 0;
 
         Ok(Some((value, visible)))
     }
@@ -193,19 +201,28 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
             expected: "valid UTF-8".to_string(),
             actual: "string with null byte".to_string(),
         })?;
+        let code_ptr = code_cstring.as_ptr();
 
-        let code_sexp = protect.protect((lib.rf_mkstring)(code_cstring.as_ptr()));
+        let code_sexp = protect.protect(top_level_exec(move || (lib.rf_mkstring)(code_ptr))?);
 
         // Parse the code
-        let mut status = ParseStatus::Null;
-        let parsed = protect.protect((lib.r_parsevector)(
+        let mut parse_payload = ParsePayload {
             code_sexp,
-            -1,
-            &mut status,
-            r_nil_value()?,
-        ));
+            status: ParseStatus::Null,
+            result: None,
+        };
+        let parse_success = (lib.r_toplevelexec)(
+            Some(parse_callback),
+            &mut parse_payload as *mut ParsePayload as *mut std::ffi::c_void,
+        );
+        if parse_success == 0 || parse_payload.result.is_none() {
+            return Err(HarpError::RError(arf_libr::RError::ParseError(
+                "Parse error (R error during parsing)".to_string(),
+            )));
+        }
+        let parsed = protect.protect(parse_payload.result.unwrap());
 
-        match status {
+        match parse_payload.status {
             ParseStatus::Ok => {}
             ParseStatus::Incomplete => {
                 return Err(HarpError::RError(arf_libr::RError::ParseError(
@@ -220,13 +237,13 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
             _ => {
                 return Err(HarpError::RError(arf_libr::RError::ParseError(format!(
                     "Unexpected parse status: {:?}",
-                    status
+                    parse_payload.status
                 ))));
             }
         }
 
         // Get the number of expressions
-        let n_expr = (lib.rf_length)(parsed);
+        let n_expr = top_level_exec(move || (lib.rf_length)(parsed))?;
         let global_env = *lib.r_globalenv;
 
         let mut last_value = r_nil_value()?;
@@ -234,7 +251,7 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
 
         // Evaluate each expression
         for i in 0..n_expr as isize {
-            let expr = (lib.vector_elt)(parsed, i);
+            let expr = top_level_exec(move || (lib.vector_elt)(parsed, i))?;
 
             // Use withVisible() to evaluate and get visibility information
             let with_visible_result = eval_with_visible(expr, global_env, &mut protect)?;

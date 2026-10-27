@@ -136,6 +136,26 @@ Examples:
         #[arg(long)]
         pid: Option<u32>,
     },
+    /// Interrupt the active IPC evaluation in a running session
+    ///
+    /// Returns JSON with `accepted` and, when accepted, the targeted
+    /// `execution_id`. An omitted execution ID targets the execution active
+    /// when the server receives this request.
+    #[command(after_long_help = "\
+Examples:
+  Interrupt the active IPC evaluation:
+    $ arf ipc interrupt
+
+  Interrupt a specific execution in a session:
+    $ arf ipc interrupt --pid 12345 --execution-id 7")]
+    Interrupt {
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Interrupt only this active execution ID
+        #[arg(long)]
+        execution_id: Option<u64>,
+    },
     /// Query command history from a running session
     ///
     /// Returns history entries as JSON, newest first. Output is
