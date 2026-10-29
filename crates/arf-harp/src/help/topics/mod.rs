@@ -20,23 +20,43 @@ pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
     topics
 }
 
-fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
-    let mut topics = Vec::new();
+/// Get only Rd help topics from explicit library paths, optionally limited to
+/// one package name.
+///
+/// Like [`get_help_topics_from_paths`], unreadable Rd metadata is skipped so
+/// one broken package does not hide the others.
+pub fn get_rd_help_topics_from_paths(
+    paths: &[String],
+    package_filter: Option<&str>,
+) -> Vec<HelpTopic> {
+    installed_package_dirs(paths)
+        .into_iter()
+        .filter(|(package, _)| package_filter.is_none_or(|filter| package == filter))
+        .flat_map(|(package, package_dir)| read_rd_help_topics(&package, &package_dir))
+        .collect()
+}
 
+fn read_rd_help_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
+    match HelpTopicIndex::read_installed(package_dir) {
+        Ok(Some(index)) => index
+            .entries()
+            .filter_map(|entry| project_help_topic_entry(package, package_dir, entry))
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            log::debug!(
+                "Skipping unreadable Rd help metadata in {}: {error}",
+                package_dir.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
     // Each metadata source is independent of compiled help files and of the
     // other metadata indexes. A malformed source should not hide the rest.
-    match HelpTopicIndex::read_installed(package_dir) {
-        Ok(Some(index)) => topics.extend(
-            index
-                .entries()
-                .filter_map(|entry| project_help_topic_entry(package, package_dir, entry)),
-        ),
-        Ok(None) => {}
-        Err(error) => log::debug!(
-            "Skipping unreadable Rd help metadata in {}: {error}",
-            package_dir.display()
-        ),
-    }
+    let mut topics = read_rd_help_topics(package, package_dir);
 
     if let Some(object) = read_metadata_index(package_dir.join("Meta/vignette.rds")) {
         match VignetteIndex::from_object(&object) {

@@ -49,6 +49,32 @@ fn resolver(libraries: &[&Path]) -> HelpTargetResolver {
     )
 }
 
+fn configured_options() -> ResolveOptions {
+    ResolveOptions {
+        skip_broken_indexes: true,
+        candidate_display: CandidateDisplay::Metadata,
+        deduplicate_keyless: false,
+    }
+}
+
+impl HelpTargetResolver {
+    fn resolve_configured_target(
+        &mut self,
+        topic: &str,
+        package: Option<&str>,
+        current_package: Option<&str>,
+        help_key: Option<&str>,
+    ) -> HarpResult<HelpResolution> {
+        self.resolve_target(
+            topic,
+            package,
+            current_package.map(CurrentPackage::Named),
+            help_key,
+            configured_options(),
+        )
+    }
+}
+
 fn resolve(
     resolver: &mut HelpTargetResolver,
     current: &PreparedHelpPage,
@@ -164,6 +190,213 @@ fn qualified_links_use_only_the_first_installed_copy() {
 }
 
 #[test]
+fn configured_lookup_returns_selectable_candidates_and_prefers_current_package() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = package(temp.path(), "base");
+    let stats = package(temp.path(), "stats");
+    let broken = package(temp.path(), "broken");
+    std::fs::write(broken.join("Meta/Rd.rds"), b"broken RDS").unwrap();
+
+    let mut resolver = resolver(&[temp.path()]);
+    let ambiguous = resolver
+        .resolve_configured_target("mean", None, None, None)
+        .unwrap();
+    assert!(matches!(ambiguous, HelpResolution::Candidates(_)));
+
+    let explicit = resolver
+        .resolve_configured_target("mean", Some("base"), Some("stats"), None)
+        .unwrap();
+    assert!(matches!(explicit, HelpResolution::Page(_)));
+
+    let preferred = resolver
+        .resolve_configured_target("mean", None, Some("stats"), None)
+        .unwrap();
+    let HelpResolution::Page(page) = preferred else {
+        panic!("expected current-package page despite unrelated corrupt index, got {preferred:?}");
+    };
+    assert_eq!(page.package_dir, stats);
+    assert_ne!(page.package_dir, base);
+    assert!(!resolver.title_for_page(&page).is_empty());
+
+    let alias_priority = resolver
+        .resolve_configured_target(r#"first-topic"#, Some(r#"base"#), None, None)
+        .unwrap();
+    let HelpResolution::Page(page) = alias_priority else {
+        panic!(r#"expected explicit-package alias priority, got {alias_priority:?}"#);
+    };
+    assert_eq!(page.help_key, r#"second-topic"#);
+    assert_eq!(resolver.title_for_page(&page), r#"Second fixture"#);
+
+    assert!(matches!(
+        resolver
+            .resolve_configured_target("not-present", None, Some("stats"), None)
+            .unwrap(),
+        HelpResolution::NotFound
+    ));
+    let broken_metadata = resolver
+        .resolve_configured_target(r"mean", Some(r"broken"), None, None)
+        .unwrap();
+    let HelpResolution::Page(page) = broken_metadata else {
+        panic!(r"expected direct aliases lookup to work with broken title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(!page.markdown.is_empty());
+    assert!(resolver.title_for_page(&page).is_empty());
+}
+
+#[test]
+fn configured_lookup_tolerates_missing_title_metadata_but_keeps_page_errors_strict() {
+    let temp = tempfile::tempdir().unwrap();
+    let bad_index = package(temp.path(), "badindex");
+    std::fs::remove_file(bad_index.join(r"Meta/Rd.rds")).unwrap();
+    let mut catalog = resolver(&[temp.path()]);
+    let result = catalog
+        .resolve_configured_target(r"mean", Some(r"badindex"), None, None)
+        .unwrap();
+    let HelpResolution::Page(page) = result else {
+        panic!(r"expected direct aliases lookup to survive missing title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(!page.markdown.is_empty());
+    assert!(catalog.title_for_page(&page).is_empty());
+
+    let bad_page = package(temp.path(), "badpage");
+    std::fs::write(bad_page.join("help/badpage.rdx"), b"broken database").unwrap();
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_configured_target("mean", Some("badpage"), None, None)
+            .is_err()
+    );
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_target(
+                r"first-topic",
+                Some(r"badpage"),
+                None,
+                Some(r"first-topic"),
+                configured_options(),
+            )
+            .is_err()
+    );
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_configured_target("mean", None, None, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn metadata_candidates_preserve_package_order_and_are_selectable() {
+    let temp = tempfile::tempdir().unwrap();
+    package(temp.path(), "base");
+    package(temp.path(), "stats");
+    let mut resolver = resolver(&[temp.path()]);
+    let ambiguous = resolver
+        .resolve_configured_target("mean", None, None, None)
+        .unwrap();
+    let HelpResolution::Candidates(candidates) = ambiguous else {
+        panic!("expected cross-package candidates, got {ambiguous:?}");
+    };
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| (
+                candidate.package.as_str(),
+                candidate.topic.as_str(),
+                candidate.help_key.as_deref(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("base", "mean", Some("first-topic")),
+            ("stats", "mean", Some("first-topic")),
+        ]
+    );
+}
+
+#[test]
+fn help_key_resolves_a_page_without_an_alias_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let package_dir = package(temp.path(), "fixture");
+    std::fs::remove_file(package_dir.join(r"help/aliases.rds")).unwrap();
+
+    let mut resolver = resolver(&[temp.path()]);
+    let result = resolver
+        .resolve_configured_target(
+            r#"first-topic"#,
+            Some(r#"fixture"#),
+            None,
+            Some(r#"first-topic"#),
+        )
+        .unwrap();
+    let HelpResolution::Page(page) = result else {
+        panic!(r"expected exact-key page without aliases.rds, got {result:?}");
+    };
+    assert_eq!(page.help_key, r#"first-topic"#);
+    assert!(page.markdown.contains(r#"Fixture first-topic"#));
+    assert_eq!(resolver.title_for_page(&page), r#"First fixture"#);
+}
+
+#[test]
+fn missing_help_key_returns_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    package(temp.path(), r"fixture");
+
+    let result = resolver(&[temp.path()])
+        .resolve_target(
+            r"absent-key",
+            Some(r"fixture"),
+            None,
+            Some(r"absent-key"),
+            configured_options(),
+        )
+        .unwrap();
+    assert_eq!(result, HelpResolution::NotFound);
+}
+
+#[test]
+fn configured_resolution_keeps_distinct_alias_only_candidates() {
+    let dir = PathBuf::from("/library/package");
+    let first = HelpTopic {
+        package: "pkg".to_owned(),
+        package_dir: dir,
+        topic: "first".to_owned(),
+        aliases: vec!["shared".to_owned()],
+        help_key: None,
+        title: "First".to_owned(),
+        entry_type: "help".to_owned(),
+    };
+    let second = HelpTopic {
+        topic: "second".to_owned(),
+        title: "Second".to_owned(),
+        ..first.clone()
+    };
+    let result = HelpTargetResolver::new(Vec::new())
+        .finish_candidates(vec![first, second], configured_options())
+        .unwrap();
+    let HelpResolution::Candidates(candidates) = result else {
+        panic!("expected distinct aliases-only candidates, got {result:?}");
+    };
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].topic, "first");
+    assert_eq!(candidates[1].topic, "second");
+}
+
+#[test]
+fn direct_lookup_does_not_read_title_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = package(temp.path(), r"base");
+    let mut resolver = resolver(&[]);
+    let result = resolve(&mut resolver, &current(&dir), r"x-r-help:/mean").unwrap();
+    let HelpResolution::Page(page) = result else {
+        panic!(r"expected direct lookup to avoid title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(resolver.indexes.is_empty());
+    assert!(resolver.packages.is_none());
+}
+
+#[test]
 fn operator_aliases_resolve_without_path_or_percent_interpretation() {
     let temp = tempfile::tempdir().unwrap();
     let dir = package(temp.path(), "base");
@@ -178,6 +411,22 @@ fn operator_aliases_resolve_without_path_or_percent_interpretation() {
             assert_eq!(result.display_topic, operator);
         }
     }
+}
+
+#[test]
+fn qualified_operator_target_resolves_as_a_page() {
+    let temp = tempfile::tempdir().unwrap();
+    package(temp.path(), "base");
+    let target = HelpTarget::from_uri(r#"x-r-help:base/%/%"#).unwrap();
+    let result = resolver(&[temp.path()])
+        .resolve_configured_target(&target.topic, target.package.as_deref(), None, None)
+        .unwrap();
+    let HelpResolution::Page(page) = result else {
+        panic!("expected the qualified operator help page, got {result:?}");
+    };
+    assert_eq!(page.package, "base");
+    assert_eq!(page.help_key, "first-topic");
+    assert!(!page.markdown.is_empty());
 }
 
 #[test]

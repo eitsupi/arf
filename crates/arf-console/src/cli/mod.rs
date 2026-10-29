@@ -11,7 +11,7 @@ mod shared;
 
 pub(crate) use config::ConfigAction;
 pub(crate) use history::{HistoryAction, ImportSource};
-pub(crate) use ipc::IpcAction;
+pub(crate) use ipc::{IpcAction, RHelpAction};
 pub(crate) use r_args::RArgsBuilder;
 pub(crate) use resolve::RCommand;
 pub(crate) use shared::RSourceArgs;

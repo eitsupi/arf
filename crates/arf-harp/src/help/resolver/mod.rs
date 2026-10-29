@@ -1,4 +1,4 @@
-//! Static cross-reference resolution for one help viewer session.
+//! Static cross-reference resolution for installed help pages.
 
 use super::markdown::{open_package_help_db, package_help_markdown_from_db};
 use super::{HelpTarget, HelpTopic};
@@ -20,10 +20,47 @@ pub enum HelpResolution {
     NotFound,
 }
 
-/// Resolver using a library-path snapshot obtained before entering the viewer.
+#[derive(Clone, Copy)]
+pub enum CurrentPackage<'a> {
+    /// Search the exact copy that supplied this previously prepared page.
+    Exact(&'a PreparedHelpPage),
+    /// Search the first installed copy of this package name.
+    Named(&'a str),
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum CandidateDisplay {
+    /// Retain the requested topic as the candidate display name.
+    #[default]
+    Requested,
+    /// Use the metadata row's representative alias as the display name.
+    Metadata,
+}
+
+#[derive(Clone, Copy)]
+pub struct ResolveOptions {
+    /// Skip unreadable metadata indexes while searching all installed packages.
+    pub skip_broken_indexes: bool,
+    /// Choose how each candidate's display topic is projected from metadata.
+    pub candidate_display: CandidateDisplay,
+    /// Remove duplicate alias-only metadata rows within each package copy.
+    pub deduplicate_keyless: bool,
+}
+
+impl Default for ResolveOptions {
+    fn default() -> Self {
+        Self {
+            skip_broken_indexes: false,
+            candidate_display: CandidateDisplay::Requested,
+            deduplicate_keyless: true,
+        }
+    }
+}
+
+/// Resolver using a snapshot of the installed library paths.
 ///
 /// All operations use installed files, never R evaluation. Package discovery
-/// and Rd metadata are loaded lazily after an unqualified current-package miss.
+/// and Rd metadata are loaded lazily as needed for lookup and page titles.
 pub struct HelpTargetResolver {
     library_paths: Vec<String>,
     packages: Option<Vec<(String, PathBuf)>>,
@@ -39,83 +76,163 @@ impl HelpTargetResolver {
         }
     }
 
-    /// Resolve relative to the exact installed copy that supplied `current`.
-    ///
-    /// Qualified targets select the first installed copy in library order.
-    /// Unqualified targets prefer the current copy, then search other package
-    /// metadata. Another copy of the current package is never substituted.
-    /// Corrupt or unreadable databases/metadata are errors, not missing topics.
+    /// Resolve a link in the exact installed copy that supplied its page.
     pub fn resolve(
         &mut self,
         current: &PreparedHelpPage,
         target: &HelpTarget,
     ) -> HarpResult<HelpResolution> {
-        if let Some(package) = &target.package {
+        self.resolve_target(
+            &target.topic,
+            target.package.as_deref(),
+            Some(CurrentPackage::Exact(current)),
+            None,
+            ResolveOptions::default(),
+        )
+    }
+
+    /// Resolve a topic using explicit, current-package, then global lookup.
+    /// A `help_key` selects the exact compiled-help page without aliases during
+    /// explicit or current-package lookup; global lookup matches the topic.
+    pub fn resolve_target(
+        &mut self,
+        topic: &str,
+        package: Option<&str>,
+        current: Option<CurrentPackage<'_>>,
+        help_key: Option<&str>,
+        options: ResolveOptions,
+    ) -> HarpResult<HelpResolution> {
+        if let Some(package) = package {
             let Some(dir) = installed_package_dir(&self.library_paths, package) else {
                 return Ok(HelpResolution::NotFound);
             };
-            return lookup_in_package(&dir, package, &target.topic)
-                .map(|page| page.map_or(HelpResolution::NotFound, HelpResolution::Page));
+            return self.resolve_direct(package, &dir, topic, help_key);
         }
 
-        if let Some(page) =
-            lookup_in_package(&current.package_dir, &current.package, &target.topic)?
-        {
-            return Ok(HelpResolution::Page(page));
+        let (current_name, current_dir) = match current {
+            Some(CurrentPackage::Exact(page)) => {
+                (Some(page.package.clone()), Some(page.package_dir.clone()))
+            }
+            Some(CurrentPackage::Named(name)) => (
+                Some(name.to_owned()),
+                installed_package_dir(&self.library_paths, name),
+            ),
+            None => (None, None),
+        };
+        if let (Some(name), Some(dir)) = (&current_name, &current_dir) {
+            let resolved = self.resolve_direct(name, dir, topic, help_key)?;
+            if !matches!(&resolved, HelpResolution::NotFound) {
+                return Ok(resolved);
+            }
         }
 
+        let mut candidates = Vec::new();
         let packages = self
             .packages
-            .get_or_insert_with(|| installed_package_dirs(&self.library_paths));
-        let mut candidates = Vec::new();
-        let mut seen = HashSet::new();
-        for (package, dir) in packages.iter().filter(|(name, _)| name != &current.package) {
-            if !self.indexes.contains_key(dir) {
-                let index = HelpTopicIndex::read_installed(dir).map_err(|source| {
-                    database_error(package, &target.topic, &target.topic, source)
-                })?;
-                self.indexes.insert(dir.clone(), index);
-            }
-            let Some(index) = self.indexes[dir].as_ref() else {
+            .get_or_insert_with(|| installed_package_dirs(&self.library_paths))
+            .clone();
+        for (name, dir) in &packages {
+            if current_name.as_deref() == Some(name) {
                 continue;
-            };
-            let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
-                entry
-                    .aliases
-                    .iter()
-                    .flatten()
-                    .any(|alias| alias == &target.topic)
-            };
-            // Match the direct lookup's alias-first policy within each package.
-            // Multiple alias rows remain candidates for explicit selection.
-            let has_alias = index.entries().any(matches_alias);
-            for entry in index.entries() {
-                let key = entry.topic_key().filter(|key| !key.is_empty());
-                let matches = if has_alias {
-                    matches_alias(entry)
-                } else {
-                    key == Some(target.topic.as_str())
-                };
-                if !matches {
-                    continue;
-                }
-                if !seen.insert((dir.clone(), key.map(str::to_owned))) {
-                    continue;
-                }
-                candidates.push(HelpTopic {
-                    package: package.clone(),
-                    package_dir: dir.clone(),
-                    topic: target.topic.clone(),
-                    aliases: entry.aliases.iter().flatten().cloned().collect(),
-                    help_key: key.map(str::to_owned),
-                    title: entry.title.as_str().unwrap_or_default().to_owned(),
-                    entry_type: "help".to_owned(),
-                });
             }
+            candidates.extend(self.matching_topics(name, dir, topic, options)?);
         }
-        match candidates.as_slice() {
-            [] => Ok(HelpResolution::NotFound),
-            [candidate] => Self::prepare_candidate(candidate).map(HelpResolution::Page),
+        self.finish_candidates(candidates, options)
+    }
+
+    fn resolve_direct(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+        help_key: Option<&str>,
+    ) -> HarpResult<HelpResolution> {
+        let page = if let Some(help_key) = help_key {
+            let db = open_package_help_db(dir, package, topic, help_key)?;
+            if !db.topics().any(|key| key == help_key) {
+                return Ok(HelpResolution::NotFound);
+            }
+            Some(prepare_page(&db, dir, package, topic, help_key)?)
+        } else {
+            lookup_in_package(dir, package, topic)?
+        };
+        Ok(page.map_or(HelpResolution::NotFound, HelpResolution::Page))
+    }
+
+    fn package_index(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+    ) -> HarpResult<Option<&HelpTopicIndex>> {
+        if !self.indexes.contains_key(dir) {
+            let index = HelpTopicIndex::read_installed(dir)
+                .map_err(|source| database_error(package, topic, topic, source))?;
+            self.indexes.insert(dir.to_owned(), index);
+        }
+        Ok(self.indexes.get(dir).and_then(Option::as_ref))
+    }
+
+    /// Return the metadata title for a prepared page, or an empty string when
+    /// its metadata is absent or unreadable.
+    pub fn title_for_page(&mut self, page: &PreparedHelpPage) -> String {
+        self.package_index(&page.package, &page.package_dir, &page.help_key)
+            .ok()
+            .flatten()
+            .and_then(|index| {
+                index
+                    .entries()
+                    .find(|entry| entry.topic_key() == Some(page.help_key.as_str()))
+                    .map(|entry| entry.title.as_str().unwrap_or_default().to_owned())
+            })
+            .unwrap_or_default()
+    }
+
+    fn matching_topics(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+        options: ResolveOptions,
+    ) -> HarpResult<Vec<HelpTopic>> {
+        match self.package_index(package, dir, topic) {
+            Ok(Some(index)) => Ok(matching_entries(
+                index,
+                dir,
+                package,
+                topic,
+                matches!(options.candidate_display, CandidateDisplay::Metadata),
+            )),
+            Ok(None) => Ok(Vec::new()),
+            Err(error) if options.skip_broken_indexes => {
+                log::warn!(
+                    "Skipping unreadable help index for package {package:?} at {}: {error}",
+                    dir.display()
+                );
+                Ok(Vec::new())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn finish_candidates(
+        &self,
+        mut candidates: Vec<HelpTopic>,
+        options: ResolveOptions,
+    ) -> HarpResult<HelpResolution> {
+        let mut seen = HashSet::new();
+        candidates.retain(|entry| match &entry.help_key {
+            Some(key) => seen.insert((entry.package_dir.clone(), Some(key.clone()))),
+            None if !options.deduplicate_keyless => true,
+            None => seen.insert((entry.package_dir.clone(), None)),
+        });
+        match candidates.len() {
+            0 => Ok(HelpResolution::NotFound),
+            1 => {
+                let candidate = &candidates[0];
+                let page = Self::prepare_candidate(candidate)?;
+                Ok(HelpResolution::Page(page))
+            }
             _ => Ok(HelpResolution::Candidates(candidates)),
         }
     }
@@ -152,6 +269,55 @@ impl HelpTargetResolver {
             },
         )
     }
+}
+
+/// Match a topic within one metadata index, preferring aliases over database
+/// keys just as the pager resolver does.
+fn matching_entries(
+    index: &HelpTopicIndex,
+    dir: &Path,
+    package: &str,
+    topic: &str,
+    metadata_topic: bool,
+) -> Vec<HelpTopic> {
+    let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
+        entry.aliases.iter().flatten().any(|alias| alias == topic)
+    };
+    let has_alias = index.entries().any(matches_alias);
+    index
+        .entries()
+        .filter_map(|entry| {
+            let key = entry.topic_key().filter(|key| !key.is_empty());
+            let matches = if has_alias {
+                matches_alias(entry)
+            } else {
+                key == Some(topic)
+            };
+            if !matches {
+                return None;
+            }
+            let aliases = entry.aliases.iter().flatten().cloned().collect::<Vec<_>>();
+            let display_topic = if metadata_topic {
+                entry
+                    .name
+                    .as_str()
+                    .filter(|name| aliases.iter().any(|alias| alias == name))
+                    .or_else(|| entry.aliases.first().and_then(Option::as_deref))
+                    .unwrap_or(topic)
+            } else {
+                topic
+            };
+            Some(HelpTopic {
+                package: package.to_owned(),
+                package_dir: dir.to_owned(),
+                topic: display_topic.to_owned(),
+                aliases,
+                help_key: key.map(str::to_owned),
+                title: entry.title.as_str().unwrap_or_default().to_owned(),
+                entry_type: "help".to_owned(),
+            })
+        })
+        .collect()
 }
 
 fn lookup_in_package(

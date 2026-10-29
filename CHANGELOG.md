@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `arf ipc r-help search` searches installed R help topics and `arf ipc r-help show` retrieves Markdown pages without evaluating R, including while R is busy.
+
 ## [0.7.0-beta.2] - 2026-10-29
 
 ### Added

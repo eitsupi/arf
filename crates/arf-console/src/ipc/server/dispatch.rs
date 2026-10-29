@@ -5,10 +5,12 @@ use crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
 use crate::ipc::handlers::{
     HandlerApiState, HandlerCallTicket, HandlerQueuePermit, handler_status,
 };
+use crate::ipc::help_query::{HelpQueryError, query_help, query_help_topics};
 use crate::ipc::history_query::{HistoryQueryError, query_history};
 use crate::ipc::protocol::{
     DEFAULT_HANDLER_QUEUE_TIMEOUT, EvaluateParams, HANDLER_NOT_FOUND, HANDLER_QUEUE_FULL,
-    HANDLER_QUEUE_TIMEOUT, HandlerCallParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS,
+    HANDLER_QUEUE_TIMEOUT, HELP_LIBRARY_PATHS_UNAVAILABLE, HELP_NOT_FOUND, HandlerCallParams,
+    HelpSearchParams, HelpShowParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS,
     InterruptParams, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
     MAX_HANDLER_QUEUE_TIMEOUT, METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, TIMEOUT,
     UserInputParams,
@@ -151,6 +153,72 @@ fn handle_history(id: Option<serde_json::Value>, params: serde_json::Value) -> J
         Err(HistoryQueryError::Internal(message)) => {
             JsonRpcResponse::error(id, INTERNAL_ERROR, message)
         }
+    }
+}
+
+/// Help metadata is read from the cached library-path snapshot and processed
+/// away from both the R thread and the async server executor.
+async fn handle_help_method(
+    id: Option<serde_json::Value>,
+    method: &str,
+    params: serde_json::Value,
+) -> JsonRpcResponse {
+    let params = if params.is_null() && method == "r_help_search" {
+        serde_json::Value::Object(Default::default())
+    } else {
+        params
+    };
+    let result = match method {
+        "r_help_search" => {
+            let params: HelpSearchParams = match parse_params(&id, params) {
+                Ok(params) => params,
+                Err(response) => return *response,
+            };
+            tokio::task::spawn_blocking(move || {
+                query_help_topics(&params).and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| HelpQueryError::Internal(error.to_string()))
+                })
+            })
+            .await
+        }
+        "r_help_show" => {
+            let params: HelpShowParams = match parse_params(&id, params) {
+                Ok(params) => params,
+                Err(response) => return *response,
+            };
+            tokio::task::spawn_blocking(move || {
+                query_help(&params).and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| HelpQueryError::Internal(error.to_string()))
+                })
+            })
+            .await
+        }
+        _ => unreachable!("handle_help_method only handles help methods"),
+    };
+    match result {
+        Ok(Ok(result)) => JsonRpcResponse::success(id, result),
+        Ok(Err(HelpQueryError::InvalidParams(message))) => {
+            JsonRpcResponse::error(id, INVALID_PARAMS, message)
+        }
+        Ok(Err(HelpQueryError::NotFound(message))) => {
+            JsonRpcResponse::error(id, HELP_NOT_FOUND, message)
+        }
+        Ok(Err(HelpQueryError::EmptyLibraryPaths)) => JsonRpcResponse::error(
+            id,
+            HELP_LIBRARY_PATHS_UNAVAILABLE,
+            "R help library paths are unavailable; the cached .libPaths() snapshot is empty"
+                .to_string(),
+        ),
+        Ok(Err(HelpQueryError::Internal(message))) => {
+            JsonRpcResponse::error(id, INTERNAL_ERROR, message)
+        }
+        Err(error) => JsonRpcResponse::error(
+            id,
+            INTERNAL_ERROR,
+            format!("Help query worker failed: {error}"),
+        ),
     }
 }
 
@@ -301,6 +369,9 @@ pub(super) async fn dispatch_request_for_connection(
 ) -> JsonRpcResponse {
     let started_execution_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let id = request.id.clone();
+    if request.method == "r_help_show" || request.method == "r_help_search" {
+        return handle_help_method(id, &request.method, request.params).await;
+    }
     let is_session = request.method == "session";
     let is_history = request.method == "history";
     let is_call = request.method == "call";
@@ -700,6 +771,41 @@ mod tests {
         assert_eq!(response.error.unwrap().code, R_NOT_AT_PROMPT);
 
         // Cleanup handled by Guard drop
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn help_methods_are_served_directly_in_alternate_mode() {
+        set_in_alternate_mode(true);
+        let _guard = Guard;
+        let (tx, rx) = mpsc::channel();
+        for (id, method, params) in [
+            (1, "r_help_search", serde_json::json!({})),
+            (2, "r_help_show", serde_json::json!({"topic": "mean"})),
+        ] {
+            let response = dispatch_request(
+                JsonRpcRequest {
+                    jsonrpc: "2.0".to_string(),
+                    id: Some(serde_json::json!(id)),
+                    method: method.to_string(),
+                    params,
+                },
+                &tx,
+            )
+            .await;
+            if let Some(error) = response.error {
+                assert!(
+                    matches!(error.code, HELP_LIBRARY_PATHS_UNAVAILABLE | HELP_NOT_FOUND),
+                    "{method} should be processed directly, got {}: {}",
+                    error.code,
+                    error.message
+                );
+            }
+        }
+        assert!(matches!(
+            rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]

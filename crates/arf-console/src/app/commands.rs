@@ -1,7 +1,7 @@
 //! Handlers for `arf config`, `arf history`, and `arf ipc` subcommands.
 
 use crate::app::config_load::load_config_or_warn;
-use crate::cli::{ConfigAction, HistoryAction, ImportSource, IpcAction};
+use crate::cli::{ConfigAction, HistoryAction, ImportSource, IpcAction, RHelpAction};
 use crate::config::{
     self, ConfigLoadError, config_file_path, init_config, load_config_from_path, mask_home_path,
 };
@@ -154,6 +154,27 @@ pub(crate) fn handle_ipc_command(action: &IpcAction) {
             grep.as_deref(),
             since.as_deref(),
         ),
+        IpcAction::RHelp(action) => match action {
+            RHelpAction::Search {
+                query,
+                package,
+                limit,
+                pid,
+            } => ipc::client::cmd_r_help_search(*pid, query.as_deref(), package.as_deref(), *limit),
+            RHelpAction::Show {
+                topic,
+                package,
+                current_package,
+                help_key,
+                pid,
+            } => ipc::client::cmd_r_help_show(
+                *pid,
+                topic,
+                package.as_deref(),
+                current_package.as_deref(),
+                help_key.as_deref(),
+            ),
+        },
     }
 }
 
