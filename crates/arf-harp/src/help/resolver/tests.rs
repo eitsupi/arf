@@ -315,13 +315,30 @@ fn ipc_resolution_keeps_distinct_alias_only_candidates() {
         title: "Second".to_owned(),
         ..first.clone()
     };
-    let result = HelpTargetResolver::finish_ipc_resolution(vec![first, second]).unwrap();
+    let result = HelpTargetResolver::new(Vec::new())
+        .finish_candidates(vec![first, second], ResolveMode::Ipc)
+        .unwrap();
     let HelpResolution::Candidates(candidates) = result else {
         panic!("expected distinct aliases-only candidates, got {result:?}");
     };
     assert_eq!(candidates.len(), 2);
     assert_eq!(candidates[0].topic, "first");
     assert_eq!(candidates[1].topic, "second");
+}
+
+#[test]
+fn viewer_direct_lookup_does_not_read_title_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = package(temp.path(), r"base");
+    let mut resolver = resolver(&[]);
+    let result = resolve(&mut resolver, &current(&dir), r"x-r-help:/mean").unwrap();
+    let HelpResolution::Page { page, title } = result else {
+        panic!(r"expected direct viewer lookup to avoid title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(title.is_empty());
+    assert!(resolver.indexes.is_empty());
+    assert!(resolver.packages.is_none());
 }
 
 #[test]
