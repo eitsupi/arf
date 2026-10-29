@@ -140,7 +140,7 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
         TIMEOUT => (
             "TIMEOUT",
             Some(
-                "The R evaluation may still be running. Request interruption with 'arf ipc interrupt'.",
+                "An evaluation that already started may still be running. Request interruption with 'arf ipc interrupt'.",
             ),
         ),
         PARSE_ERROR => ("PARSE_ERROR", None),

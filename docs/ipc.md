@@ -223,7 +223,7 @@ Error code strings:
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
 | `METHOD_NOT_FOUND` | 4 | Unknown method name |
 | `INVALID_PARAMS` | 4 | Invalid method parameters |
-| `TIMEOUT` | 4 | Server stopped waiting for a response; R execution continues |
+| `TIMEOUT` | 4 | Server stopped waiting for a response; an execution that already started continues |
 | `INTERNAL_ERROR` | 4 | Server internal error |
 | `PROTOCOL_ERROR` | 4 | Other JSON-RPC error |
 
@@ -1006,7 +1006,7 @@ The check detects the interface for feature detection only; it is not authentica
 | -32002 | Input Already Pending | Another IPC request is already queued |
 | -32003 | User Is Typing | User is typing in the REPL (interactive mode only) |
 | -32004 | Incomplete Input | R code is syntactically incomplete |
-| -32007 | Timeout | Server stopped waiting for a response; `data.timeout_ms` gives the applied timeout and R execution continues |
+| -32007 | Timeout | Server stopped waiting for a response; `data.timeout_ms` gives the applied timeout, and an execution that already started continues |
 
 ## Troubleshooting
 
