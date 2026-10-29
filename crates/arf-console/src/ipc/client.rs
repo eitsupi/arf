@@ -143,6 +143,16 @@ pub(super) fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) 
                 "An evaluation that already started may still be running. To interrupt it, pass data.execution_id to 'arf ipc interrupt --execution-id'.",
             ),
         ),
+        HELP_LIBRARY_PATHS_UNAVAILABLE => (
+            "HELP_LIBRARY_PATHS_UNAVAILABLE",
+            Some(
+                "Start a new arf session or open `:help` once to initialize the R help library paths.",
+            ),
+        ),
+        HELP_NOT_FOUND => (
+            "HELP_NOT_FOUND",
+            Some("Search available topics with 'arf ipc r-help search'."),
+        ),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
@@ -459,6 +469,64 @@ pub fn cmd_history(
 
     let transport_timeout = std::time::Duration::from_secs(15);
     let response = send_request(&session.socket_path, &request, transport_timeout);
+    handle_response(response);
+}
+
+/// Search installed R help topics via the `r_help_search` IPC method.
+pub fn cmd_r_help_search(
+    pid: Option<u32>,
+    query: Option<&str>,
+    package: Option<&str>,
+    limit: usize,
+) {
+    let session = resolve_session(pid);
+    let mut params = serde_json::json!({ "limit": limit });
+    if let Some(query) = query {
+        params["query"] = serde_json::Value::String(query.to_owned());
+    }
+    if let Some(package) = package {
+        params["package"] = serde_json::Value::String(package.to_owned());
+    }
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "r_help_search",
+        "params": params
+    });
+    let response = send_request(
+        &session.socket_path,
+        &request,
+        std::time::Duration::from_secs(30),
+    );
+    handle_response(response);
+}
+
+/// Retrieve one installed R help page via the `r_help_show` IPC method.
+pub fn cmd_r_help_show(
+    pid: Option<u32>,
+    topic: &str,
+    package: Option<&str>,
+    current_package: Option<&str>,
+) {
+    let session = resolve_session(pid);
+    let mut params = serde_json::json!({ "topic": topic });
+    if let Some(package) = package {
+        params["package"] = serde_json::Value::String(package.to_owned());
+    }
+    if let Some(current_package) = current_package {
+        params["current_package"] = serde_json::Value::String(current_package.to_owned());
+    }
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "r_help_show",
+        "params": params
+    });
+    let response = send_request(
+        &session.socket_path,
+        &request,
+        std::time::Duration::from_secs(30),
+    );
     handle_response(response);
 }
 

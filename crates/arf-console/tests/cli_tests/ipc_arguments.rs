@@ -86,6 +86,65 @@ fn test_ipc_interrupt_accepts_pid_and_execution_id() {
 }
 
 #[test]
+fn test_ipc_r_help_subcommands_accept_search_and_resolution_arguments() {
+    let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
+
+    for args in [
+        vec![
+            "ipc",
+            "r-help",
+            "search",
+            "--query",
+            "linear",
+            "--package",
+            "stats",
+            "--limit",
+            "20",
+        ],
+        vec![
+            "ipc",
+            "r-help",
+            "show",
+            "lm",
+            "--package",
+            "stats",
+            "--current-package",
+            "base",
+        ],
+    ] {
+        let output = sanitized_arf_command()
+            .args(args)
+            .env("ARF_IPC_SESSIONS_DIR", sessions_dir.path())
+            .output()
+            .expect("Failed to run arf ipc help command");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stdout.contains("SESSION_NOT_FOUND") || stderr.contains("SESSION_NOT_FOUND"),
+            "help arguments should parse before session resolution: stdout={stdout}, stderr={stderr}"
+        );
+        assert!(
+            !stderr.contains("unexpected argument") && !stderr.contains("invalid value"),
+            "help arguments should be accepted: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn test_ipc_builtin_help_subcommand_remains_available() {
+    let output = sanitized_arf_command()
+        .args(["ipc", "help"])
+        .output()
+        .expect("Failed to run arf ipc help");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Commands:"));
+    assert!(stdout.contains("r-help"));
+}
+
+#[test]
 fn test_ipc_list_ignores_empty_arf_config() {
     let sessions_dir = tempfile::tempdir().expect("Failed to create temp sessions dir");
 

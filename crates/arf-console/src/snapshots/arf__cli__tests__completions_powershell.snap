@@ -209,6 +209,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
+            [CompletionResult]::new('r-help', 'r-help', [CompletionResultType]::ParameterValue, 'Search and retrieve installed R help pages')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -268,6 +269,46 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'arf;ipc;r-help' {
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help')
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search installed R help topics without evaluating R')
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Get one R help page as Markdown without evaluating R')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;ipc;r-help;search' {
+            [CompletionResult]::new('--query', '--query', [CompletionResultType]::ParameterName, 'Case-insensitive substring in topic, aliases, or title')
+            [CompletionResult]::new('--package', '--package', [CompletionResultType]::ParameterName, 'Restrict results to this exact package name')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of results (default 50, maximum 200)')
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'arf;ipc;r-help;show' {
+            [CompletionResult]::new('--package', '--package', [CompletionResultType]::ParameterName, 'Restrict lookup to this exact package name')
+            [CompletionResult]::new('--current-package', '--current-package', [CompletionResultType]::ParameterName, 'Prefer this package for unqualified topic references')
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'arf;ipc;r-help;help' {
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search installed R help topics without evaluating R')
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Get one R help page as Markdown without evaluating R')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'arf;ipc;r-help;help;search' {
+            break
+        }
+        'arf;ipc;r-help;help;show' {
+            break
+        }
+        'arf;ipc;r-help;help;help' {
+            break
+        }
         'arf;ipc;help' {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
             [CompletionResult]::new('attach', 'attach', [CompletionResultType]::ParameterValue, 'Bridge a long-lived IPC connection over stdin/stdout for editors and agents')
@@ -277,6 +318,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
+            [CompletionResult]::new('r-help', 'r-help', [CompletionResultType]::ParameterValue, 'Search and retrieve installed R help pages')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -302,6 +344,17 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;history' {
+            break
+        }
+        'arf;ipc;help;r-help' {
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search installed R help topics without evaluating R')
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Get one R help page as Markdown without evaluating R')
+            break
+        }
+        'arf;ipc;help;r-help;search' {
+            break
+        }
+        'arf;ipc;help;r-help;show' {
             break
         }
         'arf;ipc;help;help' {
@@ -419,6 +472,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
             [CompletionResult]::new('interrupt', 'interrupt', [CompletionResultType]::ParameterValue, 'Interrupt the active IPC evaluation in a running session')
             [CompletionResult]::new('history', 'history', [CompletionResultType]::ParameterValue, 'Query command history from a running session')
+            [CompletionResult]::new('r-help', 'r-help', [CompletionResultType]::ParameterValue, 'Search and retrieve installed R help pages')
             break
         }
         'arf;help;ipc;list' {
@@ -443,6 +497,17 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;history' {
+            break
+        }
+        'arf;help;ipc;r-help' {
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search installed R help topics without evaluating R')
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Get one R help page as Markdown without evaluating R')
+            break
+        }
+        'arf;help;ipc;r-help;search' {
+            break
+        }
+        'arf;help;ipc;r-help;show' {
             break
         }
         'arf;help;headless' {

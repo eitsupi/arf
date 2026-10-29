@@ -113,6 +113,9 @@ _arf() {
             arf__subcmd__help__subcmd__ipc,list)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__list"
                 ;;
+            arf__subcmd__help__subcmd__ipc,r-help)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help"
+                ;;
             arf__subcmd__help__subcmd__ipc,send)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__send"
                 ;;
@@ -121,6 +124,12 @@ _arf() {
                 ;;
             arf__subcmd__help__subcmd__ipc,shutdown)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__shutdown"
+                ;;
+            arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help,search)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help__subcmd__search"
+                ;;
+            arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help,show)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help__subcmd__show"
                 ;;
             arf__subcmd__help__subcmd__r,resolve)
                 cmd="arf__subcmd__help__subcmd__r__subcmd__resolve"
@@ -173,6 +182,9 @@ _arf() {
             arf__subcmd__ipc,list)
                 cmd="arf__subcmd__ipc__subcmd__list"
                 ;;
+            arf__subcmd__ipc,r-help)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help"
+                ;;
             arf__subcmd__ipc,send)
                 cmd="arf__subcmd__ipc__subcmd__send"
                 ;;
@@ -200,6 +212,9 @@ _arf() {
             arf__subcmd__ipc__subcmd__help,list)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__list"
                 ;;
+            arf__subcmd__ipc__subcmd__help,r-help)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help"
+                ;;
             arf__subcmd__ipc__subcmd__help,send)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__send"
                 ;;
@@ -208,6 +223,30 @@ _arf() {
                 ;;
             arf__subcmd__ipc__subcmd__help,shutdown)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__shutdown"
+                ;;
+            arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help,search)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help__subcmd__search"
+                ;;
+            arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help,show)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help__subcmd__show"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help,help)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help,search)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__search"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help,show)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__show"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help,help)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__help"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help,search)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__search"
+                ;;
+            arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help,show)
+                cmd="arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__show"
                 ;;
             arf__subcmd__r,help)
                 cmd="arf__subcmd__r__subcmd__help"
@@ -863,7 +902,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help__subcmd__ipc)
-            opts="list attach eval send session shutdown interrupt history"
+            opts="list attach eval send session shutdown interrupt history r-help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -935,6 +974,48 @@ _arf() {
         arf__subcmd__help__subcmd__ipc__subcmd__list)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help)
+            opts="search show"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help__subcmd__search)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__ipc__subcmd__r__subcmd__help__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1225,7 +1306,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc)
-            opts="-h --help list attach eval send session shutdown interrupt history help"
+            opts="-h --help list attach eval send session shutdown interrupt history r-help help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1283,7 +1364,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__help)
-            opts="list attach eval send session shutdown interrupt history help"
+            opts="list attach eval send session shutdown interrupt history r-help help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1369,6 +1450,48 @@ _arf() {
         arf__subcmd__ipc__subcmd__help__subcmd__list)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help)
+            opts="search show"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help__subcmd__search)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__help__subcmd__r__subcmd__help__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1485,6 +1608,132 @@ _arf() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help)
+            opts="-h --help search show help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help)
+            opts="search show help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__search)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__help__subcmd__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__search)
+            opts="-h --query --package --limit --pid --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --query)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --package)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__show)
+            opts="-h --package --current-package --pid --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --package)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --current-package)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;

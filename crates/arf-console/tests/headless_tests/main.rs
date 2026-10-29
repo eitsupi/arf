@@ -5,6 +5,7 @@ mod common;
 mod error_codes;
 mod eval;
 mod handlers;
+mod help;
 mod history;
 mod interrupt;
 mod lifecycle_flags;

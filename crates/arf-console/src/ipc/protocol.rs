@@ -92,6 +92,10 @@ pub const HANDLER_R_ERROR: i32 = -32014;
 pub const HANDLER_RESULT_ERROR: i32 = -32015;
 /// The call was interrupted while running on the R thread.
 pub const HANDLER_INTERRUPTED: i32 = -32016;
+/// The requested installed help topic could not be found.
+pub const HELP_NOT_FOUND: i32 = -32017;
+/// No cached library paths are available for a static help query.
+pub const HELP_LIBRARY_PATHS_UNAVAILABLE: i32 = -32018;
 
 /// Maximum time a handler call may wait to start on the R thread.
 pub const DEFAULT_HANDLER_QUEUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -259,6 +263,34 @@ pub struct HistoryParams {
 
 fn default_history_limit() -> i64 {
     50
+}
+
+/// Parameters for the `r_help_search` method.
+#[derive(Debug, Deserialize)]
+pub struct HelpSearchParams {
+    /// Case-insensitive substring matched against topic, aliases, and title.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Restrict results to this exact package name.
+    #[serde(default)]
+    pub package: Option<String>,
+    /// Maximum number of topics (default: 50, maximum: 200).
+    #[serde(default = "default_help_topics_limit")]
+    pub limit: usize,
+}
+
+fn default_help_topics_limit() -> usize {
+    50
+}
+
+/// Parameters for the `r_help_show` method.
+#[derive(Debug, Deserialize)]
+pub struct HelpShowParams {
+    pub topic: String,
+    #[serde(default)]
+    pub package: Option<String>,
+    #[serde(default)]
+    pub current_package: Option<String>,
 }
 
 /// A single history entry returned by the `history` method.
