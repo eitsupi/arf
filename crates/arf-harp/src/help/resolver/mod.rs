@@ -1,4 +1,4 @@
-//! Static cross-reference resolution for one help viewer session.
+//! Static cross-reference resolution for installed help pages.
 
 use super::markdown::{open_package_help_db, package_help_markdown_from_db};
 use super::{HelpTarget, HelpTopic};
@@ -12,10 +12,7 @@ use std::path::{Path, PathBuf};
 /// Result of resolving a help cross-reference without evaluating R.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelpResolution {
-    Page {
-        page: PreparedHelpPage,
-        title: String,
-    },
+    Page(PreparedHelpPage),
     /// Several metadata rows match. The caller must request an explicit choice
     /// and prepare only the selected candidate with
     /// [`HelpTargetResolver::prepare_candidate`].
@@ -24,18 +21,43 @@ pub enum HelpResolution {
 }
 
 #[derive(Clone, Copy)]
-enum CurrentPackage<'a> {
+pub enum CurrentPackage<'a> {
+    /// Search the exact copy that supplied this previously prepared page.
     Exact(&'a PreparedHelpPage),
+    /// Search the first installed copy of this package name.
     Named(&'a str),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ResolveMode {
-    Viewer,
-    Ipc,
+#[derive(Clone, Copy, Default)]
+pub enum CandidateDisplay {
+    /// Retain the requested topic as the candidate display name.
+    #[default]
+    Requested,
+    /// Use the metadata row's representative alias as the display name.
+    Metadata,
 }
 
-/// Resolver using a library-path snapshot obtained before entering the viewer.
+#[derive(Clone, Copy)]
+pub struct ResolveOptions {
+    /// Skip unreadable metadata indexes while searching all installed packages.
+    pub skip_broken_indexes: bool,
+    /// Choose how each candidate's display topic is projected from metadata.
+    pub candidate_display: CandidateDisplay,
+    /// Remove duplicate alias-only metadata rows within each package copy.
+    pub deduplicate_keyless: bool,
+}
+
+impl Default for ResolveOptions {
+    fn default() -> Self {
+        Self {
+            skip_broken_indexes: false,
+            candidate_display: CandidateDisplay::Requested,
+            deduplicate_keyless: true,
+        }
+    }
+}
+
+/// Resolver using a snapshot of the installed library paths.
 ///
 /// All operations use installed files, never R evaluation. Package discovery
 /// and Rd metadata are loaded lazily as needed for lookup and page titles.
@@ -54,52 +76,37 @@ impl HelpTargetResolver {
         }
     }
 
-    /// Resolve an IPC topic using the same flow as pager cross-reference lookup.
-    /// A `help_key` selects the exact compiled-help page without aliases.
-    pub fn resolve_ipc_target(
-        &mut self,
-        topic: &str,
-        package: Option<&str>,
-        current_package: Option<&str>,
-        help_key: Option<&str>,
-    ) -> HarpResult<HelpResolution> {
-        self.resolve_flow(
-            topic,
-            package,
-            current_package.map(CurrentPackage::Named),
-            help_key,
-            ResolveMode::Ipc,
-        )
-    }
-
-    /// Resolve a pager link in the exact installed copy that supplied its page.
+    /// Resolve a link in the exact installed copy that supplied its page.
     pub fn resolve(
         &mut self,
         current: &PreparedHelpPage,
         target: &HelpTarget,
     ) -> HarpResult<HelpResolution> {
-        self.resolve_flow(
+        self.resolve_target(
             &target.topic,
             target.package.as_deref(),
             Some(CurrentPackage::Exact(current)),
             None,
-            ResolveMode::Viewer,
+            ResolveOptions::default(),
         )
     }
 
-    fn resolve_flow(
+    /// Resolve a topic using explicit, current-package, then global lookup.
+    /// A `help_key` selects the exact compiled-help page without aliases during
+    /// explicit or current-package lookup; global lookup matches the topic.
+    pub fn resolve_target(
         &mut self,
         topic: &str,
         package: Option<&str>,
         current: Option<CurrentPackage<'_>>,
         help_key: Option<&str>,
-        mode: ResolveMode,
+        options: ResolveOptions,
     ) -> HarpResult<HelpResolution> {
         if let Some(package) = package {
             let Some(dir) = installed_package_dir(&self.library_paths, package) else {
                 return Ok(HelpResolution::NotFound);
             };
-            return self.resolve_direct(package, &dir, topic, help_key, mode);
+            return self.resolve_direct(package, &dir, topic, help_key);
         }
 
         let (current_name, current_dir) = match current {
@@ -113,7 +120,7 @@ impl HelpTargetResolver {
             None => (None, None),
         };
         if let (Some(name), Some(dir)) = (&current_name, &current_dir) {
-            let resolved = self.resolve_direct(name, dir, topic, help_key, mode)?;
+            let resolved = self.resolve_direct(name, dir, topic, help_key)?;
             if !matches!(&resolved, HelpResolution::NotFound) {
                 return Ok(resolved);
             }
@@ -128,9 +135,9 @@ impl HelpTargetResolver {
             if current_name.as_deref() == Some(name) {
                 continue;
             }
-            candidates.extend(self.matching_topics(name, dir, topic, mode)?);
+            candidates.extend(self.matching_topics(name, dir, topic, options)?);
         }
-        self.finish_candidates(candidates, mode)
+        self.finish_candidates(candidates, options)
     }
 
     fn resolve_direct(
@@ -139,25 +146,17 @@ impl HelpTargetResolver {
         dir: &Path,
         topic: &str,
         help_key: Option<&str>,
-        mode: ResolveMode,
     ) -> HarpResult<HelpResolution> {
         let page = if let Some(help_key) = help_key {
             let db = open_package_help_db(dir, package, topic, help_key)?;
+            if !db.topics().any(|key| key == help_key) {
+                return Ok(HelpResolution::NotFound);
+            }
             Some(prepare_page(&db, dir, package, topic, help_key)?)
         } else {
             lookup_in_package(dir, package, topic)?
         };
-        Ok(match page {
-            Some(page) => HelpResolution::Page {
-                title: if mode == ResolveMode::Ipc {
-                    self.title_for_key(dir, package, &page.help_key)
-                } else {
-                    String::new()
-                },
-                page,
-            },
-            None => HelpResolution::NotFound,
-        })
+        Ok(page.map_or(HelpResolution::NotFound, HelpResolution::Page))
     }
 
     fn package_index(
@@ -174,14 +173,16 @@ impl HelpTargetResolver {
         Ok(self.indexes.get(dir).and_then(Option::as_ref))
     }
 
-    fn title_for_key(&mut self, dir: &Path, package: &str, help_key: &str) -> String {
-        self.package_index(package, dir, help_key)
+    /// Return the metadata title for a prepared page, or an empty string when
+    /// its metadata is absent or unreadable.
+    pub fn title_for_page(&mut self, page: &PreparedHelpPage) -> String {
+        self.package_index(&page.package, &page.package_dir, &page.help_key)
             .ok()
             .flatten()
             .and_then(|index| {
                 index
                     .entries()
-                    .find(|entry| entry.topic_key() == Some(help_key))
+                    .find(|entry| entry.topic_key() == Some(page.help_key.as_str()))
                     .map(|entry| entry.title.as_str().unwrap_or_default().to_owned())
             })
             .unwrap_or_default()
@@ -192,7 +193,7 @@ impl HelpTargetResolver {
         package: &str,
         dir: &Path,
         topic: &str,
-        mode: ResolveMode,
+        options: ResolveOptions,
     ) -> HarpResult<Vec<HelpTopic>> {
         match self.package_index(package, dir, topic) {
             Ok(Some(index)) => Ok(matching_entries(
@@ -200,10 +201,10 @@ impl HelpTargetResolver {
                 dir,
                 package,
                 topic,
-                mode == ResolveMode::Ipc,
+                matches!(options.candidate_display, CandidateDisplay::Metadata),
             )),
             Ok(None) => Ok(Vec::new()),
-            Err(error) if mode == ResolveMode::Ipc => {
+            Err(error) if options.skip_broken_indexes => {
                 log::warn!(
                     "Skipping unreadable help index for package {package:?} at {}: {error}",
                     dir.display()
@@ -217,37 +218,20 @@ impl HelpTargetResolver {
     fn finish_candidates(
         &self,
         mut candidates: Vec<HelpTopic>,
-        mode: ResolveMode,
+        options: ResolveOptions,
     ) -> HarpResult<HelpResolution> {
-        let ipc = mode == ResolveMode::Ipc;
         let mut seen = HashSet::new();
         candidates.retain(|entry| match &entry.help_key {
             Some(key) => seen.insert((entry.package_dir.clone(), Some(key.clone()))),
-            None if ipc => true,
+            None if !options.deduplicate_keyless => true,
             None => seen.insert((entry.package_dir.clone(), None)),
         });
-        if ipc {
-            candidates.sort_by(|left, right| {
-                (&left.package, &left.topic, &left.help_key).cmp(&(
-                    &right.package,
-                    &right.topic,
-                    &right.help_key,
-                ))
-            });
-        }
         match candidates.len() {
             0 => Ok(HelpResolution::NotFound),
             1 => {
                 let candidate = &candidates[0];
                 let page = Self::prepare_candidate(candidate)?;
-                Ok(HelpResolution::Page {
-                    page,
-                    title: if ipc {
-                        candidate.title.clone()
-                    } else {
-                        String::new()
-                    },
-                })
+                Ok(HelpResolution::Page(page))
             }
             _ => Ok(HelpResolution::Candidates(candidates)),
         }

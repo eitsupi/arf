@@ -20,7 +20,9 @@ mod topics;
 
 pub use markdown::{get_package_help_markdown_by_key_in_dir, rd_source_to_markdown};
 pub use r_eval::{eval_r_to_string, get_vignette_text};
-pub use resolver::{HelpResolution, HelpTargetResolver};
+pub use resolver::{
+    CandidateDisplay, CurrentPackage, HelpResolution, HelpTargetResolver, ResolveOptions,
+};
 pub use target::HelpTarget;
 pub use topics::{get_help_topics_from_paths, get_rd_help_topics_from_paths};
 

@@ -109,6 +109,22 @@ fn r_help_search_candidates_can_be_selected_and_operator_links_followed() {
         assert!(!page["content"].as_str().unwrap().is_empty());
     }
 
+    let missing_key = run_ipc_command(&[
+        r"ipc",
+        r"r-help",
+        r"show",
+        r"sum",
+        r"--package",
+        r"base",
+        r"--help-key",
+        r"arf_nonexistent_help_key",
+        r"--pid",
+        &process.pid.to_string(),
+    ]);
+    assert!(!missing_key.status.success());
+    let error: Value = serde_json::from_slice(&missing_key.stderr).unwrap();
+    assert_eq!(error[r"error"][r"code"], r"HELP_NOT_FOUND");
+
     let target = arf_harp::help::HelpTarget::from_uri("x-r-help:base/%/%").unwrap();
     let page = help_request(
         process.pid,

@@ -6,7 +6,8 @@ use crate::ipc::protocol::{
     HelpTopicResult,
 };
 use arf_harp::help::{
-    HelpResolution, HelpTargetResolver, HelpTopic, get_rd_help_topics_from_paths,
+    CandidateDisplay, CurrentPackage, HelpResolution, HelpTargetResolver, HelpTopic,
+    ResolveOptions, get_rd_help_topics_from_paths,
 };
 use arf_harp::lib_paths::cached_lib_paths;
 
@@ -89,28 +90,43 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpShowResult, Help
         ));
     }
     let library_paths = library_paths()?;
-    let resolution = HelpTargetResolver::new(library_paths.clone())
-        .resolve_ipc_target(
+    let mut resolver = HelpTargetResolver::new(library_paths.clone());
+    let resolution = resolver
+        .resolve_target(
             &params.topic,
             params.package.as_deref(),
-            params.current_package.as_deref(),
+            params.current_package.as_deref().map(CurrentPackage::Named),
             params.help_key.as_deref(),
+            ResolveOptions {
+                skip_broken_indexes: true,
+                candidate_display: CandidateDisplay::Metadata,
+                deduplicate_keyless: false,
+            },
         )
         .map_err(|error| HelpQueryError::Internal(error.to_string()))?;
     match resolution {
-        HelpResolution::Page { page, title } => Ok(HelpShowResult::Page {
+        HelpResolution::Page(page) => Ok(HelpShowResult::Page {
+            title: resolver.title_for_page(&page),
             package: page.package,
             topic: page.display_topic,
-            title,
             content: page.markdown,
             content_type: "markdown",
             entry_type: "help",
             library_paths,
         }),
-        HelpResolution::Candidates(candidates) => Ok(HelpShowResult::Candidates {
-            candidates: candidates.iter().map(candidate_result).collect(),
-            library_paths,
-        }),
+        HelpResolution::Candidates(mut candidates) => {
+            candidates.sort_by(|left, right| {
+                (&left.package, &left.topic, &left.help_key).cmp(&(
+                    &right.package,
+                    &right.topic,
+                    &right.help_key,
+                ))
+            });
+            Ok(HelpShowResult::Candidates {
+                candidates: candidates.iter().map(candidate_result).collect(),
+                library_paths,
+            })
+        }
         HelpResolution::NotFound => Err(HelpQueryError::NotFound(format!(
             "Help topic '{}' was not found",
             params.topic
