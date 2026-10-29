@@ -60,6 +60,13 @@ pub(super) fn validated_method(
 ) -> Result<IpcMethod, ValidationError> {
     validate_code(id, &code)?;
     let timeout = match timeout_ms {
+        Some(0) => {
+            return Err(Box::new(JsonRpcResponse::error(
+                id.clone(),
+                INVALID_PARAMS,
+                "timeout_ms must be greater than 0".to_string(),
+            )));
+        }
         Some(ms) if ms > MAX_TIMEOUT_MS => {
             return Err(Box::new(JsonRpcResponse::error(
                 id.clone(),
@@ -111,5 +118,13 @@ mod tests {
             IpcMethod::VisibleEvaluate { code, timeout: actual }
                 if code == "1" && actual == std::time::Duration::from_secs(4)
         ));
+    }
+
+    #[test]
+    fn evaluate_timeout_must_be_greater_than_zero() {
+        let error = validated_method(&None, "1".to_string(), false, Some(0))
+            .err()
+            .expect("zero timeout should be rejected");
+        assert_eq!(error.error.unwrap().code, INVALID_PARAMS);
     }
 }

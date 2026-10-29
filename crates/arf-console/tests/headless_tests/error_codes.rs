@@ -147,10 +147,8 @@ fn test_ipc_exit_code_protocol_error() {
 
     let json: serde_json::Value = serde_json::from_str(&result.stderr)
         .unwrap_or_else(|e| panic!("stderr should be JSON: {e}\nstderr: {}", result.stderr));
-    assert!(
-        json["error"]["code"].as_str().is_some(),
-        "should have string error code"
-    );
+    assert_eq!(json["error"]["code"], "TIMEOUT");
+    assert_eq!(json["error"]["data"]["timeout_ms"], 500);
     assert!(
         json["error"]["message"].as_str().is_some(),
         "should have message"

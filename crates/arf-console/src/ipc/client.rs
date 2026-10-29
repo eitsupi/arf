@@ -137,6 +137,12 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
             "INPUT_NOT_APPROVED",
             Some("Approve the request in the interactive REPL, then send it again."),
         ),
+        TIMEOUT => (
+            "TIMEOUT",
+            Some(
+                "An evaluation that already started may still be running. To interrupt it, pass data.execution_id to 'arf ipc interrupt --execution-id'.",
+            ),
+        ),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
@@ -312,15 +318,23 @@ pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms:
         "params": params
     });
 
-    // Client transport timeout: match the server-side timeout with a small buffer
-    // so the server can respond with a proper timeout error before the client gives up.
-    let transport_timeout = match timeout_ms {
-        Some(ms) => std::time::Duration::from_millis(ms.saturating_add(5000)),
-        None => DEFAULT_TRANSPORT_TIMEOUT + std::time::Duration::from_secs(5),
-    };
-
-    let response = send_request(&session.socket_path, &request, transport_timeout);
+    let response = send_request(
+        &session.socket_path,
+        &request,
+        reply_transport_timeout(timeout_ms),
+    );
     handle_response(response);
+}
+
+/// Client transport timeout for requests answered after an R reply wait:
+/// the server-side timeout plus a small buffer, so the server can respond
+/// with a `TIMEOUT` error before the client gives up.
+fn reply_transport_timeout(timeout_ms: Option<u64>) -> std::time::Duration {
+    let server_timeout = timeout_ms.map_or(
+        crate::ipc::execution::DEFAULT_EVAL_TIMEOUT,
+        std::time::Duration::from_millis,
+    );
+    server_timeout.saturating_add(std::time::Duration::from_secs(5))
 }
 
 /// Send code as user input to a running arf session.
@@ -349,7 +363,11 @@ pub fn cmd_send(code: Option<&str>, pid: Option<u32>) {
         "params": { "code": code }
     });
 
-    let response = send_request(&session.socket_path, &request, DEFAULT_TRANSPORT_TIMEOUT);
+    let response = send_request(
+        &session.socket_path,
+        &request,
+        reply_transport_timeout(None),
+    );
     handle_response(response);
 }
 
@@ -566,4 +584,17 @@ fn parse_http_response(data: &[u8]) -> Result<JsonRpcResponse> {
     };
 
     serde_json::from_str(body).context("Failed to parse JSON-RPC response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reply_transport_timeout;
+    use crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
+    use std::time::Duration;
+
+    #[test]
+    fn reply_transport_timeout_outlasts_the_server_reply_timeout() {
+        assert!(reply_transport_timeout(None) > DEFAULT_EVAL_TIMEOUT);
+        assert!(reply_transport_timeout(Some(1_000)) > Duration::from_millis(1_000));
+    }
 }

@@ -10,7 +10,8 @@ use crate::ipc::protocol::{
     DEFAULT_HANDLER_QUEUE_TIMEOUT, EvaluateParams, HANDLER_NOT_FOUND, HANDLER_QUEUE_FULL,
     HANDLER_QUEUE_TIMEOUT, HandlerCallParams, HistoryParams, INTERNAL_ERROR, INVALID_PARAMS,
     InterruptParams, IpcMethod, IpcRequest, IpcResponse, JsonRpcRequest, JsonRpcResponse,
-    MAX_HANDLER_QUEUE_TIMEOUT, METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, UserInputParams,
+    MAX_HANDLER_QUEUE_TIMEOUT, METHOD_NOT_FOUND, R_NOT_AT_PROMPT, ShutdownResult, TIMEOUT,
+    UserInputParams,
 };
 use crate::ipc::session_result::collect_session_result;
 use crate::ipc::state::{has_headless_shutdown_handler, is_in_alternate_mode};
@@ -410,12 +411,24 @@ pub(super) async fn dispatch_request_for_connection(
             "Request handler dropped",
             "Request handler dropped",
         ),
-        Err(_) => unavailable_response(
+        Err(_) if is_session => unavailable_response(
             id,
-            is_session,
+            true,
             "Timed out collecting R session information",
             "Request timed out",
         ),
+        Err(_) => {
+            let timeout_ms = timeout.as_millis() as u64;
+            let mut response = JsonRpcResponse::error(
+                id,
+                TIMEOUT,
+                format!("Request timed out after {timeout_ms} ms"),
+            );
+            if let Some(error) = response.error.as_mut() {
+                error.data = Some(serde_json::json!({"timeout_ms": timeout_ms}));
+            }
+            response
+        }
     };
     with_execution_id(response, &started_execution_id)
 }
@@ -754,9 +767,41 @@ mod tests {
             }
 
             let response = task.await.expect("dispatch task should complete");
-            assert_eq!(response.error.unwrap().code, INTERNAL_ERROR);
+            let error = response.error.unwrap();
+            assert_eq!(error.code, TIMEOUT);
+            assert_eq!(error.data.unwrap()["timeout_ms"], 25);
             assert!(queued.reply.is_closed());
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[serial_test::serial]
+    async fn user_input_reply_timeout_returns_timeout_error() {
+        set_in_alternate_mode(false);
+        let _guard = Guard;
+        let (tx, rx) = mpsc::channel();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "user_input".to_string(),
+            params: serde_json::json!({"code": "1"}),
+            id: Some(serde_json::json!(1)),
+        };
+        let task = tokio::spawn(async move { dispatch_request(request, &tx).await });
+        let queued =
+            tokio::task::spawn_blocking(move || rx.recv().expect("user input should be queued"))
+                .await
+                .expect("receiver task should complete");
+        assert!(matches!(queued.method, IpcMethod::UserInput { .. }));
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(DEFAULT_EVAL_TIMEOUT).await;
+        let response = task.await.expect("dispatch task should complete");
+        let error = response.error.unwrap();
+        assert_eq!(error.code, TIMEOUT);
+        assert_eq!(
+            error.data.unwrap()["timeout_ms"],
+            DEFAULT_EVAL_TIMEOUT.as_millis() as u64
+        );
     }
 
     /// Tests that `session` returns arf-only success (not an error) in alternate mode,
