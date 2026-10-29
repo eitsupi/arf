@@ -85,6 +85,7 @@ fn ipc_interrupt_stops_evaluations_and_keeps_the_headless_session_alive() {
                 .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
             "evaluation should report interruption: {result}"
         );
+        assert_eq!(result["status"], "interrupted", "{result}");
         let value = process
             .ipc_eval("interrupt_value")
             .expect("session should accept a follow-up evaluation");
@@ -169,4 +170,62 @@ fn idle_and_stale_interrupts_do_not_affect_later_headless_evaluations() {
         .ipc_eval("6 * 7")
         .expect("evaluation after stale interrupt should succeed");
     assert_eq!(parse_ipc_json(&next)["value"], "[1] 42");
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_interrupted_evaluate_status_matches_completion() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let session = process.ipc_session().expect("IPC session should run");
+    let socket_path = parse_ipc_json(&session)["socket_path"]
+        .as_str()
+        .expect("session socket path")
+        .to_owned();
+    let stream = UnixStream::connect(socket_path).expect("connect completion subscriber");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .expect("set subscriber timeout");
+    let mut reader = BufReader::new(stream);
+    writeln!(
+        reader.get_mut(),
+        r#"{{"jsonrpc":"2.0","id":1,"method":"attach","params":{{"subscribe":["arf.execution_completed"]}}}}"#
+    )
+    .expect("send attach request");
+    reader.get_mut().flush().expect("flush attach request");
+    let mut attached = String::new();
+    reader
+        .read_line(&mut attached)
+        .expect("read attach response");
+    let attached: serde_json::Value = serde_json::from_str(&attached).expect("attach JSON");
+    assert_eq!(attached["id"], 1, "{attached}");
+
+    for visible in [false, true] {
+        let marker_dir = tempfile::tempdir().expect("marker directory");
+        let marker = marker_dir.path().join("evaluation-started");
+        let marker_r = serde_json::to_string(&marker.to_string_lossy().as_ref())
+            .expect("R marker path string");
+        let code = format!("file.create({marker_r}); Sys.sleep(30)");
+        let pid = process.pid;
+        let evaluation = thread::spawn(move || eval_process(pid, &code, visible));
+        wait_for_file(&marker);
+        assert_eq!(interrupt_process(process.pid, None)["accepted"], true);
+        let response = evaluation.join().expect("evaluation thread");
+        assert_eq!(response["status"], "interrupted", "{response}");
+        let execution_id = response["execution_id"].as_u64().expect("execution ID");
+
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read completion event");
+            let event: serde_json::Value = serde_json::from_str(&line).expect("completion JSON");
+            if event["params"]["topic"] == "arf.execution_completed"
+                && event["params"]["data"]["id"] == execution_id
+            {
+                assert_eq!(event["params"]["data"]["status"], "interrupted", "{event}");
+                break;
+            }
+        }
+    }
 }

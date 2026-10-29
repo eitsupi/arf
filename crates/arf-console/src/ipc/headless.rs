@@ -4,7 +4,7 @@
 
 use super::execution;
 use super::history_query::set_history_store;
-use super::protocol::{IpcMethod, IpcRequest, IpcResponse};
+use super::protocol::{ExecutionStatus, IpcMethod, IpcRequest, IpcResponse};
 use super::session_result::collect_session_result;
 use super::state::{r_is_at_prompt, try_receive_request};
 use crate::history::{HistoryStore, IpcHistoryEntry};
@@ -333,16 +333,23 @@ fn finish_active_request() {
         ActiveKind::Evaluate(reply) => Some((reply, execution::finish_visible_eval())),
         ActiveKind::UserInput => None,
     };
-    let interrupted = execution::finish_execution(if failed {
-        execution::ExecutionStatus::Error
+    let status = execution::finish_execution(if failed {
+        ExecutionStatus::Error
     } else {
-        execution::ExecutionStatus::Ok
+        ExecutionStatus::Ok
     });
     if let Some(entry) = request.history_entry {
-        entry.finish(Some(if failed || interrupted { 1 } else { 0 }));
+        entry.finish(Some(
+            if status == ExecutionStatus::Error || status == ExecutionStatus::Interrupted {
+                1
+            } else {
+                0
+            },
+        ));
     }
     let result = result.map(|(reply, mut result)| {
-        if interrupted {
+        result.status = status;
+        if status == ExecutionStatus::Interrupted {
             result.error = Some("Evaluation interrupted".to_string());
         }
         (reply, result)

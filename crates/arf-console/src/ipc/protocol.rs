@@ -118,9 +118,21 @@ pub struct EvaluateResult {
     pub stderr: String,
     pub value: Option<String>,
     pub error: Option<String>,
+    /// Final execution status, matching `arf.execution_completed` when emitted.
+    pub status: ExecutionStatus,
     /// Identifier of the user-code execution that produced this result.
     #[serde(default)]
     pub execution_id: Option<super::events::ExecutionId>,
+}
+
+/// Final outcome of a user-code execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionStatus {
+    Ok,
+    Error,
+    Unknown,
+    Interrupted,
 }
 
 /// Parameters for the `user_input` method.

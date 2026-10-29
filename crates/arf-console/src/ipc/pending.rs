@@ -6,8 +6,8 @@
 
 use super::execution;
 use super::protocol::{
-    INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
-    USER_IS_TYPING,
+    ExecutionStatus, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
+    R_NOT_AT_PROMPT, USER_IS_TYPING,
 };
 use super::session_result::collect_session_result;
 use super::state::{drain_requests, fire_break_signal, is_in_alternate_mode, r_is_at_prompt};
@@ -212,7 +212,8 @@ fn check_visible_eval_completion() {
         // Finish WriteConsoleEx capture and collect output
         let mut result = execution::finish_visible_eval();
         result.execution_id = Some(pending.execution_id);
-        if execution::was_execution_interrupted(pending.execution_id) {
+        result.status = execution::finished_execution_status(pending.execution_id);
+        if result.status == ExecutionStatus::Interrupted {
             result.error = Some("Evaluation interrupted".to_string());
         }
 

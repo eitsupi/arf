@@ -771,6 +771,8 @@ Connection: close
     "stdout": "",
     "stderr": "",
     "value": "[1] 2",
+    "error": null,
+    "status": "ok",
     "execution_id": 7
   }
 }
@@ -785,7 +787,9 @@ Connection: close
   "result": {
     "stdout": "",
     "stderr": "",
+    "value": null,
     "error": "object 'x' not found",
+    "status": "error",
     "execution_id": 8
   }
 }
@@ -810,14 +814,22 @@ Errors are caught by `tryCatch`, so the error message appears in the `error` fie
 
 Silent `evaluate` calls capture R output through two separate channels. Visible
 `evaluate` calls use normal REPL evaluation instead, so their `value` and
-`error` fields are `null`, autoprint and callback output are captured in
-`stdout`, and evaluation errors are captured in `stderr`. `user_input`/`send` also use normal
-REPL evaluation and do not return evaluation results.
+`error` fields are `null` (except for an interruption error), autoprint and
+callback output are captured in `stdout`, and evaluation errors are captured in
+`stderr`. `user_input`/`send` also use normal REPL evaluation and do not return
+evaluation results.
 
 - **`stdout` / `stderr` (console output)**: Captured via R's `WriteConsoleEx` callback at the C level. This includes text produced by `cat()`, `message()`, `warning()`, and other writes to the R console.
-- **`value` / `error` (structured result)**: For silent `evaluate`, the evaluated result (or error) is captured separately using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). Printed values appear here rather than in `stdout`/`stderr`. Visible evaluation uses normal REPL output and leaves both fields `null`.
+- **`value` / `error` (structured result)**: For silent `evaluate`, the evaluated result (or error) is captured separately using a binary protocol (`charToRaw()` + `writeBin()` to a temp file, then read from Rust). Printed values appear here rather than in `stdout`/`stderr`. Visible evaluation uses normal REPL output and leaves both fields `null`, except that interruption sets `error`.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
+
+Every `evaluate` result includes `status`: `"ok"`, `"error"`,
+`"interrupted"`, or `"unknown"`. This applies to silent and visible evaluation
+in both interactive and headless sessions. Use this field to check the outcome,
+including R errors in visible evaluations; `"unknown"` means a reliable outcome
+is unavailable and must not be treated as success. An interrupted evaluation
+also includes an `error` message identifying the interruption.
 
 The results of `evaluate`, `user_input`, and `call` include an `execution_id`.
 It identifies the execution within this arf process, independently of the
@@ -891,6 +903,12 @@ cooperative, so an accepted interrupt can race with normal completion. If
 visible or `send` code handles the interrupt condition and then raises another
 error, the execution is still reported as `"interrupted"`; the original error
 message remains in `stderr`.
+
+The completion event's `status` always matches the corresponding `evaluate`
+result's `status`. The event is published before the evaluation response is
+issued. Publication order does not guarantee arrival order: attached connections
+write queued events and responses independently, and separate connections may
+receive them at different times. Match them using `execution_id` and `data.id`.
 
 One completion event covers one submitted terminal input or one `evaluate` /
 `user_input` request, even if it contains multiple expressions. Silent evaluations

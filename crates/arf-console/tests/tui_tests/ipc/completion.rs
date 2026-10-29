@@ -333,3 +333,116 @@ pub(super) fn read_notification_timeout(
         Err(error) => Err(error.into()),
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn evaluate_status_matches_completion_for_silent_and_visible_errors() -> Result<()> {
+    use super::raw_rpc::session_socket_path;
+    use serde_json::{Value, json};
+    use std::io::BufReader;
+    use std::os::unix::net::UnixStream;
+
+    fn response_and_completion(
+        reader: &mut BufReader<UnixStream>,
+        request_id: u64,
+    ) -> Result<(Value, Value)> {
+        let mut response: Option<Value> = None;
+        let mut completions = Vec::new();
+        loop {
+            if let Some(result) = &response
+                && let Some(event) = completions.iter().find(|event: &&Value| {
+                    event["params"]["data"]["id"] == result["result"]["execution_id"]
+                })
+            {
+                return Ok((result.clone(), (*event).clone()));
+            }
+            let message = read_notification_timeout(reader)?
+                .context("timed out waiting for evaluate response and completion event")?;
+            if message["method"] == "event"
+                && message["params"]["topic"] == "arf.execution_completed"
+            {
+                completions.push(message);
+            } else if message["id"] == request_id {
+                response = Some(message);
+            }
+        }
+    }
+
+    run_case(
+        "ipc-evaluate-status",
+        &["--with-ipc", "--ipc-eval-unrestricted"],
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let stream = UnixStream::connect(session_socket_path(terminal)?)?;
+            stream.set_read_timeout(Some(Duration::from_secs(20)))?;
+            let mut reader = BufReader::new(stream);
+            send_json_line(
+                &mut reader,
+                json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "attach",
+                    "params": {"subscribe": ["arf.execution_completed"]}
+                }),
+            )?;
+            let attached: Value =
+                read_notification_timeout(&mut reader)?.context("attach response missing")?;
+            ensure!(attached["id"] == 1, "attach failed: {attached}");
+
+            let cases = [
+                ("1 + 1", false, "ok"),
+                ("stop('STATUS_SILENT_ERROR')", false, "error"),
+                (
+                    "1 + 1; stop('STATUS_SILENT_MIDDLE_ERROR'); 3",
+                    false,
+                    "error",
+                ),
+                ("cat('STATUS_VISIBLE_OK\\n'); 1 + 1", true, "ok"),
+                ("stop('STATUS_VISIBLE_ERROR')", true, "error"),
+                (
+                    "1 + 1; stop('STATUS_VISIBLE_MIDDLE_ERROR'); 3",
+                    true,
+                    "error",
+                ),
+            ];
+            for (request_id, (code, visible, expected_status)) in (2..).zip(cases) {
+                if visible {
+                    terminal.wait_for("prompt before visible IPC evaluation", |_, line| {
+                        matches!(line.trim_end(), PROMPT | ERROR_PROMPT)
+                    })?;
+                }
+                send_json_line(
+                    &mut reader,
+                    json!({
+                        "jsonrpc": "2.0", "id": request_id, "method": "evaluate",
+                        "params": {"code": code, "visible": visible, "timeout_ms": 10000}
+                    }),
+                )?;
+                if visible {
+                    terminal.wait_for("visible IPC evaluation approval", |state, line| {
+                        state.text.contains("IPC send request:")
+                            && line.contains("Press y to approve")
+                            && state.text.contains(code)
+                    })?;
+                    terminal.key("y")?;
+                }
+                let (response, completion) = response_and_completion(&mut reader, request_id)?;
+                ensure!(
+                    response["error"].is_null(),
+                    "evaluate RPC failed: {response}"
+                );
+                ensure!(
+                    response["result"]["status"] == expected_status,
+                    "wrong evaluate status for {code:?}: {response}"
+                );
+                ensure!(
+                    completion["params"]["data"]["status"] == expected_status,
+                    "wrong completion status for {code:?}: {completion}"
+                );
+                ensure!(
+                    completion["params"]["data"]["id"] == response["result"]["execution_id"],
+                    "completion does not match response: {response}; {completion}"
+                );
+            }
+            Ok(())
+        },
+    )
+}
