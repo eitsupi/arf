@@ -262,9 +262,11 @@ fn bridge_exits_on_server_shutdown_while_stdin_remains_open() {
     let mut bridge = BridgeProcess::spawn(process.pid, &[]);
     assert_attached(&bridge);
 
-    let shutdown = process.ipc_shutdown().expect("request server shutdown");
-    assert!(shutdown.success, "{}", shutdown.stderr);
+    bridge.send_line(r#"{"jsonrpc":"2.0","id":9,"method":"shutdown","params":{}}"#);
     assert!(bridge.wait_for_exit(BRIDGE_TIMEOUT).success());
+    let shutdown = bridge.recv_json();
+    assert_eq!(shutdown["id"], 9, "{shutdown}");
+    assert_eq!(shutdown["result"]["accepted"], true, "{shutdown}");
     assert!(
         bridge.stdin.is_some(),
         "bridge exited only after stdin was closed"

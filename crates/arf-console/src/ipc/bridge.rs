@@ -13,8 +13,14 @@ const MAX_LINE_BYTES: usize = 1024 * 1024;
 enum StdinState {
     Open,
     Eof,
-    Overflow,
     ReadError(String),
+}
+
+enum EnqueueResult {
+    Complete,
+    StdinExit(i32),
+    StdoutError(String),
+    SocketError(io::Error),
 }
 
 /// Attach to a running session and bridge its JSON lines to stdio.
@@ -75,9 +81,13 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
 
     let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(QUEUE_CHUNKS);
     let (stdout_error_tx, mut stdout_error_rx) = mpsc::channel::<String>(1);
+    let (stdout_done_tx, stdout_done_rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("arf-ipc-stdout".into())
-        .spawn(move || stdout_worker(stdout_rx, stdout_error_tx))
+        .spawn(move || {
+            stdout_worker(stdout_rx, stdout_error_tx);
+            let _ = stdout_done_tx.send(());
+        })
         .unwrap_or_else(|error| {
             client::exit_error(
                 2,
@@ -99,20 +109,30 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
     });
     let mut attach_line = serde_json::to_vec(&attach).expect("serializing JSON value cannot fail");
     attach_line.push(b'\n');
+    let mut socket_write_closed = false;
     tokio::select! {
         _ = wait_for_stdin_exit(&mut stdin_state_rx) => return stdin_exit_code(&stdin_state_rx),
         result = socket_writer.write_all(&attach_line) => if let Err(error) = result {
-            return transport_error(error);
+            if is_closed_socket_error(&error) {
+                socket_write_closed = true;
+            } else {
+                return transport_error(error);
+            }
         },
     }
-    tokio::spawn(async move {
-        while let Some(bytes) = stdin_rx.recv().await {
-            if let Err(error) = socket_writer.write_all(&bytes).await {
-                let _ = socket_error_tx.send(error).await;
-                return;
+    if !socket_write_closed {
+        tokio::spawn(async move {
+            while let Some(bytes) = stdin_rx.recv().await {
+                if let Err(error) = socket_writer.write_all(&bytes).await {
+                    let _ = socket_error_tx.send(error).await;
+                    while stdin_rx.recv().await.is_some() {}
+                    return;
+                }
             }
-        }
-    });
+        });
+    } else {
+        tokio::spawn(async move { while stdin_rx.recv().await.is_some() {} });
+    }
 
     // Keep the buffer across select! iterations. This preserves any bytes
     // read beyond the attach response and makes the read cancellation-safe.
@@ -132,16 +152,19 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
         }
         tokio::select! {
             result = reader.read_buf(&mut initial) => match result {
-                Ok(0) => return 0,
+                Ok(0) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
                 Ok(_) => {},
+                Err(error) if is_closed_socket_error(&error) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
                 Err(error) => return transport_error(error),
             },
             _ = wait_for_stdin_exit(&mut stdin_state_rx) => return stdin_exit_code(&stdin_state_rx),
             error = stdout_error_rx.recv() => if let Some(error) = error {
                 client::exit_error(2, "OUTPUT_ERROR", &error, None, None);
             },
-            error = socket_error_rx.recv() => if let Some(error) = error {
-                return transport_error(error);
+            error = socket_error_rx.recv(), if !socket_write_closed => match error {
+                Some(error) if is_closed_socket_error(&error) => socket_write_closed = true,
+                Some(error) => return transport_error(error),
+                None => socket_write_closed = true,
             },
         }
     };
@@ -168,24 +191,40 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
             None,
         );
     }
-    if !enqueue_chunks(&stdout_tx, &attach_response) {
-        client::exit_error(
-            2,
-            "TRANSPORT_ERROR",
-            "Bridge output queue is full",
-            None,
-            None,
-        );
+    match enqueue_chunks(
+        &stdout_tx,
+        &attach_response,
+        &mut stdin_state_rx,
+        &mut stdout_error_rx,
+        &mut socket_error_rx,
+        &mut socket_write_closed,
+    )
+    .await
+    {
+        EnqueueResult::Complete => {}
+        EnqueueResult::StdinExit(code) => return code,
+        EnqueueResult::StdoutError(error) => {
+            client::exit_error(2, "OUTPUT_ERROR", &error, None, None)
+        }
+        EnqueueResult::SocketError(error) => return transport_error(error),
     }
     let read_ahead = std::mem::take(&mut initial);
-    if !enqueue_chunks(&stdout_tx, &read_ahead) {
-        client::exit_error(
-            2,
-            "TRANSPORT_ERROR",
-            "Bridge output queue is full",
-            None,
-            None,
-        );
+    match enqueue_chunks(
+        &stdout_tx,
+        &read_ahead,
+        &mut stdin_state_rx,
+        &mut stdout_error_rx,
+        &mut socket_error_rx,
+        &mut socket_write_closed,
+    )
+    .await
+    {
+        EnqueueResult::Complete => {}
+        EnqueueResult::StdinExit(code) => return code,
+        EnqueueResult::StdoutError(error) => {
+            client::exit_error(2, "OUTPUT_ERROR", &error, None, None)
+        }
+        EnqueueResult::SocketError(error) => return transport_error(error),
     }
 
     let mut chunk = vec![0; IO_CHUNK_BYTES];
@@ -196,16 +235,22 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
             error = stdout_error_rx.recv() => if let Some(error) = error {
                 client::exit_error(2, "OUTPUT_ERROR", &error, None, None);
             },
-            error = socket_error_rx.recv() => if let Some(error) = error {
-                return transport_error(error);
+            error = socket_error_rx.recv(), if !socket_write_closed => match error {
+                Some(error) if is_closed_socket_error(&error) => socket_write_closed = true,
+                Some(error) => return transport_error(error),
+                None => socket_write_closed = true,
             },
             result = reader.read(&mut chunk) => match result {
-                Ok(0) => return 0,
+                Ok(0) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
                 Ok(length) => {
-                    if !enqueue_chunks(&stdout_tx, &chunk[..length]) {
-                        client::exit_error(2, "TRANSPORT_ERROR", "Bridge output queue is full", None, None);
+                    match enqueue_chunks(&stdout_tx, &chunk[..length], &mut stdin_state_rx, &mut stdout_error_rx, &mut socket_error_rx, &mut socket_write_closed).await {
+                        EnqueueResult::Complete => {},
+                        EnqueueResult::StdinExit(code) => return code,
+                        EnqueueResult::StdoutError(error) => client::exit_error(2, "OUTPUT_ERROR", &error, None, None),
+                        EnqueueResult::SocketError(error) => return transport_error(error),
                     }
                 }
+                Err(error) if is_closed_socket_error(&error) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
                 Err(error) => return transport_error(error),
             },
         }
@@ -217,13 +262,67 @@ fn take_first_line(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
     Some(buffer.drain(..=end).collect())
 }
 
-fn enqueue_chunks(sender: &mpsc::Sender<Vec<u8>>, bytes: &[u8]) -> bool {
+async fn enqueue_chunks(
+    sender: &mpsc::Sender<Vec<u8>>,
+    bytes: &[u8],
+    stdin_state: &mut watch::Receiver<StdinState>,
+    stdout_errors: &mut mpsc::Receiver<String>,
+    socket_errors: &mut mpsc::Receiver<io::Error>,
+    socket_write_closed: &mut bool,
+) -> EnqueueResult {
     for chunk in bytes.chunks(IO_CHUNK_BYTES) {
-        if sender.try_send(chunk.to_vec()).is_err() {
-            return false;
+        let send = sender.send(chunk.to_vec());
+        tokio::pin!(send);
+        loop {
+            tokio::select! {
+                result = &mut send => match result {
+                    Ok(()) => break,
+                    Err(_) => return EnqueueResult::StdoutError("stdout worker stopped".into()),
+                },
+                _ = wait_for_stdin_exit(stdin_state) => return EnqueueResult::StdinExit(stdin_exit_code(stdin_state)),
+                error = stdout_errors.recv() => if let Some(error) = error { return EnqueueResult::StdoutError(error); },
+                error = socket_errors.recv(), if !*socket_write_closed => match error {
+                    Some(error) if is_closed_socket_error(&error) => {
+                        *socket_write_closed = true;
+                    }
+                    Some(error) => return EnqueueResult::SocketError(error),
+                    None => *socket_write_closed = true,
+                },
+            }
         }
     }
-    true
+    EnqueueResult::Complete
+}
+
+async fn finish_stdout(
+    sender: mpsc::Sender<Vec<u8>>,
+    mut done: tokio::sync::oneshot::Receiver<()>,
+    errors: &mut mpsc::Receiver<String>,
+    stdin_state: &mut watch::Receiver<StdinState>,
+) -> i32 {
+    drop(sender);
+    tokio::select! {
+        biased;
+        error = errors.recv() => match error {
+            Some(error) => client::exit_error(2, "OUTPUT_ERROR", &error, None, None),
+            None => {
+                tokio::select! {
+                    _ = &mut done => 0,
+                    _ = wait_for_stdin_exit(stdin_state) => stdin_exit_code(stdin_state),
+                }
+            },
+        },
+        _ = &mut done => 0,
+        _ = wait_for_stdin_exit(stdin_state) => stdin_exit_code(stdin_state),
+    }
+}
+
+fn is_closed_socket_error(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(109) {
+        return true;
+    }
+    error.kind() == io::ErrorKind::BrokenPipe
 }
 
 async fn wait_for_stdin_exit(receiver: &mut watch::Receiver<StdinState>) {
@@ -240,13 +339,6 @@ async fn wait_for_stdin_exit(receiver: &mut watch::Receiver<StdinState>) {
 fn stdin_exit_code(receiver: &watch::Receiver<StdinState>) -> i32 {
     match &*receiver.borrow() {
         StdinState::Eof => 0,
-        StdinState::Overflow => client::exit_error(
-            2,
-            "TRANSPORT_ERROR",
-            "Bridge input queue is full",
-            None,
-            None,
-        ),
         StdinState::ReadError(error) => {
             client::exit_error(2, "STDIN_READ_ERROR", error, None, None)
         }
@@ -265,8 +357,7 @@ fn stdin_worker(sender: mpsc::Sender<Vec<u8>>, state: watch::Sender<StdinState>)
                 return;
             }
             Ok(length) => {
-                if sender.try_send(buffer[..length].to_vec()).is_err() {
-                    state.send_replace(StdinState::Overflow);
+                if sender.blocking_send(buffer[..length].to_vec()).is_err() {
                     return;
                 }
             }
@@ -308,13 +399,6 @@ fn stdout_worker(mut receiver: mpsc::Receiver<Vec<u8>>, errors: mpsc::Sender<Str
 }
 
 fn transport_error(error: io::Error) -> i32 {
-    #[cfg(windows)]
-    if error.raw_os_error() == Some(109) {
-        return 0;
-    }
-    if error.kind() == std::io::ErrorKind::BrokenPipe {
-        return 0;
-    }
     client::exit_error(
         2,
         "TRANSPORT_ERROR",
@@ -355,7 +439,12 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite> AsyncConnection for T {}
 
 #[cfg(test)]
 mod tests {
-    use super::take_first_line;
+    use super::{
+        EnqueueResult, IO_CHUNK_BYTES, StdinState, enqueue_chunks, finish_stdout, take_first_line,
+    };
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+    use tokio::sync::{mpsc, watch};
 
     #[test]
     fn attach_line_extraction_retains_partial_and_coalesced_read_ahead() {
@@ -367,5 +456,94 @@ mod tests {
             concat!(r#"{"result":{}}"#, "\n").as_bytes()
         );
         assert_eq!(buffered, b"event\nnext");
+    }
+
+    #[tokio::test]
+    async fn enqueue_waits_for_capacity_and_delivers_every_chunk() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let (_stdin_tx, mut stdin_state) = watch::channel(StdinState::Open);
+        let (_stdout_error_tx, mut stdout_errors) = mpsc::channel(1);
+        let (_socket_error_tx, mut socket_errors) = mpsc::channel(1);
+        let payload = vec![b'x'; IO_CHUNK_BYTES * 3];
+        let mut socket_write_closed = false;
+
+        let mut enqueue = Box::pin(enqueue_chunks(
+            &sender,
+            &payload,
+            &mut stdin_state,
+            &mut stdout_errors,
+            &mut socket_errors,
+            &mut socket_write_closed,
+        ));
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        assert!(matches!(enqueue.as_mut().poll(&mut context), Poll::Pending));
+        let mut received = Vec::new();
+        received.extend(receiver.try_recv().expect("first queued chunk"));
+        assert!(matches!(enqueue.as_mut().poll(&mut context), Poll::Pending));
+        received.extend(receiver.try_recv().expect("second queued chunk"));
+        assert!(matches!(
+            enqueue.as_mut().poll(&mut context),
+            Poll::Ready(EnqueueResult::Complete)
+        ));
+        received.extend(receiver.try_recv().expect("third queued chunk"));
+        assert_eq!(received, payload);
+    }
+
+    #[tokio::test]
+    async fn enqueue_capacity_wait_is_interrupted_by_stdin_eof() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let (stdin_tx, mut stdin_state) = watch::channel(StdinState::Open);
+        let (_stdout_error_tx, mut stdout_errors) = mpsc::channel(1);
+        let (_socket_error_tx, mut socket_errors) = mpsc::channel(1);
+        let payload = vec![b'x'; IO_CHUNK_BYTES * 2];
+        let mut socket_write_closed = false;
+        let mut enqueue = Box::pin(enqueue_chunks(
+            &sender,
+            &payload,
+            &mut stdin_state,
+            &mut stdout_errors,
+            &mut socket_errors,
+            &mut socket_write_closed,
+        ));
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        assert!(matches!(enqueue.as_mut().poll(&mut context), Poll::Pending));
+        stdin_tx.send_replace(StdinState::Eof);
+        assert!(matches!(
+            enqueue.as_mut().poll(&mut context),
+            Poll::Ready(EnqueueResult::StdinExit(0))
+        ));
+    }
+
+    #[tokio::test]
+    async fn finish_stdout_waits_for_drain_completion() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let pending_output = b"final response\n".to_vec();
+        sender.try_send(pending_output.clone()).unwrap();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let (_stdout_error_tx, mut stdout_errors) = mpsc::channel(1);
+        let (_stdin_tx, mut stdin_state) = watch::channel(StdinState::Open);
+        let mut waiting = Box::pin(finish_stdout(
+            sender,
+            done_rx,
+            &mut stdout_errors,
+            &mut stdin_state,
+        ));
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(matches!(waiting.as_mut().poll(&mut context), Poll::Pending));
+        assert_eq!(receiver.try_recv().unwrap(), pending_output);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Disconnected)
+        ));
+        done_tx.send(()).unwrap();
+        assert!(matches!(
+            waiting.as_mut().poll(&mut context),
+            Poll::Ready(0)
+        ));
     }
 }

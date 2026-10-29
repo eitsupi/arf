@@ -875,8 +875,12 @@ the bridge**; piping a finite request with `echo` can therefore discard its
 response. Server disconnect, stdout write failure, and SIGINT/SIGTERM also end
 the bridge. Attach rejection uses the existing structured CLI error on stderr
 and exits with code 4. Server EOF and stdin EOF exit with code 0; transport
-errors exit with code 2, and session discovery errors with code 3. The bridge
-also reports a transport error if its bounded forwarding buffers fill.
+errors exit with code 2, and session discovery errors with code 3. Bounded
+forwarding buffers apply back-pressure rather than terminating the bridge when
+full. If stdout is not read, the server may close the connection under its
+existing queue limits or 30-second write timeout. On server EOF, the bridge
+finishes writing buffered stdout before exiting; stdin EOF and signals still
+exit immediately.
 
 Exit 0 does not mean that no messages were lost: a server disconnect caused by
 back-pressure can also appear as EOF. The bridge does not reconnect
