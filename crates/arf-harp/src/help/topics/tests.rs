@@ -1,6 +1,6 @@
 use super::{
-    get_help_topics_from_paths, project_help_topic_entry, read_package_topics,
-    try_get_help_topics_from_paths, vignette_topic,
+    get_help_topics_from_paths, get_rd_help_topics_from_paths, project_help_topic_entry,
+    read_package_topics, vignette_topic,
 };
 use crate::help::fixture_path;
 use rd_helpdb::VignetteEntry;
@@ -123,7 +123,7 @@ fn explicit_help_paths_keep_first_installed_copy_order() {
 }
 
 #[test]
-fn strict_help_search_limits_package_reads_and_reports_corrupt_indexes() {
+fn rd_help_search_filters_packages_and_skips_corrupt_indexes() {
     let temp = tempfile::tempdir().unwrap();
     let library = temp.path().join("library");
     install_metadata_fixture(&library, "goodpkg");
@@ -133,9 +133,12 @@ fn strict_help_search_limits_package_reads_and_reports_corrupt_indexes() {
     std::fs::write(broken_meta.join("Rd.rds"), b"broken RDS").unwrap();
     let paths = vec![library.to_string_lossy().into_owned()];
 
-    let selected = try_get_help_topics_from_paths(&paths, Some("goodpkg")).unwrap();
-    assert!(selected.iter().any(|topic| topic.package == "goodpkg"));
-    assert!(try_get_help_topics_from_paths(&paths, None).is_err());
+    let selected = get_rd_help_topics_from_paths(&paths, Some("goodpkg"));
+    assert!(!selected.is_empty());
+    assert!(selected.iter().all(|topic| topic.package == "goodpkg"));
+    let all = get_rd_help_topics_from_paths(&paths, None);
+    assert!(all.iter().any(|topic| topic.package == "goodpkg"));
+    assert!(all.iter().all(|topic| topic.package != "brokenpkg"));
 }
 
 #[test]

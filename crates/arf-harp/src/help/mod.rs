@@ -22,7 +22,7 @@ pub use markdown::{get_package_help_markdown_by_key_in_dir, rd_source_to_markdow
 pub use r_eval::{eval_r_to_string, get_vignette_text};
 pub use resolver::{HelpResolution, HelpTargetResolver, IpcHelpResolution};
 pub use target::HelpTarget;
-pub use topics::{get_help_topics_from_paths, try_get_help_topics_from_paths};
+pub use topics::{get_help_topics_from_paths, get_rd_help_topics_from_paths};
 
 /// A help topic from R's help database.
 #[derive(Debug, Clone, PartialEq, Eq)]

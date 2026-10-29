@@ -601,10 +601,10 @@ arf ipc r-help show lm --current-package stats
 
 `r-help search` accepts `--query` (case-insensitive substring across topic,
 aliases, and title), `--package` (exact package name), and `--limit` (default
-50, maximum 200). It searches ordinary help pages only; vignettes and demos
-require R to render. Results contain `topics` and the `library_paths` used for
-the search. `r-help show` accepts a topic, optional `--package`, and optional
-`--current-package`. An explicit `package` takes priority. If omitted,
+50, maximum 200). Results contain `topics`, `truncated` (whether more topics
+matched than `limit` allowed), and the `library_paths` used for the search.
+Packages whose help metadata cannot be read are skipped. `r-help show` accepts
+a topic, optional `--package`, and optional `--current-package`. An explicit `package` takes priority. If omitted,
 `current_package` is preferred; if that package has no match, all packages are
 searched. One match returns a page; multiple matches return candidates instead
 of choosing one arbitrarily. The library-path order selects which installed
@@ -632,7 +632,7 @@ JSON-RPC search request and response:
 ```
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"topics":[{"package":"stats","topic":"lm","aliases":[],"title":"Fitting Linear Models"}],"library_paths":["/usr/lib/R/library"]}}
+{"jsonrpc":"2.0","id":1,"result":{"topics":[{"package":"stats","topic":"lm","aliases":[],"title":"Fitting Linear Models"}],"truncated":false,"library_paths":["/usr/lib/R/library"]}}
 ```
 
 JSON-RPC show request:
@@ -663,11 +663,14 @@ percent escapes are not decoded. Clients can pass the topic to `r_help_show`
 and the package part as `package` when present. For an unqualified link, pass
 the origin page's package as `current_package`.
 
-The server uses the cached `.libPaths()` snapshot, which arf captures at
-startup and when opening `:help`. Changes to `.libPaths()` during a session may
-not be reflected in IPC help results. Each successful response includes the
-`library_paths` used. Help methods read installed files without evaluating R,
-so they can respond while R is busy.
+The server uses a cached `.libPaths()` snapshot. arf captures it at startup
+and, in an interactive session, again when `:help` is opened. Packages in those
+library directories are listed on every request, so packages installed into an
+existing library after startup are found. Changes to `.libPaths()` itself are
+not reflected until the snapshot is captured again; in `arf headless` that
+means until the session restarts. R also leaves a user library
+(`R_LIBS_USER`) out of `.libPaths()` when the directory does not exist at
+startup, so a user library created later during the session is not searched.
 
 ### `arf ipc shutdown` — Shut Down Headless Session
 

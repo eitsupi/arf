@@ -1,7 +1,6 @@
 //! Help, vignette, and demo topic indexes read from installed package metadata.
 
 use super::HelpTopic;
-use crate::error::{HarpError, HarpResult};
 use crate::lib_paths::installed_package_dirs;
 use rd_helpdb::{DemoIndex, HelpTopicEntry, HelpTopicIndex, VignetteIndex, read_rds_file};
 
@@ -21,54 +20,43 @@ pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
     topics
 }
 
-/// Get only Rd help topics from explicit library paths, returning metadata
-/// read errors instead of silently skipping a broken package index.
-pub fn try_get_help_topics_from_paths(
+/// Get only Rd help topics from explicit library paths, optionally limited to
+/// one package name.
+///
+/// Like [`get_help_topics_from_paths`], unreadable Rd metadata is skipped so
+/// one broken package does not hide the others.
+pub fn get_rd_help_topics_from_paths(
     paths: &[String],
     package_filter: Option<&str>,
-) -> HarpResult<Vec<HelpTopic>> {
-    let mut topics = Vec::new();
-    for (package, package_dir) in installed_package_dirs(paths)
+) -> Vec<HelpTopic> {
+    installed_package_dirs(paths)
         .into_iter()
         .filter(|(package, _)| package_filter.is_none_or(|filter| package == filter))
-    {
-        let index = HelpTopicIndex::read_installed(&package_dir).map_err(|source| {
-            HarpError::HelpDatabase {
-                package: package.clone(),
-                topic: String::new(),
-                key: String::new(),
-                source: Box::new(source),
-            }
-        })?;
-        let Some(index) = index else {
-            continue;
-        };
-        topics.extend(
-            index
-                .entries()
-                .filter_map(|entry| project_help_topic_entry(&package, &package_dir, entry)),
-        );
+        .flat_map(|(package, package_dir)| read_rd_help_topics(&package, &package_dir))
+        .collect()
+}
+
+fn read_rd_help_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
+    match HelpTopicIndex::read_installed(package_dir) {
+        Ok(Some(index)) => index
+            .entries()
+            .filter_map(|entry| project_help_topic_entry(package, package_dir, entry))
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            log::debug!(
+                "Skipping unreadable Rd help metadata in {}: {error}",
+                package_dir.display()
+            );
+            Vec::new()
+        }
     }
-    Ok(topics)
 }
 
 fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {
-    let mut topics = Vec::new();
-
     // Each metadata source is independent of compiled help files and of the
     // other metadata indexes. A malformed source should not hide the rest.
-    match HelpTopicIndex::read_installed(package_dir) {
-        Ok(Some(index)) => topics.extend(
-            index
-                .entries()
-                .filter_map(|entry| project_help_topic_entry(package, package_dir, entry)),
-        ),
-        Ok(None) => {}
-        Err(error) => log::debug!(
-            "Skipping unreadable Rd help metadata in {}: {error}",
-            package_dir.display()
-        ),
-    }
+    let mut topics = read_rd_help_topics(package, package_dir);
 
     if let Some(object) = read_metadata_index(package_dir.join("Meta/vignette.rds")) {
         match VignetteIndex::from_object(&object) {

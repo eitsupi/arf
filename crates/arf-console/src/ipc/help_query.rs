@@ -1,7 +1,7 @@
 //! Static IPC queries for installed R help metadata.
 
 use crate::ipc::protocol::{HelpSearchParams, HelpShowParams};
-use arf_harp::help::{HelpTargetResolver, IpcHelpResolution, try_get_help_topics_from_paths};
+use arf_harp::help::{HelpTargetResolver, IpcHelpResolution, get_rd_help_topics_from_paths};
 use arf_harp::lib_paths::cached_lib_paths;
 use serde::Serialize;
 
@@ -26,6 +26,8 @@ pub(crate) struct HelpTopicResult {
 #[derive(Debug, Serialize)]
 pub(crate) struct HelpTopicsResult {
     pub topics: Vec<HelpTopicResult>,
+    /// Whether more topics matched than `limit` allowed.
+    pub truncated: bool,
     pub library_paths: Vec<String>,
 }
 
@@ -66,9 +68,8 @@ pub(crate) fn query_help_topics(
     }
     let library_paths = cached_lib_paths();
     ensure_library_paths(&library_paths)?;
-    let matching_topics = try_get_help_topics_from_paths(&library_paths, params.package.as_deref())
-        .map_err(|error| HelpQueryError::Internal(error.to_string()))?;
-    let topics = search_topics(
+    let matching_topics = get_rd_help_topics_from_paths(&library_paths, params.package.as_deref());
+    let (topics, truncated) = search_topics(
         matching_topics,
         params.query.as_deref().unwrap_or_default(),
         params.limit,
@@ -76,6 +77,7 @@ pub(crate) fn query_help_topics(
 
     Ok(HelpTopicsResult {
         topics,
+        truncated,
         library_paths,
     })
 }
@@ -84,9 +86,9 @@ fn search_topics(
     topics: Vec<arf_harp::help::HelpTopic>,
     query: &str,
     limit: usize,
-) -> Vec<HelpTopicResult> {
+) -> (Vec<HelpTopicResult>, bool) {
     let query = query.to_lowercase();
-    topics
+    let mut matches: Vec<_> = topics
         .into_iter()
         .filter(|entry| entry.entry_type == "help")
         .filter(|entry| {
@@ -98,14 +100,17 @@ fn search_topics(
                     .iter()
                     .any(|alias| alias.to_lowercase().contains(&query))
         })
-        .take(limit)
+        .take(limit + 1)
         .map(|entry| HelpTopicResult {
             package: entry.package,
             topic: entry.topic,
             aliases: entry.aliases,
             title: entry.title,
         })
-        .collect()
+        .collect();
+    let truncated = matches.len() > limit;
+    matches.truncate(limit);
+    (matches, truncated)
 }
 
 /// Resolve and render one installed Rd help page without entering R.
@@ -218,12 +223,18 @@ mod tests {
         ];
 
         for query in ["FIRST", "aliasone", "A TITLE", "second title"] {
-            assert_eq!(search_topics(topics.clone(), query, 20).len(), 1, "{query}");
+            assert_eq!(
+                search_topics(topics.clone(), query, 20).0.len(),
+                1,
+                "{query}"
+            );
         }
-        assert!(search_topics(topics.clone(), "aliasguide", 20).is_empty());
-        let all = search_topics(topics, "", 1);
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].topic, "first");
+        assert!(search_topics(topics.clone(), "aliasguide", 20).0.is_empty());
+        let (limited, truncated) = search_topics(topics.clone(), "", 1);
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0].topic, "first");
+        assert!(truncated);
+        assert!(!search_topics(topics, "", 2).1);
     }
 
     #[test]
