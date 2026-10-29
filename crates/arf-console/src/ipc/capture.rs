@@ -161,12 +161,17 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
     };
 
     let header = String::from_utf8_lossy(&data[..newline_pos]);
-    let lengths: Vec<i64> = header
+    let lengths = header
         .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
+        .map(str::parse::<i64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+        .filter(|lengths| {
+            matches!(lengths.as_slice(), [value, error] | [value, error, 0..=1]
+                if *value >= -1 && *error >= -1)
+        });
 
-    if !(lengths.len() == 2 || lengths.len() == 3) {
+    let Some(lengths) = lengths else {
         return (
             EvaluateResult {
                 stdout: String::new(),
@@ -178,7 +183,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
             },
             false,
         );
-    }
+    };
 
     let body = &data[newline_pos + 1..];
     let mut offset = 0usize;
@@ -389,7 +394,16 @@ mod tests {
         assert!(missing.error.is_some());
         assert_eq!(missing.status, ExecutionStatus::Unknown);
 
-        for data in [b"no header".as_slice(), b"invalid\n", b"100 -1\nshort"] {
+        for data in [
+            b"no header".as_slice(),
+            b"invalid\n",
+            b"100 -1\nshort",
+            b"-2 -1\n",
+            b"-1 -2\n",
+            b"-1 -1 -1\n",
+            b"-1 -1 2\n",
+            b"-1 invalid -1\n",
+        ] {
             std::fs::write(&path, data).unwrap();
             let result = parse_capture_file(&path);
             assert!(result.error.is_some());
