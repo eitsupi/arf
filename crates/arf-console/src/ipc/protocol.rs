@@ -76,6 +76,8 @@ pub const INCOMPLETE_INPUT: i32 = -32004;
 pub const R_EVAL_NOT_ALLOWED: i32 = -32005;
 /// Interactive user input was not explicitly approved.
 pub const INPUT_NOT_APPROVED: i32 = -32006;
+/// The server stopped waiting for a reply; an R execution may continue.
+pub const TIMEOUT: i32 = -32007;
 /// The requested handler is not exposed or has been revoked.
 pub const HANDLER_NOT_FOUND: i32 = -32010;
 /// The call could not be queued because the shared handler queue is full.

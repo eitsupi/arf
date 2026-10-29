@@ -223,6 +223,7 @@ Error code strings:
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
 | `METHOD_NOT_FOUND` | 4 | Unknown method name |
 | `INVALID_PARAMS` | 4 | Invalid method parameters |
+| `TIMEOUT` | 4 | Server stopped waiting for a response; R execution continues |
 | `INTERNAL_ERROR` | 4 | Server internal error |
 | `PROTOCOL_ERROR` | 4 | Other JSON-RPC error |
 
@@ -331,12 +332,12 @@ arf ipc eval --pid 12345 'getwd()'
 |-----------|-------------|
 | `<CODE>` | R code to evaluate (required) |
 | `--visible` | Evaluate through the R REPL and show output in the session. In an interactive session, this is governed by the same human approval as `send`; in headless mode it runs immediately. The response's `value` and `error` are `null`; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. |
-| `--timeout <MS>` | Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
+| `--timeout <MS>` | Timeout in milliseconds for waiting for the response, including queue waiting time (range: 1–86400000; default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
 | `--pid <PID>` | Target session PID |
 
 **Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), `error` (string or null), and `execution_id` (number). These fields are always present. For visible evaluation, `value` and `error` are `null`; normal REPL output and errors appear in `stdout` and `stderr`. Silent evaluation (the default) uses the direct evaluation path, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
 
-When the timeout fires, the server returns a JSON-RPC error response instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. The R evaluation continues, so the session stays busy until it finishes.
+When the timeout fires, the server returns a `TIMEOUT` (`-32007`) JSON-RPC error response with the applied `data.timeout_ms` instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. The R evaluation continues, so the session stays busy until it finishes. Use `arf ipc interrupt` (or the `interrupt` method) to request interruption. `timeout_ms = 0` is rejected with `INVALID_PARAMS`; the timeout includes time spent waiting in the queue. If execution has started, the timeout error also includes `data.execution_id`.
 
 Example (silent eval, result captured in `value`):
 
@@ -1005,6 +1006,7 @@ The check detects the interface for feature detection only; it is not authentica
 | -32002 | Input Already Pending | Another IPC request is already queued |
 | -32003 | User Is Typing | User is typing in the REPL (interactive mode only) |
 | -32004 | Incomplete Input | R code is syntactically incomplete |
+| -32007 | Timeout | Server stopped waiting for a response; `data.timeout_ms` gives the applied timeout and R execution continues |
 
 ## Troubleshooting
 

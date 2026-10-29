@@ -137,6 +137,12 @@ fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
             "INPUT_NOT_APPROVED",
             Some("Approve the request in the interactive REPL, then send it again."),
         ),
+        TIMEOUT => (
+            "TIMEOUT",
+            Some(
+                "The R evaluation may still be running. Request interruption with 'arf ipc interrupt'.",
+            ),
+        ),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),

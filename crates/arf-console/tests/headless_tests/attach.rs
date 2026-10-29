@@ -259,6 +259,15 @@ fn headless_evaluate_timeout_keeps_execution_context_until_completion() {
         &["demo.timeout", "arf.execution_completed"],
     );
     for visible in [false, true] {
+        client.send(&request(
+            1,
+            "evaluate",
+            json!({"code": "1", "visible": visible, "timeout_ms": 0}),
+        ));
+        let rejected = client.recv();
+        assert_eq!(rejected["id"], 1, "{rejected}");
+        assert_eq!(rejected["error"]["code"], -32602, "{rejected}");
+
         // Allow R to start even while the workspace tests run in parallel,
         // then keep it busy beyond the reply deadline.
         client.send(&request(
@@ -279,9 +288,10 @@ fn headless_evaluate_timeout_keeps_execution_context_until_completion() {
         let completion = client.recv();
         assert_eq!(published["params"]["topic"], "demo.timeout", "{published}");
         assert_eq!(timed_out["id"], 2, "{timed_out}");
-        assert!(
-            timed_out["error"].is_object(),
-            "expected reply timeout: {timed_out}"
+        assert_eq!(timed_out["error"]["code"], -32007, "{timed_out}");
+        assert_eq!(
+            timed_out["error"]["data"]["timeout_ms"], 1000,
+            "{timed_out}"
         );
         let execution_id = timed_out["error"]["data"]["execution_id"]
             .as_u64()

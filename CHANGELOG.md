@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- **Experimental:** IPC response timeouts now return `TIMEOUT` (`-32007`) with the applied `timeout_ms`, allowing clients to distinguish them from internal errors. Evaluation timeouts must be positive and do not interrupt R execution.
+
 - **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit (#477).
 - Ctrl+C during `readline()`, `menu()`, or `browser()` now follows R's interrupt behavior (#478).
 
