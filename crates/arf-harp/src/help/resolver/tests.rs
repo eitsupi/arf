@@ -164,6 +164,124 @@ fn qualified_links_use_only_the_first_installed_copy() {
 }
 
 #[test]
+fn ipc_target_returns_selectable_candidates_and_prefers_current_package() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = package(temp.path(), "base");
+    let stats = package(temp.path(), "stats");
+    let broken = package(temp.path(), "broken");
+    std::fs::write(broken.join("Meta/Rd.rds"), b"broken RDS").unwrap();
+
+    let mut resolver = resolver(&[temp.path()]);
+    let ambiguous = resolver.resolve_ipc_target("mean", None, None).unwrap_err();
+    assert!(ambiguous.to_string().contains("broken"));
+
+    let explicit = resolver
+        .resolve_ipc_target("mean", Some("base"), Some("stats"))
+        .unwrap();
+    assert!(matches!(explicit, IpcHelpResolution::Page { .. }));
+
+    let preferred = resolver
+        .resolve_ipc_target("mean", None, Some("stats"))
+        .unwrap();
+    let IpcHelpResolution::Page { page, title } = preferred else {
+        panic!("expected current-package page despite unrelated corrupt index, got {preferred:?}");
+    };
+    assert_eq!(page.package_dir, stats);
+    assert_ne!(page.package_dir, base);
+    assert!(!title.is_empty());
+
+    // If the current package misses, malformed indexes in the global search
+    // still surface as errors instead of being treated as topic misses.
+    assert!(
+        resolver
+            .resolve_ipc_target("not-present", None, Some("stats"))
+            .is_err()
+    );
+}
+
+#[test]
+fn ipc_search_candidates_are_sorted_and_selectable() {
+    let temp = tempfile::tempdir().unwrap();
+    package(temp.path(), "base");
+    package(temp.path(), "stats");
+    let mut resolver = resolver(&[temp.path()]);
+    let ambiguous = resolver.resolve_ipc_target("mean", None, None).unwrap();
+    let IpcHelpResolution::Candidates(candidates) = ambiguous else {
+        panic!("expected cross-package candidates, got {ambiguous:?}");
+    };
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| (
+                candidate.package.as_str(),
+                candidate.topic.as_str(),
+                candidate.help_key.as_deref(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("base", "mean", Some("first-topic")),
+            ("stats", "mean", Some("first-topic")),
+        ]
+    );
+}
+
+#[test]
+fn ipc_resolution_keeps_multiple_same_package_rows_as_candidates() {
+    let temp = tempfile::tempdir().unwrap();
+    let package_dir = package(temp.path(), "fixture");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/help_metadata/help_topics_metadata_v3.rds"),
+        package_dir.join("Meta/Rd.rds"),
+    )
+    .unwrap();
+    let result = resolver(&[temp.path()])
+        .resolve_ipc_target("shared", None, None)
+        .unwrap();
+    let IpcHelpResolution::Candidates(candidates) = result else {
+        panic!("expected same-package ambiguity candidates, got {result:?}");
+    };
+    assert!(candidates.len() >= 2);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.package == "fixture")
+    );
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.help_key.is_some())
+    );
+}
+
+#[test]
+fn ipc_resolution_keeps_distinct_alias_only_candidates() {
+    let dir = PathBuf::from("/library/package");
+    let first = HelpTopic {
+        package: "pkg".to_owned(),
+        package_dir: dir,
+        topic: "first".to_owned(),
+        aliases: vec!["shared".to_owned()],
+        help_key: None,
+        title: "First".to_owned(),
+        entry_type: "help".to_owned(),
+    };
+    let second = HelpTopic {
+        topic: "second".to_owned(),
+        title: "Second".to_owned(),
+        ..first.clone()
+    };
+    let result = HelpTargetResolver::finish_ipc_resolution(vec![first, second]).unwrap();
+    let IpcHelpResolution::Candidates(candidates) = result else {
+        panic!("expected distinct aliases-only candidates, got {result:?}");
+    };
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].topic, "first");
+    assert_eq!(candidates[1].topic, "second");
+}
+
+#[test]
 fn operator_aliases_resolve_without_path_or_percent_interpretation() {
     let temp = tempfile::tempdir().unwrap();
     let dir = package(temp.path(), "base");

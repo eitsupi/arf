@@ -1,6 +1,7 @@
 //! Help, vignette, and demo topic indexes read from installed package metadata.
 
 use super::HelpTopic;
+use crate::error::{HarpError, HarpResult};
 use crate::lib_paths::installed_package_dirs;
 use rd_helpdb::{DemoIndex, HelpTopicEntry, HelpTopicIndex, VignetteIndex, read_rds_file};
 
@@ -18,6 +19,37 @@ pub fn get_help_topics_from_paths(paths: &[String]) -> Vec<HelpTopic> {
         topics.extend(read_package_topics(&package, &package_dir));
     }
     topics
+}
+
+/// Get only Rd help topics from explicit library paths, returning metadata
+/// read errors instead of silently skipping a broken package index.
+pub fn try_get_help_topics_from_paths(
+    paths: &[String],
+    package_filter: Option<&str>,
+) -> HarpResult<Vec<HelpTopic>> {
+    let mut topics = Vec::new();
+    for (package, package_dir) in installed_package_dirs(paths)
+        .into_iter()
+        .filter(|(package, _)| package_filter.is_none_or(|filter| package == filter))
+    {
+        let index = HelpTopicIndex::read_installed(&package_dir).map_err(|source| {
+            HarpError::HelpDatabase {
+                package: package.clone(),
+                topic: String::new(),
+                key: String::new(),
+                source: Box::new(source),
+            }
+        })?;
+        let Some(index) = index else {
+            continue;
+        };
+        topics.extend(
+            index
+                .entries()
+                .filter_map(|entry| project_help_topic_entry(&package, &package_dir, entry)),
+        );
+    }
+    Ok(topics)
 }
 
 fn read_package_topics(package: &str, package_dir: &std::path::Path) -> Vec<HelpTopic> {

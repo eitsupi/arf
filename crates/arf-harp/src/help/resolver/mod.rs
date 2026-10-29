@@ -20,6 +20,18 @@ pub enum HelpResolution {
     NotFound,
 }
 
+/// IPC resolution result that keeps the selected metadata title alongside the
+/// prepared page, without changing pager resolution behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpcHelpResolution {
+    Page {
+        page: PreparedHelpPage,
+        title: String,
+    },
+    Candidates(Vec<HelpTopic>),
+    NotFound,
+}
+
 /// Resolver using a library-path snapshot obtained before entering the viewer.
 ///
 /// All operations use installed files, never R evaluation. Package discovery
@@ -36,6 +48,94 @@ impl HelpTargetResolver {
             library_paths,
             packages: None,
             indexes: HashMap::new(),
+        }
+    }
+
+    /// Resolve an IPC topic, reading the current package before other indexes.
+    ///
+    /// This deliberately remains separate from pager resolution: IPC returns
+    /// ambiguity candidates and carries the title from the selected metadata
+    /// row, while the viewer keeps its established behavior.
+    pub fn resolve_ipc_target(
+        &mut self,
+        topic: &str,
+        package: Option<&str>,
+        current_package: Option<&str>,
+    ) -> HarpResult<IpcHelpResolution> {
+        let packages = self
+            .packages
+            .get_or_insert_with(|| installed_package_dirs(&self.library_paths))
+            .clone();
+
+        if let Some(package) = package {
+            let Some((name, dir)) = packages.iter().find(|(name, _)| name == package) else {
+                return Ok(IpcHelpResolution::NotFound);
+            };
+            let matches = self.ipc_matches_in_package(name, dir, topic)?;
+            return Self::finish_ipc_resolution(matches);
+        }
+
+        if let Some(current_package) = current_package
+            && let Some((name, dir)) = packages.iter().find(|(name, _)| name == current_package)
+        {
+            let matches = self.ipc_matches_in_package(name, dir, topic)?;
+            if !matches.is_empty() {
+                return Self::finish_ipc_resolution(matches);
+            }
+        }
+
+        let mut matches = Vec::new();
+        for (name, dir) in &packages {
+            if Some(name.as_str()) == current_package {
+                continue;
+            }
+            matches.extend(self.ipc_matches_in_package(name, dir, topic)?);
+        }
+        Self::finish_ipc_resolution(matches)
+    }
+
+    fn ipc_matches_in_package(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+    ) -> HarpResult<Vec<HelpTopic>> {
+        if !self.indexes.contains_key(dir) {
+            let index = HelpTopicIndex::read_installed(dir)
+                .map_err(|source| database_error(package, topic, topic, source))?;
+            self.indexes.insert(dir.to_owned(), index);
+        }
+        Ok(self.indexes[dir].as_ref().map_or_else(Vec::new, |index| {
+            matching_entries(index, dir, package, topic)
+        }))
+    }
+
+    fn finish_ipc_resolution(mut candidates: Vec<HelpTopic>) -> HarpResult<IpcHelpResolution> {
+        let mut seen = HashSet::new();
+        candidates.retain(|entry| {
+            entry
+                .help_key
+                .as_ref()
+                .is_none_or(|key| seen.insert((entry.package_dir.clone(), Some(key.clone()))))
+        });
+        candidates.sort_by(|left, right| {
+            (&left.package, &left.topic, &left.help_key).cmp(&(
+                &right.package,
+                &right.topic,
+                &right.help_key,
+            ))
+        });
+        match candidates.len() {
+            0 => Ok(IpcHelpResolution::NotFound),
+            1 => {
+                let candidate = &candidates[0];
+                let page = Self::prepare_candidate(candidate)?;
+                Ok(IpcHelpResolution::Page {
+                    page,
+                    title: candidate.title.clone(),
+                })
+            }
+            _ => Ok(IpcHelpResolution::Candidates(candidates)),
         }
     }
 
@@ -152,6 +252,50 @@ impl HelpTargetResolver {
             },
         )
     }
+}
+
+/// Match a topic within one metadata index, preferring aliases over database
+/// keys just as the pager resolver does.
+fn matching_entries(
+    index: &HelpTopicIndex,
+    dir: &Path,
+    package: &str,
+    topic: &str,
+) -> Vec<HelpTopic> {
+    let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
+        entry.aliases.iter().flatten().any(|alias| alias == topic)
+    };
+    let has_alias = index.entries().any(matches_alias);
+    index
+        .entries()
+        .filter_map(|entry| {
+            let key = entry.topic_key().filter(|key| !key.is_empty());
+            let matches = if has_alias {
+                matches_alias(entry)
+            } else {
+                key == Some(topic)
+            };
+            if !matches {
+                return None;
+            }
+            let aliases = entry.aliases.iter().flatten().cloned().collect::<Vec<_>>();
+            let display_topic = entry
+                .name
+                .as_str()
+                .filter(|name| aliases.iter().any(|alias| alias == name))
+                .or_else(|| entry.aliases.first().and_then(Option::as_deref))
+                .unwrap_or(topic);
+            Some(HelpTopic {
+                package: package.to_owned(),
+                package_dir: dir.to_owned(),
+                topic: display_topic.to_owned(),
+                aliases,
+                help_key: key.map(str::to_owned),
+                title: entry.title.as_str().unwrap_or_default().to_owned(),
+                entry_type: "help".to_owned(),
+            })
+        })
+        .collect()
 }
 
 fn lookup_in_package(
