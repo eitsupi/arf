@@ -2,7 +2,7 @@
 
 use crate::help_search::{SearchIndex, SearchScratch, search_topics};
 use crate::ipc::protocol::{HelpSearchParams, HelpShowParams};
-use arf_harp::help::{HelpTargetResolver, IpcHelpResolution, get_rd_help_topics_from_paths};
+use arf_harp::help::{HelpResolution, HelpTargetResolver, get_rd_help_topics_from_paths};
 use arf_harp::lib_paths::cached_lib_paths;
 use serde::Serialize;
 
@@ -21,6 +21,7 @@ pub(crate) struct HelpTopicResult {
     pub package: String,
     pub topic: String,
     pub aliases: Vec<String>,
+    pub help_key: Option<String>,
     pub title: String,
 }
 
@@ -88,10 +89,6 @@ fn search_help_topics(
     query: &str,
     limit: usize,
 ) -> (Vec<HelpTopicResult>, bool) {
-    let topics: Vec<_> = topics
-        .into_iter()
-        .filter(|entry| entry.entry_type == "help")
-        .collect();
     let Some(index) = SearchIndex::new_cancellable(&topics, || false) else {
         return (Vec::new(), false);
     };
@@ -107,6 +104,7 @@ fn search_help_topics(
                 package: entry.package.clone(),
                 topic: entry.topic.clone(),
                 aliases: entry.aliases.clone(),
+                help_key: entry.help_key.clone(),
                 title: entry.title.clone(),
             }
         })
@@ -140,7 +138,7 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpResult, HelpQuer
         )
         .map_err(|error| HelpQueryError::Internal(error.to_string()))?;
     match resolution {
-        IpcHelpResolution::Page { page, title } => Ok(HelpResult::Page {
+        HelpResolution::Page { page, title } => Ok(HelpResult::Page {
             package: page.package,
             topic: page.display_topic,
             title,
@@ -149,7 +147,7 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpResult, HelpQuer
             entry_type: "help",
             library_paths,
         }),
-        IpcHelpResolution::Candidates(candidates) => Ok(HelpResult::Candidates {
+        HelpResolution::Candidates(candidates) => Ok(HelpResult::Candidates {
             candidates: candidates
                 .into_iter()
                 .map(|candidate| HelpCandidateResult {
@@ -161,7 +159,7 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpResult, HelpQuer
                 .collect(),
             library_paths,
         }),
-        IpcHelpResolution::NotFound => Err(HelpQueryError::NotFound(format!(
+        HelpResolution::NotFound => Err(HelpQueryError::NotFound(format!(
             "Help topic '{}' was not found",
             params.topic
         ))),
@@ -180,12 +178,7 @@ fn ensure_library_paths(paths: &[String]) -> Result<(), HelpQueryError> {
 mod tests {
     use super::*;
 
-    fn topic(
-        topic: &str,
-        aliases: &[&str],
-        title: &str,
-        entry_type: &str,
-    ) -> arf_harp::help::HelpTopic {
+    fn topic(topic: &str, aliases: &[&str], title: &str) -> arf_harp::help::HelpTopic {
         arf_harp::help::HelpTopic {
             package: "pkg".to_string(),
             package_dir: std::path::PathBuf::from("/library/pkg"),
@@ -193,7 +186,7 @@ mod tests {
             aliases: aliases.iter().map(|alias| (*alias).to_string()).collect(),
             help_key: None,
             title: title.to_string(),
-            entry_type: entry_type.to_string(),
+            entry_type: r"help".to_string(),
         }
     }
 
@@ -243,9 +236,8 @@ mod tests {
     #[test]
     fn search_uses_fuzzy_ranking_before_limit_and_marks_truncated() {
         let topics = vec![
-            topic("sprint", &["fast_run"], "Sprint", "help"),
-            topic("print", &["show_value"], "Print a value", "help"),
-            topic("guide", &["AliasGuide"], "Guide title", "vignette"),
+            topic(r"sprint", &[r"fast_run"], r"Sprint"),
+            topic(r"print", &[r"show_value"], r"Print a value"),
         ];
 
         let (limited, truncated) = search_help_topics(topics.clone(), "print", 1);
@@ -260,7 +252,6 @@ mod tests {
             search_help_topics(topics.clone(), "pkg::sprint", 20).0[0].topic,
             "sprint"
         );
-        assert!(search_help_topics(topics, "aliasguide", 20).0.is_empty());
     }
 
     #[test]

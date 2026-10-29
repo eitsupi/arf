@@ -35,7 +35,7 @@ fn resolve_qualified(package: &str, topic: &str) -> arf_harp::HarpResult<HelpRes
 
 fn resolve_page(package: &str, topic: &str) -> PreparedHelpPage {
     match resolve_qualified(package, topic) {
-        Ok(HelpResolution::Page(page)) => page,
+        Ok(HelpResolution::Page { page, .. }) => page,
         other => panic!("expected a help page for {package}::{topic}, got: {other:?}"),
     }
 }

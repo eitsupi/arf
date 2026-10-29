@@ -36,6 +36,11 @@ fn r_help_search_candidates_can_be_selected_and_operator_links_followed() {
         package.join("Meta/Rd.rds"),
     )
     .unwrap();
+    std::fs::copy(
+        fixtures.join(r"../help_resolution/aliases.rds"),
+        package.join(r"help/aliases.rds"),
+    )
+    .unwrap();
     std::fs::write(package.join("Meta/package.rds"), []).unwrap();
     let process = HeadlessProcess::spawn_with_args_and_env(
         &["--vanilla", "--no-history"],
@@ -58,10 +63,32 @@ fn r_help_search_candidates_can_be_selected_and_operator_links_followed() {
         .iter()
         .find_map(|alias| alias.as_str().filter(|alias| *alias == "shared"))
         .expect("search returns the shared alias");
-    let result = help_request(
+    let first = &search[r"topics"][0];
+    let selected = help_request(
         process.pid,
-        &["show", topic, "--package", "resolverfixture"],
+        &[
+            r"show",
+            first[r"topic"].as_str().unwrap(),
+            r"--package",
+            first[r"package"].as_str().unwrap(),
+            r"--help-key",
+            first[r"help_key"].as_str().unwrap(),
+        ],
     );
+    assert_eq!(selected[r"kind"], r"page");
+    assert_eq!(selected[r"title"], first[r"title"]);
+    let explicit = help_request(
+        process.pid,
+        &[r"show", topic, r"--package", r"resolverfixture"],
+    );
+    assert_eq!(explicit[r"kind"], r"page");
+    assert!(
+        explicit[r"content"]
+            .as_str()
+            .unwrap()
+            .contains(r"Fixture first-topic")
+    );
+    let result = help_request(process.pid, &[r"show", topic]);
     assert_eq!(result["kind"], "candidates");
     let candidates = result["candidates"].as_array().unwrap();
     assert!(candidates.len() >= 2);

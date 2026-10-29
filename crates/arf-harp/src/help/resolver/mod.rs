@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 /// Result of resolving a help cross-reference without evaluating R.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelpResolution {
-    Page(PreparedHelpPage),
+    Page {
+        page: PreparedHelpPage,
+        title: String,
+    },
     /// Several metadata rows match. The caller must request an explicit choice
     /// and prepare only the selected candidate with
     /// [`HelpTargetResolver::prepare_candidate`].
@@ -20,22 +23,10 @@ pub enum HelpResolution {
     NotFound,
 }
 
-/// IPC resolution result that keeps the selected metadata title alongside the
-/// prepared page, without changing pager resolution behavior.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IpcHelpResolution {
-    Page {
-        page: PreparedHelpPage,
-        title: String,
-    },
-    Candidates(Vec<HelpTopic>),
-    NotFound,
-}
-
 /// Resolver using a library-path snapshot obtained before entering the viewer.
 ///
 /// All operations use installed files, never R evaluation. Package discovery
-/// and Rd metadata are loaded lazily after an unqualified current-package miss.
+/// and Rd metadata are loaded lazily as needed for lookup and page titles.
 pub struct HelpTargetResolver {
     library_paths: Vec<String>,
     packages: Option<Vec<(String, PathBuf)>>,
@@ -51,20 +42,18 @@ impl HelpTargetResolver {
         }
     }
 
-    /// Resolve an IPC topic, reading the current package before other indexes.
+    /// Resolve an IPC topic using the pager's direct package lookup before
+    /// falling back to metadata search across installed packages.
     ///
-    /// This deliberately remains separate from pager resolution: IPC returns
-    /// ambiguity candidates and carries the title from the selected metadata
-    /// row, while the viewer keeps its established behavior. A `help_key` is
-    /// an exact metadata-row selector and is only accepted with an explicit
-    /// package by the IPC boundary.
+    /// A `help_key` selects the exact compiled-help page and can be used without an
+    /// aliases file. The IPC boundary requires it to be paired with a package.
     pub fn resolve_ipc_target(
         &mut self,
         topic: &str,
         package: Option<&str>,
         current_package: Option<&str>,
         help_key: Option<&str>,
-    ) -> HarpResult<IpcHelpResolution> {
+    ) -> HarpResult<HelpResolution> {
         let packages = self
             .packages
             .get_or_insert_with(|| installed_package_dirs(&self.library_paths))
@@ -72,18 +61,20 @@ impl HelpTargetResolver {
 
         if let Some(package) = package {
             let Some((name, dir)) = packages.iter().find(|(name, _)| name == package) else {
-                return Ok(IpcHelpResolution::NotFound);
+                return Ok(HelpResolution::NotFound);
             };
-            let matches = self.ipc_matches_in_package(name, dir, topic, help_key)?;
-            return Self::finish_ipc_resolution(matches);
+            if let Some(help_key) = help_key {
+                return self.page_by_key(name, dir, topic, help_key);
+            }
+            return self.direct_page(name, dir, topic);
         }
 
         if let Some(current_package) = current_package
             && let Some((name, dir)) = packages.iter().find(|(name, _)| name == current_package)
         {
-            let matches = self.ipc_matches_in_package_or_warn(name, dir, topic, help_key);
-            if !matches.is_empty() {
-                return Self::finish_ipc_resolution(matches);
+            let result = self.direct_page(name, dir, topic);
+            if !matches!(&result, Ok(HelpResolution::NotFound)) {
+                return result;
             }
         }
 
@@ -92,41 +83,88 @@ impl HelpTargetResolver {
             if Some(name.as_str()) == current_package {
                 continue;
             }
-            matches.extend(self.ipc_matches_in_package_or_warn(name, dir, topic, help_key));
+            matches.extend(self.matching_topics_or_warn(name, dir, topic));
         }
         Self::finish_ipc_resolution(matches)
     }
 
-    fn ipc_matches_in_package(
+    fn direct_page(
         &mut self,
         package: &str,
         dir: &Path,
         topic: &str,
-        help_key: Option<&str>,
-    ) -> HarpResult<Vec<HelpTopic>> {
+    ) -> HarpResult<HelpResolution> {
+        match lookup_in_package(dir, package, topic)? {
+            Some(page) => {
+                let title = self.title_for_key(dir, package, &page.help_key);
+                Ok(HelpResolution::Page { page, title })
+            }
+            None => Ok(HelpResolution::NotFound),
+        }
+    }
+
+    fn page_by_key(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+        help_key: &str,
+    ) -> HarpResult<HelpResolution> {
+        let candidate = HelpTopic {
+            package: package.to_owned(),
+            package_dir: dir.to_owned(),
+            topic: topic.to_owned(),
+            aliases: Vec::new(),
+            help_key: Some(help_key.to_owned()),
+            title: self.title_for_key(dir, package, help_key),
+            entry_type: "help".to_owned(),
+        };
+        let page = Self::prepare_candidate(&candidate)?;
+        Ok(HelpResolution::Page {
+            page,
+            title: candidate.title,
+        })
+    }
+
+    fn title_for_key(&mut self, dir: &Path, package: &str, help_key: &str) -> String {
+        self.package_index(package, dir, help_key)
+            .ok()
+            .flatten()
+            .and_then(|index| {
+                index
+                    .entries()
+                    .find(|entry| entry.topic_key() == Some(help_key))
+                    .map(|entry| entry.title.as_str().unwrap_or_default().to_owned())
+            })
+            .unwrap_or_default()
+    }
+
+    fn package_index(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+    ) -> HarpResult<Option<&HelpTopicIndex>> {
         if !self.indexes.contains_key(dir) {
             let index = HelpTopicIndex::read_installed(dir)
                 .map_err(|source| database_error(package, topic, topic, source))?;
             self.indexes.insert(dir.to_owned(), index);
         }
-        Ok(self.indexes[dir].as_ref().map_or_else(Vec::new, |index| {
-            if let Some(help_key) = help_key {
-                matching_key(index, dir, package, help_key)
-            } else {
-                matching_entries(index, dir, package, topic)
-            }
-        }))
+        Ok(self.indexes.get(dir).and_then(Option::as_ref))
     }
 
-    fn ipc_matches_in_package_or_warn(
+    fn matching_topics_or_warn(
         &mut self,
         package: &str,
         dir: &Path,
         topic: &str,
-        help_key: Option<&str>,
     ) -> Vec<HelpTopic> {
-        match self.ipc_matches_in_package(package, dir, topic, help_key) {
-            Ok(matches) => matches,
+        match self.package_index(package, dir, topic).map(|index| {
+            index.map_or_else(Vec::new, |index| {
+                matching_entries(index, dir, package, topic, CandidateDisplay::Metadata)
+            })
+        }) {
+            Ok(topics) => topics,
             Err(error) => {
                 log::warn!(
                     "Skipping unreadable help index for package {package:?} at {}: {error}",
@@ -137,7 +175,7 @@ impl HelpTargetResolver {
         }
     }
 
-    fn finish_ipc_resolution(mut candidates: Vec<HelpTopic>) -> HarpResult<IpcHelpResolution> {
+    fn finish_ipc_resolution(mut candidates: Vec<HelpTopic>) -> HarpResult<HelpResolution> {
         let mut seen = HashSet::new();
         candidates.retain(|entry| {
             entry
@@ -153,16 +191,16 @@ impl HelpTargetResolver {
             ))
         });
         match candidates.len() {
-            0 => Ok(IpcHelpResolution::NotFound),
+            0 => Ok(HelpResolution::NotFound),
             1 => {
                 let candidate = &candidates[0];
                 let page = Self::prepare_candidate(candidate)?;
-                Ok(IpcHelpResolution::Page {
+                Ok(HelpResolution::Page {
                     page,
                     title: candidate.title.clone(),
                 })
             }
-            _ => Ok(IpcHelpResolution::Candidates(candidates)),
+            _ => Ok(HelpResolution::Candidates(candidates)),
         }
     }
 
@@ -181,68 +219,45 @@ impl HelpTargetResolver {
             let Some(dir) = installed_package_dir(&self.library_paths, package) else {
                 return Ok(HelpResolution::NotFound);
             };
-            return lookup_in_package(&dir, package, &target.topic)
-                .map(|page| page.map_or(HelpResolution::NotFound, HelpResolution::Page));
+            return self.direct_page(package, &dir, &target.topic);
         }
 
-        if let Some(page) =
-            lookup_in_package(&current.package_dir, &current.package, &target.topic)?
-        {
-            return Ok(HelpResolution::Page(page));
+        let direct = self.direct_page(&current.package, &current.package_dir, &target.topic)?;
+        if !matches!(&direct, HelpResolution::NotFound) {
+            return Ok(direct);
         }
 
         let packages = self
             .packages
-            .get_or_insert_with(|| installed_package_dirs(&self.library_paths));
+            .get_or_insert_with(|| installed_package_dirs(&self.library_paths))
+            .clone();
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
         for (package, dir) in packages.iter().filter(|(name, _)| name != &current.package) {
-            if !self.indexes.contains_key(dir) {
-                let index = HelpTopicIndex::read_installed(dir).map_err(|source| {
-                    database_error(package, &target.topic, &target.topic, source)
-                })?;
-                self.indexes.insert(dir.clone(), index);
-            }
-            let Some(index) = self.indexes[dir].as_ref() else {
+            let Some(index) = self.package_index(package, dir, &target.topic)? else {
                 continue;
             };
-            let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
-                entry
-                    .aliases
-                    .iter()
-                    .flatten()
-                    .any(|alias| alias == &target.topic)
-            };
-            // Match the direct lookup's alias-first policy within each package.
-            // Multiple alias rows remain candidates for explicit selection.
-            let has_alias = index.entries().any(matches_alias);
-            for entry in index.entries() {
-                let key = entry.topic_key().filter(|key| !key.is_empty());
-                let matches = if has_alias {
-                    matches_alias(entry)
-                } else {
-                    key == Some(target.topic.as_str())
-                };
-                if !matches {
-                    continue;
+            for candidate in matching_entries(
+                index,
+                dir,
+                package,
+                &target.topic,
+                CandidateDisplay::Requested,
+            ) {
+                if seen.insert((dir.clone(), candidate.help_key.clone())) {
+                    candidates.push(candidate);
                 }
-                if !seen.insert((dir.clone(), key.map(str::to_owned))) {
-                    continue;
-                }
-                candidates.push(HelpTopic {
-                    package: package.clone(),
-                    package_dir: dir.clone(),
-                    topic: target.topic.clone(),
-                    aliases: entry.aliases.iter().flatten().cloned().collect(),
-                    help_key: key.map(str::to_owned),
-                    title: entry.title.as_str().unwrap_or_default().to_owned(),
-                    entry_type: "help".to_owned(),
-                });
             }
         }
         match candidates.as_slice() {
             [] => Ok(HelpResolution::NotFound),
-            [candidate] => Self::prepare_candidate(candidate).map(HelpResolution::Page),
+            [candidate] => {
+                let page = Self::prepare_candidate(candidate)?;
+                Ok(HelpResolution::Page {
+                    page,
+                    title: candidate.title.clone(),
+                })
+            }
             _ => Ok(HelpResolution::Candidates(candidates)),
         }
     }
@@ -288,6 +303,7 @@ fn matching_entries(
     dir: &Path,
     package: &str,
     topic: &str,
+    display: CandidateDisplay,
 ) -> Vec<HelpTopic> {
     let matches_alias = |entry: &rd_helpdb::HelpTopicEntry| {
         entry.aliases.iter().flatten().any(|alias| alias == topic)
@@ -305,41 +321,33 @@ fn matching_entries(
             if !matches {
                 return None;
             }
-            Some(project_ipc_entry(entry, dir, package, topic, key))
+            Some(project_index_entry(
+                entry, dir, package, topic, key, display,
+            ))
         })
         .collect()
 }
 
-/// Select metadata by its compiled-help key without applying alias-first
-/// lookup. This lets an IPC client retrieve a previously returned candidate
-/// even when its topic string is also an alias for another metadata row.
-fn matching_key(
-    index: &HelpTopicIndex,
-    dir: &Path,
-    package: &str,
-    help_key: &str,
-) -> Vec<HelpTopic> {
-    index
-        .entries()
-        .filter(|entry| entry.topic_key() == Some(help_key))
-        .map(|entry| project_ipc_entry(entry, dir, package, help_key, Some(help_key)))
-        .collect()
-}
-
-fn project_ipc_entry(
+/// Convert one selected metadata row to a help candidate while preserving the
+/// caller's display-topic policy.
+fn project_index_entry(
     entry: &rd_helpdb::HelpTopicEntry,
     dir: &Path,
     package: &str,
     fallback_topic: &str,
     help_key: Option<&str>,
+    display: CandidateDisplay,
 ) -> HelpTopic {
     let aliases = entry.aliases.iter().flatten().cloned().collect::<Vec<_>>();
-    let display_topic = entry
-        .name
-        .as_str()
-        .filter(|name| aliases.iter().any(|alias| alias == name))
-        .or_else(|| entry.aliases.first().and_then(Option::as_deref))
-        .unwrap_or(fallback_topic);
+    let display_topic = match display {
+        CandidateDisplay::Requested => fallback_topic,
+        CandidateDisplay::Metadata => entry
+            .name
+            .as_str()
+            .filter(|name| aliases.iter().any(|alias| alias == name))
+            .or_else(|| entry.aliases.first().and_then(Option::as_deref))
+            .unwrap_or(fallback_topic),
+    };
     HelpTopic {
         package: package.to_owned(),
         package_dir: dir.to_owned(),
@@ -349,6 +357,12 @@ fn project_ipc_entry(
         title: entry.title.as_str().unwrap_or_default().to_owned(),
         entry_type: "help".to_owned(),
     }
+}
+
+#[derive(Clone, Copy)]
+enum CandidateDisplay {
+    Requested,
+    Metadata,
 }
 
 fn lookup_in_package(

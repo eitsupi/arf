@@ -606,12 +606,15 @@ aliases, help keys, and `package::name`; titles also match at half weight, and
 results are ordered by match score. A corrupt or unreadable package index is
 skipped, while results from other packages remain available.
 Results contain `topics`, `truncated` (true when more matches were found than
-the requested limit permits), and the `library_paths` used. `r-help show`
+the requested limit permits), and the `library_paths` used; each topic includes
+its `help_key` when available, for fetching that exact search result. `r-help show`
 accepts a topic, optional `--package`, optional `--current-package`, and
 optional `--help-key` (which requires `--package`). An explicit `package` takes
 priority. If omitted, `current_package` is preferred; if that package has no
-match, all packages are searched. One match returns a page; multiple matches
-return candidates instead of choosing one arbitrarily. The library-path order
+match, all packages are searched. Within an explicit or current package,
+lookup uses the viewer's alias-first resolution, falling back to a database
+key. Across packages, one match returns a page; multiple matches return
+candidates instead of choosing one arbitrarily. The library-path order
 selects which installed copy of a given package is read, but does not select
 among different packages.
 
@@ -619,10 +622,12 @@ The resolver does not reproduce R's `?topic` behavior: R resolves unqualified
 topics according to package attach order, while this method uses the explicit
 package priority above and returns candidates when multiple packages match.
 Candidates are sorted lexically by package, canonical topic, then help key.
-Multiple matches within one package are also returned as candidates.
+Cross-package metadata lookup can also return multiple rows from one package.
 Successful results include the `library_paths` used to resolve the request.
-An explicitly selected package's unreadable index and failures loading a
-selected page return internal errors. With no explicit package, unrelated
+Failures reading a selected package's help database or loading a selected page
+return internal errors. A missing or unreadable metadata index used only to
+look up a resolved page's title leaves `title` empty without hiding the page.
+With no explicit package, unrelated
 corrupt indexes are skipped during lookup; a topic present only in a skipped
 package can therefore appear not found. An empty
 cached library-path list returns `HELP_LIBRARY_PATHS_UNAVAILABLE` (`-32018`),
@@ -640,7 +645,7 @@ JSON-RPC search request and response:
 ```
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"topics":[{"package":"stats","topic":"lm","aliases":[],"title":"Fitting Linear Models"}],"truncated":false,"library_paths":["/usr/lib/R/library"]}}
+{"jsonrpc":"2.0","id":1,"result":{"topics":[{"package":"stats","topic":"lm","aliases":[],"help_key":"lm","title":"Fitting Linear Models"}],"truncated":false,"library_paths":["/usr/lib/R/library"]}}
 ```
 
 JSON-RPC show request:
@@ -656,9 +661,8 @@ array with `package`, canonical `topic`, `help_key`, and `title`, plus
 `library_paths`. Use `package` and `help_key` from a candidate in a subsequent
 `r_help_show` request to fetch that exact entry. The request still requires
 `topic`; when `help_key` is supplied, exact-key lookup bypasses alias matching.
-Candidates without a `help_key` can still be fetched by `package` and `topic`
-when unique, but cannot be selected individually when multiple such candidates
-share the same package and topic.
+For candidates without a `help_key`, `package` and `topic` use alias resolution
+and cannot guarantee selection of a particular metadata row.
 
 ```json
 {"jsonrpc":"2.0","id":4,"method":"r_help_show","params":{"topic":"shared","package":"alpha","help_key":"shared-a"}}

@@ -59,7 +59,7 @@ fn resolve(
 
 fn page(result: HelpResolution) -> PreparedHelpPage {
     match result {
-        HelpResolution::Page(page) => page,
+        HelpResolution::Page { page, .. } => page,
         other => panic!("expected one prepared page, got {other:?}"),
     }
 }
@@ -175,46 +175,63 @@ fn ipc_target_returns_selectable_candidates_and_prefers_current_package() {
     let ambiguous = resolver
         .resolve_ipc_target("mean", None, None, None)
         .unwrap();
-    assert!(matches!(ambiguous, IpcHelpResolution::Candidates(_)));
+    assert!(matches!(ambiguous, HelpResolution::Candidates(_)));
 
     let explicit = resolver
         .resolve_ipc_target("mean", Some("base"), Some("stats"), None)
         .unwrap();
-    assert!(matches!(explicit, IpcHelpResolution::Page { .. }));
+    assert!(matches!(explicit, HelpResolution::Page { .. }));
 
     let preferred = resolver
         .resolve_ipc_target("mean", None, Some("stats"), None)
         .unwrap();
-    let IpcHelpResolution::Page { page, title } = preferred else {
+    let HelpResolution::Page { page, title } = preferred else {
         panic!("expected current-package page despite unrelated corrupt index, got {preferred:?}");
     };
     assert_eq!(page.package_dir, stats);
     assert_ne!(page.package_dir, base);
     assert!(!title.is_empty());
 
+    let alias_priority = resolver
+        .resolve_ipc_target(r#"first-topic"#, Some(r#"base"#), None, None)
+        .unwrap();
+    let HelpResolution::Page { page, title } = alias_priority else {
+        panic!(r#"expected explicit-package alias priority, got {alias_priority:?}"#);
+    };
+    assert_eq!(page.help_key, r#"second-topic"#);
+    assert_eq!(title, r#"Second fixture"#);
+
     assert!(matches!(
         resolver
             .resolve_ipc_target("not-present", None, Some("stats"), None)
             .unwrap(),
-        IpcHelpResolution::NotFound
+        HelpResolution::NotFound
     ));
-    assert!(
-        resolver
-            .resolve_ipc_target("mean", Some("broken"), None, None)
-            .is_err()
-    );
+    let broken_metadata = resolver
+        .resolve_ipc_target(r"mean", Some(r"broken"), None, None)
+        .unwrap();
+    let HelpResolution::Page { page, title } = broken_metadata else {
+        panic!(r"expected direct aliases lookup to work with broken title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(!page.markdown.is_empty());
+    assert!(title.is_empty());
 }
 
 #[test]
-fn explicit_ipc_package_keeps_index_and_selected_page_errors_strict() {
+fn ipc_lookup_tolerates_missing_title_metadata_but_keeps_page_errors_strict() {
     let temp = tempfile::tempdir().unwrap();
     let bad_index = package(temp.path(), "badindex");
-    std::fs::write(bad_index.join("Meta/Rd.rds"), b"broken RDS").unwrap();
-    assert!(
-        resolver(&[temp.path()])
-            .resolve_ipc_target("mean", Some("badindex"), None, None)
-            .is_err()
-    );
+    std::fs::remove_file(bad_index.join(r"Meta/Rd.rds")).unwrap();
+    let result = resolver(&[temp.path()])
+        .resolve_ipc_target(r"mean", Some(r"badindex"), None, None)
+        .unwrap();
+    let HelpResolution::Page { page, title } = result else {
+        panic!(r"expected direct aliases lookup to survive missing title metadata");
+    };
+    assert_eq!(page.help_key, r"first-topic");
+    assert!(!page.markdown.is_empty());
+    assert!(title.is_empty());
 
     let bad_page = package(temp.path(), "badpage");
     std::fs::write(bad_page.join("help/badpage.rdx"), b"broken database").unwrap();
@@ -239,7 +256,7 @@ fn ipc_search_candidates_are_sorted_and_selectable() {
     let ambiguous = resolver
         .resolve_ipc_target("mean", None, None, None)
         .unwrap();
-    let IpcHelpResolution::Candidates(candidates) = ambiguous else {
+    let HelpResolution::Candidates(candidates) = ambiguous else {
         panic!("expected cross-package candidates, got {ambiguous:?}");
     };
     assert_eq!(candidates.len(), 2);
@@ -260,62 +277,25 @@ fn ipc_search_candidates_are_sorted_and_selectable() {
 }
 
 #[test]
-fn ipc_resolution_keeps_multiple_same_package_rows_as_candidates() {
+fn ipc_help_key_resolves_a_page_without_an_alias_file() {
     let temp = tempfile::tempdir().unwrap();
     let package_dir = package(temp.path(), "fixture");
-    std::fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/help_metadata/help_topics_metadata_v3.rds"),
-        package_dir.join("Meta/Rd.rds"),
-    )
-    .unwrap();
-    let result = resolver(&[temp.path()])
-        .resolve_ipc_target("shared", None, None, None)
-        .unwrap();
-    let IpcHelpResolution::Candidates(candidates) = result else {
-        panic!("expected same-package ambiguity candidates, got {result:?}");
-    };
-    assert!(candidates.len() >= 2);
-    assert!(
-        candidates
-            .iter()
-            .all(|candidate| candidate.package == "fixture")
-    );
-    assert!(
-        candidates
-            .iter()
-            .all(|candidate| candidate.help_key.is_some())
-    );
-    for candidate in candidates {
-        let key = candidate.help_key.as_deref().unwrap();
-        let selected = resolver(&[temp.path()])
-            .resolve_ipc_target("shared", Some(&candidate.package), None, Some(key))
-            .unwrap();
-        let IpcHelpResolution::Page { page, title } = selected else {
-            panic!("expected selected package/key page, got {selected:?}");
-        };
-        assert_eq!(page.help_key, key);
-        assert_eq!(title, candidate.title);
-    }
+    std::fs::remove_file(package_dir.join(r"help/aliases.rds")).unwrap();
 
-    let candidates = match resolver(&[temp.path()])
-        .resolve_ipc_target("shared", Some("fixture"), None, None)
-        .unwrap()
-    {
-        IpcHelpResolution::Candidates(candidates) => candidates,
-        other => panic!("expected same-package candidates, got {other:?}"),
-    };
-    let candidate = candidates
-        .iter()
-        .find(|candidate| candidate.help_key.as_deref() == Some("first-topic"))
+    let result = resolver(&[temp.path()])
+        .resolve_ipc_target(
+            r#"first-topic"#,
+            Some(r#"fixture"#),
+            None,
+            Some(r#"first-topic"#),
+        )
         .unwrap();
-    let selected = resolver(&[temp.path()])
-        .resolve_ipc_target("first-topic", Some("fixture"), None, Some("first-topic"))
-        .unwrap();
-    let IpcHelpResolution::Page { page, .. } = selected else {
-        panic!("expected key-selected page for colliding alias, got {selected:?}");
+    let HelpResolution::Page { page, title } = result else {
+        panic!(r"expected exact-key page without aliases.rds, got {result:?}");
     };
-    assert_eq!(page.help_key, candidate.help_key.as_deref().unwrap());
+    assert_eq!(page.help_key, r#"first-topic"#);
+    assert!(page.markdown.contains(r#"Fixture first-topic"#));
+    assert_eq!(title, r#"First fixture"#);
 }
 
 #[test]
@@ -336,7 +316,7 @@ fn ipc_resolution_keeps_distinct_alias_only_candidates() {
         ..first.clone()
     };
     let result = HelpTargetResolver::finish_ipc_resolution(vec![first, second]).unwrap();
-    let IpcHelpResolution::Candidates(candidates) = result else {
+    let HelpResolution::Candidates(candidates) = result else {
         panic!("expected distinct aliases-only candidates, got {result:?}");
     };
     assert_eq!(candidates.len(), 2);
@@ -365,11 +345,11 @@ fn operator_aliases_resolve_without_path_or_percent_interpretation() {
 fn ipc_show_resolves_a_qualified_operator_link_uri() {
     let temp = tempfile::tempdir().unwrap();
     package(temp.path(), "base");
-    let target = HelpTarget::from_uri("x-r-help:base/%/%").unwrap();
+    let target = HelpTarget::from_uri(r#"x-r-help:base/%/%"#).unwrap();
     let result = resolver(&[temp.path()])
         .resolve_ipc_target(&target.topic, target.package.as_deref(), None, None)
         .unwrap();
-    let IpcHelpResolution::Page { page, .. } = result else {
+    let HelpResolution::Page { page, .. } = result else {
         panic!("expected the qualified operator help page, got {result:?}");
     };
     assert_eq!(page.package, "base");

@@ -136,7 +136,7 @@ impl HelpViewer {
             return PagerAction::Redraw;
         };
         match self.resolver.resolve(&current.page, &target) {
-            Ok(HelpResolution::Page(page)) => self.show_page(page),
+            Ok(HelpResolution::Page { page, .. }) => self.show_page(page),
             Ok(HelpResolution::Candidates(topics)) => {
                 self.candidates = Some(HelpCandidates::new(CandidatePages::Topics(topics)));
                 PagerAction::ScrollTo(0)
