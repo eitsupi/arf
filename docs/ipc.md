@@ -656,8 +656,9 @@ array with `package`, canonical `topic`, `help_key`, and `title`, plus
 `library_paths`. Use `package` and `help_key` from a candidate in a subsequent
 `r_help_show` request to fetch that exact entry. The request still requires
 `topic`; when `help_key` is supplied, exact-key lookup bypasses alias matching.
-Candidates without a `help_key`, which occur only when corrupt metadata lacks
-`File` values in `Meta/Rd.rds`, cannot be fetched individually.
+Candidates without a `help_key` can still be fetched by `package` and `topic`
+when unique, but cannot be selected individually when multiple such candidates
+share the same package and topic.
 
 ```json
 {"jsonrpc":"2.0","id":4,"method":"r_help_show","params":{"topic":"shared","package":"alpha","help_key":"shared-a"}}
