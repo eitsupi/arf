@@ -2,32 +2,19 @@
 
 ## [Unreleased]
 
-### Added
-
-- **Experimental:** Subscribe to `arf.console_output` to stream R stdout and stderr from terminal and IPC user code, with execution IDs and origin metadata. Output events arrive before execution completion events on the same subscribed connection. Clients subscribed to `arf.*` now also receive console output; subscribe to `arf.execution_completed` explicitly if only completion is needed.
-- **Experimental:** `arf ipc attach` bridges a long-lived IPC connection over stdin/stdout for editors and agents, with optional event subscriptions. Closing stdin ends the bridge while leaving the R session running.
-- **Experimental:** IPC `evaluate` responses now include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations.
-- **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive.
-
-### Changed
-
-- **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection` (#476).
-
-### Fixed
-
-- **Experimental:** IPC response timeouts now return `TIMEOUT` (`-32007`) with the applied `timeout_ms`, allowing clients to distinguish them from internal errors. Evaluation timeouts must be positive and do not interrupt R execution.
-- **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit (#477).
-- Ctrl+C during `readline()`, `menu()`, or `browser()` now follows R's interrupt behavior (#478).
-
-## [0.7.0-beta.1] - 2026-10-24
+## [0.7.0-beta.2] - 2026-10-29
 
 ### Added
 
 - `arf history migrate` copies history from the previous default location to the current one, skipping duplicates and leaving the old files in place. Use `--dry-run` to preview (#454, #455).
-- **Experimental:** IPC clients can keep a connection open with `attach` and receive events from the session as they happen, so editors and other tools can follow it without polling (#465, #466, #468, #469, #470, #471, #472).
+- **Experimental:** IPC clients can keep a connection open with `attach` and receive events from the session as they happen, so editors and other tools can follow it without polling (#465, #466, #468, #469, #470, #471, #472, #496, #497).
+  - `arf ipc attach` bridges such a connection over stdin/stdout, with optional event subscriptions. Closing stdin ends the bridge while leaving the R session running (#496).
   - R code can publish its own events with `arf_publish_event`.
   - Subscribers receive `arf.execution_completed` when terminal input or IPC user code finishes. Responses include an execution ID that matches it.
+  - Subscribers receive `arf.console_output` with R stdout and stderr from terminal and IPC user code, including execution IDs and origin metadata, before the matching completion event. Subscribing to `arf.*` includes console output; subscribe to `arf.execution_completed` explicitly if only completion is needed (#497).
   - Sessions can expose named R functions ("handlers") for IPC clients to call with JSON arguments, with `--ipc-expose` at startup or later with `:ipc expose` after the user confirms. Handlers are not subject to the code evaluation policy, so expose only functions that validate their arguments.
+- **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive (#489).
+- **Experimental:** IPC `evaluate` responses include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations (#494).
 - **Experimental:** arf can start R from a Pixi environment or a rig project (#407, #411, #412, #419, #420, #423).
   - `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
   - `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420). With rig 0.11.0, `:switch` to another R minor version can leave an incompatible project library active ([rig#450](https://github.com/r-lib/rig/issues/450)); use a rig release with the fix and run `rig proj sync` first.
@@ -44,6 +31,7 @@
   - macOS and explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) are not affected.
 - **Breaking:** `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, as Rscript does. Previously they printed the error and exited with status 0 (#422).
 - **Breaking:** `--r-home` and `--with-r-version` now take precedence over `ARF_R_HOME` and `ARF_R_VERSION`, and setting both environment variables without either option is an error. Unset one of them or pass the option instead (#408).
+- **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection` (#476).
 - `:switch` now replaces earlier R version and provider options instead of adding to them, and the new session applies rig project activation afresh (#417).
 - R source overrides now try later entries when rig is unavailable, and show a single notice if all of them fail (#407).
 - Checking an R installation's home directory during startup and `arf r resolve` now times out instead of waiting indefinitely (#407).
@@ -65,6 +53,9 @@
 - On macOS, the selected R's own libraries take priority when loading, and switching R versions restores the original library search path (#416).
 - After changing directories, `:restart` no longer keeps stale R directory paths from the previous R installation (#421).
 - The help and history browsers show their header row again instead of scrolling it off the screen (#433).
+- Ctrl+C during `readline()`, `menu()`, or `browser()` now follows R's interrupt behavior (#478).
+- **Experimental:** IPC response timeouts now return `TIMEOUT` (`-32007`) with the applied `timeout_ms`, allowing clients to distinguish them from internal errors. Evaluation timeouts must be positive and do not interrupt R execution (#495).
+- **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit (#477).
 - **Experimental:** On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).
 - **Experimental:** On macOS, `arf ipc` commands no longer intermittently report a transport error after the session has already handled the request (#432).
 
