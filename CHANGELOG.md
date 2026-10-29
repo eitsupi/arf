@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Experimental:** `arf ipc attach` bridges a long-lived IPC connection over stdin/stdout for editors and agents, with optional event subscriptions. Closing stdin ends the bridge while leaving the R session running.
 - **Experimental:** IPC `evaluate` responses now include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations.
 - **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive.
 

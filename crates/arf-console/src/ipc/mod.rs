@@ -21,6 +21,7 @@
 //! later IPC request.
 
 mod approval;
+pub(crate) mod bridge;
 mod capture;
 pub mod client;
 mod events;

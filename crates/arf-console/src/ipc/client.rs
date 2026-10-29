@@ -58,7 +58,7 @@ fn print_json_or_exit(value: &serde_json::Value) {
 /// NOTE: This function calls `std::process::exit()`, so it cannot be
 /// tested in-process. Error paths are covered by integration tests in
 /// `headless_tests.rs` which run `arf ipc` as a subprocess.
-fn exit_error(
+pub(super) fn exit_error(
     exit_code: i32,
     code: &str,
     message: &str,
@@ -88,7 +88,7 @@ fn exit_error(
 }
 
 /// Map a JSON-RPC numeric error code to a string identifier and hint.
-fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
+pub(super) fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) {
     use crate::ipc::protocol::*;
     match code {
         R_BUSY => (
@@ -211,7 +211,7 @@ pub fn cmd_list() {
 }
 
 /// Resolve a session or exit with a structured JSON error.
-fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
+pub(super) fn resolve_session(pid: Option<u32>) -> crate::ipc::session::SessionInfo {
     match find_session(pid) {
         Some(session) => session,
         None => {
