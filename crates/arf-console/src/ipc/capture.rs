@@ -22,8 +22,8 @@ pub(crate) struct CaptureEvaluation {
 ///
 /// Protocol: R writes a binary file with 2 length-prefixed fields:
 ///   `<header_line>\n<value><error>`
-/// Header format: `value_len error_len`
-/// A length of -1 means the field is NULL/absent.
+/// Header format: `value_len error_len interrupted`, where interrupted is 0 or 1.
+/// A value or error length of -1 means that field is NULL/absent.
 pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
     let escaped = code
         .replace('\\', "\\\\")
@@ -167,7 +167,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
         .collect::<Result<Vec<_>, _>>()
         .ok()
         .filter(|lengths| {
-            matches!(lengths.as_slice(), [value, error] | [value, error, 0..=1]
+            matches!(lengths.as_slice(), [value, error, 0..=1]
                 if *value >= -1 && *error >= -1)
         });
 
@@ -255,7 +255,7 @@ mod tests {
 
         // Simulate R output: value="[1] 42", error=NULL
         let value = b"[1] 42";
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -277,7 +277,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_err.dat");
 
         let error_msg = b"object 'x' not found";
-        let header = format!("-1 {}\n", error_msg.len());
+        let header = format!("-1 {} 0\n", error_msg.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(error_msg).unwrap();
@@ -300,7 +300,7 @@ mod tests {
 
         // value present, error absent
         let value = br#"[1] "hello""#;
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -322,7 +322,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_empty.dat");
 
         // Both value and error absent (invisible result, no error)
-        let header = "-1 -1\n";
+        let header = "-1 -1 0\n";
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         drop(file);
@@ -341,7 +341,7 @@ mod tests {
 
         // Value containing quotes, newlines, backslashes, and control chars
         let value = b"[1] \"hello\\nworld\"\n\ttab\there\r\n\\backslash\\\x1b[31mred\x1b[0m";
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -369,7 +369,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_truncated.dat");
 
         // Header claims value is 100 bytes, but body is only 5 bytes
-        let header = "100 -1\n";
+        let header = "100 -1 0\n";
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(b"short").unwrap();
@@ -397,9 +397,10 @@ mod tests {
         for data in [
             b"no header".as_slice(),
             b"invalid\n",
-            b"100 -1\nshort",
-            b"-2 -1\n",
-            b"-1 -2\n",
+            b"-1 -1\n",
+            b"100 -1 0\nshort",
+            b"-2 -1 0\n",
+            b"-1 -2 0\n",
             b"-1 -1 -1\n",
             b"-1 -1 2\n",
             b"-1 invalid -1\n",
