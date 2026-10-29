@@ -220,8 +220,9 @@ Quick start:
   # 5. Shut down when done
   $ arf ipc shutdown
 
-All commands output JSON to stdout (pretty-printed on terminal, compact \
-when piped). Errors are written to stderr as JSON. Exit codes: \
+Single-shot commands output JSON to stdout (pretty-printed on terminal, compact \
+when piped). The attach bridge always emits newline-delimited JSON-RPC. \
+Errors are written to stderr as JSON. Exit codes: \
 0 = success, 2 = client-side failure (transport error or missing/unreadable \
 code input), 3 = session error, 4 = protocol error.
 

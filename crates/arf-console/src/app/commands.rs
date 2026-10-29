@@ -126,6 +126,7 @@ pub(crate) fn handle_history_command(
 pub(crate) fn handle_ipc_command(action: &IpcAction) {
     match action {
         IpcAction::List => ipc::client::cmd_list(),
+        IpcAction::Attach { pid, subscribe } => ipc::bridge::cmd_attach(*pid, subscribe),
         IpcAction::Eval {
             code,
             pid,

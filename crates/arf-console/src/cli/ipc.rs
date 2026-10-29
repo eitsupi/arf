@@ -22,6 +22,29 @@ Examples:
   Extract PIDs with jq:
     $ arf ipc list | jq '.sessions[].pid'")]
     List,
+    /// Bridge a long-lived IPC connection over stdin/stdout for editors and agents
+    ///
+    /// Sends attach automatically, then relays newline-delimited JSON-RPC.
+    /// Ends on stdin EOF, server disconnect, output failure, or SIGINT/SIGTERM.
+    /// To watch events only, run from a terminal and keep stdin open.
+    #[command(after_long_help = r#"Examples:
+  Watch execution completion events from a terminal (Ctrl+C exits the bridge):
+    $ arf ipc attach --subscribe arf.execution_completed
+
+  Connect an editor or agent to a specific session:
+    $ arf ipc attach --pid 12345 --subscribe arf.execution_completed
+
+Keep stdin open while waiting for responses or events. Closing stdin ends the
+bridge immediately; outstanding responses may be lost. The R session keeps
+running when the bridge exits."#)]
+    Attach {
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Initial event subscription pattern (repeat for multiple patterns)
+        #[arg(long)]
+        subscribe: Vec<String>,
+    },
     /// Evaluate R code and return captured output as JSON
     ///
     /// Returns a JSON object with stdout, stderr, value, and error fields.
