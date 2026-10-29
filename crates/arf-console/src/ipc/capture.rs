@@ -5,7 +5,7 @@
 //! for value/error capture. R writes value+error metadata to a temp file;
 //! Rust reads it back and constructs the JSON response.
 
-use crate::ipc::protocol::EvaluateResult;
+use crate::ipc::protocol::{EvaluateResult, ExecutionStatus};
 
 pub(crate) struct CaptureEvaluation {
     pub result: EvaluateResult,
@@ -217,16 +217,24 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
         );
     }
 
+    let interrupted = lengths.get(2).copied() == Some(1);
+    let status = if interrupted {
+        ExecutionStatus::Interrupted
+    } else if error_field.is_some() {
+        ExecutionStatus::Error
+    } else {
+        ExecutionStatus::Ok
+    };
     (
         EvaluateResult {
             stdout: String::new(),
             stderr: String::new(),
             value,
             error: error_field,
-            status: super::protocol::ExecutionStatus::Unknown,
+            status,
             execution_id: None,
         },
-        lengths.get(2).copied() == Some(1),
+        interrupted,
     )
 }
 
@@ -255,6 +263,7 @@ mod tests {
         assert_eq!(result.stderr, "");
         assert_eq!(result.value.as_deref(), Some("[1] 42"));
         assert!(result.error.is_none());
+        assert_eq!(result.status, ExecutionStatus::Ok);
     }
 
     #[test]
@@ -276,6 +285,7 @@ mod tests {
         assert_eq!(result.stderr, "");
         assert!(result.value.is_none());
         assert_eq!(result.error.as_deref(), Some("object 'x' not found"));
+        assert_eq!(result.status, ExecutionStatus::Error);
     }
 
     #[test]
@@ -368,5 +378,32 @@ mod tests {
             result.error.as_deref(),
             Some("Malformed capture file: truncated")
         );
+        assert_eq!(result.status, ExecutionStatus::Unknown);
+    }
+
+    #[test]
+    fn capture_failures_have_unknown_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture.dat");
+        let missing = parse_capture_file(&path);
+        assert!(missing.error.is_some());
+        assert_eq!(missing.status, ExecutionStatus::Unknown);
+
+        for data in [b"no header".as_slice(), b"invalid\n", b"100 -1\nshort"] {
+            std::fs::write(&path, data).unwrap();
+            let result = parse_capture_file(&path);
+            assert!(result.error.is_some());
+            assert_eq!(result.status, ExecutionStatus::Unknown);
+        }
+    }
+
+    #[test]
+    fn captured_interrupt_takes_priority_over_error() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"-1 0 1\n").unwrap();
+        let (result, interrupted) = parse_capture_file_with_status(file.path());
+        assert!(interrupted);
+        assert_eq!(result.error.as_deref(), Some(""));
+        assert_eq!(result.status, ExecutionStatus::Interrupted);
     }
 }

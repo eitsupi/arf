@@ -173,10 +173,8 @@ pub(crate) fn run_silent_eval_from(
     let status = if captured.interrupted {
         arf_libr::mark_ipc_interrupt_observed();
         ExecutionStatus::Interrupted
-    } else if result.error.is_some() {
-        ExecutionStatus::Error
     } else {
-        ExecutionStatus::Ok
+        result.status
     };
     result.status = finish_execution(status);
     if result.status == ExecutionStatus::Interrupted {
