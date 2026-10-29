@@ -348,6 +348,10 @@ fn headless_interrupt_emits_interrupted_completion_distinct_from_error() {
             "evaluation response should report interruption (visible={visible}): {evaluation}"
         );
         assert_eq!(
+            evaluation["result"]["status"], "interrupted",
+            "visible={visible}: {evaluation}"
+        );
+        assert_eq!(
             completion["params"]["data"]["status"], "interrupted",
             "visible={visible}: {completion}"
         );
