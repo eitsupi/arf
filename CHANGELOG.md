@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Experimental:** Subscribe to `arf.console_output` to stream R stdout and stderr from terminal and IPC user code, with execution IDs and origin metadata. Output events arrive before execution completion events on the same subscribed connection.
+- **Experimental:** Subscribe to `arf.console_output` to stream R stdout and stderr from terminal and IPC user code, with execution IDs and origin metadata. Output events arrive before execution completion events on the same subscribed connection. Clients subscribed to `arf.*` now also receive console output; subscribe to `arf.execution_completed` explicitly if only completion is needed.
 - **Experimental:** `arf ipc attach` bridges a long-lived IPC connection over stdin/stdout for editors and agents, with optional event subscriptions. Closing stdin ends the bridge while leaving the R session running.
 - **Experimental:** IPC `evaluate` responses now include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations.
 - **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive.

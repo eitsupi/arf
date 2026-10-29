@@ -1007,6 +1007,12 @@ evaluation during user code can inherit its execution context. Direct writes to
 OS file descriptors, including writes by subprocesses or native code, are outside
 this guarantee. Existing evaluation capture and terminal output remain available.
 
+The same output therefore appears both in these events and in an `evaluate`
+response's `stdout` and `stderr`. A client that shows `arf.console_output` as it
+arrives should not display the response's `stdout` and `stderr` again, and can
+use the response for `status`, `value` and `error`. Clients that do not subscribe
+can keep using the response alone.
+
 On one connection, output events precede later R-published events and the
 execution's completion event. Receiving completion means all console output has
 arrived only if that connection subscribed to both topics throughout the whole
