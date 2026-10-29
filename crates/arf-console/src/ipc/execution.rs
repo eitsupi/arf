@@ -32,7 +32,6 @@ thread_local! {
     /// The R thread executes one top-level command at a time. Keep its context
     /// installed across ReadConsole callbacks so notifications inherit the ID.
     static CURRENT_EXECUTION: std::cell::Cell<Option<ExecutionContext>> = const { std::cell::Cell::new(None) };
-    static LAST_FINISHED_EXECUTION: std::cell::Cell<Option<(u64, ExecutionStatus)>> = const { std::cell::Cell::new(None) };
 }
 
 fn begin_execution_kind(
@@ -97,7 +96,6 @@ pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
     } else {
         status
     };
-    LAST_FINISHED_EXECUTION.set(Some((context.id.0, status)));
     if !context.emit_completion {
         return status;
     }
@@ -114,16 +112,6 @@ pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
         log::debug!("Could not publish execution completion: {error}");
     }
     status
-}
-
-pub(crate) fn finished_execution_status(
-    execution_id: super::events::ExecutionId,
-) -> ExecutionStatus {
-    LAST_FINISHED_EXECUTION
-        .get()
-        .filter(|(id, _)| *id == execution_id.0)
-        .map(|(_, status)| status)
-        .unwrap_or(ExecutionStatus::Unknown)
 }
 
 /// Request an interrupt for the active IPC-originated user-code evaluation.
@@ -260,30 +248,12 @@ fn has_user_code(code: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ExecutionStatus, LAST_FINISHED_EXECUTION, finished_execution_status, has_user_code,
-    };
+    use super::has_user_code;
 
     #[test]
     fn blank_and_comment_only_input_does_not_emit_completion() {
         assert!(!has_user_code(" \t\n"));
         assert!(!has_user_code("# only a comment\n  # another comment\n"));
         assert!(has_user_code("# leading comment\nx <- 1"));
-    }
-
-    #[test]
-    fn finished_execution_status_is_unknown_without_a_matching_id() {
-        LAST_FINISHED_EXECUTION.set(Some((41, ExecutionStatus::Error)));
-
-        assert_eq!(
-            finished_execution_status(super::super::events::ExecutionId(42)),
-            ExecutionStatus::Unknown
-        );
-        assert_eq!(
-            finished_execution_status(super::super::events::ExecutionId(41)),
-            ExecutionStatus::Error
-        );
-
-        LAST_FINISHED_EXECUTION.set(None);
     }
 }

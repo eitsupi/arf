@@ -49,6 +49,7 @@ pub(crate) use execution::{
 };
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;
+pub(crate) use pending::finish_pending_visible_eval;
 pub use pending::{
     PendingIpcKind, poll_ipc_requests, reject_operation_user_typing, setup_visible_eval,
     take_pending_ipc_operation,
