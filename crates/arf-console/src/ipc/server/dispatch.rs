@@ -174,14 +174,26 @@ async fn handle_help_method(
                 Ok(params) => params,
                 Err(response) => return *response,
             };
-            tokio::task::spawn_blocking(move || query_help_topics(&params)).await
+            tokio::task::spawn_blocking(move || {
+                query_help_topics(&params).and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| HelpQueryError::Internal(error.to_string()))
+                })
+            })
+            .await
         }
         "r_help_show" => {
             let params: HelpShowParams = match parse_params(&id, params) {
                 Ok(params) => params,
                 Err(response) => return *response,
             };
-            tokio::task::spawn_blocking(move || query_help(&params)).await
+            tokio::task::spawn_blocking(move || {
+                query_help(&params).and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| HelpQueryError::Internal(error.to_string()))
+                })
+            })
+            .await
         }
         _ => unreachable!("handle_help_method only handles help methods"),
     };

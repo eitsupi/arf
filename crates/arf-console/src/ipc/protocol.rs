@@ -296,6 +296,50 @@ pub struct HelpShowParams {
     pub help_key: Option<String>,
 }
 
+/// Shared identity and title of an installed help metadata row.
+#[derive(Debug, Serialize)]
+pub struct HelpCandidate {
+    pub package: String,
+    pub topic: String,
+    pub help_key: Option<String>,
+    pub title: String,
+}
+
+/// A search result includes the candidate's aliases for further lookup.
+#[derive(Debug, Serialize)]
+pub struct HelpTopicResult {
+    #[serde(flatten)]
+    pub candidate: HelpCandidate,
+    pub aliases: Vec<String>,
+}
+
+/// Result of the `r_help_search` method.
+#[derive(Debug, Serialize)]
+pub struct HelpSearchResult {
+    pub topics: Vec<HelpTopicResult>,
+    pub truncated: bool,
+    pub library_paths: Vec<String>,
+}
+
+/// Result of the `r_help_show` method.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HelpShowResult {
+    Page {
+        package: String,
+        topic: String,
+        title: String,
+        content: String,
+        content_type: &'static str,
+        entry_type: &'static str,
+        library_paths: Vec<String>,
+    },
+    Candidates {
+        candidates: Vec<HelpCandidate>,
+        library_paths: Vec<String>,
+    },
+}
+
 /// A single history entry returned by the `history` method.
 ///
 /// All fields are always present. Optional fields are `null` when not

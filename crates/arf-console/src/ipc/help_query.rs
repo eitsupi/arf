@@ -1,12 +1,14 @@
 //! Static IPC queries for installed R help metadata.
 
 use crate::help_search::{SearchIndex, SearchScratch, search_topics};
-use crate::ipc::protocol::{HelpSearchParams, HelpShowParams};
+use crate::ipc::protocol::{
+    HelpCandidate, HelpSearchParams, HelpSearchResult, HelpShowParams, HelpShowResult,
+    HelpTopicResult,
+};
 use arf_harp::help::{
     HelpResolution, HelpTargetResolver, HelpTopic, get_rd_help_topics_from_paths,
 };
 use arf_harp::lib_paths::cached_lib_paths;
-use serde_json::{Value, json};
 
 const MAX_LIMIT: usize = 200;
 
@@ -19,7 +21,9 @@ pub(crate) enum HelpQueryError {
 }
 
 /// Search installed Rd help metadata without evaluating R.
-pub(crate) fn query_help_topics(params: &HelpSearchParams) -> Result<Value, HelpQueryError> {
+pub(crate) fn query_help_topics(
+    params: &HelpSearchParams,
+) -> Result<HelpSearchResult, HelpQueryError> {
     if params.limit == 0 || params.limit > MAX_LIMIT {
         return Err(HelpQueryError::InvalidParams(format!(
             "limit must be between 1 and {MAX_LIMIT}"
@@ -31,14 +35,18 @@ pub(crate) fn query_help_topics(params: &HelpSearchParams) -> Result<Value, Help
         params.query.as_deref().unwrap_or_default(),
         params.limit,
     );
-    Ok(json!({
-        "topics": topics,
-        "truncated": truncated,
-        "library_paths": library_paths
-    }))
+    Ok(HelpSearchResult {
+        topics,
+        truncated,
+        library_paths,
+    })
 }
 
-fn search_help_topics(topics: Vec<HelpTopic>, query: &str, limit: usize) -> (Vec<Value>, bool) {
+fn search_help_topics(
+    topics: Vec<HelpTopic>,
+    query: &str,
+    limit: usize,
+) -> (Vec<HelpTopicResult>, bool) {
     let index = SearchIndex::new_cancellable(&topics, || false).expect("search is not cancelled");
     let ranked = search_topics(&index, query, &mut SearchScratch::new(), || false)
         .expect("search is not cancelled");
@@ -48,25 +56,26 @@ fn search_help_topics(topics: Vec<HelpTopic>, query: &str, limit: usize) -> (Vec
         .take(limit)
         .map(|(index, _)| {
             let entry = &topics[index];
-            let mut result = candidate_result(entry);
-            result["aliases"] = json!(entry.aliases);
-            result
+            HelpTopicResult {
+                candidate: candidate_result(entry),
+                aliases: entry.aliases.clone(),
+            }
         })
         .collect();
     (results, truncated)
 }
 
-fn candidate_result(topic: &HelpTopic) -> Value {
-    json!({
-        "package": topic.package,
-        "topic": topic.topic,
-        "help_key": topic.help_key,
-        "title": topic.title
-    })
+fn candidate_result(topic: &HelpTopic) -> HelpCandidate {
+    HelpCandidate {
+        package: topic.package.clone(),
+        topic: topic.topic.clone(),
+        help_key: topic.help_key.clone(),
+        title: topic.title.clone(),
+    }
 }
 
 /// Resolve and render one installed Rd help page without entering R.
-pub(crate) fn query_help(params: &HelpShowParams) -> Result<Value, HelpQueryError> {
+pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpShowResult, HelpQueryError> {
     if params.topic.trim().is_empty() {
         return Err(HelpQueryError::InvalidParams(
             "topic must not be empty".into(),
@@ -88,29 +97,25 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<Value, HelpQueryErro
             params.help_key.as_deref(),
         )
         .map_err(|error| HelpQueryError::Internal(error.to_string()))?;
-    let mut result = match resolution {
-        HelpResolution::Page { page, title } => json!({
-            "kind": "page",
-            "package": page.package,
-            "topic": page.display_topic,
-            "title": title,
-            "content": page.markdown,
-            "content_type": "markdown",
-            "entry_type": "help"
+    match resolution {
+        HelpResolution::Page { page, title } => Ok(HelpShowResult::Page {
+            package: page.package,
+            topic: page.display_topic,
+            title,
+            content: page.markdown,
+            content_type: "markdown",
+            entry_type: "help",
+            library_paths,
         }),
-        HelpResolution::Candidates(candidates) => json!({
-            "kind": "candidates",
-            "candidates": candidates.iter().map(candidate_result).collect::<Vec<_>>()
+        HelpResolution::Candidates(candidates) => Ok(HelpShowResult::Candidates {
+            candidates: candidates.iter().map(candidate_result).collect(),
+            library_paths,
         }),
-        HelpResolution::NotFound => {
-            return Err(HelpQueryError::NotFound(format!(
-                "Help topic '{}' was not found",
-                params.topic
-            )));
-        }
-    };
-    result["library_paths"] = json!(library_paths);
-    Ok(result)
+        HelpResolution::NotFound => Err(HelpQueryError::NotFound(format!(
+            "Help topic '{}' was not found",
+            params.topic
+        ))),
+    }
 }
 
 fn library_paths() -> Result<Vec<String>, HelpQueryError> {
@@ -130,6 +135,7 @@ fn ensure_library_paths(paths: &[String]) -> Result<(), HelpQueryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     fn topic(topic: &str, aliases: &[&str], title: &str) -> arf_harp::help::HelpTopic {
         arf_harp::help::HelpTopic {
@@ -196,18 +202,22 @@ mod tests {
         let (limited, truncated) = search_help_topics(topics.clone(), "print", 1);
         assert_eq!(limited.len(), 1);
         assert_eq!(
-            limited[0],
+            serde_json::to_value(&limited[0]).unwrap(),
             serde_json::from_str::<Value>(
                 r#"{"package":"pkg","topic":"print","aliases":["show_value"],"help_key":null,"title":"Print a value"}"#
             ).unwrap()
         );
         assert!(truncated);
         assert_eq!(
-            search_help_topics(topics.clone(), "show_val", 20).0[0][r"topic"],
+            search_help_topics(topics.clone(), "show_val", 20).0[0]
+                .candidate
+                .topic,
             "print"
         );
         assert_eq!(
-            search_help_topics(topics.clone(), "pkg::sprint", 20).0[0][r"topic"],
+            search_help_topics(topics.clone(), "pkg::sprint", 20).0[0]
+                .candidate
+                .topic,
             "sprint"
         );
     }
