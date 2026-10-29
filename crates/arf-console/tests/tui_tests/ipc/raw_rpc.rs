@@ -136,6 +136,7 @@ fn raw_json_rpc_responses_have_the_documented_shape() -> Result<()> {
                     "id": 1,
                     "jsonrpc": "2.0",
                     "result": {
+                        "status": if error.is_null() { "ok" } else { "error" },
                         "error": error,
                         "stderr": "",
                         "stdout": stdout,

@@ -44,15 +44,17 @@ pub use approval::{
 };
 pub(crate) use events::install_r_event_publisher;
 pub(crate) use execution::{
-    ExecutionStatus, accept_user_input, begin_terminal_execution, current_execution_id,
-    finish_execution, run_silent_eval_from,
+    accept_user_input, begin_terminal_execution, current_execution_id, finish_execution,
+    run_silent_eval_from,
 };
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;
+pub(crate) use pending::finish_pending_visible_eval;
 pub use pending::{
     PendingIpcKind, poll_ipc_requests, reject_operation_user_typing, setup_visible_eval,
     take_pending_ipc_operation,
 };
+pub use protocol::ExecutionStatus;
 pub use session_result::{clear_history_session_id, read_r_version};
 pub use state::{
     break_signal, is_in_alternate_mode, set_headless_shutdown, set_in_alternate_mode,

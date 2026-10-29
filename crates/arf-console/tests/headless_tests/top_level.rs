@@ -173,6 +173,7 @@ fn headless_long_utf8_request_survives_r_console_buffer_boundary() {
         response,
         serde_json::json!({
             "execution_id": execution_id,
+            "status": "ok",
             "stdout": payload,
             "stderr": "",
             "value": null,

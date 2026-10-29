@@ -99,7 +99,7 @@ impl AttachedClient {
     /// event, so no stray completion reaches later assertions.
     fn evaluate_to_completion(&mut self, id: i64, code: &str) -> Value {
         self.send(&request(id, "evaluate", json!({"code": code})));
-        let mut response = None;
+        let mut response: Option<Value> = None;
         let mut completed = false;
         while response.is_none() || !completed {
             let message = self.recv();
@@ -112,6 +112,31 @@ impl AttachedClient {
         response.expect("evaluation response")
     }
 
+    fn evaluate_with_completion(&mut self, id: i64, code: &str, visible: bool) -> (Value, Value) {
+        self.send(&request(
+            id,
+            "evaluate",
+            json!({"code": code, "visible": visible}),
+        ));
+        let mut response: Option<Value> = None;
+        let mut completions = Vec::new();
+        loop {
+            if let Some(result) = &response
+                && let Some(event) = completions.iter().find(|event: &&Value| {
+                    event["params"]["data"]["id"] == result["result"]["execution_id"]
+                })
+            {
+                return (result.clone(), (*event).clone());
+            }
+            let message = self.recv();
+            if message["id"] == id {
+                response = Some(message);
+            } else if message["params"]["topic"] == "arf.execution_completed" {
+                completions.push(message);
+            }
+        }
+    }
+
     fn recv_timeout(&mut self, timeout: Duration) -> Option<Value> {
         let reader = &mut self.reader;
         let mut line = String::new();
@@ -122,6 +147,41 @@ impl AttachedClient {
         let read = read.expect("read from the IPC connection");
         assert_ne!(read, 0, "the IPC connection closed before a reply");
         Some(serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}")))
+    }
+}
+
+#[test]
+fn headless_evaluate_status_matches_completion() {
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let mut client = attach_subscribed(&socket_path_of(&process), &["arf.execution_completed"]);
+    let cases = [
+        ("1 + 1", false, "ok"),
+        ("stop('HEADLESS_ATTACH_ERROR')", false, "error"),
+        (
+            "1 + 1; stop('HEADLESS_ATTACH_MIDDLE_ERROR'); 3",
+            false,
+            "error",
+        ),
+        ("1 + 1", true, "ok"),
+        ("stop('HEADLESS_ATTACH_VISIBLE_ERROR')", true, "error"),
+        (
+            "1 + 1; stop('HEADLESS_ATTACH_VISIBLE_MIDDLE_ERROR'); 3",
+            true,
+            "error",
+        ),
+    ];
+    for (id, (code, visible, expected_status)) in (2..).zip(cases) {
+        let (response, completion) = client.evaluate_with_completion(id, code, visible);
+        assert!(response["error"].is_null(), "{response}");
+        assert_eq!(response["result"]["status"], expected_status, "{response}");
+        assert_eq!(
+            completion["params"]["data"]["status"], expected_status,
+            "{completion}"
+        );
+        assert_eq!(
+            completion["params"]["data"]["id"], response["result"]["execution_id"],
+            "response and completion differ: {response}; {completion}"
+        );
     }
 }
 
@@ -286,6 +346,10 @@ fn headless_interrupt_emits_interrupted_completion_distinct_from_error() {
                 .as_str()
                 .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
             "evaluation response should report interruption (visible={visible}): {evaluation}"
+        );
+        assert_eq!(
+            evaluation["result"]["status"], "interrupted",
+            "visible={visible}: {evaluation}"
         );
         assert_eq!(
             completion["params"]["data"]["status"], "interrupted",

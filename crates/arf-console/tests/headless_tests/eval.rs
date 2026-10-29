@@ -155,6 +155,16 @@ fn test_headless_eval_error() {
     );
 }
 
+#[test]
+fn headless_evaluate_status_reports_r_error_via_cli() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let result = process
+        .ipc_eval("stop('HEADLESS_STATUS_ERROR')")
+        .expect("eval should respond");
+    assert!(result.success, "eval transport failed: {}", result.stderr);
+    assert_eq!(parse_ipc_json(&result)["status"], "error");
+}
+
 /// Test that `arf ipc send` (user_input) is accepted in headless mode.
 #[test]
 fn test_headless_user_input() {

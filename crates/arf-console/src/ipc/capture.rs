@@ -5,7 +5,7 @@
 //! for value/error capture. R writes value+error metadata to a temp file;
 //! Rust reads it back and constructs the JSON response.
 
-use crate::ipc::protocol::EvaluateResult;
+use crate::ipc::protocol::{EvaluateResult, ExecutionStatus};
 
 pub(crate) struct CaptureEvaluation {
     pub result: EvaluateResult,
@@ -22,8 +22,8 @@ pub(crate) struct CaptureEvaluation {
 ///
 /// Protocol: R writes a binary file with 2 length-prefixed fields:
 ///   `<header_line>\n<value><error>`
-/// Header format: `value_len error_len`
-/// A length of -1 means the field is NULL/absent.
+/// Header format: `value_len error_len interrupted`, where interrupted is 0 or 1.
+/// A value or error length of -1 means that field is NULL/absent.
 pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
     let escaped = code
         .replace('\\', "\\\\")
@@ -44,6 +44,7 @@ pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
                     stderr: String::new(),
                     value: None,
                     error: Some(format!("Failed to create temp file for IPC capture: {e}")),
+                    status: super::protocol::ExecutionStatus::Unknown,
                     execution_id: None,
                 },
                 interrupted: false,
@@ -108,6 +109,7 @@ pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
                     stderr,
                     value: None,
                     error: Some(format!("Failed to evaluate: {e}")),
+                    status: super::protocol::ExecutionStatus::Unknown,
                     execution_id: None,
                 },
                 interrupted: false,
@@ -132,6 +134,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
                     stderr: String::new(),
                     value: None,
                     error: Some(format!("Failed to read capture file: {e}")),
+                    status: super::protocol::ExecutionStatus::Unknown,
                     execution_id: None,
                 },
                 false,
@@ -149,6 +152,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
                     stderr: String::new(),
                     value: None,
                     error: Some("Malformed capture file: no header".to_string()),
+                    status: super::protocol::ExecutionStatus::Unknown,
                     execution_id: None,
                 },
                 false,
@@ -157,23 +161,29 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
     };
 
     let header = String::from_utf8_lossy(&data[..newline_pos]);
-    let lengths: Vec<i64> = header
+    let lengths = header
         .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
+        .map(str::parse::<i64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+        .filter(|lengths| {
+            matches!(lengths.as_slice(), [value, error, 0..=1]
+                if *value >= -1 && *error >= -1)
+        });
 
-    if !(lengths.len() == 2 || lengths.len() == 3) {
+    let Some(lengths) = lengths else {
         return (
             EvaluateResult {
                 stdout: String::new(),
                 stderr: String::new(),
                 value: None,
                 error: Some(format!("Malformed capture header: {header}")),
+                status: super::protocol::ExecutionStatus::Unknown,
                 execution_id: None,
             },
             false,
         );
-    }
+    };
 
     let body = &data[newline_pos + 1..];
     let mut offset = 0usize;
@@ -205,21 +215,31 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
                 stderr: String::new(),
                 value: None,
                 error: Some("Malformed capture file: truncated".to_string()),
+                status: super::protocol::ExecutionStatus::Unknown,
                 execution_id: None,
             },
             false,
         );
     }
 
+    let interrupted = lengths.get(2).copied() == Some(1);
+    let status = if interrupted {
+        ExecutionStatus::Interrupted
+    } else if error_field.is_some() {
+        ExecutionStatus::Error
+    } else {
+        ExecutionStatus::Ok
+    };
     (
         EvaluateResult {
             stdout: String::new(),
             stderr: String::new(),
             value,
             error: error_field,
+            status,
             execution_id: None,
         },
-        lengths.get(2).copied() == Some(1),
+        interrupted,
     )
 }
 
@@ -235,7 +255,7 @@ mod tests {
 
         // Simulate R output: value="[1] 42", error=NULL
         let value = b"[1] 42";
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -248,6 +268,7 @@ mod tests {
         assert_eq!(result.stderr, "");
         assert_eq!(result.value.as_deref(), Some("[1] 42"));
         assert!(result.error.is_none());
+        assert_eq!(result.status, ExecutionStatus::Ok);
     }
 
     #[test]
@@ -256,7 +277,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_err.dat");
 
         let error_msg = b"object 'x' not found";
-        let header = format!("-1 {}\n", error_msg.len());
+        let header = format!("-1 {} 0\n", error_msg.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(error_msg).unwrap();
@@ -269,6 +290,7 @@ mod tests {
         assert_eq!(result.stderr, "");
         assert!(result.value.is_none());
         assert_eq!(result.error.as_deref(), Some("object 'x' not found"));
+        assert_eq!(result.status, ExecutionStatus::Error);
     }
 
     #[test]
@@ -278,7 +300,7 @@ mod tests {
 
         // value present, error absent
         let value = br#"[1] "hello""#;
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -300,7 +322,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_empty.dat");
 
         // Both value and error absent (invisible result, no error)
-        let header = "-1 -1\n";
+        let header = "-1 -1 0\n";
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         drop(file);
@@ -319,7 +341,7 @@ mod tests {
 
         // Value containing quotes, newlines, backslashes, and control chars
         let value = b"[1] \"hello\\nworld\"\n\ttab\there\r\n\\backslash\\\x1b[31mred\x1b[0m";
-        let header = format!("{} -1\n", value.len());
+        let header = format!("{} -1 0\n", value.len());
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(value).unwrap();
@@ -347,7 +369,7 @@ mod tests {
         let path = tmpdir.join(".arf_test_capture_truncated.dat");
 
         // Header claims value is 100 bytes, but body is only 5 bytes
-        let header = "100 -1\n";
+        let header = "100 -1 0\n";
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(header.as_bytes()).unwrap();
         file.write_all(b"short").unwrap();
@@ -361,5 +383,42 @@ mod tests {
             result.error.as_deref(),
             Some("Malformed capture file: truncated")
         );
+        assert_eq!(result.status, ExecutionStatus::Unknown);
+    }
+
+    #[test]
+    fn capture_failures_have_unknown_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture.dat");
+        let missing = parse_capture_file(&path);
+        assert!(missing.error.is_some());
+        assert_eq!(missing.status, ExecutionStatus::Unknown);
+
+        for data in [
+            b"no header".as_slice(),
+            b"invalid\n",
+            b"-1 -1\n",
+            b"100 -1 0\nshort",
+            b"-2 -1 0\n",
+            b"-1 -2 0\n",
+            b"-1 -1 -1\n",
+            b"-1 -1 2\n",
+            b"-1 invalid -1\n",
+        ] {
+            std::fs::write(&path, data).unwrap();
+            let result = parse_capture_file(&path);
+            assert!(result.error.is_some());
+            assert_eq!(result.status, ExecutionStatus::Unknown);
+        }
+    }
+
+    #[test]
+    fn captured_interrupt_takes_priority_over_error() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"-1 0 1\n").unwrap();
+        let (result, interrupted) = parse_capture_file_with_status(file.path());
+        assert!(interrupted);
+        assert_eq!(result.error.as_deref(), Some(""));
+        assert_eq!(result.status, ExecutionStatus::Interrupted);
     }
 }

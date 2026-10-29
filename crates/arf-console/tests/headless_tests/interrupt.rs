@@ -85,6 +85,7 @@ fn ipc_interrupt_stops_evaluations_and_keeps_the_headless_session_alive() {
                 .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
             "evaluation should report interruption: {result}"
         );
+        assert_eq!(result["status"], "interrupted", "{result}");
         let value = process
             .ipc_eval("interrupt_value")
             .expect("session should accept a follow-up evaluation");

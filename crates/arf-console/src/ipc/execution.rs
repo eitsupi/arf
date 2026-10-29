@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::capture;
-use super::protocol::{EvaluateResult, IpcResponse, UserInputResult};
+use super::protocol::{EvaluateResult, ExecutionStatus, IpcResponse, UserInputResult};
 use super::state::r_is_at_prompt;
 
 /// Origin recorded for one evaluated unit of user code.
@@ -32,7 +32,6 @@ thread_local! {
     /// The R thread executes one top-level command at a time. Keep its context
     /// installed across ReadConsole callbacks so notifications inherit the ID.
     static CURRENT_EXECUTION: std::cell::Cell<Option<ExecutionContext>> = const { std::cell::Cell::new(None) };
-    static LAST_FINISHED_EXECUTION: std::cell::Cell<Option<(u64, bool)>> = const { std::cell::Cell::new(None) };
 }
 
 fn begin_execution_kind(
@@ -87,15 +86,18 @@ pub(crate) fn current_execution_id() -> Option<super::events::ExecutionId> {
 
 /// Publish one completion and clear the active context. This must run on the
 /// R thread after all notifications produced by the evaluation were queued.
-pub(crate) fn finish_execution(status: ExecutionStatus) -> bool {
+pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
     let Some(context) = CURRENT_EXECUTION.take() else {
-        return false;
+        return ExecutionStatus::Unknown;
     };
     arf_libr::begin_ipc_execution_finishing();
-    let interrupted = arf_libr::finish_ipc_execution() || status == ExecutionStatus::Interrupted;
-    LAST_FINISHED_EXECUTION.set(Some((context.id.0, interrupted)));
+    let status = if arf_libr::finish_ipc_execution() || status == ExecutionStatus::Interrupted {
+        ExecutionStatus::Interrupted
+    } else {
+        status
+    };
     if !context.emit_completion {
-        return interrupted;
+        return status;
     }
     let topic = super::events::Topic::internal("arf.execution_completed")
         .expect("the built-in execution topic is valid");
@@ -104,25 +106,12 @@ pub(crate) fn finish_execution(status: ExecutionStatus) -> bool {
         "origin": context.origin,
         "kind": context.kind,
         "visible": context.visible,
-        "status": if interrupted { ExecutionStatus::Interrupted } else { status },
+        "status": status,
     });
     if let Err(error) = super::events::publish_event(topic, data, Some(context.id)) {
         log::debug!("Could not publish execution completion: {error}");
     }
-    interrupted
-}
-
-pub(crate) fn was_execution_interrupted(execution_id: super::events::ExecutionId) -> bool {
-    LAST_FINISHED_EXECUTION.get() == Some((execution_id.0, true))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ExecutionStatus {
-    Ok,
-    Error,
-    Unknown,
-    Interrupted,
+    status
 }
 
 /// Request an interrupt for the active IPC-originated user-code evaluation.
@@ -172,13 +161,11 @@ pub(crate) fn run_silent_eval_from(
     let status = if captured.interrupted {
         arf_libr::mark_ipc_interrupt_observed();
         ExecutionStatus::Interrupted
-    } else if result.error.is_some() {
-        ExecutionStatus::Error
     } else {
-        ExecutionStatus::Ok
+        result.status
     };
-    let interrupted = finish_execution(status);
-    if interrupted {
+    result.status = finish_execution(status);
+    if result.status == ExecutionStatus::Interrupted {
         result.error = Some("Evaluation interrupted".to_string());
     }
     result
@@ -213,6 +200,7 @@ pub(super) fn finish_visible_eval() -> EvaluateResult {
         stderr,
         value: None,
         error: None,
+        status: ExecutionStatus::Unknown,
         execution_id,
     }
 }

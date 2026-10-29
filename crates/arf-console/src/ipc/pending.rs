@@ -6,8 +6,8 @@
 
 use super::execution;
 use super::protocol::{
-    INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
-    USER_IS_TYPING,
+    ExecutionStatus, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
+    R_NOT_AT_PROMPT, USER_IS_TYPING,
 };
 use super::session_result::collect_session_result;
 use super::state::{drain_requests, fire_break_signal, is_in_alternate_mode, r_is_at_prompt};
@@ -73,7 +73,7 @@ pub(super) fn pending_ipc_operation() -> &'static Mutex<Option<PendingIpcOperati
 
 /// Pending visible evaluate: reply channel waiting for REPL evaluation to complete.
 /// When set, the WriteConsoleEx callback is capturing output. The reply is sent
-/// once R returns to the prompt (detected by `check_visible_eval_completion`).
+/// at command completion, before the REPL accepts its next input.
 static PENDING_VISIBLE_EVAL: OnceLock<Mutex<Option<PendingVisibleEval>>> = OnceLock::new();
 
 struct PendingVisibleEval {
@@ -179,48 +179,37 @@ pub(super) fn cancel_in_flight_operations() {
 /// `PENDING_IPC_OPERATION` and the break signal is fired so that
 /// the ExternalBreak handler can check the editor buffer first.
 pub fn poll_ipc_requests() {
-    // Check if a visible evaluate has completed (R returned to prompt)
-    check_visible_eval_completion();
-
     // Process all pending requests
     drain_requests(handle_request);
     process_interactive_call();
 }
 
-/// Check if a pending visible evaluate has completed.
-///
-/// A visible evaluate injects code into the REPL (like user_input) and waits
-/// for the result. When R returns to the prompt, the evaluation is done and
-/// we can collect captured output and send the reply.
-fn check_visible_eval_completion() {
-    // Reply deadlines belong to the server. Keep capture until R actually finishes.
-    let at_prompt = r_is_at_prompt().load(Ordering::Acquire);
-
-    let mut guard = match pending_visible_eval().try_lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-
-    if !at_prompt {
+/// Finish the matching visible evaluation before accepting the next input.
+/// The caller publishes the completion event first and supplies its final status.
+/// Reply deadlines belong to the server; capture lasts until R actually finishes.
+pub(crate) fn finish_pending_visible_eval(
+    execution_id: super::events::ExecutionId,
+    status: ExecutionStatus,
+) {
+    let mut guard = pending_visible_eval().lock_recover();
+    if guard
+        .as_ref()
+        .is_none_or(|pending| pending.execution_id != execution_id)
+    {
         return;
     }
-
-    if let Some(pending) = guard.take() {
-        // Prevent new requests from starting during capture finalization
-        r_is_at_prompt().store(false, Ordering::Release);
-
-        // Finish WriteConsoleEx capture and collect output
-        let mut result = execution::finish_visible_eval();
-        result.execution_id = Some(pending.execution_id);
-        if execution::was_execution_interrupted(pending.execution_id) {
-            result.error = Some("Evaluation interrupted".to_string());
-        }
-
-        let _ = pending.reply.send(IpcResponse::Evaluate(result));
-
-        // Restore prompt state now that finalization is complete
-        r_is_at_prompt().store(true, Ordering::Release);
+    let pending = guard
+        .take()
+        .expect("the matching visible evaluation is pending");
+    let at_prompt = r_is_at_prompt().swap(false, Ordering::AcqRel);
+    let mut result = execution::finish_visible_eval();
+    result.execution_id = Some(execution_id);
+    result.status = status;
+    if status == ExecutionStatus::Interrupted {
+        result.error = Some("Evaluation interrupted".to_string());
     }
+    let _ = pending.reply.send(IpcResponse::Evaluate(result));
+    r_is_at_prompt().store(at_prompt, Ordering::Release);
 }
 
 /// Answer a `session` request immediately.
@@ -402,7 +391,7 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
 /// Set up a visible evaluate: start capture and store the deferred reply.
 ///
 /// Called from the REPL after the buffer check passes. The reply will be
-/// sent later by `check_visible_eval_completion` when R returns to the prompt.
+/// sent by `finish_pending_visible_eval` when R finishes the command.
 pub fn setup_visible_eval(
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
     _timeout: std::time::Duration,
@@ -412,7 +401,7 @@ pub fn setup_visible_eval(
 ) {
     let execution_id = execution::begin_visible_eval(code, origin, started_execution_id);
 
-    // Store reply channel — will be consumed by check_visible_eval_completion.
+    // Store the reply until command completion, before the next input is read.
     // A server-side reply timeout never ends this capture or execution context.
     *pending_visible_eval().lock_recover() = Some(PendingVisibleEval {
         reply,

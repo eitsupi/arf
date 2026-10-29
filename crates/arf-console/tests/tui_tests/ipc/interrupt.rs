@@ -308,12 +308,43 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
             let attached: Value = serde_json::from_str(&attached)?;
             ensure!(attached["id"] == 1, "attach failed: {attached}");
 
+            let silent_dir = tempfile::tempdir()?;
+            let silent_marker = silent_dir.path().join("started");
+            let silent_path = serde_json::to_string(&silent_marker.to_string_lossy().as_ref())?;
+            send_json_line(
+                &mut reader,
+                json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "evaluate",
+                    "params": {
+                        "code": format!("file.create({silent_path}); Sys.sleep(30)"),
+                        "timeout_ms": 30000
+                    }
+                }),
+            )?;
+            wait_for_file(&silent_marker)?;
+            ensure!(terminal.start_ipc(&["interrupt"])?.finish()?["accepted"] == true);
+            let (silent_response, silent_completion) =
+                await_response_and_completion(&mut reader, 2)?;
+            ensure!(
+                silent_response["result"]["status"] == "interrupted",
+                "{silent_response}"
+            );
+            ensure!(
+                silent_completion["params"]["data"]["status"] == "interrupted",
+                "{silent_completion}"
+            );
+            ensure!(
+                silent_completion["params"]["data"]["id"]
+                    == silent_response["result"]["execution_id"],
+                "silent response and completion differ: {silent_response}; {silent_completion}"
+            );
+
             // Visible evaluation: interrupted, with the earlier assignment kept.
             send_json_line(
                 &mut reader,
                 json!({
                     "jsonrpc": "2.0",
-                    "id": 2,
+                    "id": 3,
                     "method": "evaluate",
                     "params": {
                         "code": r#"interrupt_kept <- 42L; cat("IPC_COMPLETION_VISIBLE\n"); Sys.sleep(30)"#,
@@ -333,12 +364,17 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
                     .any(|line| line.trim() == "IPC_COMPLETION_VISIBLE")
             })?;
             ensure!(terminal.start_ipc(&["interrupt"])?.finish()?["accepted"] == true);
-            let (response, completion) = await_response_and_completion(&mut reader, 2)?;
+            let (response, completion) = await_response_and_completion(&mut reader, 3)?;
             ensure!(
                 response["result"]["error"]
                     .as_str()
                     .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
                 "{response}"
+            );
+            ensure!(response["result"]["status"] == "interrupted", "{response}");
+            ensure!(
+                completion["params"]["data"]["id"] == response["result"]["execution_id"],
+                "completion does not match response: {response}; {completion}"
             );
             ensure!(
                 completion["params"]["data"]["status"] == "interrupted",
@@ -354,7 +390,7 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
                 &mut reader,
                 json!({
                     "jsonrpc": "2.0",
-                    "id": 3,
+                    "id": 4,
                     "method": "user_input",
                     "params": {
                         "code": "cat('IPC_COMPLETION_SEND\\n'); Sys.sleep(30)\ninterrupt_remainder <- TRUE"
@@ -372,7 +408,7 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
                     .any(|line| line.trim() == "IPC_COMPLETION_SEND")
             })?;
             ensure!(terminal.start_ipc(&["interrupt"])?.finish()?["accepted"] == true);
-            let (_, completion) = await_response_and_completion(&mut reader, 3)?;
+            let (_, completion) = await_response_and_completion(&mut reader, 4)?;
             ensure!(
                 completion["params"]["data"]["status"] == "interrupted",
                 "send interrupt must report interrupted: {completion}"
@@ -391,7 +427,7 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
                 &mut reader,
                 json!({
                     "jsonrpc": "2.0",
-                    "id": 4,
+                    "id": 5,
                     "method": "evaluate",
                     "params": {
                         "code": r#"stop("ordinary visible failure")"#,
@@ -404,7 +440,7 @@ fn ipc_interrupt_reports_interrupted_completion_for_visible_and_send() -> Result
                 state.text.contains("IPC send request:") && line.contains("Press y to approve")
             })?;
             terminal.key("y")?;
-            let (_, completion) = await_response_and_completion(&mut reader, 4)?;
+            let (_, completion) = await_response_and_completion(&mut reader, 5)?;
             ensure!(
                 completion["params"]["data"]["status"] == "error",
                 "ordinary errors must stay errors: {completion}"
