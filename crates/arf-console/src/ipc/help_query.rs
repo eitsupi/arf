@@ -1,5 +1,6 @@
 //! Static IPC queries for installed R help metadata.
 
+use crate::help_search::{SearchIndex, SearchScratch, search_topics};
 use crate::ipc::protocol::{HelpSearchParams, HelpShowParams};
 use arf_harp::help::{HelpTargetResolver, IpcHelpResolution, get_rd_help_topics_from_paths};
 use arf_harp::lib_paths::cached_lib_paths;
@@ -69,7 +70,7 @@ pub(crate) fn query_help_topics(
     let library_paths = cached_lib_paths();
     ensure_library_paths(&library_paths)?;
     let matching_topics = get_rd_help_topics_from_paths(&library_paths, params.package.as_deref());
-    let (topics, truncated) = search_topics(
+    let (topics, truncated) = search_help_topics(
         matching_topics,
         params.query.as_deref().unwrap_or_default(),
         params.limit,
@@ -82,35 +83,35 @@ pub(crate) fn query_help_topics(
     })
 }
 
-fn search_topics(
+fn search_help_topics(
     topics: Vec<arf_harp::help::HelpTopic>,
     query: &str,
     limit: usize,
 ) -> (Vec<HelpTopicResult>, bool) {
-    let query = query.to_lowercase();
-    let mut matches: Vec<_> = topics
+    let topics: Vec<_> = topics
         .into_iter()
         .filter(|entry| entry.entry_type == "help")
-        .filter(|entry| {
-            query.is_empty()
-                || entry.topic.to_lowercase().contains(&query)
-                || entry.title.to_lowercase().contains(&query)
-                || entry
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.to_lowercase().contains(&query))
-        })
-        .take(limit + 1)
-        .map(|entry| HelpTopicResult {
-            package: entry.package,
-            topic: entry.topic,
-            aliases: entry.aliases,
-            title: entry.title,
+        .collect();
+    let Some(index) = SearchIndex::new_cancellable(&topics, || false) else {
+        return (Vec::new(), false);
+    };
+    let mut scratch = SearchScratch::new();
+    let ranked = search_topics(&index, query, &mut scratch, || false).unwrap_or_default();
+    let truncated = ranked.len() > limit;
+    let results = ranked
+        .into_iter()
+        .take(limit)
+        .map(|(index, _score)| {
+            let entry = &topics[index];
+            HelpTopicResult {
+                package: entry.package.clone(),
+                topic: entry.topic.clone(),
+                aliases: entry.aliases.clone(),
+                title: entry.title.clone(),
+            }
         })
         .collect();
-    let truncated = matches.len() > limit;
-    matches.truncate(limit);
-    (matches, truncated)
+    (results, truncated)
 }
 
 /// Resolve and render one installed Rd help page without entering R.
@@ -118,6 +119,13 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpResult, HelpQuer
     if params.topic.trim().is_empty() {
         return Err(HelpQueryError::InvalidParams(
             "topic must not be empty".to_string(),
+        ));
+    }
+    if let Some(help_key) = &params.help_key
+        && (help_key.trim().is_empty() || params.package.as_deref().is_none_or(str::is_empty))
+    {
+        return Err(HelpQueryError::InvalidParams(
+            "help_key must not be empty and requires an explicit package".to_string(),
         ));
     }
     let library_paths = cached_lib_paths();
@@ -128,6 +136,7 @@ pub(crate) fn query_help(params: &HelpShowParams) -> Result<HelpResult, HelpQuer
             &params.topic,
             params.package.as_deref(),
             params.current_package.as_deref(),
+            params.help_key.as_deref(),
         )
         .map_err(|error| HelpQueryError::Internal(error.to_string()))?;
     match resolution {
@@ -207,6 +216,7 @@ mod tests {
             topic: "  ".to_string(),
             package: None,
             current_package: None,
+            help_key: None,
         };
         assert!(matches!(
             query_help(&params),
@@ -215,26 +225,42 @@ mod tests {
     }
 
     #[test]
-    fn search_matches_topic_alias_and_title_case_insensitively_and_limits_results() {
+    fn help_key_requires_a_package_and_nonempty_key() {
+        for (package, help_key) in [(None, "key"), (Some("base"), " ")] {
+            let params = HelpShowParams {
+                topic: "sum".to_owned(),
+                package: package.map(str::to_owned),
+                current_package: Some("base".to_owned()),
+                help_key: Some(help_key.to_owned()),
+            };
+            assert!(matches!(
+                query_help(&params),
+                Err(HelpQueryError::InvalidParams(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn search_uses_fuzzy_ranking_before_limit_and_marks_truncated() {
         let topics = vec![
-            topic("first", &["AliasOne"], "A title", "help"),
-            topic("second", &["other"], "SECOND title", "help"),
+            topic("sprint", &["fast_run"], "Sprint", "help"),
+            topic("print", &["show_value"], "Print a value", "help"),
             topic("guide", &["AliasGuide"], "Guide title", "vignette"),
         ];
 
-        for query in ["FIRST", "aliasone", "A TITLE", "second title"] {
-            assert_eq!(
-                search_topics(topics.clone(), query, 20).0.len(),
-                1,
-                "{query}"
-            );
-        }
-        assert!(search_topics(topics.clone(), "aliasguide", 20).0.is_empty());
-        let (limited, truncated) = search_topics(topics.clone(), "", 1);
+        let (limited, truncated) = search_help_topics(topics.clone(), "print", 1);
         assert_eq!(limited.len(), 1);
-        assert_eq!(limited[0].topic, "first");
+        assert_eq!(limited[0].topic, "print");
         assert!(truncated);
-        assert!(!search_topics(topics, "", 2).1);
+        assert_eq!(
+            search_help_topics(topics.clone(), "show_val", 20).0[0].topic,
+            "print"
+        );
+        assert_eq!(
+            search_help_topics(topics.clone(), "pkg::sprint", 20).0[0].topic,
+            "sprint"
+        );
+        assert!(search_help_topics(topics, "aliasguide", 20).0.is_empty());
     }
 
     #[test]

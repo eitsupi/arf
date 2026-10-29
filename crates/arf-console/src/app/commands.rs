@@ -165,12 +165,14 @@ pub(crate) fn handle_ipc_command(action: &IpcAction) {
                 topic,
                 package,
                 current_package,
+                help_key,
                 pid,
             } => ipc::client::cmd_r_help_show(
                 *pid,
                 topic,
                 package.as_deref(),
                 current_package.as_deref(),
+                help_key.as_deref(),
             ),
         },
     }

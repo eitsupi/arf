@@ -344,7 +344,7 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (search)
 _arguments "${_arguments_options[@]}" : \
-'--query=[Case-insensitive substring in topic, aliases, or title]:QUERY:_default' \
+'--query=[Fuzzy search topic, aliases, help key, package\:\:name, and title (smart case)]:QUERY:_default' \
 '--package=[Restrict results to this exact package name]:PACKAGE:_default' \
 '--limit=[Maximum number of results (default 50, maximum 200)]:LIMIT:_default' \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
@@ -356,6 +356,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '--package=[Restrict lookup to this exact package name]:PACKAGE:_default' \
 '--current-package=[Prefer this package for unqualified topic references]:CURRENT_PACKAGE:_default' \
+'--help-key=[Select a candidate'\''s help database key (requires --package)]:HELP_KEY:_default' \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \

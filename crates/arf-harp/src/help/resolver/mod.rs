@@ -55,12 +55,15 @@ impl HelpTargetResolver {
     ///
     /// This deliberately remains separate from pager resolution: IPC returns
     /// ambiguity candidates and carries the title from the selected metadata
-    /// row, while the viewer keeps its established behavior.
+    /// row, while the viewer keeps its established behavior. A `help_key` is
+    /// an exact metadata-row selector and is only accepted with an explicit
+    /// package by the IPC boundary.
     pub fn resolve_ipc_target(
         &mut self,
         topic: &str,
         package: Option<&str>,
         current_package: Option<&str>,
+        help_key: Option<&str>,
     ) -> HarpResult<IpcHelpResolution> {
         let packages = self
             .packages
@@ -71,14 +74,14 @@ impl HelpTargetResolver {
             let Some((name, dir)) = packages.iter().find(|(name, _)| name == package) else {
                 return Ok(IpcHelpResolution::NotFound);
             };
-            let matches = self.ipc_matches_in_package(name, dir, topic)?;
+            let matches = self.ipc_matches_in_package(name, dir, topic, help_key)?;
             return Self::finish_ipc_resolution(matches);
         }
 
         if let Some(current_package) = current_package
             && let Some((name, dir)) = packages.iter().find(|(name, _)| name == current_package)
         {
-            let matches = self.ipc_matches_in_package(name, dir, topic)?;
+            let matches = self.ipc_matches_in_package_or_warn(name, dir, topic, help_key);
             if !matches.is_empty() {
                 return Self::finish_ipc_resolution(matches);
             }
@@ -89,7 +92,7 @@ impl HelpTargetResolver {
             if Some(name.as_str()) == current_package {
                 continue;
             }
-            matches.extend(self.ipc_matches_in_package(name, dir, topic)?);
+            matches.extend(self.ipc_matches_in_package_or_warn(name, dir, topic, help_key));
         }
         Self::finish_ipc_resolution(matches)
     }
@@ -99,6 +102,7 @@ impl HelpTargetResolver {
         package: &str,
         dir: &Path,
         topic: &str,
+        help_key: Option<&str>,
     ) -> HarpResult<Vec<HelpTopic>> {
         if !self.indexes.contains_key(dir) {
             let index = HelpTopicIndex::read_installed(dir)
@@ -106,8 +110,31 @@ impl HelpTargetResolver {
             self.indexes.insert(dir.to_owned(), index);
         }
         Ok(self.indexes[dir].as_ref().map_or_else(Vec::new, |index| {
-            matching_entries(index, dir, package, topic)
+            if let Some(help_key) = help_key {
+                matching_key(index, dir, package, help_key)
+            } else {
+                matching_entries(index, dir, package, topic)
+            }
         }))
+    }
+
+    fn ipc_matches_in_package_or_warn(
+        &mut self,
+        package: &str,
+        dir: &Path,
+        topic: &str,
+        help_key: Option<&str>,
+    ) -> Vec<HelpTopic> {
+        match self.ipc_matches_in_package(package, dir, topic, help_key) {
+            Ok(matches) => matches,
+            Err(error) => {
+                log::warn!(
+                    "Skipping unreadable help index for package {package:?} at {}: {error}",
+                    dir.display()
+                );
+                Vec::new()
+            }
+        }
     }
 
     fn finish_ipc_resolution(mut candidates: Vec<HelpTopic>) -> HarpResult<IpcHelpResolution> {
@@ -278,24 +305,50 @@ fn matching_entries(
             if !matches {
                 return None;
             }
-            let aliases = entry.aliases.iter().flatten().cloned().collect::<Vec<_>>();
-            let display_topic = entry
-                .name
-                .as_str()
-                .filter(|name| aliases.iter().any(|alias| alias == name))
-                .or_else(|| entry.aliases.first().and_then(Option::as_deref))
-                .unwrap_or(topic);
-            Some(HelpTopic {
-                package: package.to_owned(),
-                package_dir: dir.to_owned(),
-                topic: display_topic.to_owned(),
-                aliases,
-                help_key: key.map(str::to_owned),
-                title: entry.title.as_str().unwrap_or_default().to_owned(),
-                entry_type: "help".to_owned(),
-            })
+            Some(project_ipc_entry(entry, dir, package, topic, key))
         })
         .collect()
+}
+
+/// Select metadata by its compiled-help key without applying alias-first
+/// lookup. This lets an IPC client retrieve a previously returned candidate
+/// even when its topic string is also an alias for another metadata row.
+fn matching_key(
+    index: &HelpTopicIndex,
+    dir: &Path,
+    package: &str,
+    help_key: &str,
+) -> Vec<HelpTopic> {
+    index
+        .entries()
+        .filter(|entry| entry.topic_key() == Some(help_key))
+        .map(|entry| project_ipc_entry(entry, dir, package, help_key, Some(help_key)))
+        .collect()
+}
+
+fn project_ipc_entry(
+    entry: &rd_helpdb::HelpTopicEntry,
+    dir: &Path,
+    package: &str,
+    fallback_topic: &str,
+    help_key: Option<&str>,
+) -> HelpTopic {
+    let aliases = entry.aliases.iter().flatten().cloned().collect::<Vec<_>>();
+    let display_topic = entry
+        .name
+        .as_str()
+        .filter(|name| aliases.iter().any(|alias| alias == name))
+        .or_else(|| entry.aliases.first().and_then(Option::as_deref))
+        .unwrap_or(fallback_topic);
+    HelpTopic {
+        package: package.to_owned(),
+        package_dir: dir.to_owned(),
+        topic: display_topic.to_owned(),
+        aliases,
+        help_key: help_key.map(str::to_owned),
+        title: entry.title.as_str().unwrap_or_default().to_owned(),
+        entry_type: "help".to_owned(),
+    }
 }
 
 fn lookup_in_package(

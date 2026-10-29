@@ -1716,7 +1716,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__r__subcmd__help__subcmd__show)
-            opts="-h --package --current-package --pid --help"
+            opts="-h --package --current-package --help-key --pid --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1727,6 +1727,10 @@ _arf() {
                     return 0
                     ;;
                 --current-package)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --help-key)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

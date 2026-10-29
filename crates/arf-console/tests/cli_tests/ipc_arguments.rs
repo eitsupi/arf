@@ -110,6 +110,8 @@ fn test_ipc_r_help_subcommands_accept_search_and_resolution_arguments() {
             "stats",
             "--current-package",
             "base",
+            "--help-key",
+            "lm",
         ],
     ] {
         let output = sanitized_arf_command()

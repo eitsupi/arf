@@ -278,7 +278,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;r-help;search' {
-            [CompletionResult]::new('--query', '--query', [CompletionResultType]::ParameterName, 'Case-insensitive substring in topic, aliases, or title')
+            [CompletionResult]::new('--query', '--query', [CompletionResultType]::ParameterName, 'Fuzzy search topic, aliases, help key, package::name, and title (smart case)')
             [CompletionResult]::new('--package', '--package', [CompletionResultType]::ParameterName, 'Restrict results to this exact package name')
             [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of results (default 50, maximum 200)')
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
@@ -289,6 +289,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
         'arf;ipc;r-help;show' {
             [CompletionResult]::new('--package', '--package', [CompletionResultType]::ParameterName, 'Restrict lookup to this exact package name')
             [CompletionResult]::new('--current-package', '--current-package', [CompletionResultType]::ParameterName, 'Prefer this package for unqualified topic references')
+            [CompletionResult]::new('--help-key', '--help-key', [CompletionResultType]::ParameterName, 'Select a candidate''s help database key (requires --package)')
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')

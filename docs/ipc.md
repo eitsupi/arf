@@ -599,24 +599,32 @@ arf ipc r-help show mean --package base
 arf ipc r-help show lm --current-package stats
 ```
 
-`r-help search` accepts `--query` (case-insensitive substring across topic,
-aliases, and title), `--package` (exact package name), and `--limit` (default
-50, maximum 200). Results contain `topics`, `truncated` (whether more topics
-matched than `limit` allowed), and the `library_paths` used for the search.
-Packages whose help metadata cannot be read are skipped. `r-help show` accepts
-a topic, optional `--package`, and optional `--current-package`. An explicit `package` takes priority. If omitted,
-`current_package` is preferred; if that package has no match, all packages are
-searched. One match returns a page; multiple matches return candidates instead
-of choosing one arbitrarily. The library-path order selects which installed
-copy of a given package is read, but does not select among different packages.
+`r-help search` accepts `--query`, `--package` (exact package name), and
+`--limit` (default 50, maximum 200). Query matching uses the same fuzzy,
+smart-case search as the interactive help browser. It searches topic names,
+aliases, help keys, and `package::name`; titles also match at half weight, and
+results are ordered by match score. A corrupt or unreadable package index is
+skipped, while results from other packages remain available.
+Results contain `topics`, `truncated` (true when more matches were found than
+the requested limit permits), and the `library_paths` used. `r-help show`
+accepts a topic, optional `--package`, optional `--current-package`, and
+optional `--help-key` (which requires `--package`). An explicit `package` takes
+priority. If omitted, `current_package` is preferred; if that package has no
+match, all packages are searched. One match returns a page; multiple matches
+return candidates instead of choosing one arbitrarily. The library-path order
+selects which installed copy of a given package is read, but does not select
+among different packages.
 
 The resolver does not reproduce R's `?topic` behavior: R resolves unqualified
 topics according to package attach order, while this method uses the explicit
 package priority above and returns candidates when multiple packages match.
 Candidates are sorted lexically by package, canonical topic, then help key.
-Multiple matches within one package are also returned as candidates; the
-initial interface does not provide a way to fetch one by `help_key`. Successful
-results include the `library_paths` used to resolve the request. An empty
+Multiple matches within one package are also returned as candidates.
+Successful results include the `library_paths` used to resolve the request.
+An explicitly selected package's unreadable index and failures loading a
+selected page return internal errors. With no explicit package, unrelated
+corrupt indexes are skipped during lookup; a topic present only in a skipped
+package can therefore appear not found. An empty
 cached library-path list returns `HELP_LIBRARY_PATHS_UNAVAILABLE` (`-32018`),
 distinct from `HELP_NOT_FOUND` (`-32017`), which means no matching topic.
 JSON-RPC errors do not include `library_paths`.
@@ -645,7 +653,13 @@ A page result has `kind: "page"`, with `package`, `topic`, `title`, Markdown
 `content`, `content_type: "markdown"`, `entry_type: "help"`, and
 `library_paths`. An ambiguous result has `kind: "candidates"`, a `candidates`
 array with `package`, canonical `topic`, `help_key`, and `title`, plus
-`library_paths`.
+`library_paths`. Use `package` and `help_key` from a candidate in a subsequent
+`r_help_show` request to fetch that exact entry. The request still requires
+`topic`; when `help_key` is supplied, exact-key lookup bypasses alias matching.
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"r_help_show","params":{"topic":"shared","package":"alpha","help_key":"shared-a"}}
+```
 
 ```json
 {"jsonrpc":"2.0","id":2,"result":{"kind":"page","package":"stats","topic":"lm","title":"Fitting Linear Models","content":"# Fitting Linear Models\n\n...","content_type":"markdown","entry_type":"help","library_paths":["/usr/lib/R/library"]}}

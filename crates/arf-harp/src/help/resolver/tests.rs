@@ -172,16 +172,18 @@ fn ipc_target_returns_selectable_candidates_and_prefers_current_package() {
     std::fs::write(broken.join("Meta/Rd.rds"), b"broken RDS").unwrap();
 
     let mut resolver = resolver(&[temp.path()]);
-    let ambiguous = resolver.resolve_ipc_target("mean", None, None).unwrap_err();
-    assert!(ambiguous.to_string().contains("broken"));
+    let ambiguous = resolver
+        .resolve_ipc_target("mean", None, None, None)
+        .unwrap();
+    assert!(matches!(ambiguous, IpcHelpResolution::Candidates(_)));
 
     let explicit = resolver
-        .resolve_ipc_target("mean", Some("base"), Some("stats"))
+        .resolve_ipc_target("mean", Some("base"), Some("stats"), None)
         .unwrap();
     assert!(matches!(explicit, IpcHelpResolution::Page { .. }));
 
     let preferred = resolver
-        .resolve_ipc_target("mean", None, Some("stats"))
+        .resolve_ipc_target("mean", None, Some("stats"), None)
         .unwrap();
     let IpcHelpResolution::Page { page, title } = preferred else {
         panic!("expected current-package page despite unrelated corrupt index, got {preferred:?}");
@@ -190,11 +192,40 @@ fn ipc_target_returns_selectable_candidates_and_prefers_current_package() {
     assert_ne!(page.package_dir, base);
     assert!(!title.is_empty());
 
-    // If the current package misses, malformed indexes in the global search
-    // still surface as errors instead of being treated as topic misses.
+    assert!(matches!(
+        resolver
+            .resolve_ipc_target("not-present", None, Some("stats"), None)
+            .unwrap(),
+        IpcHelpResolution::NotFound
+    ));
     assert!(
         resolver
-            .resolve_ipc_target("not-present", None, Some("stats"))
+            .resolve_ipc_target("mean", Some("broken"), None, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn explicit_ipc_package_keeps_index_and_selected_page_errors_strict() {
+    let temp = tempfile::tempdir().unwrap();
+    let bad_index = package(temp.path(), "badindex");
+    std::fs::write(bad_index.join("Meta/Rd.rds"), b"broken RDS").unwrap();
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_ipc_target("mean", Some("badindex"), None, None)
+            .is_err()
+    );
+
+    let bad_page = package(temp.path(), "badpage");
+    std::fs::write(bad_page.join("help/badpage.rdx"), b"broken database").unwrap();
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_ipc_target("mean", Some("badpage"), None, None)
+            .is_err()
+    );
+    assert!(
+        resolver(&[temp.path()])
+            .resolve_ipc_target("mean", None, None, None)
             .is_err()
     );
 }
@@ -205,7 +236,9 @@ fn ipc_search_candidates_are_sorted_and_selectable() {
     package(temp.path(), "base");
     package(temp.path(), "stats");
     let mut resolver = resolver(&[temp.path()]);
-    let ambiguous = resolver.resolve_ipc_target("mean", None, None).unwrap();
+    let ambiguous = resolver
+        .resolve_ipc_target("mean", None, None, None)
+        .unwrap();
     let IpcHelpResolution::Candidates(candidates) = ambiguous else {
         panic!("expected cross-package candidates, got {ambiguous:?}");
     };
@@ -237,7 +270,7 @@ fn ipc_resolution_keeps_multiple_same_package_rows_as_candidates() {
     )
     .unwrap();
     let result = resolver(&[temp.path()])
-        .resolve_ipc_target("shared", None, None)
+        .resolve_ipc_target("shared", None, None, None)
         .unwrap();
     let IpcHelpResolution::Candidates(candidates) = result else {
         panic!("expected same-package ambiguity candidates, got {result:?}");
@@ -253,6 +286,36 @@ fn ipc_resolution_keeps_multiple_same_package_rows_as_candidates() {
             .iter()
             .all(|candidate| candidate.help_key.is_some())
     );
+    for candidate in candidates {
+        let key = candidate.help_key.as_deref().unwrap();
+        let selected = resolver(&[temp.path()])
+            .resolve_ipc_target("shared", Some(&candidate.package), None, Some(key))
+            .unwrap();
+        let IpcHelpResolution::Page { page, title } = selected else {
+            panic!("expected selected package/key page, got {selected:?}");
+        };
+        assert_eq!(page.help_key, key);
+        assert_eq!(title, candidate.title);
+    }
+
+    let candidates = match resolver(&[temp.path()])
+        .resolve_ipc_target("shared", Some("fixture"), None, None)
+        .unwrap()
+    {
+        IpcHelpResolution::Candidates(candidates) => candidates,
+        other => panic!("expected same-package candidates, got {other:?}"),
+    };
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.help_key.as_deref() == Some("first-topic"))
+        .unwrap();
+    let selected = resolver(&[temp.path()])
+        .resolve_ipc_target("first-topic", Some("fixture"), None, Some("first-topic"))
+        .unwrap();
+    let IpcHelpResolution::Page { page, .. } = selected else {
+        panic!("expected key-selected page for colliding alias, got {selected:?}");
+    };
+    assert_eq!(page.help_key, candidate.help_key.as_deref().unwrap());
 }
 
 #[test]
@@ -296,6 +359,22 @@ fn operator_aliases_resolve_without_path_or_percent_interpretation() {
             assert_eq!(result.display_topic, operator);
         }
     }
+}
+
+#[test]
+fn ipc_show_resolves_a_qualified_operator_link_uri() {
+    let temp = tempfile::tempdir().unwrap();
+    package(temp.path(), "base");
+    let target = HelpTarget::from_uri("x-r-help:base/%/%").unwrap();
+    let result = resolver(&[temp.path()])
+        .resolve_ipc_target(&target.topic, target.package.as_deref(), None, None)
+        .unwrap();
+    let IpcHelpResolution::Page { page, .. } = result else {
+        panic!("expected the qualified operator help page, got {result:?}");
+    };
+    assert_eq!(page.package, "base");
+    assert_eq!(page.help_key, "first-topic");
+    assert!(!page.markdown.is_empty());
 }
 
 #[test]

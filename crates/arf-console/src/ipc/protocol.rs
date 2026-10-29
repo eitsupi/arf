@@ -268,7 +268,7 @@ fn default_history_limit() -> i64 {
 /// Parameters for the `r_help_search` method.
 #[derive(Debug, Deserialize)]
 pub struct HelpSearchParams {
-    /// Case-insensitive substring matched against topic, aliases, and title.
+    /// Fuzzy query using the interactive help browser's smart-case matching.
     #[serde(default)]
     pub query: Option<String>,
     /// Restrict results to this exact package name.
@@ -291,6 +291,9 @@ pub struct HelpShowParams {
     pub package: Option<String>,
     #[serde(default)]
     pub current_package: Option<String>,
+    /// Select a candidate's database key; requires an explicit package.
+    #[serde(default)]
+    pub help_key: Option<String>,
 }
 
 /// A single history entry returned by the `history` method.

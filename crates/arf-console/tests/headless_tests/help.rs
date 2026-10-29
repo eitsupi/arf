@@ -17,6 +17,87 @@ fn help_request(pid: u32, args: &[&str]) -> Value {
 }
 
 #[test]
+fn r_help_search_candidates_can_be_selected_and_operator_links_followed() {
+    let library = tempfile::tempdir().unwrap();
+    let package = library.path().join("resolverfixture");
+    std::fs::create_dir_all(package.join("help")).unwrap();
+    std::fs::create_dir_all(package.join("Meta")).unwrap();
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../arf-harp/tests/fixtures/help_metadata");
+    for extension in ["rdx", "rdb"] {
+        std::fs::copy(
+            fixtures.join(format!("../help_resolution/resolverpkg.{extension}")),
+            package.join(format!("help/resolverfixture.{extension}")),
+        )
+        .unwrap();
+    }
+    std::fs::copy(
+        fixtures.join("help_topics_metadata_v3.rds"),
+        package.join("Meta/Rd.rds"),
+    )
+    .unwrap();
+    std::fs::write(package.join("Meta/package.rds"), []).unwrap();
+    let process = HeadlessProcess::spawn_with_args_and_env(
+        &["--vanilla", "--no-history"],
+        &[("R_LIBS", library.path().to_str().unwrap())],
+    )
+    .expect("headless process");
+    let search = help_request(
+        process.pid,
+        &[
+            "search",
+            "--query",
+            "shared",
+            "--package",
+            "resolverfixture",
+        ],
+    );
+    let topic = search["topics"][0]["aliases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|alias| alias.as_str().filter(|alias| *alias == "shared"))
+        .expect("search returns the shared alias");
+    let result = help_request(
+        process.pid,
+        &["show", topic, "--package", "resolverfixture"],
+    );
+    assert_eq!(result["kind"], "candidates");
+    let candidates = result["candidates"].as_array().unwrap();
+    assert!(candidates.len() >= 2);
+    for candidate in candidates {
+        let page = help_request(
+            process.pid,
+            &[
+                "show",
+                candidate["topic"].as_str().unwrap(),
+                "--package",
+                candidate["package"].as_str().unwrap(),
+                "--help-key",
+                candidate["help_key"].as_str().unwrap(),
+            ],
+        );
+        assert_eq!(page["kind"], "page");
+        assert_eq!(page["title"], candidate["title"]);
+        assert!(!page["content"].as_str().unwrap().is_empty());
+    }
+
+    let target = arf_harp::help::HelpTarget::from_uri("x-r-help:base/%/%").unwrap();
+    let page = help_request(
+        process.pid,
+        &[
+            "show",
+            &target.topic,
+            "--package",
+            target.package.as_deref().unwrap(),
+        ],
+    );
+    assert_eq!(page["kind"], "page");
+    assert_eq!(page["package"], "base");
+    assert!(page["content"].as_str().unwrap().contains("%/%"));
+}
+
+#[test]
 fn r_help_search_and_show_respond_while_r_is_busy() {
     let temp = tempfile::tempdir().unwrap();
     let process =

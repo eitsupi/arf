@@ -246,7 +246,7 @@ Examples:
   List topics from one package:
     $ arf ipc r-help search --package stats --limit 20")]
     Search {
-        /// Case-insensitive substring in topic, aliases, or title
+        /// Fuzzy search topic, aliases, help key, package::name, and title (smart case)
         #[arg(long)]
         query: Option<String>,
         /// Restrict results to this exact package name
@@ -279,6 +279,9 @@ Examples:
         /// Prefer this package for unqualified topic references
         #[arg(long)]
         current_package: Option<String>,
+        /// Select a candidate's help database key (requires --package)
+        #[arg(long, requires = "package")]
+        help_key: Option<String>,
         /// PID of the target arf session (optional if only one session is running)
         #[arg(long)]
         pid: Option<u32>,

@@ -507,6 +507,7 @@ pub fn cmd_r_help_show(
     topic: &str,
     package: Option<&str>,
     current_package: Option<&str>,
+    help_key: Option<&str>,
 ) {
     let session = resolve_session(pid);
     let mut params = serde_json::json!({ "topic": topic });
@@ -515,6 +516,9 @@ pub fn cmd_r_help_show(
     }
     if let Some(current_package) = current_package {
         params["current_package"] = serde_json::Value::String(current_package.to_owned());
+    }
+    if let Some(help_key) = help_key {
+        params["help_key"] = serde_json::Value::String(help_key.to_owned());
     }
     let request = serde_json::json!({
         "jsonrpc": "2.0",
