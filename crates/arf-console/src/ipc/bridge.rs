@@ -138,17 +138,16 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
     // read beyond the attach response and makes the read cancellation-safe.
     let mut initial = Vec::with_capacity(IO_CHUNK_BYTES);
     let attach_response = loop {
-        if let Some(line) = take_first_line(&mut initial) {
-            break line;
-        }
-        if initial.len() > MAX_LINE_BYTES {
-            client::exit_error(
+        match take_first_line(&mut initial, MAX_LINE_BYTES) {
+            Ok(Some(line)) => break line,
+            Ok(None) => {}
+            Err(LineTooLong) => client::exit_error(
                 2,
                 "PROTOCOL_ERROR",
                 "Attach response exceeded the line limit",
                 None,
                 None,
-            );
+            ),
         }
         tokio::select! {
             result = reader.read_buf(&mut initial) => match result {
@@ -257,9 +256,18 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
     }
 }
 
-fn take_first_line(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
-    let end = buffer.iter().position(|byte| *byte == b'\n')?;
-    Some(buffer.drain(..=end).collect())
+struct LineTooLong;
+
+/// Remove the first complete line, including its newline, from `buffer`.
+/// Fails once the line, excluding its newline, is longer than `max_bytes`,
+/// whether or not the newline has arrived yet.
+fn take_first_line(buffer: &mut Vec<u8>, max_bytes: usize) -> Result<Option<Vec<u8>>, LineTooLong> {
+    match buffer.iter().position(|byte| *byte == b'\n') {
+        Some(end) if end > max_bytes => Err(LineTooLong),
+        Some(end) => Ok(Some(buffer.drain(..=end).collect())),
+        None if buffer.len() > max_bytes => Err(LineTooLong),
+        None => Ok(None),
+    }
 }
 
 async fn enqueue_chunks(
@@ -440,7 +448,8 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite> AsyncConnection for T {}
 #[cfg(test)]
 mod tests {
     use super::{
-        EnqueueResult, IO_CHUNK_BYTES, StdinState, enqueue_chunks, finish_stdout, take_first_line,
+        EnqueueResult, IO_CHUNK_BYTES, LineTooLong, StdinState, enqueue_chunks, finish_stdout,
+        take_first_line,
     };
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
@@ -449,13 +458,29 @@ mod tests {
     #[test]
     fn attach_line_extraction_retains_partial_and_coalesced_read_ahead() {
         let mut buffered = br#"{"result":{}}"#.to_vec();
-        assert!(take_first_line(&mut buffered).is_none());
+        assert!(matches!(take_first_line(&mut buffered, 64), Ok(None)));
         buffered.extend_from_slice(b"\nevent\nnext");
         assert_eq!(
-            take_first_line(&mut buffered).unwrap(),
+            take_first_line(&mut buffered, 64).ok().flatten().unwrap(),
             concat!(r#"{"result":{}}"#, "\n").as_bytes()
         );
         assert_eq!(buffered, b"event\nnext");
+    }
+
+    #[test]
+    fn attach_line_limit_applies_when_the_newline_arrives_with_the_excess() {
+        let mut exact = b"1234\n".to_vec();
+        assert!(matches!(take_first_line(&mut exact, 4), Ok(Some(_))));
+        let mut oversized = b"12345\nevent\n".to_vec();
+        assert!(matches!(
+            take_first_line(&mut oversized, 4),
+            Err(LineTooLong)
+        ));
+        let mut unterminated = b"12345".to_vec();
+        assert!(matches!(
+            take_first_line(&mut unterminated, 4),
+            Err(LineTooLong)
+        ));
     }
 
     #[tokio::test]
