@@ -9,6 +9,7 @@
 ///
 /// A registration failure is logged; R sessions work without the routines.
 pub(crate) fn register_embedding_api() {
+    crate::ipc::install_console_output_observer();
     // The publisher is in place before any R code can call the routine.
     crate::ipc::install_r_event_publisher();
     if let Err(error) = arf_harp::register_embedding_routines() {

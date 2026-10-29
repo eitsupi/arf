@@ -24,6 +24,11 @@ mod approval;
 pub(crate) mod bridge;
 mod capture;
 pub mod client;
+mod console_output;
+pub(crate) use console_output::{
+    clear_bus as clear_console_output_bus, flush as flush_console_output,
+    install_bus as install_console_output_bus, install_observer as install_console_output_observer,
+};
 mod events;
 mod execution;
 pub mod handlers;

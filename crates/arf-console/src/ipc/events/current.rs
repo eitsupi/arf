@@ -64,6 +64,21 @@ impl CurrentBus {
         }
     }
 
+    pub(super) fn is_installed(&self) -> bool {
+        self.slot
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+    }
+
+    pub(super) fn is_generation_current(&self, generation: Generation) -> bool {
+        self.slot
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .is_some_and(|installed| installed.generation == generation)
+    }
+
     pub(super) fn publish(
         &self,
         topic: Topic,
@@ -101,12 +116,30 @@ pub(crate) fn clear_current_bus(generation: Generation) -> bool {
     CURRENT.clear(generation)
 }
 
+pub(crate) fn has_current_bus() -> bool {
+    CURRENT.is_installed()
+}
+
+pub(crate) fn is_current_generation(generation: Generation) -> bool {
+    CURRENT.is_generation_current(generation)
+}
+
 /// Publish an event on the bus of the running IPC server, without blocking.
 ///
 /// Fails with [`PublishError::Closed`] when no server is running, unless the
 /// event is too large for any server to accept; see [`EventBus::publish`] for
 /// the other outcomes.
 pub(crate) fn publish_event(
+    topic: Topic,
+    data: Value,
+    execution: Option<ExecutionId>,
+) -> Result<u64, PublishError> {
+    super::super::flush_console_output();
+    publish_event_raw(topic, data, execution)
+}
+
+/// Publish without flushing the console buffer; used by the flush path itself.
+pub(crate) fn publish_event_raw(
     topic: Topic,
     data: Value,
     execution: Option<ExecutionId>,

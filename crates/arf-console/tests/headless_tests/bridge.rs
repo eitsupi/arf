@@ -1,6 +1,6 @@
 //! Stdin/stdout bridge integration tests for `arf ipc attach`.
 
-use super::support::{HeadlessProcess, wait_for_history_until};
+use super::support::{HeadlessProcess, run_ipc_command, wait_for_history_until};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -188,13 +188,59 @@ impl Drop for BridgeProcess {
     }
 }
 
-fn assert_attached(bridge: &BridgeProcess) {
+fn assert_attached(bridge: &BridgeProcess) -> u64 {
     let first = bridge.recv_json();
     assert_eq!(first["jsonrpc"], "2.0", "{first}");
     assert!(
         first["result"].is_object(),
         "automatic attach response: {first}"
     );
+    first["result"]["connection_id"]
+        .as_u64()
+        .expect("attach response connection ID")
+}
+
+fn collect_execution(bridge: &BridgeProcess, id: u64) -> (Vec<Value>, Value, Value) {
+    let mut output = Vec::new();
+    let mut completion = None;
+    let mut response = None;
+    while completion.is_none() || response.is_none() {
+        let message = bridge.recv_json();
+        if message["method"] == "event" {
+            match message["params"]["topic"].as_str() {
+                Some("arf.console_output") => {
+                    assert!(
+                        completion.is_none(),
+                        "output arrived after completion: {message}"
+                    );
+                    output.push(message);
+                }
+                Some("arf.execution_completed") => completion = Some(message),
+                _ => {}
+            }
+        } else if message["id"] == id {
+            response = Some(message);
+        }
+    }
+    (
+        output,
+        completion.expect("execution completion event"),
+        response.expect("execution response"),
+    )
+}
+
+fn spawn_console_bridge() -> (HeadlessProcess, BridgeProcess, u64) {
+    let process = HeadlessProcess::spawn().expect("headless process should start");
+    let bridge = BridgeProcess::spawn(
+        process.pid,
+        &[
+            "arf.console_output",
+            "arf.execution_completed",
+            "demo.marker",
+        ],
+    );
+    let connection_id = assert_attached(&bridge);
+    (process, bridge, connection_id)
 }
 
 #[test]
@@ -232,6 +278,279 @@ fn bridge_automatically_attaches_and_relays_requests_and_completion_events() {
         "{completion}"
     );
     assert_eq!(completion["params"]["data"]["status"], "ok", "{completion}");
+}
+
+#[test]
+fn console_output_is_streamed_through_bridge_before_execution_completion() {
+    let (_process, mut bridge, connection_id) = spawn_console_bridge();
+
+    // Keep stdout and stderr in one R evaluation so the segment order is observable.
+    let code = r#"cat("out-界"); cat("err-λ\n", file=stderr()); cat("\033[31m-tail\033[0m\r")"#;
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":21,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(code).expect("serialize R source")
+    ));
+
+    let mut output_events = Vec::new();
+    let mut completion = None;
+    let mut response = None;
+    while completion.is_none() || response.is_none() {
+        let message = bridge.recv_json();
+        if message["method"] == "event" {
+            match message["params"]["topic"].as_str() {
+                Some("arf.console_output") => {
+                    assert!(
+                        completion.is_none(),
+                        "output arrived after completion: {message}"
+                    );
+                    output_events.push(message);
+                }
+                Some("arf.execution_completed") => completion = Some(message),
+                _ => {}
+            }
+        } else if message["id"] == 21 {
+            response = Some(message);
+        }
+    }
+    let completion = completion.expect("completion event");
+    let response = response.expect("evaluation response");
+    assert!(
+        !output_events.is_empty(),
+        "no console output event was received"
+    );
+    let execution_id = response["result"]["execution_id"].clone();
+    assert_eq!(completion["params"]["data"]["id"], execution_id);
+    assert_eq!(completion["params"]["data"]["status"], "ok");
+    assert!(
+        output_events.iter().all(|event| {
+            event["params"]["execution"] == execution_id
+                && event["params"]["data"]["visible"] == false
+                && event["params"]["data"]["origin"] == connection_id
+        }),
+        "output metadata must identify the silent execution: {output_events:?}"
+    );
+    let mut segments = Vec::new();
+    for event in &output_events {
+        assert!(event["params"]["data"]["segments"].is_array(), "{event}");
+        segments.extend(
+            event["params"]["data"]["segments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|segment| {
+                    (
+                        segment["stream"].as_str().unwrap_or_default().to_owned(),
+                        segment["text"].as_str().unwrap_or_default().to_owned(),
+                    )
+                }),
+        );
+    }
+    let mut normalized: Vec<(String, String)> = Vec::new();
+    for (stream, text) in segments {
+        if let Some((previous_stream, previous_text)) = normalized.last_mut()
+            && *previous_stream == stream
+        {
+            previous_text.push_str(&text);
+        } else {
+            normalized.push((stream, text));
+        }
+    }
+    assert_eq!(
+        normalized,
+        vec![
+            ("stdout".to_owned(), "out-界".to_owned()),
+            ("stderr".to_owned(), "err-λ\n".to_owned()),
+            ("stdout".to_owned(), "\u{1b}[31m-tail\u{1b}[0m\r".to_owned(),),
+        ]
+    );
+    assert_eq!(response["result"]["stdout"], "out-界-tail\r");
+    assert_eq!(response["result"]["stderr"], "err-λ\n");
+
+    // A silent evaluate that errors after writing must flush its output before completion.
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":22,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(r#"cat("before-error"); stop("expected-output-error")"#)
+            .expect("serialize R source")
+    ));
+    let mut saw_output = false;
+    let mut saw_completion = false;
+    let mut saw_error_response = false;
+    while !saw_output || !saw_completion || !saw_error_response {
+        let message = bridge.recv_json();
+        if message["params"]["topic"] == "arf.console_output" {
+            assert!(
+                !saw_completion,
+                "output arrived after completion: {message}"
+            );
+            saw_output |= message["params"]["data"]["segments"]
+                .to_string()
+                .contains("before-error");
+        } else if message["params"]["topic"] == "arf.execution_completed" {
+            saw_completion = true;
+            assert_eq!(message["params"]["data"]["status"], "error");
+        } else if message["id"] == 22 {
+            saw_error_response = true;
+        }
+    }
+
+    // Visible evaluation and user_input each carry their own execution metadata.
+    for (id, method, visible) in [(23, "evaluate", true), (24, "user_input", true)] {
+        let visible_param = if method == "evaluate" {
+            r#", "visible":true"#
+        } else {
+            ""
+        };
+        bridge.send_line(&format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{{"code":{}{visible_param}}}}}"#,
+            serde_json::to_string(r#"cat("mode-output")"#).expect("serialize R source"),
+        ));
+        let (events, completion, response) = collect_execution(&bridge, id);
+        assert!(!events.is_empty(), "{method} output was not published");
+        let execution_id = if method == "evaluate" {
+            response["result"]["execution_id"].clone()
+        } else {
+            completion["params"]["data"]["id"].clone()
+        };
+        assert_eq!(completion["params"]["data"]["id"], execution_id);
+        assert!(events.iter().all(|event| {
+            event["params"]["execution"] == execution_id
+                && event["params"]["data"]["visible"] == visible
+                && event["params"]["data"]["origin"] == connection_id
+        }));
+    }
+}
+
+#[test]
+fn console_output_flushes_before_other_published_events() {
+    let (_process, mut bridge, _) = spawn_console_bridge();
+    let code = r#"cat("before-marker"); .Call("arf_publish_event", "demo.marker", NULL, PACKAGE = "(embedding)"); cat("after-marker")"#;
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":32,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(code).expect("serialize R source")
+    ));
+    let mut first_output = None;
+    let mut marker = None;
+    let mut completion = None;
+    let mut response = None;
+    while completion.is_none() || response.is_none() {
+        let message = bridge.recv_json();
+        if message["params"]["topic"] == "arf.console_output" && first_output.is_none() {
+            first_output = Some(message);
+        } else if message["params"]["topic"] == "demo.marker" {
+            marker = Some(message);
+        } else if message["params"]["topic"] == "arf.execution_completed" {
+            completion = Some(message);
+        } else if message["id"] == 32 {
+            response = Some(message);
+        }
+    }
+    let output = first_output.expect("console output before published R event");
+    let marker = marker.expect("published marker event");
+    let completion = completion.expect("execution completion event");
+    assert!(output["params"]["seq"].as_u64() < marker["params"]["seq"].as_u64());
+    assert!(marker["params"]["seq"].as_u64() < completion["params"]["seq"].as_u64());
+    assert!(
+        output["params"]["data"]["segments"]
+            .to_string()
+            .contains("before-marker")
+    );
+    assert_eq!(response.unwrap()["result"]["status"], "ok");
+}
+
+#[test]
+fn console_output_timer_flushes_during_computation() {
+    let (_process, mut bridge, _) = spawn_console_bridge();
+    let started = Instant::now();
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":33,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(r#"cat("timer-flush"); Sys.sleep(5)"#).expect("serialize R source")
+    ));
+    let early = bridge.recv_json();
+    assert_eq!(early["params"]["topic"], "arf.console_output", "{early}");
+    assert!(
+        early["params"]["data"]["segments"]
+            .to_string()
+            .contains("timer-flush")
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "flush waited for evaluation end"
+    );
+    let (_, completion, response) = collect_execution(&bridge, 33);
+    assert_eq!(response["result"]["status"], "ok");
+    assert_eq!(completion["params"]["data"]["status"], "ok");
+}
+
+#[test]
+fn console_output_large_unicode_is_split_without_loss() {
+    let (_process, mut bridge, _) = spawn_console_bridge();
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":34,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(r#"cat(strrep("界", 600000L))"#).expect("serialize R source")
+    ));
+    let (events, completion, response) = collect_execution(&bridge, 34);
+    assert!(events.len() > 1, "large output was not split into frames");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.to_string().len() <= 1024 * 1024)
+    );
+    assert_eq!(response["result"]["status"], "ok");
+    assert_eq!(completion["params"]["data"]["status"], "ok");
+    let text: String = events
+        .iter()
+        .flat_map(|event| event["params"]["data"]["segments"].as_array().unwrap())
+        .map(|segment| segment["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(text, "界".repeat(600000));
+}
+
+#[test]
+fn console_output_is_flushed_before_interrupt_completion() {
+    let (process, mut bridge, _) = spawn_console_bridge();
+    bridge.send_line(&format!(
+        r#"{{"jsonrpc":"2.0","id":35,"method":"evaluate","params":{{"code":{}}}}}"#,
+        serde_json::to_string(r#"cat("interrupt-flush"); Sys.sleep(30)"#)
+            .expect("serialize R source")
+    ));
+    let output = bridge.recv_json();
+    assert_eq!(output["params"]["topic"], "arf.console_output");
+    assert!(
+        output["params"]["data"]["segments"]
+            .to_string()
+            .contains("interrupt-flush")
+    );
+    let interrupt = run_ipc_command(&["ipc", "interrupt", "--pid", &process.pid.to_string()]);
+    assert!(
+        interrupt.status.success(),
+        "{}",
+        String::from_utf8_lossy(&interrupt.stderr)
+    );
+    let (_, completion, response) = collect_execution(&bridge, 35);
+    assert_eq!(response["result"]["status"], "interrupted");
+    assert_eq!(completion["params"]["data"]["status"], "interrupted");
+}
+
+#[test]
+fn handler_output_is_excluded_from_console_output_events() {
+    let process = HeadlessProcess::spawn_with_args(&[
+        "--ipc-expose",
+        r#"list("test/output" = function(args) { cat("handler-only"); list(ok = TRUE) })"#,
+    ])
+    .expect("headless process with exposed handler should start");
+    let mut bridge = BridgeProcess::spawn(process.pid, &["arf.console_output"]);
+    assert_attached(&bridge);
+    bridge.send_line(
+        r#"{"jsonrpc":"2.0","id":31,"method":"call","params":{"handler":"test/output","args":{}}}"#,
+    );
+    let response = bridge.recv_json();
+    assert_eq!(response["id"], 31, "{response}");
+    assert_eq!(response["result"]["value"]["ok"], true, "{response}");
+    assert_eq!(
+        bridge.stdout.recv_timeout(Duration::from_millis(300)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "handler output must not be forwarded as user console output"
+    );
 }
 
 #[cfg(unix)]

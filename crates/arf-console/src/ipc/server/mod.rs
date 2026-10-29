@@ -19,7 +19,7 @@ mod transport;
 #[cfg(test)]
 pub(in crate::ipc) use attached::EventNotification;
 
-use crate::ipc::events::{EventBus, Limits, clear_current_bus, install_current_bus};
+use crate::ipc::events::{EventBus, Limits};
 use crate::ipc::protocol::IpcRequest;
 use crate::ipc::session::{SessionInfo, SessionType, remove_session, write_session};
 use crate::sync::LockRecover;
@@ -212,8 +212,19 @@ pub fn start_server(
                 // before any client can connect.
                 let (bus, dispatcher) = EventBus::new(Limits::default());
                 let dispatcher_task = tokio::spawn(dispatcher.run());
-                let generation = install_current_bus(bus.clone());
+                let generation = crate::ipc::install_console_output_bus(bus.clone());
                 let ctx = ConnectionContext::new(tx, bus.clone(), token_clone);
+                let timer_cancel = ctx.cancel.clone();
+                let output_timer = tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+                    interval.tick().await;
+                    loop {
+                        tokio::select! {
+                            _ = timer_cancel.cancelled() => break,
+                            _ = interval.tick() => crate::ipc::flush_console_output(),
+                        }
+                    }
+                });
 
                 if let Err(e) = transport::run_server(
                     &path,
@@ -230,9 +241,11 @@ pub fn start_server(
                     log::error!("IPC server error: {}", e);
                 }
 
+                output_timer.abort();
+                let _ = output_timer.await;
                 // Only remove our own bus: a server started after this one
                 // may already have installed another.
-                clear_current_bus(generation);
+                crate::ipc::clear_console_output_bus(generation);
                 bus.close();
                 let _ = dispatcher_task.await;
             });
