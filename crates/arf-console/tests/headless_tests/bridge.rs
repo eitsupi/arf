@@ -28,18 +28,27 @@ enum StdoutMode {
 
 impl BridgeProcess {
     fn spawn(pid: u32, subscriptions: &[&str]) -> Self {
-        Self::spawn_inner(pid, subscriptions, StdoutMode::Read)
+        Self::spawn_inner(pid, subscriptions, StdoutMode::Read, None)
+    }
+
+    fn spawn_with_sessions_dir(pid: u32, sessions_dir: &str) -> Self {
+        Self::spawn_inner(pid, &[], StdoutMode::Read, Some(sessions_dir))
     }
 
     fn spawn_with_broken_stdout(pid: u32, subscriptions: &[&str]) -> Self {
-        Self::spawn_inner(pid, subscriptions, StdoutMode::Drop)
+        Self::spawn_inner(pid, subscriptions, StdoutMode::Drop, None)
     }
 
     fn spawn_with_blocked_stdout(pid: u32, subscriptions: &[&str]) -> Self {
-        Self::spawn_inner(pid, subscriptions, StdoutMode::Hold)
+        Self::spawn_inner(pid, subscriptions, StdoutMode::Hold, None)
     }
 
-    fn spawn_inner(pid: u32, subscriptions: &[&str], stdout_mode: StdoutMode) -> Self {
+    fn spawn_inner(
+        pid: u32,
+        subscriptions: &[&str],
+        stdout_mode: StdoutMode,
+        sessions_dir: Option<&str>,
+    ) -> Self {
         let bin_path = env!("CARGO_BIN_EXE_arf");
         let mut command = Command::new(bin_path);
         command
@@ -48,6 +57,9 @@ impl BridgeProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(sessions_dir) = sessions_dir {
+            command.env("ARF_IPC_SESSIONS_DIR", sessions_dir);
+        }
         for subscription in subscriptions {
             command.args(["--subscribe", subscription]);
         }
@@ -189,15 +201,23 @@ fn assert_attached(bridge: &BridgeProcess) {
 fn bridge_automatically_attaches_and_relays_requests_and_completion_events() {
     let process = HeadlessProcess::spawn().expect("headless process should start");
     let mut bridge = BridgeProcess::spawn(process.pid, &["arf.execution_completed"]);
-    assert_attached(&bridge);
+
+    // Send a numeric ID before reading the automatic attach response. The bridge must keep
+    // that response's reserved string ID distinct from the client's request ID.
+    bridge.send_line(r#"{"jsonrpc":"2.0","id":1,"method":"evaluate","params":{"code":"1 + 1"}}"#);
+    let attach = bridge.recv_json();
+    assert_eq!(attach["id"], "arf-ipc-attach", "{attach}");
+    assert!(
+        attach["result"].is_object(),
+        "automatic attach response: {attach}"
+    );
 
     // Keep stdin open while the response and its subscribed completion event arrive.
-    bridge.send_line(r#"{"jsonrpc":"2.0","id":7,"method":"evaluate","params":{"code":"1 + 1"}}"#);
     let mut response = None;
     let mut completion = None;
     while response.is_none() || completion.is_none() {
         let message = bridge.recv_json();
-        if message["id"] == 7 {
+        if message["id"] == 1 {
             response = Some(message);
         } else if message["params"]["topic"] == "arf.execution_completed" {
             completion = Some(message);
@@ -212,6 +232,130 @@ fn bridge_automatically_attaches_and_relays_requests_and_completion_events() {
         "{completion}"
     );
     assert_eq!(completion["params"]["data"]["status"], "ok", "{completion}");
+}
+
+#[cfg(unix)]
+fn fake_socket_server() -> (
+    String,
+    mpsc::Receiver<String>,
+    thread::JoinHandle<()>,
+    Option<tempfile::TempDir>,
+) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::net::UnixListener;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .expect("create fake IPC server runtime");
+    let temp = tempfile::tempdir().expect("create fake IPC socket directory");
+    let socket_path = temp.path().join("fake.sock");
+    let listener = {
+        let _guard = runtime.enter();
+        UnixListener::bind(&socket_path).expect("bind fake IPC socket")
+    };
+    let (attach_tx, attach_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        runtime.block_on(async move {
+            let (stream, _) = listener
+                .accept()
+                .await
+                .expect("accept fake bridge connection");
+            let mut line = String::new();
+            BufReader::new(stream)
+                .read_line(&mut line)
+                .await
+                .expect("read bridge attach request");
+            let _ = attach_tx.send(line);
+        });
+    });
+    (
+        socket_path.to_string_lossy().into_owned(),
+        attach_rx,
+        server,
+        Some(temp),
+    )
+}
+
+#[cfg(windows)]
+fn fake_socket_server() -> (
+    String,
+    mpsc::Receiver<String>,
+    thread::JoinHandle<()>,
+    Option<tempfile::TempDir>,
+) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .expect("create fake IPC server runtime");
+    let pipe_name = format!(r"\\.\pipe\arf-bridge-test-{}", std::process::id());
+    let pipe = {
+        let _guard = runtime.enter();
+        ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .expect("create fake IPC named pipe")
+    };
+    let (attach_tx, attach_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        runtime.block_on(async move {
+            pipe.connect().await.expect("accept fake bridge connection");
+            let mut line = String::new();
+            BufReader::new(pipe)
+                .read_line(&mut line)
+                .await
+                .expect("read bridge attach request");
+            let _ = attach_tx.send(line);
+        });
+    });
+    (pipe_name, attach_rx, server, None)
+}
+
+#[test]
+fn bridge_reports_transport_error_when_server_closes_before_attach_reply() {
+    let sessions_dir = tempfile::tempdir().expect("create temporary sessions directory");
+    let (socket_path, attach_request, server, _socket_directory) = fake_socket_server();
+    let session = format!(
+        r#"{{"pid":{},"socket_path":{},"r_version":null,"r_home":null,"cwd":"/","started_at":"2026-01-01T00:00:00Z","session_type":"headless","log_file":null,"history_session_id":null}}"#,
+        std::process::id(),
+        serde_json::to_string(&socket_path).expect("encode socket path")
+    );
+    std::fs::write(
+        sessions_dir
+            .path()
+            .join(format!("{}.json", std::process::id())),
+        session,
+    )
+    .expect("write fake session metadata");
+
+    let mut bridge = BridgeProcess::spawn_with_sessions_dir(
+        std::process::id(),
+        sessions_dir
+            .path()
+            .to_str()
+            .expect("sessions path is UTF-8"),
+    );
+    let received = attach_request
+        .recv_timeout(BRIDGE_TIMEOUT)
+        .expect("fake server did not receive attach request");
+    let attach: Value = serde_json::from_str(&received).expect("bridge sent JSON attach request");
+    assert_eq!(attach["method"], "attach", "{attach}");
+
+    let status = bridge.wait_for_exit(BRIDGE_TIMEOUT);
+    let stderr = bridge.stderr_after_exit();
+    assert_eq!(status.code(), Some(2), "stderr: {stderr}");
+    let error: Value = serde_json::from_str(stderr.trim()).unwrap_or_else(|parse_error| {
+        panic!("expected a JSON transport error on stderr ({parse_error}): {stderr:?}")
+    });
+    assert_eq!(error["error"]["code"], "TRANSPORT_ERROR", "{error}");
+    assert!(
+        bridge.stdin.is_some(),
+        "bridge exited only after stdin was closed"
+    );
+    server.join().expect("fake IPC server thread");
 }
 
 #[test]

@@ -103,7 +103,7 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
     let (socket_error_tx, mut socket_error_rx) = mpsc::channel::<io::Error>(1);
     let attach = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": "arf-ipc-attach",
         "method": "attach",
         "params": { "subscribe": subscribe },
     });
@@ -113,26 +113,18 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
     tokio::select! {
         _ = wait_for_stdin_exit(&mut stdin_state_rx) => return stdin_exit_code(&stdin_state_rx),
         result = socket_writer.write_all(&attach_line) => if let Err(error) = result {
-            if is_closed_socket_error(&error) {
-                socket_write_closed = true;
-            } else {
-                return transport_error(error);
-            }
+            return transport_error(error);
         },
     }
-    if !socket_write_closed {
-        tokio::spawn(async move {
-            while let Some(bytes) = stdin_rx.recv().await {
-                if let Err(error) = socket_writer.write_all(&bytes).await {
-                    let _ = socket_error_tx.send(error).await;
-                    while stdin_rx.recv().await.is_some() {}
-                    return;
-                }
+    tokio::spawn(async move {
+        while let Some(bytes) = stdin_rx.recv().await {
+            if let Err(error) = socket_writer.write_all(&bytes).await {
+                let _ = socket_error_tx.send(error).await;
+                while stdin_rx.recv().await.is_some() {}
+                return;
             }
-        });
-    } else {
-        tokio::spawn(async move { while stdin_rx.recv().await.is_some() {} });
-    }
+        }
+    });
 
     // Keep the buffer across select! iterations. This preserves any bytes
     // read beyond the attach response and makes the read cancellation-safe.
@@ -151,9 +143,8 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
         }
         tokio::select! {
             result = reader.read_buf(&mut initial) => match result {
-                Ok(0) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
+                Ok(0) => return transport_error(io::Error::new(io::ErrorKind::UnexpectedEof, "Server closed the connection before the attach response")),
                 Ok(_) => {},
-                Err(error) if is_closed_socket_error(&error) => return finish_stdout(stdout_tx, stdout_done_rx, &mut stdout_error_rx, &mut stdin_state_rx).await,
                 Err(error) => return transport_error(error),
             },
             _ = wait_for_stdin_exit(&mut stdin_state_rx) => return stdin_exit_code(&stdin_state_rx),
@@ -161,7 +152,6 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
                 client::exit_error(2, "OUTPUT_ERROR", &error, None, None);
             },
             error = socket_error_rx.recv(), if !socket_write_closed => match error {
-                Some(error) if is_closed_socket_error(&error) => socket_write_closed = true,
                 Some(error) => return transport_error(error),
                 None => socket_write_closed = true,
             },

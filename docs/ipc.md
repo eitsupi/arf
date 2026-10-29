@@ -857,8 +857,9 @@ arf ipc attach --pid 12345 --subscribe arf.execution_completed
 to register multiple initial event patterns. For subscription-only use, run the
 command from a terminal and leave stdin open; Ctrl+C ends the bridge.
 
-The bridge sends `attach` itself. The first stdout line is the server's attach
-response, including `connection_id` and `session_id`. After that, write one raw
+The bridge sends `attach` itself with request ID `"arf-ipc-attach"`. The first
+stdout line is the server's attach response, including `connection_id` and
+`session_id`. After that, write one raw
 JSON-RPC request per line to stdin and read responses and events from stdout.
 The bridge relays these messages unchanged and flushes stdout after each line.
 Stdout is reserved for the protocol; diagnostics go to stderr. Match responses
@@ -874,9 +875,11 @@ Keep stdin open while awaiting replies or events. **Stdin EOF immediately ends
 the bridge**; piping a finite request with `echo` can therefore discard its
 response. Server disconnect, stdout write failure, and SIGINT/SIGTERM also end
 the bridge. Attach rejection uses the existing structured CLI error on stderr
-and exits with code 4. Server EOF and stdin EOF exit with code 0; transport
-errors exit with code 2, and session discovery errors with code 3. Bounded
-forwarding buffers apply back-pressure rather than terminating the bridge when
+and exits with code 4. Server EOF after a successful attach and stdin EOF exit
+with code 0. A disconnect before the attach response is received is a
+`TRANSPORT_ERROR` and exits with code 2, as do other transport errors. Session
+discovery errors exit with code 3. Bounded forwarding buffers apply
+back-pressure rather than terminating the bridge when
 full. If stdout is not read, the server may close the connection under its
 existing queue limits or 30-second write timeout. On server EOF, the bridge
 finishes writing buffered stdout before exiting; stdin EOF and signals still
