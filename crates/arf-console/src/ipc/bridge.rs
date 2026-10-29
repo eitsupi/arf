@@ -151,7 +151,10 @@ async fn run_bridge(socket_path: &str, subscribe: &[String]) -> i32 {
             error = stdout_error_rx.recv() => if let Some(error) = error {
                 client::exit_error(2, "OUTPUT_ERROR", &error, None, None);
             },
+            // Keep reading after a closed write side: the server may have
+            // refused attach and closed after writing its error response.
             error = socket_error_rx.recv(), if !socket_write_closed => match error {
+                Some(error) if is_closed_socket_error(&error) => socket_write_closed = true,
                 Some(error) => return transport_error(error),
                 None => socket_write_closed = true,
             },
