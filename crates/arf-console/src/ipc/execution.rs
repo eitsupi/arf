@@ -40,6 +40,7 @@ fn begin_execution_kind(
     visible: bool,
     emit_completion: bool,
 ) -> super::events::ExecutionId {
+    super::flush_console_output();
     let id = super::events::ExecutionId(NEXT_EXECUTION_ID.fetch_add(1, Ordering::Relaxed));
     CURRENT_EXECUTION.set(Some(ExecutionContext {
         id,
@@ -77,6 +78,7 @@ pub(crate) fn begin_handler_execution(
 }
 
 pub(crate) fn clear_execution() {
+    super::flush_console_output();
     CURRENT_EXECUTION.take();
 }
 
@@ -84,9 +86,26 @@ pub(crate) fn current_execution_id() -> Option<super::events::ExecutionId> {
     CURRENT_EXECUTION.get().map(|context| context.id)
 }
 
+/// Metadata used by the console observer; handler output is deliberately out
+/// of scope for the public console output stream.
+pub(super) fn console_output_context()
+-> Option<(super::events::ExecutionId, serde_json::Value, bool)> {
+    CURRENT_EXECUTION.with(|current| {
+        let context = current.get()?;
+        (context.kind == "user_code").then(|| {
+            (
+                context.id,
+                serde_json::to_value(context.origin).expect("execution origin serializes"),
+                context.visible,
+            )
+        })
+    })
+}
+
 /// Publish one completion and clear the active context. This must run on the
 /// R thread after all notifications produced by the evaluation were queued.
 pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
+    super::flush_console_output();
     let Some(context) = CURRENT_EXECUTION.take() else {
         return ExecutionStatus::Unknown;
     };

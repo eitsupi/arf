@@ -941,7 +941,7 @@ Events are never dropped silently. A connection that cannot keep up, or that may
 
 #### Execution completion
 
-Subscribe to `arf.execution_completed` (or `arf.*`) to observe completed user
+Subscribe to `arf.execution_completed` to observe completed user
 code in interactive and headless sessions:
 
 ```json
@@ -980,6 +980,40 @@ their own executions.
 Events published during an execution carry its ID in `execution` and have
 smaller `seq` values than its completion event. A reply timeout does not trigger
 completion: the event is published once, when the running user code finishes.
+
+#### Console output
+
+Subscribe to `arf.console_output` to receive R console output as user code runs:
+
+```sh
+arf ipc attach --pid 12345 --subscribe arf.console_output --subscribe arf.execution_completed
+```
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"seq":42,"topic":"arf.console_output","data":{"origin":3,"visible":false,"segments":[{"stream":"stdout","text":"Computing…"},{"stream":"stderr","text":"warning\n"}]},"execution":7}}
+```
+
+`execution` identifies the user-code execution. `origin` and `visible` have the
+same meanings as in the completion event, so each output event can be classified
+even when subscribing during an execution. `segments` preserves the order of
+stdout and stderr writes; adjacent segments for the same stream are combined.
+Output is batched and split into bounded events. Event boundaries need not match
+lines or ANSI escape sequences. Text preserves ANSI escapes and carriage returns.
+
+Output from terminal submissions, silent and visible `evaluate`, and `user_input`
+is included in interactive and headless sessions. Handler `call` output and output
+outside a user-code execution, such as startup messages, are excluded. Internal R
+evaluation during user code can inherit its execution context. Direct writes to
+OS file descriptors, including writes by subprocesses or native code, are outside
+this guarantee. Existing evaluation capture and terminal output remain available.
+
+On one connection, output events precede later R-published events and the
+execution's completion event. Receiving completion means all console output has
+arrived only if that connection subscribed to both topics throughout the whole
+execution and remained connected. Events and responses still have no relative
+arrival-order guarantee. `arf.*` subscribes to console output as well as completion
+events; subscribe explicitly to `arf.execution_completed` when only completion is
+needed. Slow subscribers follow the disconnection rules described above.
 
 #### Exposing and calling R handlers
 
@@ -1028,7 +1062,7 @@ R code running in the session can publish events to subscribed connections with 
 - `arf_publish_event(topic, data)` takes exactly two arguments. `topic` is a non-`NA` character string. `data` is any value that converts to JSON under the strict rules below, and `NULL` becomes JSON `null`. It returns `TRUE` when the event was queued on a running IPC server and `FALSE` when there is nowhere to publish it (no IPC server is running). `TRUE` is not a delivery guarantee: an event nobody is subscribed to is dropped.
 - `arf_api_version()` takes no arguments and returns `1L`.
 
-Publishing never waits: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` identifies the active user-code or handler execution, and is `null` when there is no active execution.
+Publishing does not wait for queue space or delivery: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Publishing can briefly acquire shared locks. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` identifies the active user-code or handler execution, and is `null` when there is no active execution.
 
 R values convert to JSON as follows: `NULL` is `null`; a length-1 logical, integer, double or character vector is a boolean, number or string; an unnamed list is an array; a named list is an object. Longer atomic vectors, `NA`, `NaN`, infinite numbers, objects with a `class` attribute (factors, dates and data frames included), duplicate or `NA` names, and every other type are errors. Wrap vectors in `as.list()` to send them as arrays.
 

@@ -56,8 +56,11 @@ mod tests;
 
 pub(crate) use bus::allocate_connection_id;
 pub use bus::{ConnectionId, EventBus, EventStream, Limits, SubscribeError};
-pub(crate) use current::publish_event;
+pub(crate) use current::Generation;
+pub(crate) use current::has_current_bus;
+pub(crate) use current::is_current_generation;
 pub(crate) use current::{clear_current_bus, install_current_bus};
+pub(crate) use current::{publish_event, publish_event_raw};
 pub use event::Event;
 pub use pattern::SubscriptionPattern;
 pub(crate) use r_publisher::install_r_event_publisher;

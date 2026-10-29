@@ -2,6 +2,7 @@
 
 mod approval;
 mod completion;
+mod console_output;
 mod expose;
 mod handlers;
 mod interrupt;

@@ -1,5 +1,5 @@
 use std::os::raw::{c_char, c_int};
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 
 use super::error_state::is_stderr_suppressed;
 use super::spinner::stop_spinner;
@@ -14,6 +14,8 @@ use super::spinner::stop_spinner;
 /// primitive is needed as long as this invariant holds. If multi-threaded
 /// access ever becomes possible, replace with `AtomicPtr` or similar.
 static mut WRITE_CONSOLE_CALLBACK: Option<fn(&str, bool)> = None;
+/// Independent observer called for console output before capture/reprex routing.
+static CONSOLE_OUTPUT_OBSERVER: OnceLock<fn(&str, bool)> = OnceLock::new();
 
 /// IPC capture state for buffering stdout/stderr during evaluate requests.
 struct IpcCaptureState {
@@ -119,6 +121,11 @@ pub(super) unsafe extern "C" fn r_write_console_ex(
     };
 
     let is_error = otype != 0;
+
+    // Observe decoded R output independently of the active capture callback.
+    if let Some(observer) = CONSOLE_OUTPUT_OBSERVER.get() {
+        observer(&s, is_error);
+    }
 
     // Check for custom callback first
     if let Some(callback) = unsafe { WRITE_CONSOLE_CALLBACK } {
@@ -336,6 +343,15 @@ pub fn set_write_console_callback(callback: fn(&str, bool)) {
     unsafe {
         WRITE_CONSOLE_CALLBACK = Some(callback);
     }
+}
+
+/// Install an independent observer for decoded R console output once.
+///
+/// The observer runs on R's main thread after stderr suppression and before
+/// capture, reprex, or terminal routing. It must not call into R.
+/// Later installations leave the original observer in place.
+pub fn set_console_output_observer(observer: fn(&str, bool)) {
+    let _ = CONSOLE_OUTPUT_OBSERVER.set(observer);
 }
 
 /// Clear the console write callback.

@@ -48,10 +48,10 @@ pub use sys::{
     process_r_events_protected, r_home_from_library_path, r_home_from_rhome_output, r_library_path,
     r_path_vars_from_wrapper, read_console_chunk_end, request_ipc_interrupt,
     reset_command_error_state, reset_console_generation, restore_stderr, run_r_mainloop,
-    set_headless_read_console_callback, set_ipc_execution_phase, set_r_auto_discovery_disabled,
-    set_r_interrupt_pending, set_read_console_callback, set_reprex_mode, set_spinner_color,
-    set_spinner_frames, set_write_console_callback, start_ipc_capture, start_spinner, stop_spinner,
-    suppress_stderr, take_ipc_interrupt_request,
+    set_console_output_observer, set_headless_read_console_callback, set_ipc_execution_phase,
+    set_r_auto_discovery_disabled, set_r_interrupt_pending, set_read_console_callback,
+    set_reprex_mode, set_spinner_color, set_spinner_frames, set_write_console_callback,
+    start_ipc_capture, start_spinner, stop_spinner, suppress_stderr, take_ipc_interrupt_request,
 };
 #[cfg(unix)]
 pub use sys::{
