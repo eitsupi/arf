@@ -580,6 +580,119 @@ arf ipc history | jq -r '.entries[].command'
 > running command can appear with a `null` exit status. The status stays `null`
 > when arf cannot determine a reliable result.
 
+### `arf ipc r-help search` and `arf ipc r-help show` — Search and Get R Help
+
+These methods search installed R help metadata and read compiled help databases
+from the server thread. They do not enter R, so they remain available while R
+is evaluating code or is in an alternate mode. Vignettes and demos are not
+included because rendering them requires R evaluation.
+
+```sh
+# Search topic names, aliases, and titles
+arf ipc r-help search --query linear --limit 20
+
+# Get a page; an ambiguous result contains candidates to choose from
+arf ipc r-help show mean
+arf ipc r-help show mean --package base
+
+# Resolve unqualified references relative to a package
+arf ipc r-help show lm --current-package stats
+```
+
+`r-help search` accepts `--query`, `--package` (exact package name), and
+`--limit` (default 50, maximum 200). Query matching uses the same fuzzy,
+smart-case search as the interactive help browser. It searches topic names,
+aliases, help keys, and `package::name`; titles also match at half weight, and
+results are ordered by match score. A corrupt or unreadable package index is
+skipped, while results from other packages remain available.
+Results contain `topics`, `truncated` (true when more matches were found than
+the requested limit permits), and the `library_paths` used; each topic includes
+its `help_key` when available, for fetching that exact search result. `r-help show`
+accepts a topic, optional `--package`, optional `--current-package`, and
+optional `--help-key` (which requires `--package`). An explicit `package` takes
+priority. If omitted, `current_package` is preferred; if that package has no
+match, all packages are searched. Within an explicit or current package,
+lookup uses the viewer's alias-first resolution, falling back to a database
+key. Across packages, one match returns a page; multiple matches return
+candidates instead of choosing one arbitrarily. The library-path order
+selects which installed copy of a given package is read, but does not select
+among different packages.
+
+The resolver does not reproduce R's `?topic` behavior: R resolves unqualified
+topics according to package attach order, while this method uses the explicit
+package priority above and returns candidates when multiple packages match.
+Candidates are sorted lexically by package, canonical topic, then help key.
+Cross-package metadata lookup can also return multiple rows from one package.
+Successful results include the `library_paths` used to resolve the request.
+Failures reading a selected package's help database or loading a selected page
+return internal errors. A missing or unreadable metadata index used only to
+look up a resolved page's title leaves `title` empty without hiding the page.
+With no explicit package, unrelated
+corrupt indexes are skipped during lookup; a topic present only in a skipped
+package can therefore appear not found. An empty
+cached library-path list returns `HELP_LIBRARY_PATHS_UNAVAILABLE` (`-32018`),
+distinct from `HELP_NOT_FOUND` (`-32017`), which means no matching topic.
+JSON-RPC errors do not include `library_paths`.
+
+```json
+{"jsonrpc":"2.0","id":3,"error":{"code":-32018,"message":"R help library paths are unavailable; the cached .libPaths() snapshot is empty"}}
+```
+
+JSON-RPC search request and response:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"r_help_search","params":{"query":"linear","package":"stats","limit":20}}
+```
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"topics":[{"package":"stats","topic":"lm","aliases":[],"help_key":"lm","title":"Fitting Linear Models"}],"truncated":false,"library_paths":["/usr/lib/R/library"]}}
+```
+
+JSON-RPC show request:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"r_help_show","params":{"topic":"lm","current_package":"stats"}}
+```
+
+A page result has `kind: "page"`, with `package`, `topic`, `title`, Markdown
+`content`, `content_type: "markdown"`, `entry_type: "help"`, and
+`library_paths`. An ambiguous result has `kind: "candidates"`, a `candidates`
+array with `package`, canonical `topic`, `help_key`, and `title`, plus
+`library_paths`. Use `package` and `help_key` from a candidate in a subsequent
+`r_help_show` request to fetch that exact entry. The request still requires
+`topic`; when `help_key` is supplied, exact-key lookup bypasses alias matching.
+For candidates without a `help_key`, `package` and `topic` use alias resolution
+and cannot guarantee selection of a particular metadata row.
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"r_help_show","params":{"topic":"shared","package":"alpha","help_key":"shared-a"}}
+```
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{"kind":"page","package":"stats","topic":"lm","title":"Fitting Linear Models","content":"# Fitting Linear Models\n\n...","content_type":"markdown","entry_type":"help","library_paths":["/usr/lib/R/library"]}}
+```
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{"kind":"candidates","candidates":[{"package":"alpha","topic":"shared","help_key":"shared-a","title":"Shared topic"},{"package":"beta","topic":"shared","help_key":"shared-b","title":"Shared topic"}],"library_paths":["/usr/lib/R/library"]}}
+```
+
+Markdown help links remain in `x-r-help:` form. `x-r-help:package/topic` names
+both package and topic; `x-r-help:/topic` leaves the package unqualified. The
+first slash separates package from topic; further slashes belong to the topic.
+Topic text is opaque: `%`, `?`, and `#` are literal topic characters, and
+percent escapes are not decoded. Clients can pass the topic to `r_help_show`
+and the package part as `package` when present. For an unqualified link, pass
+the origin page's package as `current_package`.
+
+The server uses a cached `.libPaths()` snapshot. arf captures it at startup
+and, in an interactive session, again when `:help` is opened. Packages in those
+library directories are listed on every request, so packages installed into an
+existing library after startup are found. Changes to `.libPaths()` itself are
+not reflected until the snapshot is captured again; in `arf headless` that
+means until the session restarts. R also leaves a user library
+(`R_LIBS_USER`) out of `.libPaths()` when the directory does not exist at
+startup, so a user library created later during the session is not searched.
+
 ### `arf ipc shutdown` — Shut Down Headless Session
 
 Requests shutdown of a headless session. The session removes its socket, PID
@@ -1102,6 +1215,8 @@ The check detects the interface for feature detection only; it is not authentica
 | -32003 | User Is Typing | User is typing in the REPL (interactive mode only) |
 | -32004 | Incomplete Input | R code is syntactically incomplete |
 | -32007 | Timeout | Server stopped waiting for a response; `data.timeout_ms` gives the applied timeout, and an execution that already started continues |
+| -32017 | Help Not Found | No installed help page matches the requested topic |
+| -32018 | Help Library Paths Unavailable | The cached `.libPaths()` snapshot is empty |
 
 ## Troubleshooting
 

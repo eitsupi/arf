@@ -91,6 +91,12 @@ pub(crate) fn run_headless(
             .map_err(|error| anyhow::anyhow!("Could not expose IPC handlers: {error}"))?;
     }
 
+    // Capture startup library paths before the listener accepts static help
+    // queries, after profiles and explicit handler setup have finished.
+    if let Err(error) = arf_harp::lib_paths::refresh_lib_paths_from_r() {
+        log::warn!("Could not populate the R library path snapshot: {error}");
+    }
+
     // Set up shutdown flag (shared between Ctrl+C handler and IPC shutdown method)
     let shutdown = Arc::new(AtomicBool::new(false));
     ipc::set_headless_shutdown(shutdown.clone());
