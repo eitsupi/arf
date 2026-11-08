@@ -173,7 +173,11 @@ pub(crate) fn run_silent_eval_from(
     // SAFETY: evaluate_with_capture enters R only through the protected harp
     // evaluation helper; this guard remains outside its top-level callbacks.
     let _interrupt_guard = unsafe { arf_libr::ConsoleEvaluationInterruptGuard::new() };
-    let captured = capture::evaluate_with_capture(code);
+    let captured = {
+        // Silent evaluation has no console to answer input requests.
+        let _input_block = arf_libr::ConsoleInputBlockGuard::new();
+        capture::evaluate_with_capture(code)
+    };
     let mut result = captured.result;
     r_is_at_prompt().store(true, Ordering::Release);
     result.execution_id = Some(execution_id);

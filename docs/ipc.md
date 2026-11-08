@@ -214,7 +214,7 @@ Error code strings:
 | `SESSION_NOT_FOUND` | 3 | No session with the specified PID, or no sessions at all |
 | `SESSION_AMBIGUOUS` | 3 | Multiple sessions running and `--pid` not specified |
 | `R_BUSY` | 4 | R is executing code |
-| `R_NOT_AT_PROMPT` | 4 | R is in browser/menu mode |
+| `R_NOT_AT_PROMPT` | 4 | R is waiting for console input (browser, menu, etc.) or the console is in an alternate mode; finish it in the arf terminal |
 | `INPUT_ALREADY_PENDING` | 4 | Another IPC request is already queued |
 | `USER_IS_TYPING` | 4 | User is typing in the REPL (see `data` fields below) |
 | `INCOMPLETE_INPUT` | 4 | R code is syntactically incomplete and would enter the continuation prompt |
@@ -308,6 +308,13 @@ expression and callback semantics described under [Headless console
 limitations](#headless-console-limitations). Visible `eval` captures autoprint
 and callback output in `stdout` and evaluation errors in `stderr`, returning
 `null` for both `value` and `error`.
+
+Silent eval has no console to answer input requests. In both session types,
+console reads that silent code triggers through arf, such as a `browser()`
+prompt, `readline()`, a menu, or arf's password prompt, receive EOF, so
+`browser()` does not stop and evaluation continues. How each function handles
+EOF is up to R. To debug interactively, run the code with `--visible` in an
+interactive session, where the person at the terminal answers the prompt.
 
 ```sh
 # Basic evaluation

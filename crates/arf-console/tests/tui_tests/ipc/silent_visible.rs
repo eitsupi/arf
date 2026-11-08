@@ -130,6 +130,63 @@ fn silent_ipc_evaluation_captures_output_without_printing_in_the_repl() -> Resul
 }
 
 #[test]
+fn silent_ipc_console_reads_receive_eof_and_the_repl_recovers() -> Result<()> {
+    run_case(
+        "ipc-silent-console-eof",
+        &["--with-ipc", "--ipc-eval-unrestricted"],
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let checkpoint = terminal.checkpoint()?;
+            let response = terminal
+                .start_ipc(&[
+                    "eval",
+                    r#"f <- function() { browser(); "SILENT_BROWSER_CONTINUED" }; paste0(f(), "<", readline("SILENT_READLINE? "), ">")"#,
+                    "--timeout",
+                    "10000",
+                ])?
+                .finish()?;
+            ensure!(
+                response["error"].is_null(),
+                "silent console reads produced an error: {response}"
+            );
+            ensure!(
+                response["value"] == r#"[1] "SILENT_BROWSER_CONTINUED<>""#,
+                "browser() should continue and readline() should read EOF: {response}"
+            );
+
+            // arf's Unix askpass handler reads the terminal directly instead of
+            // going through the REPL callback, so it needs the same EOF.
+            #[cfg(unix)]
+            {
+                let response = terminal
+                    .start_ipc(&[
+                        "eval",
+                        r#"is.null(getOption("askpass")("SILENT_ASKPASS: "))"#,
+                        "--timeout",
+                        "10000",
+                    ])?
+                    .finish()?;
+                ensure!(
+                    response["error"].is_null() && response["value"] == "[1] TRUE",
+                    "the askpass prompt should read EOF: {response}"
+                );
+            }
+
+            // The editor must still own the terminal after the nested reads.
+            terminal.submit("6 * 7", "[1] 42", PROMPT)?;
+            let visible_output = terminal.output_since(checkpoint)?;
+            for marker in ["Browse[", "SILENT_READLINE?", "SILENT_ASKPASS:"] {
+                ensure!(
+                    !visible_output.contains(marker),
+                    "silent console read reached the terminal: {marker}"
+                );
+            }
+            Ok(())
+        },
+    )
+}
+
+#[test]
 fn visible_ipc_evaluation_waits_for_approval_and_repl_completion() -> Result<()> {
     run_case("ipc-visible", &["--with-ipc"], |terminal| {
         let request = terminal.start_ipc(&[

@@ -6,6 +6,11 @@
 
 - **Experimental:** `arf ipc r-help search` searches installed R help topics and `arf ipc r-help show` retrieves Markdown pages without evaluating R, including while R is busy.
 
+### Fixed
+
+- On Unix, silent `arf ipc eval` no longer waits for a password typed in the terminal when R code reaches arf's password prompt; the prompt reads EOF like other console input during silent evaluation.
+- The `R_NOT_AT_PROMPT` hint from `arf ipc` no longer suggests `arf ipc send "Q"`, which is rejected in that state, and instead points to the arf terminal.
+
 ## [0.7.0-beta.2] - 2026-10-29
 
 ### Added
