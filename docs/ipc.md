@@ -313,8 +313,8 @@ Silent eval has no console to answer input requests. In both session types,
 console reads that silent code triggers through arf, such as a `browser()`
 prompt, `readline()`, a menu, or arf's password prompt, receive EOF, so
 `browser()` does not stop and evaluation continues. How each function handles
-EOF is up to R. To debug interactively, run the code with `--visible` in an interactive session, where
-the person at the terminal answers the prompt.
+EOF is up to R. To debug interactively, run the code with `--visible` in an
+interactive session, where the person at the terminal answers the prompt.
 
 ```sh
 # Basic evaluation
