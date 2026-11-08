@@ -32,37 +32,6 @@ thread_local! {
     /// The R thread executes one top-level command at a time. Keep its context
     /// installed across ReadConsole callbacks so notifications inherit the ID.
     static CURRENT_EXECUTION: std::cell::Cell<Option<ExecutionContext>> = const { std::cell::Cell::new(None) };
-
-    /// Whether the R thread is inside a silent IPC evaluation.
-    static SILENT_EVAL_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Whether a silent IPC evaluation is running on the R thread.
-///
-/// Silent evaluation has no console to answer input requests, so console
-/// reads made while it runs (`browser()`, `readline()`, menus) must receive
-/// EOF instead of reaching the terminal editor.
-pub(crate) fn silent_eval_active() -> bool {
-    SILENT_EVAL_ACTIVE.with(std::cell::Cell::get)
-}
-
-/// Marks the R thread as inside a silent evaluation until dropped.
-struct SilentEvalGuard {
-    previous: bool,
-}
-
-impl SilentEvalGuard {
-    fn new() -> Self {
-        Self {
-            previous: SILENT_EVAL_ACTIVE.with(|active| active.replace(true)),
-        }
-    }
-}
-
-impl Drop for SilentEvalGuard {
-    fn drop(&mut self) {
-        SILENT_EVAL_ACTIVE.with(|active| active.set(self.previous));
-    }
 }
 
 fn begin_execution_kind(
@@ -205,7 +174,8 @@ pub(crate) fn run_silent_eval_from(
     // evaluation helper; this guard remains outside its top-level callbacks.
     let _interrupt_guard = unsafe { arf_libr::ConsoleEvaluationInterruptGuard::new() };
     let captured = {
-        let _silent_guard = SilentEvalGuard::new();
+        // Silent evaluation has no console to answer input requests.
+        let _input_block = arf_libr::ConsoleInputBlockGuard::new();
         capture::evaluate_with_capture(code)
     };
     let mut result = captured.result;
@@ -301,27 +271,12 @@ fn has_user_code(code: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SilentEvalGuard, has_user_code, silent_eval_active};
+    use super::has_user_code;
 
     #[test]
     fn blank_and_comment_only_input_does_not_emit_completion() {
         assert!(!has_user_code(" \t\n"));
         assert!(!has_user_code("# only a comment\n  # another comment\n"));
         assert!(has_user_code("# leading comment\nx <- 1"));
-    }
-
-    #[test]
-    fn silent_eval_guard_restores_the_previous_state() {
-        assert!(!silent_eval_active());
-        {
-            let _outer = SilentEvalGuard::new();
-            assert!(silent_eval_active());
-            {
-                let _inner = SilentEvalGuard::new();
-                assert!(silent_eval_active());
-            }
-            assert!(silent_eval_active());
-        }
-        assert!(!silent_eval_active());
     }
 }

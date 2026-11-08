@@ -251,6 +251,45 @@ struct PendingConsoleInput {
 static PENDING_INPUT: std::sync::Mutex<Vec<PendingConsoleInput>> =
     std::sync::Mutex::new(Vec::new());
 
+thread_local! {
+    /// Whether console input is blocked on the R thread.
+    static CONSOLE_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Blocks console input on the R thread until dropped.
+///
+/// While a guard is alive, every ReadConsole call returns EOF before any input
+/// source is consulted, including the frontend callbacks and the askpass
+/// terminal read. Use it for evaluations that have no console to answer
+/// input requests, such as silent IPC evaluation.
+pub struct ConsoleInputBlockGuard {
+    previous: bool,
+}
+
+impl ConsoleInputBlockGuard {
+    pub fn new() -> Self {
+        Self {
+            previous: CONSOLE_INPUT_BLOCKED.with(|blocked| blocked.replace(true)),
+        }
+    }
+}
+
+impl Default for ConsoleInputBlockGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ConsoleInputBlockGuard {
+    fn drop(&mut self) {
+        CONSOLE_INPUT_BLOCKED.with(|blocked| blocked.set(self.previous));
+    }
+}
+
+fn console_input_blocked() -> bool {
+    CONSOLE_INPUT_BLOCKED.with(std::cell::Cell::get)
+}
+
 /// R's ReadConsole callback.
 ///
 /// # Safety
@@ -338,6 +377,13 @@ unsafe fn r_read_console_inner(
     // the earliest safe point by restoring any pending termios state.
     #[cfg(unix)]
     recover_pending_termios();
+
+    // Blocked input gets EOF before any input source, including the askpass
+    // terminal read below, can wait for or consume input.
+    if console_input_blocked() {
+        log::debug!("r_read_console: console input is blocked, returning EOF");
+        return 0;
+    }
 
     // Read the prompt options once per invocation and share the resulting
     // metadata with both the reprex bookkeeping and high-level callback.
@@ -681,5 +727,20 @@ mod tests {
 
         assert!(!browse_main.prompt_options_are_valid);
         assert!(!browse_continue.prompt_options_are_valid);
+    }
+
+    #[test]
+    fn console_input_block_guard_restores_the_previous_state() {
+        assert!(!console_input_blocked());
+        {
+            let _outer = ConsoleInputBlockGuard::new();
+            assert!(console_input_blocked());
+            {
+                let _inner = ConsoleInputBlockGuard::new();
+                assert!(console_input_blocked());
+            }
+            assert!(console_input_blocked());
+        }
+        assert!(!console_input_blocked());
     }
 }
