@@ -101,8 +101,10 @@ pub(super) fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) 
         R_NOT_AT_PROMPT => (
             "R_NOT_AT_PROMPT",
             Some(
-                "R is in browser/debug mode or a menu. If triggered by \
-                 browser(), use 'arf ipc send \"Q\"' to exit the debugger.",
+                "R is waiting for console input (for example browser(), a \
+                 menu, or readline()), or the console is in shell or a \
+                 browser mode. Finish or cancel it in the arf terminal; at a \
+                 Browse[n]> prompt, Q exits the debugger.",
             ),
         ),
         INPUT_ALREADY_PENDING => (

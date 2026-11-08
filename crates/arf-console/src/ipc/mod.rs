@@ -52,7 +52,7 @@ pub use approval::{
 pub(crate) use events::install_r_event_publisher;
 pub(crate) use execution::{
     accept_user_input, begin_terminal_execution, current_execution_id, finish_execution,
-    run_silent_eval_from,
+    run_silent_eval_from, silent_eval_active,
 };
 pub use headless::{headless_read_console, set_headless_history};
 pub use history_query::set_history_store;

@@ -30,6 +30,13 @@ pub(super) fn read_console_callback(
     r_prompt: &str,
     prompt_info: arf_libr::ReadConsolePromptInfo,
 ) -> ReadConsoleResult {
+    // A silent IPC evaluation runs inside an earlier ReadConsole call and has
+    // no console to answer input requests. Give its nested reads (browser(),
+    // readline(), menus) EOF before touching the REPL state or the editor.
+    if crate::ipc::silent_eval_active() {
+        return ReadConsoleResult::Eof;
+    }
+
     REPL_STATE.with(|state| {
         // Use try_borrow_mut to detect re-entrant calls.
         // This is a defensive measure in case R unexpectedly calls ReadConsole
