@@ -346,6 +346,7 @@ impl CliSession {
             restart: false,
             timeouts: defaults.timeouts,
             recording: AutomaticRecording::default(),
+            style: defaults.style,
         })?;
         Ok(Self { session })
     }

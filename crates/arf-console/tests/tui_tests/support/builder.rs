@@ -296,6 +296,7 @@ impl TerminalBuilder {
                 mode: AutomaticRecordingMode::Always,
                 directory: Some(terminal.artifacts.clone()),
             },
+            style: defaults.style,
         })?;
         terminal.pid = opened.shell_pid;
         Ok(terminal)
