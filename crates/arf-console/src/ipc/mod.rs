@@ -33,6 +33,7 @@ mod events;
 mod execution;
 pub mod handlers;
 mod headless;
+mod help_query;
 mod history_query;
 mod pending;
 pub mod policy;

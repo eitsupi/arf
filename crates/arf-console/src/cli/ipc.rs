@@ -230,4 +230,71 @@ Examples:
         #[arg(long)]
         pid: Option<u32>,
     },
+    /// Search and retrieve installed R help pages
+    #[command(subcommand)]
+    RHelp(RHelpAction),
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum RHelpAction {
+    /// Search installed R help topics without evaluating R
+    #[command(after_long_help = "\
+Examples:
+  Search topics and aliases:
+    $ arf ipc r-help search --query linear
+
+  List topics from one package:
+    $ arf ipc r-help search --package stats --limit 20")]
+    Search {
+        /// Fuzzy search topic, aliases, help key, package::name, and title (smart case)
+        #[arg(long)]
+        query: Option<String>,
+        /// Restrict results to this exact package name
+        #[arg(long)]
+        package: Option<String>,
+        /// Maximum number of results (default 50, maximum 200)
+        #[arg(long, default_value = "50", value_parser = parse_help_topics_limit)]
+        limit: usize,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
+    /// Get one R help page as Markdown without evaluating R
+    #[command(after_long_help = "\
+Examples:
+  Get a topic:
+    $ arf ipc r-help show mean
+
+  Select a package when the topic is ambiguous:
+    $ arf ipc r-help show mean --package base
+
+  Resolve unqualified links relative to a package:
+    $ arf ipc r-help show lm --current-package stats")]
+    Show {
+        /// Help topic name
+        topic: String,
+        /// Restrict lookup to this exact package name
+        #[arg(long)]
+        package: Option<String>,
+        /// Prefer this package for unqualified topic references
+        #[arg(long)]
+        current_package: Option<String>,
+        /// Select a candidate's help database key (requires --package)
+        #[arg(long, requires = "package")]
+        help_key: Option<String>,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
+}
+
+fn parse_help_topics_limit(value: &str) -> Result<usize, String> {
+    let limit = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid help topic limit: {error}"))?;
+    if (1..=200).contains(&limit) {
+        Ok(limit)
+    } else {
+        Err("help topic limit must be between 1 and 200".to_owned())
+    }
 }
