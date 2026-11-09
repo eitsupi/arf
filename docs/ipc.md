@@ -791,18 +791,18 @@ When both a human and an external tool use the same session, arf prevents confli
 
 ### Headless is not a security boundary
 
-IPC requests run R code in the arf process itself, with the same user
-privileges as arf. This applies to headless and interactive sessions alike:
-nothing isolates R from the files, network, environment, or other processes
-that user can reach. The silent eval allowlist described under
+IPC requests run R code in the arf process, with arf's user privileges. This
+applies to headless and interactive sessions alike: nothing isolates R from the
+files, network, environment, or other processes that user can reach. The silent
+eval allowlist described under
 [`arf ipc eval`](#arf-ipc-eval--evaluate-r-code) only restricts which calls
 silent evaluation accepts; it is not a sandbox, and visible evaluation, `send`,
 and exposed handlers are not restricted by it.
 
-If code from an untrusted source (for example, an AI agent you do not fully
-trust) must be isolated, run the whole `arf headless` process inside an
-external sandbox such as a container or virtual machine. The socket and file
-permissions below only keep other users from connecting to your session.
+If code from an untrusted source must be isolated, run the whole `arf headless`
+process inside an external sandbox such as a container or virtual machine. The
+socket and file permissions below only keep other users from connecting to
+your session.
 
 ### Unix (Linux/macOS)
 
