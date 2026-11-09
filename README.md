@@ -292,6 +292,9 @@ arf ipc session | jq '.r.version'
 arf ipc shutdown
 ```
 
+> [!IMPORTANT]
+> Headless mode is [not a sandbox](docs/ipc.md#headless-is-not-a-security-boundary); IPC code runs with your user privileges.
+
 See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
 ## Experimental Features
