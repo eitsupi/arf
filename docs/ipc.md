@@ -713,6 +713,11 @@ arf ipc shutdown --pid 12345
 
 **Output format:** JSON object with `accepted` (bool). Example: `{"accepted": true}`
 
+`accepted: true` means the request was accepted, not that shutdown has
+finished. The session removes its files after responding, so a client that
+needs a clean exit should wait for the process to exit instead of killing it
+immediately; killing it early can leave the socket and session file behind.
+
 ### `arf ipc interrupt` — Interrupt an IPC Evaluation
 
 Request interruption of the active IPC-originated user-code evaluation in a
@@ -783,6 +788,21 @@ When both a human and an external tool use the same session, arf prevents confli
 - `list` reads local session files and does not connect to any server, so it always works regardless of R state
 
 ## Transport & Security
+
+### Headless is not a security boundary
+
+IPC requests run R code in the arf process itself, with the same user
+privileges as arf. This applies to headless and interactive sessions alike:
+nothing isolates R from the files, network, environment, or other processes
+that user can reach. The silent eval allowlist described under
+[`arf ipc eval`](#arf-ipc-eval--evaluate-r-code) only restricts which calls
+silent evaluation accepts; it is not a sandbox, and visible evaluation, `send`,
+and exposed handlers are not restricted by it.
+
+If code from an untrusted source (for example, an AI agent you do not fully
+trust) must be isolated, run the whole `arf headless` process inside an
+external sandbox such as a container or virtual machine. The socket and file
+permissions below only keep other users from connecting to your session.
 
 ### Unix (Linux/macOS)
 
@@ -876,6 +896,8 @@ Connection: close
 | `interrupt` | `execution_id` (int, optional) | Request interruption of the active IPC user-code execution |
 | `session` | *(none)* | Get session information |
 | `history` | `limit` (int, default 50), `all_sessions` (bool, default false), `cwd` (string, optional), `grep` (string, optional), `since` (string, optional) | Query command history |
+| `r_help_search` | `query` (string, optional), `package` (string, optional), `limit` (int, default 50, maximum 200) | Search installed R help topics without evaluating R |
+| `r_help_show` | `topic` (string), `package` (string, optional), `current_package` (string, optional), `help_key` (string, optional; requires `package`) | Get an R help page as Markdown without evaluating R |
 | `shutdown` | *(none)* | Shut down the session (headless mode only; returns an error in interactive mode) |
 | `attach` | `client` (object, optional), `subscribe` (array of patterns, optional), `protocol` (int, optional) | Turn the connection into a [long-lived connection](#long-lived-connections) (raw newline-delimited JSON only) |
 | `subscribe` | `patterns` (array of strings) | Long-lived connections only: add event subscriptions |
