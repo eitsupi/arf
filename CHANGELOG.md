@@ -2,16 +2,7 @@
 
 ## [Unreleased]
 
-### Added
-
-- **Experimental:** `arf ipc r-help search` searches installed R help topics and `arf ipc r-help show` retrieves Markdown pages without evaluating R, including while R is busy.
-
-### Fixed
-
-- On Unix, silent `arf ipc eval` no longer waits for a password typed in the terminal when R code reaches arf's password prompt; the prompt reads EOF like other console input during silent evaluation.
-- The `R_NOT_AT_PROMPT` hint from `arf ipc` no longer suggests `arf ipc send "Q"`, which is rejected in that state, and instead points to the arf terminal.
-
-## [0.7.0-beta.2] - 2026-10-29
+## [0.7.0] - 2026-11-09
 
 ### Added
 
@@ -23,6 +14,7 @@
   - Subscribers receive `arf.console_output` with R stdout and stderr from terminal and IPC user code, including execution IDs and origin metadata, before the matching completion event. Subscribing to `arf.*` includes console output; subscribe to `arf.execution_completed` explicitly if only completion is needed (#497).
   - Sessions can expose named R functions ("handlers") for IPC clients to call with JSON arguments, with `--ipc-expose` at startup or later with `:ipc expose` after the user confirms. Handlers are not subject to the code evaluation policy, so expose only functions that validate their arguments.
 - **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive (#489).
+- **Experimental:** `arf ipc r-help search` searches installed R help topics and `arf ipc r-help show` retrieves Markdown pages without evaluating R, including while R is busy (#499).
 - **Experimental:** IPC `evaluate` responses include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations (#494).
 - **Experimental:** arf can start R from a Pixi environment or a rig project (#407, #411, #412, #419, #420, #423).
   - `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
@@ -40,19 +32,19 @@
   - macOS and explicit history directories (`--history-dir`, `ARF_HISTORY_DIR`, `history.mode = { dir = ... }`) are not affected.
 - **Breaking:** `arf -e` and `arf -f` now exit with status 1 when R code fails to parse or raises an error, as Rscript does. Previously they printed the error and exited with status 0 (#422).
 - **Breaking:** `--r-home` and `--with-r-version` now take precedence over `ARF_R_HOME` and `ARF_R_VERSION`, and setting both environment variables without either option is an error. Unset one of them or pass the option instead (#408).
-- **Breaking:** `arf headless --json` now reports only `state` in `r_source_override`; selection details remain available in `r_source_selection` (#476).
-- `:switch` now replaces earlier R version and provider options instead of adding to them, and the new session applies rig project activation afresh (#417).
-- R source overrides now try later entries when rig is unavailable, and show a single notice if all of them fail (#407).
-- Checking an R installation's home directory during startup and `arf r resolve` now times out instead of waiting indefinitely (#407).
-- The interactive help browser stays responsive while searching large help indexes (#404).
+- **Experimental/Breaking:** `experimental.r_source_overrides` entries use the `provider` key instead of `type`. Rename `type` to `provider` in your configuration (#409).
+- **Experimental/Breaking:** `arf headless --json` now reports only `state` in `r_source_override`. Read selection details from `r_source_selection` and the running R version from `r_version` (#476).
 - **Experimental/Breaking:** Headless IPC `send` and `eval --visible` now run code through R's normal REPL, so task callbacks (`addTaskCallback()`), autoprinting, and `.Last.value` behave as in interactive R (#450).
   - Visible `eval` responses leave `value` and `error` null; printed output appears in `stdout` and errors in `stderr`. Use silent `eval` to get a value.
   - `send` returns an `accepted` acknowledgment instead of reporting evaluation success. Subscribe to `arf.execution_completed` to learn when it finishes.
   - `readline()`, menus, `browser()`, and other nested console reads receive EOF instead of consuming further IPC requests.
   - The session stops with a diagnostic if the main and continuation prompt options are not distinct, non-empty strings or resemble `browser()` prompts. `--no-echo` is unsupported.
-- **Experimental/Breaking:** Headless IPC history records every code request, including silent `evaluate`. Rows appear when execution begins and get their exit status once it is known. Interactive history still records only visible `send` and `eval --visible` (#451).
+- **Experimental/Breaking:** Headless IPC history records each non-whitespace code request when execution begins, including silent `evaluate`, and adds its exit status once known. Interactive history still records only visible `send` and `eval --visible` (#451).
 - **Experimental/Breaking:** IPC now rejects code containing a NUL character with an error in both interactive and headless sessions (#451).
-- **Experimental/Breaking:** `experimental.r_source_overrides` entries use the `provider` key instead of `type`. Rename `type` to `provider` in your configuration (#409).
+- `:switch` now replaces earlier R version and provider options instead of adding to them, and the new session applies rig project activation afresh (#417).
+- R source overrides now try later entries when rig is unavailable, and show a single notice if all of them fail (#407).
+- Checking an R installation's home directory during startup and `arf r resolve` now times out instead of waiting indefinitely (#407).
+- The interactive help browser stays responsive while searching large help indexes (#404).
 
 ### Fixed
 
@@ -63,6 +55,8 @@
 - After changing directories, `:restart` no longer keeps stale R directory paths from the previous R installation (#421).
 - The help and history browsers show their header row again instead of scrolling it off the screen (#433).
 - Ctrl+C during `readline()`, `menu()`, or `browser()` now follows R's interrupt behavior (#478).
+- **Experimental:** On Unix, password prompts during silent `arf ipc eval` receive EOF instead of waiting for terminal input (#506).
+- **Experimental:** The `R_NOT_AT_PROMPT` hint from `arf ipc` now points to the arf terminal instead of suggesting `arf ipc send "Q"`, which is rejected in that state (#506).
 - **Experimental:** IPC response timeouts now return `TIMEOUT` (`-32007`) with the applied `timeout_ms`, allowing clients to distinguish them from internal errors. Evaluation timeouts must be positive and do not interrupt R execution (#495).
 - **Experimental:** Unix IPC sessions no longer delete a different file or socket that replaced theirs at the same path when they exit (#477).
 - **Experimental:** On Windows, an IPC `send` approval prompt shown right after pressing Enter is no longer declined automatically (#429).
