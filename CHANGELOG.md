@@ -11,14 +11,14 @@
   - `arf ipc attach` bridges such a connection over stdin/stdout, with optional event subscriptions. Closing stdin ends the bridge while leaving the R session running (#496).
   - R code can publish its own events with `arf_publish_event`.
   - Subscribers receive `arf.execution_completed` when terminal input or IPC user code finishes. Responses include an execution ID that matches it.
-  - Subscribers receive `arf.console_output` with R stdout and stderr from terminal and IPC user code, including execution IDs and origin metadata, before the matching completion event. Subscribing to `arf.*` includes console output; subscribe to `arf.execution_completed` explicitly if only completion is needed (#497).
+  - Subscribers receive R stdout and stderr through `arf.console_output`, followed by the matching completion event (#497).
   - Sessions can expose named R functions ("handlers") for IPC clients to call with JSON arguments, with `--ipc-expose` at startup or later with `:ipc expose` after the user confirms. Handlers are not subject to the code evaluation policy, so expose only functions that validate their arguments.
 - **Experimental:** `arf ipc interrupt [--pid] [--execution-id]` and the JSON-RPC `interrupt` method can request interruption of an active IPC evaluation while keeping the R session alive (#489).
 - **Experimental:** `arf ipc r-help search` searches installed R help topics and `arf ipc r-help show` retrieves Markdown pages without evaluating R, including while R is busy (#499).
 - **Experimental:** IPC `evaluate` responses include `status` (`ok`, `error`, `interrupted`, or `unknown`), matching the execution completion event so clients can detect errors in visible evaluations (#494).
 - **Experimental:** arf can start R from a Pixi environment or a rig project (#407, #411, #412, #419, #420, #423).
   - `{ provider = "pixi" }` in `experimental.r_source_overrides` uses R from the active Pixi environment, such as under `pixi run arf`, without requiring rig (#407).
-  - `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420). With rig 0.11.0, `:switch` to another R minor version can leave an incompatible project library active ([rig#450](https://github.com/r-lib/rig/issues/450)); use a rig release with the fix and run `rig proj sync` first.
+  - `{ provider = "rig-project" }` uses R from a synchronized `rig proj` project in the current directory (#419, #420).
   - `--r-provider` and `ARF_R_PROVIDER` select `pixi` or `rig-project` explicitly. Unlike configured overrides, an unavailable provider is an error rather than a fallback (#411, #420).
   - `arf r resolve` and `arf headless --json` report the selected provider, where it was requested, and its details; failed explicit provider requests include a `reason_code` (#412, #423).
 - **Experimental:** The `history_runtime` object in `arf headless --json` output includes a `source` field reporting where the history directory came from (`default`, `legacy_default`, `explicit`, or `volatile`) (#455).
