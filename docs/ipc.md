@@ -800,9 +800,9 @@ silent evaluation accepts; it is not a sandbox, and visible evaluation, `send`,
 and exposed handlers are not restricted by it.
 
 If code from an untrusted source must be isolated, run the whole `arf headless`
-process inside an external sandbox such as a container or virtual machine. The
-socket and file permissions below only keep other users from connecting to
-your session.
+process inside an external sandbox such as a container or virtual machine. On
+Unix, the socket and file permissions below keep other users from connecting
+to your session; any process running as the same user can still connect.
 
 ### Unix (Linux/macOS)
 
