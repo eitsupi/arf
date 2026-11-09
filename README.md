@@ -293,7 +293,7 @@ arf ipc shutdown
 ```
 
 > [!IMPORTANT]
-> Headless mode is not a sandbox. Code sent over IPC runs in the arf process with your user privileges. If the code comes from a source you do not trust, run arf inside an external sandbox such as a container. See [Headless is not a security boundary](docs/ipc.md#headless-is-not-a-security-boundary).
+> Headless mode is [not a sandbox](docs/ipc.md#headless-is-not-a-security-boundary); IPC code runs with your user privileges.
 
 See the full [IPC & Headless Mode Guide](docs/ipc.md) for details.
 
