@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Air CLI
-        uses: posit-dev/setup-air@cf390573ff4fe0f198f35df3a642b1409328d859 # v1
+        uses: posit-dev/setup-air@fd20dd239848b9d807848a7ab92265cf197de694 # v1
       - name: Install R
         uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
