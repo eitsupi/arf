@@ -42,6 +42,7 @@ pub(crate) struct EvalPayload {
 /// If the evaluation raises an R error, `R_ToplevelExec` catches it and
 /// `result` stays `None`.
 pub(crate) unsafe extern "C-unwind" fn eval_callback(payload: *mut std::ffi::c_void) {
+    arf_libr::begin_ipc_protected_evaluation();
     let data = unsafe { &mut *(payload as *mut EvalPayload) };
     let lib = match r_library() {
         Ok(lib) => lib,
@@ -62,6 +63,7 @@ unsafe extern "C-unwind" fn top_level_trampoline<F, T>(data: *mut std::ffi::c_vo
 where
     F: FnOnce() -> T,
 {
+    arf_libr::begin_ipc_protected_evaluation();
     // SAFETY: `data` points to the payload owned by `top_level_exec`, which
     // outlives the `R_ToplevelExec` call.
     let payload = unsafe { &mut *(data as *mut TopLevelPayload<F, T>) };
@@ -109,6 +111,7 @@ where
             &mut payload as *mut TopLevelPayload<F, T> as *mut std::ffi::c_void,
         )
     };
+    arf_libr::finish_ipc_protected_evaluation();
     match (completed, payload.result) {
         (0, _) | (_, None) => Err(HarpError::RError(arf_libr::RError::EvalError(
             "R signalled an error or was interrupted".to_string(),

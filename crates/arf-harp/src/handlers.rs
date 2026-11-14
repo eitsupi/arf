@@ -30,9 +30,9 @@ const CALL_WRAPPER: &str = r#"function(fun, args) {
       }
     }, error = function(ignored) fallback)
   }
-  base::tryCatch(
+  base::suspendInterrupts(base::tryCatch(
     base::withCallingHandlers(
-      base::list(TRUE, fun(args)),
+      base::list(TRUE, base::allowInterrupts(fun(args))),
       warning = function(w) {
         if (base::getOption("warn") == 0L) {
           base::message("Warning: ", condition_message(w, "R warning"))
@@ -44,7 +44,7 @@ const CALL_WRAPPER: &str = r#"function(fun, args) {
                                    base::as.list(base::class(e)), FALSE),
     interrupt = function(e) base::list(FALSE, condition_message(e, "Interrupted"),
                                        base::as.list(base::class(e)), TRUE)
-  )
+  ))
 }"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,7 @@ pub struct HandlerError {
     pub class: Vec<String>,
     pub stdout: String,
     pub stderr: String,
+    pub deadline_requested: bool,
 }
 
 impl HandlerError {
@@ -73,6 +74,7 @@ impl HandlerError {
             class: Vec::new(),
             stdout: String::new(),
             stderr: String::new(),
+            deadline_requested: false,
         }
     }
 
@@ -261,6 +263,16 @@ impl HandlerRegistry {
 
     /// Call a published function with one R argument created from `args`.
     pub fn call(&self, name: &str, args: &Value) -> Result<HandlerResult, HandlerError> {
+        self.call_with_deadline(name, args, None)
+    }
+
+    /// Call a published function with an optional IPC execution deadline.
+    pub fn call_with_deadline(
+        &self,
+        name: &str,
+        args: &Value,
+        execution_id: Option<u64>,
+    ) -> Result<HandlerResult, HandlerError> {
         if self.revoked || self.root.is_none() {
             return Err(HandlerError::not_found(name));
         }
@@ -270,6 +282,7 @@ impl HandlerRegistry {
         let lib =
             r_library().map_err(|e| HandlerError::new(HandlerErrorKind::RError, e.to_string()))?;
         let capture = IpcCapture::start();
+        let mut deadline_requested = false;
         let mut result = (|| {
             let argument = json_to_r(args).map_err(|error| {
                 HandlerError::new(HandlerErrorKind::ArgumentConversion, error.to_string())
@@ -277,8 +290,24 @@ impl HandlerRegistry {
             let call_wrapper = self.call_wrapper;
             let function = handler.function;
             let argument = argument.sexp();
+            // Keep wrapper setup and condition handling suspended. Only the
+            // user function runs with interrupts enabled by allowInterrupts().
+            // Restore outside the jump boundary so longjmp cannot skip cleanup.
+            let suspended = lib.r_interrupts_suspended;
+            let previous_suspended = if suspended.is_null() {
+                0
+            } else {
+                unsafe {
+                    let previous = std::ptr::read_volatile(suspended);
+                    std::ptr::write_volatile(suspended, 1);
+                    previous
+                }
+            };
             let call_result = unsafe {
                 top_level_exec(move || {
+                    if let Some(execution_id) = execution_id {
+                        let _ = arf_libr::begin_handler_protected_execution(execution_id);
+                    }
                     let nil = *lib.r_nilvalue;
                     let args = (lib.rf_protect)((lib.rf_cons)(argument, nil));
                     let function_arg = (lib.rf_protect)((lib.rf_cons)(function, args));
@@ -288,6 +317,12 @@ impl HandlerRegistry {
                     result
                 })
             };
+            deadline_requested = execution_id
+                .map(arf_libr::finish_handler_protected_execution)
+                .unwrap_or(false);
+            if !suspended.is_null() {
+                unsafe { std::ptr::write_volatile(suspended, previous_suspended) };
+            }
             let result = call_result.map_err(|error| {
                 HandlerError::new(
                     // User interrupts raised during the handler are returned
@@ -331,6 +366,9 @@ impl HandlerRegistry {
                 }
             }
         })();
+        if let Err(error) = &mut result {
+            error.deadline_requested = deadline_requested;
+        }
         let (stdout, stderr) = capture.finish();
         match &mut result {
             Ok(response) => {

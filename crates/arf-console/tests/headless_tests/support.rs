@@ -382,6 +382,46 @@ impl HeadlessProcess {
         })
     }
 
+    /// Run `arf ipc call <handler> --pid <pid>` with JSON arguments and timeouts.
+    pub(crate) fn ipc_call(
+        &self,
+        handler: &str,
+        args: &str,
+        queue_timeout_ms: Option<u64>,
+        execution_timeout_ms: Option<u64>,
+    ) -> Result<IpcOutput, String> {
+        let bin_path = env!("CARGO_BIN_EXE_arf");
+        let mut cmd = Command::new(bin_path);
+        cmd.args([
+            "ipc",
+            "call",
+            handler,
+            "--args",
+            args,
+            "--pid",
+            &self.pid.to_string(),
+        ]);
+        if let Some(timeout) = queue_timeout_ms {
+            cmd.args(["--queue-timeout", &timeout.to_string()]);
+        }
+        if let Some(timeout) = execution_timeout_ms {
+            cmd.args(["--execution-timeout", &timeout.to_string()]);
+        }
+        for (key, value) in &self.env_overrides {
+            cmd.env(key, value);
+        }
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to run arf ipc call: {e}"))?;
+
+        Ok(IpcOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+            exit_code: output.status.code(),
+        })
+    }
+
     /// Run `arf ipc eval <code> --pid <pid> --visible` and return output.
     pub(crate) fn ipc_eval_visible(&self, code: &str) -> Result<IpcOutput, String> {
         let bin_path = env!("CARGO_BIN_EXE_arf");

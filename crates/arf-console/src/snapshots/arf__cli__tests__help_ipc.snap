@@ -12,6 +12,7 @@ Commands:
   list       List active arf sessions as JSON
   attach     Bridge a long-lived IPC connection over stdin/stdout for editors and agents
   eval       Evaluate R code and return captured output as JSON
+  call       Call an exposed R handler with JSON arguments
   send       Send code as user input to a running session
   session    Get session information as JSON (arf + R environment)
   shutdown   Shut down a running arf headless session (returns JSON `{"accepted": true}`)

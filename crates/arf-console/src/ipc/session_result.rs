@@ -60,6 +60,7 @@ fn arf_session_base(meta: &SessionMeta) -> SessionResult {
         history_session_id: meta.history_session_id,
         ipc_policy: policy::policy(meta.session_type),
         handler_api: super::handlers::handler_status(),
+        capabilities: vec!["call_execution_timeout".to_string()],
         r: None,
         r_unavailable_reason: None,
         hint: None,

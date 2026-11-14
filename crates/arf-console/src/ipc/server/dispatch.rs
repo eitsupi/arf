@@ -259,11 +259,9 @@ fn parse_handler_call(
     params: serde_json::Value,
 ) -> Result<IpcMethod, Box<JsonRpcResponse>> {
     let params: HandlerCallParams = parse_params(id, params)?;
-    let timeout = params.queue_timeout_ms.map_or(
-        DEFAULT_HANDLER_QUEUE_TIMEOUT,
-        std::time::Duration::from_millis,
-    );
-    if timeout.is_zero() || timeout > MAX_HANDLER_QUEUE_TIMEOUT {
+    if params.queue_timeout_ms.is_some_and(|timeout| {
+        timeout == 0 || timeout > MAX_HANDLER_QUEUE_TIMEOUT.as_millis() as u64
+    }) {
         return Err(Box::new(JsonRpcResponse::error(
             id.clone(),
             INVALID_PARAMS,
@@ -273,6 +271,24 @@ fn parse_handler_call(
             ),
         )));
     }
+    let timeout = params
+        .queue_timeout_ms
+        .map_or(DEFAULT_HANDLER_QUEUE_TIMEOUT, |timeout| {
+            std::time::Duration::from_millis(timeout)
+        });
+    if params
+        .execution_timeout_ms
+        .is_some_and(|timeout| !(1..=300_000).contains(&timeout))
+    {
+        return Err(Box::new(JsonRpcResponse::error(
+            id.clone(),
+            INVALID_PARAMS,
+            "execution_timeout_ms must be between 1 and 300000".to_string(),
+        )));
+    }
+    let execution_timeout = params
+        .execution_timeout_ms
+        .map(std::time::Duration::from_millis);
     if handler_status().state != HandlerApiState::Locked {
         return Err(Box::new(JsonRpcResponse::error(
             id.clone(),
@@ -292,6 +308,7 @@ fn parse_handler_call(
     let queue_deadline = queued_at.checked_add(timeout).unwrap_or(queued_at);
     Ok(IpcMethod::Call {
         queue_deadline,
+        execution_timeout,
         ticket: std::sync::Arc::new(HandlerCallTicket::new(queue, params.handler, params.args)),
     })
 }
@@ -653,6 +670,50 @@ mod tests {
         match &request.method {
             IpcMethod::Call { ticket, .. } => ticket,
             _ => panic!("expected queued handler call"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn handler_execution_timeout_is_validated_independently_of_queue_timeout() {
+        let _status = enable_test_handlers();
+        let id = Some(serde_json::json!(1));
+        let method = parse_handler_call(
+            &id,
+            serde_json::json!({
+                "handler": "test/read",
+                "args": null,
+                "queue_timeout_ms": 7,
+                "execution_timeout_ms": 11,
+            }),
+        )
+        .expect("valid handler call");
+        match method {
+            IpcMethod::Call {
+                execution_timeout,
+                ticket,
+                ..
+            } => {
+                assert_eq!(
+                    execution_timeout,
+                    Some(std::time::Duration::from_millis(11))
+                );
+                ticket.cancel();
+            }
+            _ => panic!("expected handler call"),
+        }
+
+        for value in [serde_json::json!(0), serde_json::json!(300_001)] {
+            let response = parse_handler_call(
+                &id,
+                serde_json::json!({
+                    "handler": "test/read",
+                    "execution_timeout_ms": value,
+                }),
+            )
+            .err()
+            .expect("out-of-range execution timeout");
+            assert_eq!(response.error.as_ref().unwrap().code, INVALID_PARAMS);
         }
     }
 

@@ -527,7 +527,7 @@ fn test_attach_serves_several_requests_on_one_connection() {
     assert_eq!(result["api_version"], 1, "{attached}");
     assert_eq!(
         result["capabilities"],
-        json!(["events", "execution_events"]),
+        json!(["events", "execution_events", "call_execution_timeout"]),
         "{attached}"
     );
     assert!(result["connection_id"].is_u64(), "{attached}");

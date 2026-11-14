@@ -91,6 +91,32 @@ Examples:
         #[arg(long)]
         timeout: Option<u64>,
     },
+    /// Call an exposed R handler with JSON arguments
+    #[command(after_long_help = r#"Examples:
+  Call a handler with a JSON object:
+    $ arf ipc call workspace/list --args '{"path":"."}'
+
+  Set independent queue and execution limits:
+    $ arf ipc call workspace/inspect --args '{}' --queue-timeout 5000 --execution-timeout 1000
+
+  Target a specific session:
+    $ arf ipc call workspace/list --pid 12345"#)]
+    Call {
+        /// Name of the exposed handler
+        handler: String,
+        /// JSON arguments (defaults to null)
+        #[arg(long, default_value = "null")]
+        args: String,
+        /// Maximum time in milliseconds to wait for the handler to start
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300000), alias = "queue-timeout-ms")]
+        queue_timeout: Option<u64>,
+        /// Maximum handler execution time in milliseconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300000), alias = "execution-timeout-ms")]
+        execution_timeout: Option<u64>,
+        /// PID of the target arf session (optional if only one session is running)
+        #[arg(long)]
+        pid: Option<u32>,
+    },
     /// Send code as user input to a running session
     ///
     /// Unlike `eval`, the code is executed as if the user typed it at the

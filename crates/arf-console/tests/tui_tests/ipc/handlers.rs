@@ -44,3 +44,35 @@ fn exposed_handlers_preserve_typed_input_capture_output_and_can_be_revoked() -> 
         },
     )
 }
+
+#[test]
+fn deadline_terminated_handler_preserves_the_reedline_buffer() -> Result<()> {
+    run_case_with(
+        Terminal::builder("ipc-handler-deadline-buffer").args([
+            "--with-ipc",
+            "--ipc-expose",
+            r#"list("demo/slow" = function(args) { Sys.sleep(2); NULL })"#,
+        ]),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.write("deadline_typed <- ")?;
+            terminal.wait_for("partially typed deadline command", |_, line| {
+                line.contains("deadline_typed <-")
+            })?;
+
+            let socket = session_socket_path(terminal)?;
+            let response = raw_json_rpc(
+                &socket,
+                "call",
+                json!({"handler": "demo/slow", "execution_timeout_ms": 50}),
+            )?;
+            ensure!(response["error"]["code"] == -32019, "{response}");
+
+            terminal.write(r#"42; cat("TUI_DEADLINE_BUFFER_OK\n")"#)?;
+            terminal.key("enter")?;
+            terminal.wait_for_prompt(Some("TUI_DEADLINE_BUFFER_OK"), PROMPT)?;
+            terminal.submit_quiet("invisible(NULL)", PROMPT)?;
+            Ok(())
+        },
+    )
+}

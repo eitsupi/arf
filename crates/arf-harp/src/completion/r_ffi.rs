@@ -82,6 +82,7 @@ pub fn get_namespace_exports(pkg: &str, triple_colon: bool) -> HarpResult<Vec<St
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Ok(vec![]);
@@ -186,6 +187,7 @@ pub(super) fn get_r_builtin_completions(
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Ok(vec![]);
@@ -257,6 +259,7 @@ pub fn get_token(line: &str, cursor_pos: usize) -> HarpResult<String> {
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Ok(String::new());
@@ -403,6 +406,7 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Ok(vec![false; names.len()]);

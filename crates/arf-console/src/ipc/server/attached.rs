@@ -266,7 +266,7 @@ fn attach_connection(
                 format!("Session info error: {e}"),
             ))
         })?;
-    let mut capabilities = vec!["events", "execution_events"];
+    let mut capabilities = vec!["events", "execution_events", "call_execution_timeout"];
     if handler_status().state == HandlerApiState::Locked {
         capabilities.push("handlers");
     }

@@ -66,6 +66,7 @@ pub unsafe fn eval_r_to_string(code: &str) -> HarpResult<Option<String>> {
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 {
             return Err(HarpError::RError(arf_libr::RError::EvalError(

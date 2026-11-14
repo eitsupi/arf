@@ -286,6 +286,17 @@ _arguments "${_arguments_options[@]}" : \
 '::code -- R code to evaluate (reads from stdin if omitted):_default' \
 && ret=0
 ;;
+(call)
+_arguments "${_arguments_options[@]}" : \
+'--args=[JSON arguments (defaults to null)]:ARGS:_default' \
+'--queue-timeout=[Maximum time in milliseconds to wait for the handler to start]:QUEUE_TIMEOUT:_default' \
+'--execution-timeout=[Maximum handler execution time in milliseconds]:EXECUTION_TIMEOUT:_default' \
+'--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':handler -- Name of the exposed handler:_default' \
+&& ret=0
+;;
 (send)
 _arguments "${_arguments_options[@]}" : \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
@@ -416,6 +427,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (eval)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(call)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -657,6 +672,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(call)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (send)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -890,6 +909,7 @@ _arf__subcmd__help__subcmd__ipc_commands() {
 'list:List active arf sessions as JSON' \
 'attach:Bridge a long-lived IPC connection over stdin/stdout for editors and agents' \
 'eval:Evaluate R code and return captured output as JSON' \
+'call:Call an exposed R handler with JSON arguments' \
 'send:Send code as user input to a running session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session (returns JSON \`{"accepted"\: true}\`)' \
@@ -903,6 +923,11 @@ _arf__subcmd__help__subcmd__ipc_commands() {
 _arf__subcmd__help__subcmd__ipc__subcmd__attach_commands() {
     local commands; commands=()
     _describe -t commands 'arf help ipc attach commands' commands "$@"
+}
+(( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__call_commands] )) ||
+_arf__subcmd__help__subcmd__ipc__subcmd__call_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf help ipc call commands' commands "$@"
 }
 (( $+functions[_arf__subcmd__help__subcmd__ipc__subcmd__eval_commands] )) ||
 _arf__subcmd__help__subcmd__ipc__subcmd__eval_commands() {
@@ -1042,6 +1067,7 @@ _arf__subcmd__ipc_commands() {
 'list:List active arf sessions as JSON' \
 'attach:Bridge a long-lived IPC connection over stdin/stdout for editors and agents' \
 'eval:Evaluate R code and return captured output as JSON' \
+'call:Call an exposed R handler with JSON arguments' \
 'send:Send code as user input to a running session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session (returns JSON \`{"accepted"\: true}\`)' \
@@ -1057,6 +1083,11 @@ _arf__subcmd__ipc__subcmd__attach_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc attach commands' commands "$@"
 }
+(( $+functions[_arf__subcmd__ipc__subcmd__call_commands] )) ||
+_arf__subcmd__ipc__subcmd__call_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc call commands' commands "$@"
+}
 (( $+functions[_arf__subcmd__ipc__subcmd__eval_commands] )) ||
 _arf__subcmd__ipc__subcmd__eval_commands() {
     local commands; commands=()
@@ -1068,6 +1099,7 @@ _arf__subcmd__ipc__subcmd__help_commands() {
 'list:List active arf sessions as JSON' \
 'attach:Bridge a long-lived IPC connection over stdin/stdout for editors and agents' \
 'eval:Evaluate R code and return captured output as JSON' \
+'call:Call an exposed R handler with JSON arguments' \
 'send:Send code as user input to a running session' \
 'session:Get session information as JSON (arf + R environment)' \
 'shutdown:Shut down a running arf headless session (returns JSON \`{"accepted"\: true}\`)' \
@@ -1082,6 +1114,11 @@ _arf__subcmd__ipc__subcmd__help_commands() {
 _arf__subcmd__ipc__subcmd__help__subcmd__attach_commands() {
     local commands; commands=()
     _describe -t commands 'arf ipc help attach commands' commands "$@"
+}
+(( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__call_commands] )) ||
+_arf__subcmd__ipc__subcmd__help__subcmd__call_commands() {
+    local commands; commands=()
+    _describe -t commands 'arf ipc help call commands' commands "$@"
 }
 (( $+functions[_arf__subcmd__ipc__subcmd__help__subcmd__eval_commands] )) ||
 _arf__subcmd__ipc__subcmd__help__subcmd__eval_commands() {

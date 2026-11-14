@@ -246,3 +246,29 @@ r_test!(
         }
     }
 );
+
+r_test!(
+    pending_deadline_is_caught_inside_the_handler_wrapper,
+    pending_deadline_is_caught_inside_the_handler_wrapper_in_r,
+    || {
+        let mut registry = HandlerRegistry::new().expect("create registry");
+        registry
+            .expose(r#"list("demo/loop" = function(args) repeat { 1 + 1 }, "demo/answer" = function(args) 42L)"#)
+            .expect("publish handlers");
+        // Vary R's interrupt-check counter across wrapper setup and teardown.
+        for execution_id in 9200..9328 {
+            arf_libr::begin_handler_ipc_execution(execution_id, true);
+            assert!(arf_libr::request_ipc_deadline(execution_id));
+            let error = registry
+                .call_with_deadline("demo/loop", &Value::Null, Some(execution_id))
+                .expect_err("pending deadline must stop the handler");
+            assert_eq!(error.kind, HandlerErrorKind::Interrupted);
+            assert!(error.deadline_requested);
+            arf_libr::finish_ipc_execution();
+            assert_eq!(
+                registry.call("demo/answer", &Value::Null).unwrap().value,
+                json!(42)
+            );
+        }
+    }
+);
