@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-14
+
 ### Added
 
 - **Experimental:** `arf ipc call` calls a handler exposed by the session from the command line (#515).
