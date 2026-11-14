@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `menu()` and `select.list()` no longer occupy the session indefinitely in IPC evaluations and handler calls; repeated unanswerable console reads now raise an R error (#518).
+
 ## [0.7.1] - 2026-11-14
 
 ### Added
