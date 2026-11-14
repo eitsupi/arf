@@ -438,6 +438,7 @@ mod tests {
             IpcRequest {
                 method: IpcMethod::Call {
                     queue_deadline: std::time::Instant::now(),
+                    execution_timeout: None,
                     ticket: std::sync::Arc::new(super::super::handlers::HandlerCallTicket::new(
                         queue,
                         "demo/read".to_owned(),

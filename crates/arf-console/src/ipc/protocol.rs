@@ -92,6 +92,8 @@ pub const HANDLER_R_ERROR: i32 = -32014;
 pub const HANDLER_RESULT_ERROR: i32 = -32015;
 /// The call was interrupted while running on the R thread.
 pub const HANDLER_INTERRUPTED: i32 = -32016;
+/// The handler was interrupted by its execution deadline.
+pub const HANDLER_EXECUTION_TIMEOUT: i32 = -32019;
 /// The requested installed help topic could not be found.
 pub const HELP_NOT_FOUND: i32 = -32017;
 /// No cached library paths are available for a static help query.
@@ -155,6 +157,8 @@ pub struct HandlerCallParams {
     pub args: serde_json::Value,
     #[serde(default)]
     pub queue_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub execution_timeout_ms: Option<u64>,
 }
 
 /// Result of the `user_input` method.
@@ -232,6 +236,8 @@ pub struct SessionResult {
     pub ipc_policy: IpcPolicy,
     /// Whether R startup handlers are exposed or have been revoked.
     pub handler_api: super::handlers::HandlerApiStatus,
+    /// Features supported by this IPC server.
+    pub capabilities: Vec<String>,
     /// R session information, or `null` if R is unavailable.
     pub r: Option<RSessionInfo>,
     /// Reason why R information is unavailable, or `null` if available.
@@ -389,6 +395,7 @@ pub enum IpcMethod {
     /// Call one handler exposed by the R startup expression.
     Call {
         queue_deadline: std::time::Instant,
+        execution_timeout: Option<std::time::Duration>,
         ticket: std::sync::Arc<super::handlers::HandlerCallTicket>,
     },
     /// Collect session information (arf + R if available).

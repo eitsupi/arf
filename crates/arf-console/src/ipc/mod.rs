@@ -84,6 +84,7 @@ pub fn start_server(
     session_type: session::SessionType,
 ) -> std::io::Result<session::SessionInfo> {
     let (tx, rx) = std::sync::mpsc::channel();
+    let (deadline_tx, deadline_rx) = tokio::sync::mpsc::unbounded_channel();
 
     // Initialize pending operation storage
     let _ = pending::pending_ipc_operation();
@@ -97,6 +98,7 @@ pub fn start_server(
     // doesn't break an already-running server's channel.
     let session = server::start_server(
         tx,
+        deadline_rx,
         bind,
         &started_at,
         r_home,
@@ -105,6 +107,11 @@ pub fn start_server(
         history_session_id,
         session_type,
     )?;
+
+    // Requests can queue on the server thread, but R cannot execute them until
+    // this R-thread startup call returns and the receiver below is installed.
+    // A failed start must preserve the running server's notifier and receiver.
+    execution::install_handler_deadline_notifier(deadline_tx);
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.

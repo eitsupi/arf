@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `arf ipc call` calls a handler exposed by the session from the command line (#515).
+- **Experimental:** IPC `call` accepts `execution_timeout_ms`, a deadline after which a running handler is interrupted and the call fails with `HANDLER_EXECUTION_TIMEOUT` (`-32019`). Servers that support it advertise `call_execution_timeout` (#515).
+
+### Changed
+
+- **Experimental/Breaking:** `readline()`, menus, `browser()`, and other console reads inside an IPC handler now receive EOF, as in silent `evaluate` (#515).
+
 ## [0.7.0] - 2026-11-09
 
 ### Added

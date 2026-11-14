@@ -48,6 +48,7 @@ unsafe fn deparse_to_string(expr: SEXP) -> HarpResult<String> {
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Err(HarpError::RError(arf_libr::RError::EvalError(
@@ -115,6 +116,7 @@ pub fn eval_string_reprex(code: &str, comment: &str) -> HarpResult<RObject> {
             Some(parse_callback),
             &mut parse_payload as *mut ParsePayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if parse_success == 0 || parse_payload.result.is_none() {
             arf_libr::set_reprex_mode(false, "");

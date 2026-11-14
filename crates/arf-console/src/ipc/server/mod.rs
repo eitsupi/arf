@@ -142,6 +142,9 @@ impl Drop for SocketPathGuard {
 #[allow(clippy::too_many_arguments)]
 pub fn start_server(
     tx: mpsc::Sender<IpcRequest>,
+    deadline_rx: tokio::sync::mpsc::UnboundedReceiver<
+        crate::ipc::execution::HandlerDeadlineNotification,
+    >,
     bind: Option<&str>,
     started_at: &str,
     r_home: Option<String>,
@@ -214,7 +217,11 @@ pub fn start_server(
                 let dispatcher_task = tokio::spawn(dispatcher.run());
                 let generation = crate::ipc::install_console_output_bus(bus.clone());
                 let ctx = ConnectionContext::new(tx, bus.clone(), token_clone);
+                let deadline_cancel = ctx.cancel.clone();
+                let deadline_task =
+                    tokio::spawn(run_handler_deadline_timers(deadline_rx, deadline_cancel));
                 let timer_cancel = ctx.cancel.clone();
+                let server_cancel = ctx.cancel.clone();
                 let output_timer = tokio::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
                     interval.tick().await;
@@ -243,6 +250,8 @@ pub fn start_server(
 
                 output_timer.abort();
                 let _ = output_timer.await;
+                server_cancel.cancel();
+                let _ = deadline_task.await;
                 // Only remove our own bus: a server started after this one
                 // may already have installed another.
                 crate::ipc::clear_console_output_bus(generation);
@@ -301,6 +310,45 @@ pub fn start_server(
     Ok(session)
 }
 
+async fn run_handler_deadline_timers(
+    notifications: tokio::sync::mpsc::UnboundedReceiver<
+        crate::ipc::execution::HandlerDeadlineNotification,
+    >,
+    cancel: CancellationToken,
+) {
+    let mut timers = tokio::task::JoinSet::new();
+    process_handler_deadline_timers(notifications, cancel, &mut timers).await;
+    timers.abort_all();
+    while timers.join_next().await.is_some() {}
+}
+
+async fn process_handler_deadline_timers(
+    mut notifications: tokio::sync::mpsc::UnboundedReceiver<
+        crate::ipc::execution::HandlerDeadlineNotification,
+    >,
+    cancel: CancellationToken,
+    timers: &mut tokio::task::JoinSet<()>,
+) {
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            _ = timers.join_next(), if !timers.is_empty() => {}
+            notification = notifications.recv() => {
+                let Some(notification) = notification else { break };
+                let timer_cancel = cancel.clone();
+                timers.spawn(async move {
+                    tokio::select! {
+                        _ = timer_cancel.cancelled() => {}
+                        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(notification.deadline)) => {
+                            crate::ipc::execution::request_handler_deadline(notification.execution_id.0);
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
 extern "C" fn stop_server_at_exit() {
     stop_server();
 }
@@ -313,6 +361,8 @@ pub fn stop_server() {
     };
 
     let state = handle_store.lock().unwrap().take();
+    crate::ipc::execution::clear_handler_deadline_notifier();
+    arf_libr::cancel_ipc_deadline();
     if let Some(state) = state {
         // Unlink before cancellation, keeping the old listener alive through
         // cleanup. A later server may bind the freed path; the identity check
@@ -408,5 +458,50 @@ mod ownership_tests {
         drop(guard);
 
         UnixStream::connect(&path).expect("guard removed the replacement socket");
+    }
+}
+
+#[cfg(test)]
+mod deadline_timer_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn completed_deadline_tasks_are_reaped_while_the_server_keeps_running() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut timers = tokio::task::JoinSet::new();
+        tx.send(crate::ipc::execution::HandlerDeadlineNotification {
+            execution_id: crate::ipc::events::ExecutionId(u64::MAX),
+            deadline: (tokio::time::Instant::now() + std::time::Duration::from_secs(1)).into_std(),
+        })
+        .unwrap();
+        {
+            let mut runner = std::pin::pin!(process_handler_deadline_timers(
+                rx,
+                CancellationToken::new(),
+                &mut timers,
+            ));
+            // Poll the server and its timer without relying on elapsed wall time.
+            for _ in 0..4 {
+                tokio::select! {
+                    biased;
+                    _ = &mut runner => panic!("timer server stopped with its sender still open"),
+                    _ = tokio::task::yield_now() => {}
+                }
+            }
+            tokio::time::advance(std::time::Duration::from_secs(2)).await;
+            for _ in 0..8 {
+                tokio::select! {
+                    biased;
+                    _ = &mut runner => panic!("timer server stopped with its sender still open"),
+                    _ = tokio::task::yield_now() => {}
+                }
+            }
+        }
+        assert_eq!(
+            timers.len(),
+            0,
+            "completed tasks must be reaped before shutdown"
+        );
+        drop(tx);
     }
 }

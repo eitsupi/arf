@@ -1,6 +1,8 @@
 //! Shared execution primitives for interactive and headless IPC frontends.
 
 use std::sync::atomic::Ordering;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::json;
@@ -27,6 +29,48 @@ struct ExecutionContext {
 }
 
 static NEXT_EXECUTION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub(crate) struct HandlerDeadlineNotification {
+    pub execution_id: super::events::ExecutionId,
+    pub deadline: Instant,
+}
+
+static HANDLER_DEADLINE_NOTIFIER: OnceLock<
+    Mutex<Option<tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>>>,
+> = OnceLock::new();
+
+fn handler_deadline_notifier()
+-> &'static Mutex<Option<tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>>> {
+    HANDLER_DEADLINE_NOTIFIER.get_or_init(|| Mutex::new(None))
+}
+
+pub(crate) fn install_handler_deadline_notifier(
+    sender: tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>,
+) {
+    *handler_deadline_notifier()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender);
+}
+
+pub(crate) fn clear_handler_deadline_notifier() {
+    *handler_deadline_notifier()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+fn notify_handler_deadline(notification: HandlerDeadlineNotification) {
+    let sender = handler_deadline_notifier()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if let Some(sender) = sender {
+        let _ = sender.send(notification);
+    }
+}
+
+pub(crate) fn request_handler_deadline(execution_id: u64) -> bool {
+    arf_libr::request_ipc_deadline(execution_id)
+}
 
 thread_local! {
     /// The R thread executes one top-level command at a time. Keep its context
@@ -67,14 +111,25 @@ fn begin_ipc_execution(
 pub(crate) fn begin_handler_execution(
     origin: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
+    execution_timeout: Option<std::time::Duration>,
 ) -> super::events::ExecutionId {
-    begin_ipc_execution(
+    let id = begin_ipc_execution(
         ExecutionOrigin::Connection(origin),
         "handler",
         false,
         started_execution_id,
         false,
-    )
+    );
+    arf_libr::begin_handler_ipc_execution(id.0, execution_timeout.is_some());
+    if let Some(timeout) = execution_timeout {
+        notify_handler_deadline(HandlerDeadlineNotification {
+            execution_id: id,
+            deadline: Instant::now()
+                .checked_add(timeout)
+                .unwrap_or_else(Instant::now),
+        });
+    }
+    id
 }
 
 pub(crate) fn clear_execution() {
@@ -168,8 +223,8 @@ pub(crate) fn run_silent_eval_from(
         has_user_code(code),
     );
     arf_libr::begin_ipc_execution(execution_id.0, has_user_code(code));
+    arf_libr::enable_ipc_silent_boundaries();
     r_is_at_prompt().store(false, Ordering::Release);
-    arf_libr::set_ipc_execution_phase(arf_libr::InterruptPhase::ProtectedEvaluation);
     // SAFETY: evaluate_with_capture enters R only through the protected harp
     // evaluation helper; this guard remains outside its top-level callbacks.
     let _interrupt_guard = unsafe { arf_libr::ConsoleEvaluationInterruptGuard::new() };

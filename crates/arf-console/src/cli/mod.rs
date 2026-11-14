@@ -330,6 +330,43 @@ mod tests {
     }
 
     #[test]
+    fn ipc_call_parses_json_and_independent_timeouts() {
+        let cli = Cli::try_parse_from([
+            "arf",
+            "ipc",
+            "call",
+            "demo/add",
+            "--args",
+            r#"{"x":[2,3]}"#,
+            "--queue-timeout",
+            "5000",
+            "--execution-timeout",
+            "1000",
+            "--pid",
+            "123",
+        ])
+        .unwrap();
+        let Some(Commands::Ipc(args)) = cli.command else {
+            panic!("expected ipc command");
+        };
+        let IpcAction::Call {
+            handler,
+            args,
+            queue_timeout,
+            execution_timeout,
+            pid,
+        } = args.action
+        else {
+            panic!("expected ipc call");
+        };
+        assert_eq!(handler, "demo/add");
+        assert_eq!(args, r#"{"x":[2,3]}"#);
+        assert_eq!(queue_timeout, Some(5000));
+        assert_eq!(execution_timeout, Some(1000));
+        assert_eq!(pid, Some(123));
+    }
+
+    #[test]
     fn test_help_history_export_snapshot() {
         let help = Cli::generate_help_string(&["history", "export"]);
         insta::with_settings!({snapshot_path => "../snapshots"}, {

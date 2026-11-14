@@ -15,6 +15,12 @@ pub enum InterruptPhase {
     Finishing,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InterruptExecutionKind {
+    UserCode,
+    Handler,
+}
+
 #[derive(Debug)]
 struct InterruptState {
     execution_id: Option<u64>,
@@ -30,6 +36,33 @@ struct InterruptState {
     flag_consumed: bool,
     /// Reset generation when the execution began, to detect a jump to top level.
     start_generation: u64,
+    kind: InterruptExecutionKind,
+    deadline_in_force: bool,
+    deadline_requested: bool,
+    silent_boundaries: bool,
+    protected_depth: usize,
+    protected_previous_phase: InterruptPhase,
+    /// Re-entrant R evaluations temporarily save the outer execution here.
+    stack: Vec<InterruptFrame>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InterruptFrame {
+    execution_id: Option<u64>,
+    eligible: bool,
+    phase: InterruptPhase,
+    requested: bool,
+    delivered: bool,
+    interrupted: bool,
+    flag_written: bool,
+    flag_consumed: bool,
+    start_generation: u64,
+    kind: InterruptExecutionKind,
+    deadline_in_force: bool,
+    deadline_requested: bool,
+    silent_boundaries: bool,
+    protected_depth: usize,
+    protected_previous_phase: InterruptPhase,
 }
 
 impl Default for InterruptState {
@@ -44,8 +77,53 @@ impl Default for InterruptState {
             flag_written: false,
             flag_consumed: false,
             start_generation: 0,
+            kind: InterruptExecutionKind::UserCode,
+            deadline_in_force: false,
+            deadline_requested: false,
+            silent_boundaries: false,
+            protected_depth: 0,
+            protected_previous_phase: InterruptPhase::Input,
+            stack: Vec::new(),
         }
     }
+}
+
+fn snapshot(state: &InterruptState) -> InterruptFrame {
+    InterruptFrame {
+        execution_id: state.execution_id,
+        eligible: state.eligible,
+        phase: state.phase,
+        requested: state.requested,
+        delivered: state.delivered,
+        interrupted: state.interrupted,
+        flag_written: state.flag_written,
+        flag_consumed: state.flag_consumed,
+        start_generation: state.start_generation,
+        kind: state.kind,
+        deadline_in_force: state.deadline_in_force,
+        deadline_requested: state.deadline_requested,
+        silent_boundaries: state.silent_boundaries,
+        protected_depth: state.protected_depth,
+        protected_previous_phase: state.protected_previous_phase,
+    }
+}
+
+fn restore(state: &mut InterruptState, frame: InterruptFrame) {
+    state.execution_id = frame.execution_id;
+    state.eligible = frame.eligible;
+    state.phase = frame.phase;
+    state.requested = frame.requested;
+    state.delivered = frame.delivered;
+    state.interrupted = frame.interrupted;
+    state.flag_written = frame.flag_written;
+    state.flag_consumed = frame.flag_consumed;
+    state.start_generation = frame.start_generation;
+    state.kind = frame.kind;
+    state.deadline_in_force = frame.deadline_in_force;
+    state.deadline_requested = frame.deadline_requested;
+    state.silent_boundaries = frame.silent_boundaries;
+    state.protected_depth = frame.protected_depth;
+    state.protected_previous_phase = frame.protected_previous_phase;
 }
 
 static INTERRUPT_STATE: OnceLock<Mutex<InterruptState>> = OnceLock::new();
@@ -63,6 +141,10 @@ fn lock_interrupt_state() -> std::sync::MutexGuard<'static, InterruptState> {
 /// Start tracking one IPC user-code evaluation.
 pub fn begin_ipc_execution(execution_id: u64, eligible: bool) {
     let mut state = lock_interrupt_state();
+    if state.execution_id.is_some() {
+        let previous = snapshot(&state);
+        state.stack.push(previous);
+    }
     state.execution_id = Some(execution_id);
     state.eligible = eligible;
     state.phase = InterruptPhase::Input;
@@ -72,6 +154,38 @@ pub fn begin_ipc_execution(execution_id: u64, eligible: bool) {
     state.flag_written = false;
     state.flag_consumed = false;
     state.start_generation = reset_console_generation();
+    state.kind = InterruptExecutionKind::UserCode;
+    state.deadline_in_force = false;
+    state.deadline_requested = false;
+    state.silent_boundaries = false;
+    state.protected_depth = 0;
+    state.protected_previous_phase = InterruptPhase::Input;
+}
+
+/// Start tracking a handler call. Handler calls remain ineligible for the
+/// request-based `interrupt` method; only an explicitly supplied deadline can
+/// request a flag.
+pub fn begin_handler_ipc_execution(execution_id: u64, deadline_in_force: bool) {
+    let mut state = lock_interrupt_state();
+    if state.execution_id.is_some() {
+        let previous = snapshot(&state);
+        state.stack.push(previous);
+    }
+    state.execution_id = Some(execution_id);
+    state.eligible = false;
+    state.phase = InterruptPhase::Input;
+    state.requested = false;
+    state.delivered = false;
+    state.interrupted = false;
+    state.flag_written = false;
+    state.flag_consumed = false;
+    state.start_generation = reset_console_generation();
+    state.kind = InterruptExecutionKind::Handler;
+    state.deadline_in_force = deadline_in_force;
+    state.deadline_requested = false;
+    state.silent_boundaries = false;
+    state.protected_depth = 0;
+    state.protected_previous_phase = InterruptPhase::Input;
 }
 
 /// Mark a phase transition while preserving an interrupt requested during input.
@@ -112,9 +226,147 @@ pub fn finish_ipc_execution() -> bool {
     state.interrupted = false;
     state.flag_written = false;
     state.flag_consumed = false;
+    state.deadline_in_force = false;
+    state.deadline_requested = false;
     clear_r_interrupt_pending_unlocked();
-    state.phase = InterruptPhase::Idle;
+    if let Some(frame) = state.stack.pop() {
+        restore(&mut state, frame);
+        if (state.requested || state.deadline_requested)
+            && matches!(
+                state.phase,
+                InterruptPhase::ProtectedEvaluation | InterruptPhase::TopLevelEvaluation
+            )
+        {
+            write_ipc_interrupt_flag(&mut state);
+        }
+    } else {
+        state.phase = InterruptPhase::Idle;
+    }
     interrupted
+}
+
+/// Enable protected-boundary interrupt delivery for a silent evaluation only.
+pub fn enable_ipc_silent_boundaries() {
+    let mut state = lock_interrupt_state();
+    state.silent_boundaries = true;
+}
+
+/// Enter a protected silent-evaluation callback after its jump boundary exists.
+pub fn begin_ipc_protected_evaluation() {
+    let mut state = lock_interrupt_state();
+    if state.execution_id.is_some()
+        && state.silent_boundaries
+        && state.kind == InterruptExecutionKind::UserCode
+        && state.phase != InterruptPhase::Finishing
+    {
+        if state.protected_depth == 0 {
+            state.protected_previous_phase = state.phase;
+        }
+        state.protected_depth += 1;
+        state.phase = InterruptPhase::ProtectedEvaluation;
+        if state.requested {
+            write_ipc_interrupt_flag(&mut state);
+        }
+    }
+}
+
+/// Restore the outer phase only when the last silent boundary has closed.
+pub fn finish_ipc_protected_evaluation() {
+    let mut state = lock_interrupt_state();
+    if state.silent_boundaries && state.protected_depth > 0 {
+        state.protected_depth -= 1;
+        if state.protected_depth == 0 {
+            clear_r_interrupt_pending_unlocked();
+            state.phase = state.protected_previous_phase;
+        }
+    }
+}
+
+/// Enter the interruptible phase of a handler's protected evaluation.
+pub fn begin_handler_protected_execution(execution_id: u64) -> bool {
+    let mut state = lock_interrupt_state();
+    if state.execution_id != Some(execution_id)
+        || state.kind != InterruptExecutionKind::Handler
+        || !state.deadline_in_force
+        || state.phase == InterruptPhase::Finishing
+    {
+        return false;
+    }
+    state.phase = InterruptPhase::ProtectedEvaluation;
+    if state.deadline_requested {
+        write_ipc_interrupt_flag(&mut state);
+    }
+    true
+}
+
+/// Close a handler protected boundary before result extraction. The returned
+/// value records whether the deadline request won the request/finish race.
+pub fn finish_handler_protected_execution(execution_id: u64) -> bool {
+    let mut state = lock_interrupt_state();
+    if state.execution_id != Some(execution_id)
+        || state.kind != InterruptExecutionKind::Handler
+        || state.phase != InterruptPhase::ProtectedEvaluation
+    {
+        return false;
+    }
+    let requested = state.deadline_requested;
+    state.phase = InterruptPhase::Finishing;
+    state.deadline_requested = false;
+    clear_r_interrupt_pending_unlocked();
+    requested
+}
+
+/// Register a handler deadline request. A request that arrives during argument
+/// conversion is retained, but the R flag is written only while the matching
+/// protected callback is active.
+pub fn request_ipc_deadline(execution_id: u64) -> bool {
+    let mut state = lock_interrupt_state();
+    if state.execution_id == Some(execution_id)
+        && state.kind == InterruptExecutionKind::Handler
+        && state.deadline_in_force
+        && state.phase != InterruptPhase::Finishing
+    {
+        state.deadline_requested = true;
+        if state.phase == InterruptPhase::ProtectedEvaluation {
+            write_ipc_interrupt_flag(&mut state);
+        }
+        return true;
+    }
+    if let Some(frame) = state
+        .stack
+        .iter_mut()
+        .rev()
+        .find(|frame| frame.execution_id == Some(execution_id))
+        && frame.kind == InterruptExecutionKind::Handler
+        && frame.deadline_in_force
+        && frame.phase != InterruptPhase::Finishing
+    {
+        frame.deadline_requested = true;
+        return true;
+    }
+    false
+}
+
+/// Retire any active handler deadline during server shutdown.
+pub fn cancel_ipc_deadline() {
+    let mut state = lock_interrupt_state();
+    if state.execution_id.is_some()
+        && state.kind == InterruptExecutionKind::Handler
+        && state.deadline_requested
+        && state.flag_written
+    {
+        clear_r_interrupt_pending_unlocked();
+    }
+    if state.kind == InterruptExecutionKind::Handler {
+        state.deadline_in_force = false;
+        state.deadline_requested = false;
+    }
+    for frame in &mut state.stack {
+        if frame.kind == InterruptExecutionKind::Handler {
+            frame.deadline_in_force = false;
+            frame.deadline_requested = false;
+        }
+    }
 }
 
 /// Register an interrupt request for the currently active IPC evaluation.
@@ -320,7 +572,7 @@ pub(super) fn finish_read_console_input(
     } else {
         InterruptPhase::Input
     };
-    if state.requested
+    if (state.requested || state.deadline_requested)
         && matches!(
             state.phase,
             InterruptPhase::ProtectedEvaluation | InterruptPhase::TopLevelEvaluation
@@ -737,6 +989,180 @@ mod tests {
         // flag alone.
         assert_eq!(super::request_ipc_interrupt(None), (false, None));
         assert_eq!(unsafe { *flag }, 0);
+
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn protected_hooks_preserve_visible_and_input_phases() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+        for phase in [
+            super::InterruptPhase::TopLevelEvaluation,
+            super::InterruptPhase::Input,
+        ] {
+            super::begin_ipc_execution(9100, true);
+            super::set_ipc_execution_phase(phase);
+            super::request_ipc_interrupt(Some(9100));
+            super::begin_ipc_protected_evaluation();
+            super::finish_ipc_protected_evaluation();
+            assert_eq!(super::lock_interrupt_state().phase, phase);
+            assert_eq!(
+                *flag,
+                i32::from(phase == super::InterruptPhase::TopLevelEvaluation)
+            );
+            super::finish_ipc_execution();
+        }
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn silent_boundaries_restore_the_outer_phase_after_nested_evaluation() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+        super::begin_ipc_execution(9103, true);
+        super::enable_ipc_silent_boundaries();
+        super::request_ipc_interrupt(Some(9103));
+        super::begin_ipc_protected_evaluation();
+        super::begin_ipc_protected_evaluation();
+        super::finish_ipc_protected_evaluation();
+        assert_eq!(
+            super::lock_interrupt_state().phase,
+            super::InterruptPhase::ProtectedEvaluation
+        );
+        assert_eq!(*flag, 1);
+        super::finish_ipc_protected_evaluation();
+        assert_eq!(
+            super::lock_interrupt_state().phase,
+            super::InterruptPhase::Input
+        );
+        assert_eq!(*flag, 0);
+        super::finish_ipc_execution();
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn cancelling_deadlines_preserves_a_user_code_interrupt() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+        super::begin_ipc_execution(9104, true);
+        super::set_ipc_execution_phase(super::InterruptPhase::TopLevelEvaluation);
+        super::request_ipc_interrupt(Some(9104));
+        super::cancel_ipc_deadline();
+        assert_eq!(*flag, 1);
+        super::finish_ipc_execution();
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn handler_deadline_survives_console_input() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+        for during_input in [false, true] {
+            super::begin_handler_ipc_execution(9101, true);
+            super::begin_handler_protected_execution(9101);
+            if !during_input {
+                super::request_ipc_deadline(9101);
+            }
+            let previous = super::begin_read_console_input();
+            if during_input {
+                super::request_ipc_deadline(9101);
+            }
+            super::finish_read_console_input(previous, false);
+            assert_eq!(*flag, 1);
+            super::finish_handler_protected_execution(9101);
+            super::finish_ipc_execution();
+        }
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn handler_deadline_is_only_written_inside_its_protected_boundary() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag: *mut c_int = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+
+        super::begin_handler_ipc_execution(9001, true);
+        assert!(super::request_ipc_deadline(9001));
+        assert_eq!(
+            unsafe { *flag },
+            0,
+            "argument conversion must not see the flag"
+        );
+        assert!(super::begin_handler_protected_execution(9001));
+        assert_eq!(
+            unsafe { *flag },
+            1,
+            "the protected boundary must receive it"
+        );
+        assert!(super::finish_handler_protected_execution(9001));
+        assert_eq!(
+            unsafe { *flag },
+            0,
+            "finishing must clear the flag immediately"
+        );
+        super::begin_ipc_execution_finishing();
+        assert!(!super::finish_ipc_execution());
+        assert!(
+            !super::request_ipc_deadline(9001),
+            "late timer must be harmless"
+        );
+
+        super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn handler_deadline_checks_id_and_phase_without_sleeping() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !super::request_ipc_deadline(9000),
+            "idle has no active deadline"
+        );
+        super::begin_handler_ipc_execution(9002, true);
+        assert!(!super::request_ipc_deadline(9001));
+        super::set_ipc_execution_phase(super::InterruptPhase::TopLevelEvaluation);
+        assert!(super::request_ipc_deadline(9002));
+        assert!(!super::finish_handler_protected_execution(9002));
+        super::begin_ipc_execution_finishing();
+        assert!(!super::finish_ipc_execution());
+
+        super::begin_handler_ipc_execution(9003, true);
+        super::begin_handler_protected_execution(9003);
+        assert!(super::request_ipc_deadline(9003));
+        assert!(super::finish_handler_protected_execution(9003));
+        assert!(
+            !super::request_ipc_deadline(9003),
+            "finishing rejects late timers"
+        );
+        super::begin_ipc_execution_finishing();
+        super::finish_ipc_execution();
+    }
+
+    #[test]
+    fn handler_deadlines_survive_a_reentrant_execution_without_cross_talk() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let flag: *mut c_int = Box::leak(Box::new(0));
+        super::R_INTERRUPT_FLAG.store(flag, Ordering::Release);
+
+        super::begin_handler_ipc_execution(9004, true);
+        super::begin_handler_ipc_execution(9005, false);
+        assert!(super::request_ipc_deadline(9004));
+        assert_eq!(
+            unsafe { *flag },
+            0,
+            "an outer deadline cannot write into the inner call"
+        );
+        super::begin_ipc_execution_finishing();
+        assert!(!super::finish_ipc_execution());
+        assert!(super::begin_handler_protected_execution(9004));
+        assert_eq!(unsafe { *flag }, 1);
+        assert!(super::finish_handler_protected_execution(9004));
+        super::begin_ipc_execution_finishing();
+        super::finish_ipc_execution();
 
         super::R_INTERRUPT_FLAG.store(std::ptr::null_mut(), Ordering::Release);
     }

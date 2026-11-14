@@ -50,6 +50,7 @@ fn eval_string_in_env(code: &str, eval_env: SEXP) -> HarpResult<RObject> {
             Some(parse_callback),
             &mut parse_payload as *mut ParsePayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if parse_success == 0 || parse_payload.result.is_none() {
             return Err(HarpError::RError(arf_libr::RError::ParseError(
@@ -109,6 +110,7 @@ pub(super) struct ParsePayload {
 
 /// Callback for R_ToplevelExec - parses the expression.
 pub(super) unsafe extern "C-unwind" fn parse_callback(payload: *mut std::ffi::c_void) {
+    arf_libr::begin_ipc_protected_evaluation();
     let data = unsafe { &mut *(payload as *mut ParsePayload) };
     let lib = match r_library() {
         Ok(lib) => lib,
@@ -156,6 +158,7 @@ pub(super) unsafe fn eval_with_visible(
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             // Evaluation failed (R error occurred)
@@ -215,6 +218,7 @@ pub fn eval_string_with_visibility(code: &str) -> HarpResult<EvalResult> {
             Some(parse_callback),
             &mut parse_payload as *mut ParsePayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
         if parse_success == 0 || parse_payload.result.is_none() {
             return Err(HarpError::RError(arf_libr::RError::ParseError(
                 "Parse error (R error during parsing)".to_string(),

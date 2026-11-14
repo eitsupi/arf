@@ -36,6 +36,7 @@ pub fn r_n_frame() -> HarpResult<i32> {
             Some(eval_callback),
             &mut payload as *mut EvalPayload as *mut std::ffi::c_void,
         );
+        arf_libr::finish_ipc_protected_evaluation();
 
         if success == 0 || payload.result.is_none() {
             return Err(HarpError::RError(arf_libr::RError::EvalError(

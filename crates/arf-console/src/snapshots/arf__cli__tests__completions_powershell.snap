@@ -204,6 +204,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
             [CompletionResult]::new('attach', 'attach', [CompletionResultType]::ParameterValue, 'Bridge a long-lived IPC connection over stdin/stdout for editors and agents')
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
+            [CompletionResult]::new('call', 'call', [CompletionResultType]::ParameterValue, 'Call an exposed R handler with JSON arguments')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
@@ -229,6 +230,15 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout')
             [CompletionResult]::new('--visible', '--visible', [CompletionResultType]::ParameterName, 'Also show output in the session (REPL or headless stdout)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'arf;ipc;call' {
+            [CompletionResult]::new('--args', '--args', [CompletionResultType]::ParameterName, 'JSON arguments (defaults to null)')
+            [CompletionResult]::new('--queue-timeout', '--queue-timeout', [CompletionResultType]::ParameterName, 'Maximum time in milliseconds to wait for the handler to start')
+            [CompletionResult]::new('--execution-timeout', '--execution-timeout', [CompletionResultType]::ParameterName, 'Maximum handler execution time in milliseconds')
+            [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
@@ -314,6 +324,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
             [CompletionResult]::new('attach', 'attach', [CompletionResultType]::ParameterValue, 'Bridge a long-lived IPC connection over stdin/stdout for editors and agents')
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
+            [CompletionResult]::new('call', 'call', [CompletionResultType]::ParameterValue, 'Call an exposed R handler with JSON arguments')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
@@ -330,6 +341,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;help;eval' {
+            break
+        }
+        'arf;ipc;help;call' {
             break
         }
         'arf;ipc;help;send' {
@@ -468,6 +482,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active arf sessions as JSON')
             [CompletionResult]::new('attach', 'attach', [CompletionResultType]::ParameterValue, 'Bridge a long-lived IPC connection over stdin/stdout for editors and agents')
             [CompletionResult]::new('eval', 'eval', [CompletionResultType]::ParameterValue, 'Evaluate R code and return captured output as JSON')
+            [CompletionResult]::new('call', 'call', [CompletionResultType]::ParameterValue, 'Call an exposed R handler with JSON arguments')
             [CompletionResult]::new('send', 'send', [CompletionResultType]::ParameterValue, 'Send code as user input to a running session')
             [CompletionResult]::new('session', 'session', [CompletionResultType]::ParameterValue, 'Get session information as JSON (arf + R environment)')
             [CompletionResult]::new('shutdown', 'shutdown', [CompletionResultType]::ParameterValue, 'Shut down a running arf headless session (returns JSON `{"accepted": true}`)')
@@ -483,6 +498,9 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;help;ipc;eval' {
+            break
+        }
+        'arf;help;ipc;call' {
             break
         }
         'arf;help;ipc;send' {

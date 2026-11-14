@@ -101,6 +101,9 @@ _arf() {
             arf__subcmd__help__subcmd__ipc,attach)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__attach"
                 ;;
+            arf__subcmd__help__subcmd__ipc,call)
+                cmd="arf__subcmd__help__subcmd__ipc__subcmd__call"
+                ;;
             arf__subcmd__help__subcmd__ipc,eval)
                 cmd="arf__subcmd__help__subcmd__ipc__subcmd__eval"
                 ;;
@@ -167,6 +170,9 @@ _arf() {
             arf__subcmd__ipc,attach)
                 cmd="arf__subcmd__ipc__subcmd__attach"
                 ;;
+            arf__subcmd__ipc,call)
+                cmd="arf__subcmd__ipc__subcmd__call"
+                ;;
             arf__subcmd__ipc,eval)
                 cmd="arf__subcmd__ipc__subcmd__eval"
                 ;;
@@ -196,6 +202,9 @@ _arf() {
                 ;;
             arf__subcmd__ipc__subcmd__help,attach)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__attach"
+                ;;
+            arf__subcmd__ipc__subcmd__help,call)
+                cmd="arf__subcmd__ipc__subcmd__help__subcmd__call"
                 ;;
             arf__subcmd__ipc__subcmd__help,eval)
                 cmd="arf__subcmd__ipc__subcmd__help__subcmd__eval"
@@ -902,7 +911,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help__subcmd__ipc)
-            opts="list attach eval send session shutdown interrupt history r-help"
+            opts="list attach eval call send session shutdown interrupt history r-help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -916,6 +925,20 @@ _arf() {
             return 0
             ;;
         arf__subcmd__help__subcmd__ipc__subcmd__attach)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__help__subcmd__ipc__subcmd__call)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1306,7 +1329,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc)
-            opts="-h --help list attach eval send session shutdown interrupt history r-help help"
+            opts="-h --help list attach eval call send session shutdown interrupt history r-help help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1341,6 +1364,36 @@ _arf() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        arf__subcmd__ipc__subcmd__call)
+            opts="-h --args --queue-timeout --execution-timeout --pid --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --args)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --queue-timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --execution-timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --pid)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         arf__subcmd__ipc__subcmd__eval)
             opts="-h --pid --visible --timeout --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -1364,7 +1417,7 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__help)
-            opts="list attach eval send session shutdown interrupt history r-help help"
+            opts="list attach eval call send session shutdown interrupt history r-help help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1378,6 +1431,20 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__help__subcmd__attach)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        arf__subcmd__ipc__subcmd__help__subcmd__call)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )

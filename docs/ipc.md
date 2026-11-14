@@ -178,7 +178,7 @@ All `arf ipc` subcommands connect to a running arf session. If only one session 
 
 ### Output Format
 
-Single-shot IPC action subcommands (`list`, `eval`, `send`, `session`, `shutdown`, `interrupt`, `history`) output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
+Single-shot IPC action subcommands (`list`, `eval`, `call`, `send`, `session`, `shutdown`, `interrupt`, `history`) output JSON to stdout. Output is pretty-printed when stdout is a terminal, compact when piped. Errors are written to stderr as structured JSON:
 
 ```json
 {
@@ -225,6 +225,14 @@ Error code strings:
 | `INVALID_REQUEST` | 4 | Not a valid JSON-RPC request |
 | `METHOD_NOT_FOUND` | 4 | Unknown method name |
 | `INVALID_PARAMS` | 4 | Invalid method parameters |
+| `HANDLER_NOT_FOUND` | 4 | Handler is not exposed or has been revoked |
+| `HANDLER_QUEUE_FULL` | 4 | Handler queue admission limit was reached |
+| `HANDLER_QUEUE_TIMEOUT` | 4 | Handler call expired before it started |
+| `HANDLER_ARGUMENT_ERROR` | 4 | JSON arguments could not be converted to R |
+| `HANDLER_R_ERROR` | 4 | Handler raised an R error |
+| `HANDLER_RESULT_ERROR` | 4 | Handler result could not be converted to JSON |
+| `HANDLER_INTERRUPTED` | 4 | Handler ended with an interrupt without a deadline |
+| `HANDLER_EXECUTION_TIMEOUT` | 4 | Handler ended with an interrupt caused by its execution deadline |
 | `TIMEOUT` | 4 | Server stopped waiting for a response; an execution that already started continues |
 | `INTERNAL_ERROR` | 4 | Server internal error |
 | `PROTOCOL_ERROR` | 4 | Other JSON-RPC error |
@@ -372,6 +380,36 @@ Example (R error):
 }
 ```
 
+### `arf ipc call` — Call an Exposed R Handler
+
+Invoke a selector published with `--ipc-expose` or `:ipc expose`, passing JSON
+arguments and receiving a structured JSON value. Calls do not enter R history.
+
+```sh
+arf ipc call demo/add --args '{"x":[2,3]}'
+arf ipc call demo/add --pid 12345 --args '{"x":[2,3]}' --queue-timeout 5000 --execution-timeout 1000
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `<HANDLER>` | Published selector, such as `demo/add` |
+| `--args <JSON>` | JSON argument (default: `null`) |
+| `--pid <PID>` | Target session; optional when only one session is running |
+| `--queue-timeout <MS>` | Maximum wait before starting, 1–300,000 ms (default: 30,000) |
+| `--execution-timeout <MS>` | Cooperative execution deadline, 1–300,000 ms; omitted means no execution deadline |
+
+**Output format:** The result object contains `value` (JSON), `stdout` and
+`stderr` (strings), and `execution_id` (number), without a JSON-RPC envelope.
+For example: `{"value":{"sum":5},"stdout":"","stderr":"","execution_id":1}`.
+Errors use the standard CLI error format described above.
+
+The CLI transport wait is separate from the server deadlines. With no execution
+deadline it is 300 seconds; reaching that limit does not stop the handler. With
+an execution deadline it is the queue timeout plus the execution timeout plus
+5 seconds. Cooperative interruption may take longer than that wait. See
+[Exposing and calling R handlers](#exposing-and-calling-r-handlers) for deadline
+semantics and errors.
+
 ### `arf ipc send` — Send User Input
 
 Sends code through R's normal REPL, as if the user typed it at the prompt. It uses the same expression and callback semantics as visible `eval`. Output goes to the session's output streams (REPL terminal or headless stdout/log file) and is **not** captured in the IPC response.
@@ -453,6 +491,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "socket_path": "/run/user/1000/arf/12345.sock",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
+  "capabilities": ["call_execution_timeout"],
   "ipc_policy": {
     "silent": {
       "mode": "restricted",
@@ -902,7 +941,7 @@ Connection: close
 | `attach` | `client` (object, optional), `subscribe` (array of patterns, optional), `protocol` (int, optional) | Turn the connection into a [long-lived connection](#long-lived-connections) (raw newline-delimited JSON only) |
 | `subscribe` | `patterns` (array of strings) | Long-lived connections only: add event subscriptions |
 | `unsubscribe` | `patterns` (array of strings) | Long-lived connections only: remove event subscriptions |
-| `call` | `handler` (string), `args` (JSON, optional), `queue_timeout_ms` (int, optional) | Call a handler exposed by the session; available on single-shot and long-lived connections |
+| `call` | `handler` (string), `args` (JSON, optional), `queue_timeout_ms` (int, optional), `execution_timeout_ms` (int, optional) | Call a handler exposed by the session; available on single-shot and long-lived connections |
 
 ### Response Examples
 
@@ -1051,7 +1090,7 @@ All `params` are optional. `client` is informational only and is never used for 
 The response is:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events","execution_events"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
+{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events","execution_events","call_execution_timeout"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
 ```
 
 `session` is the same object the `session` method returns, but it never waits for R: `r` is `null` and `r_unavailable_reason` says so. Call `session` to get R's details. `session_id` identifies the arf process and is the same after the server is restarted within it.
@@ -1195,11 +1234,26 @@ Use the `call` method to invoke one exposed selector with JSON arguments:
 {"jsonrpc":"2.0","id":2,"method":"call","params":{"handler":"demo/add","args":{"x":[2,3]}}}
 ```
 
-If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, `stderr`, and `execution_id`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
+For CLI examples and transport wait limits, see [`arf ipc call`](#arf-ipc-call--call-an-exposed-r-handler).
+
+Both handler timeout parameters are integers from 1 through 300,000 ms when
+present. `queue_timeout_ms` only limits waiting to start. `execution_timeout_ms`
+starts when the ticket starts on the R thread and applies only while the
+protected handler evaluation is running; it does not include queue wait or
+return-value conversion. A deadline is cooperative: the server never replies
+until the handler has stopped, and a handler that does not check interrupts is
+allowed to continue.
+
+If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, `stderr`, and `execution_id`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler has no console: nested `readline()`, menus, `browser()`, and similar reads receive EOF, just as silent `evaluate` does. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
 
 Call requests from all clients share one FIFO queue with a limit of 64 waiting calls and 8 MiB of queued handler names and compact JSON arguments. A full queue is rejected immediately. `queue_timeout_ms` sets how long a call may wait before it starts (default 30,000 ms; allowed range 1–300,000 ms). A call that expires before starting is not run. Closing an attached connection also drops a call that has not started; an already running R function continues and its response is discarded if the client has disconnected. Single-shot connections preserve write-half-close compatibility: a disconnect while waiting is not detected until the response is written, so use an attached connection when cancellation on disconnect is required. Calls do not interrupt one another once running.
 
-Errors distinguish an unpublished or revoked handler (`-32010`), a full queue (`-32011`), a queue timeout (`-32012`), argument conversion (`-32013`), an R error (`-32014`), return conversion (`-32015`), and an interrupt (`-32016`). R errors include the condition message and class; errors include captured `stdout` and `stderr` when available. An error does not roll back side effects or trigger a retry.
+Errors distinguish an unpublished or revoked handler (`-32010`), a full queue (`-32011`), a queue timeout (`-32012`), argument conversion (`-32013`), an R error (`-32014`), return conversion (`-32015`), and an interrupt (`-32016`). A deadline-triggered interrupt is `HANDLER_EXECUTION_TIMEOUT` (`-32019`); its `data` always contains `timeout_ms`, `execution_id`, `stdout`, `stderr`, and `class`. A handler that catches its interrupt and returns a value succeeds. R errors include the condition message and class; errors include captured `stdout` and `stderr` when available. An error does not roll back side effects or trigger a retry.
+
+The `attach` response advertises `call_execution_timeout` in its `capabilities`
+array. The `session` response has the same capability in its always-present
+`capabilities` array, so single-shot clients can check support before sending
+an execution deadline.
 
 `session` reports `handler_api.state` as `unexposed`, `locked`, or `revoked`, along with the available handler names. `:ipc status` (or `:ipc`) displays the same state and `:ipc revoke` permanently revokes all handlers for that session. Revocation also prevents queued calls from starting, and cannot stop a handler that is already running. In the interactive REPL, at most one queued call starts per idle poll; calls can run while the user is editing a line without changing the input buffer or input history. Calls wait while R is evaluating or the editor is in an alternate mode, and may expire before starting. A locked handler list reveals its names and interface to every IPC client. The function's enclosing environment, bindings, and S3/S4 methods can change later, so the published list does not freeze the function's behavior. The lock prevents changing which selectors are published; it does not sandbox their code or environment.
 

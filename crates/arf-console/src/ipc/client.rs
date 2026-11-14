@@ -155,6 +155,19 @@ pub(super) fn rpc_error_info(code: i32) -> (&'static str, Option<&'static str>) 
             "HELP_NOT_FOUND",
             Some("Search available topics with 'arf ipc r-help search'."),
         ),
+        HANDLER_EXECUTION_TIMEOUT => (
+            "HANDLER_EXECUTION_TIMEOUT",
+            Some(
+                "The handler stopped after its execution deadline; inspect error.data for the captured output.",
+            ),
+        ),
+        HANDLER_NOT_FOUND => ("HANDLER_NOT_FOUND", None),
+        HANDLER_QUEUE_FULL => ("HANDLER_QUEUE_FULL", None),
+        HANDLER_QUEUE_TIMEOUT => ("HANDLER_QUEUE_TIMEOUT", None),
+        HANDLER_ARGUMENT_ERROR => ("HANDLER_ARGUMENT_ERROR", None),
+        HANDLER_R_ERROR => ("HANDLER_R_ERROR", None),
+        HANDLER_RESULT_ERROR => ("HANDLER_RESULT_ERROR", None),
+        HANDLER_INTERRUPTED => ("HANDLER_INTERRUPTED", None),
         PARSE_ERROR => ("PARSE_ERROR", None),
         INVALID_REQUEST => ("INVALID_REQUEST", None),
         METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
@@ -338,6 +351,45 @@ pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms:
     handle_response(response);
 }
 
+/// Call an exposed handler with JSON arguments.
+pub fn cmd_call(
+    handler: &str,
+    args: &str,
+    pid: Option<u32>,
+    queue_timeout_ms: Option<u64>,
+    execution_timeout_ms: Option<u64>,
+) {
+    let args: serde_json::Value = serde_json::from_str(args).unwrap_or_else(|error| {
+        exit_error(
+            EXIT_CLIENT,
+            "INVALID_JSON_ARGUMENTS",
+            &format!("Invalid JSON handler arguments: {error}"),
+            Some("Pass a JSON value with --args, for example --args '{\"path\":\".\"}'."),
+            None,
+        );
+    });
+    let session = resolve_session(pid);
+    let mut params = serde_json::json!({
+        "handler": handler,
+        "args": args,
+    });
+    if let Some(timeout) = queue_timeout_ms {
+        params["queue_timeout_ms"] = serde_json::json!(timeout);
+    }
+    if let Some(timeout) = execution_timeout_ms {
+        params["execution_timeout_ms"] = serde_json::json!(timeout);
+    }
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "call",
+        "params": params,
+    });
+    let transport_timeout = handler_transport_timeout(queue_timeout_ms, execution_timeout_ms);
+    let response = send_request(&session.socket_path, &request, transport_timeout);
+    handle_response(response);
+}
+
 /// Client transport timeout for requests answered after an R reply wait:
 /// the server-side timeout plus a small buffer, so the server can respond
 /// with a `TIMEOUT` error before the client gives up.
@@ -347,6 +399,23 @@ fn reply_transport_timeout(timeout_ms: Option<u64>) -> std::time::Duration {
         std::time::Duration::from_millis,
     );
     server_timeout.saturating_add(std::time::Duration::from_secs(5))
+}
+
+fn handler_transport_timeout(
+    queue_timeout_ms: Option<u64>,
+    execution_timeout_ms: Option<u64>,
+) -> std::time::Duration {
+    let Some(execution_timeout_ms) = execution_timeout_ms else {
+        return crate::ipc::execution::DEFAULT_EVAL_TIMEOUT;
+    };
+    let queue = queue_timeout_ms.map_or(
+        crate::ipc::protocol::DEFAULT_HANDLER_QUEUE_TIMEOUT,
+        std::time::Duration::from_millis,
+    );
+    let execution = std::time::Duration::from_millis(execution_timeout_ms);
+    queue
+        .saturating_add(execution)
+        .saturating_add(std::time::Duration::from_secs(5))
 }
 
 /// Send code as user input to a running arf session.

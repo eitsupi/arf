@@ -1,8 +1,9 @@
 //! Shared admission limits and R-thread registry for exposed IPC handlers.
 
 use super::protocol::{
-    HANDLER_ARGUMENT_ERROR, HANDLER_INTERRUPTED, HANDLER_NOT_FOUND, HANDLER_QUEUE_TIMEOUT,
-    HANDLER_R_ERROR, HANDLER_RESULT_ERROR, IpcMethod, IpcRequest, IpcResponse,
+    HANDLER_ARGUMENT_ERROR, HANDLER_EXECUTION_TIMEOUT, HANDLER_INTERRUPTED, HANDLER_NOT_FOUND,
+    HANDLER_QUEUE_TIMEOUT, HANDLER_R_ERROR, HANDLER_RESULT_ERROR, IpcMethod, IpcRequest,
+    IpcResponse,
 };
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, RwLock};
@@ -293,8 +294,19 @@ pub fn call_handler(
     name: &str,
     args: &serde_json::Value,
 ) -> Result<arf_harp::handlers::HandlerResult, arf_harp::handlers::HandlerError> {
+    call_handler_with_deadline(name, args, None, super::events::ExecutionId(0))
+}
+
+fn call_handler_with_deadline(
+    name: &str,
+    args: &serde_json::Value,
+    execution_timeout: Option<std::time::Duration>,
+    execution_id: super::events::ExecutionId,
+) -> Result<arf_harp::handlers::HandlerResult, arf_harp::handlers::HandlerError> {
     REGISTRY.with(|slot| match slot.borrow().as_ref() {
-        Some(registry) => registry.call(name, args),
+        Some(registry) => {
+            registry.call_with_deadline(name, args, execution_timeout.map(|_| execution_id.0))
+        }
         None => Err(arf_harp::handlers::HandlerError::not_found(name)),
     })
 }
@@ -310,6 +322,7 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
     } = request;
     let IpcMethod::Call {
         queue_deadline,
+        execution_timeout,
         ticket,
         ..
     } = method
@@ -333,7 +346,8 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
     let Some((handler, args)) = ticket.start() else {
         return;
     };
-    let execution_id = super::execution::begin_handler_execution(origin, &started_execution_id);
+    let execution_id =
+        super::execution::begin_handler_execution(origin, &started_execution_id, execution_timeout);
 
     struct PromptGuard;
     impl Drop for PromptGuard {
@@ -343,7 +357,12 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
     }
     super::state::set_r_at_prompt(false);
     let _prompt_guard = PromptGuard;
-    let response = match call_handler(&handler, &args) {
+    let _input_block = arf_libr::ConsoleInputBlockGuard::new();
+    let call_result = match execution_timeout {
+        Some(_) => call_handler_with_deadline(&handler, &args, execution_timeout, execution_id),
+        None => call_handler(&handler, &args),
+    };
+    let response = match call_result {
         Ok(result) => IpcResponse::Call(serde_json::json!({
             "value": result.value,
             "stdout": result.stdout,
@@ -351,6 +370,12 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
             "execution_id": execution_id,
         })),
         Err(error) => {
+            let deadline_triggered = error.deadline_requested
+                && execution_timeout.is_some()
+                && matches!(
+                    error.kind,
+                    arf_harp::handlers::HandlerErrorKind::Interrupted
+                );
             let (code, message) = match error.kind {
                 arf_harp::handlers::HandlerErrorKind::ArgumentConversion => {
                     (HANDLER_ARGUMENT_ERROR, error.message)
@@ -362,23 +387,41 @@ pub(crate) fn execute_handler_request(request: IpcRequest) {
                 arf_harp::handlers::HandlerErrorKind::ReturnConversion => {
                     (HANDLER_RESULT_ERROR, error.message)
                 }
+                arf_harp::handlers::HandlerErrorKind::Interrupted if deadline_triggered => (
+                    HANDLER_EXECUTION_TIMEOUT,
+                    format!(
+                        "Handler execution exceeded its {} ms deadline",
+                        execution_timeout
+                            .expect("deadline-triggered handler has a timeout")
+                            .as_millis()
+                    ),
+                ),
                 arf_harp::handlers::HandlerErrorKind::Interrupted => {
                     (HANDLER_INTERRUPTED, error.message)
                 }
             };
-            IpcResponse::error_with_data(
-                code,
-                message.clone(),
+            let data = if deadline_triggered {
+                serde_json::json!({
+                    "timeout_ms": execution_timeout.expect("deadline-triggered handler has a timeout").as_millis(),
+                    "execution_id": execution_id,
+                    "stdout": error.stdout,
+                    "stderr": error.stderr,
+                    "class": error.class,
+                })
+            } else {
                 serde_json::json!({
                     "message": message.clone(),
                     "class": error.class,
                     "stdout": error.stdout,
                     "stderr": error.stderr,
                     "execution_id": execution_id,
-                }),
-            )
+                })
+            };
+            IpcResponse::error_with_data(code, message, data)
         }
     };
+    arf_libr::begin_ipc_execution_finishing();
+    let _ = arf_libr::finish_ipc_execution();
     super::execution::clear_execution();
     let _ = reply.send(response);
 }
