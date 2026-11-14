@@ -520,6 +520,23 @@ fn unavailable_console_reads_stop_menus_and_preserve_the_session() {
         let followup = process.ipc_eval("1 + 1").expect("evaluate after menu");
         assert_eq!(parse_ipc_json(&followup)["value"], "[1] 2");
     }
+
+    // The error is an ordinary R error: code that handles it completes normally.
+    let code = r#"setTimeLimit(elapsed = 2, transient = TRUE); tryCatch(menu(c("a", "b")), error = conditionMessage)"#;
+    let result = process.ipc_eval(code).expect("evaluate caught menu");
+    let response = parse_ipc_json(&result);
+    assert_eq!(response["status"], "ok", "{response}");
+    assert!(
+        response["value"]
+            .as_str()
+            .unwrap()
+            .contains("more than 100 times"),
+        "{response}"
+    );
+    let followup = process
+        .ipc_eval("1 + 1")
+        .expect("evaluate after caught menu");
+    assert_eq!(parse_ipc_json(&followup)["value"], "[1] 2");
 }
 
 #[test]
