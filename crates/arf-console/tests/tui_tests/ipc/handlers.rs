@@ -76,3 +76,32 @@ fn deadline_terminated_handler_preserves_the_reedline_buffer() -> Result<()> {
         },
     )
 }
+
+#[test]
+fn failed_server_restart_keeps_handler_deadlines_working() -> Result<()> {
+    run_case_with(
+        Terminal::builder("ipc-handler-deadline-restart").args([
+            "--with-ipc",
+            "--ipc-expose",
+            r#"list("demo/slow" = function(args) { Sys.sleep(2); NULL })"#,
+        ]),
+        |terminal| {
+            terminal.wait_for_first_prompt()?;
+            terminal.enter(":ipc start")?;
+            terminal.key("enter")?;
+            terminal.wait_for_prompt(
+                Some("# [arf] Failed to start IPC server: IPC server is already running"),
+                PROMPT,
+            )?;
+
+            let socket = session_socket_path(terminal)?;
+            let response = raw_json_rpc(
+                &socket,
+                "call",
+                json!({"handler": "demo/slow", "execution_timeout_ms": 50}),
+            )?;
+            ensure!(response["error"]["code"] == -32019, "{response}");
+            Ok(())
+        },
+    )
+}
