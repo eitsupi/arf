@@ -493,3 +493,67 @@ fn headless_error_and_incomplete_eval_leave_the_next_request_usable() {
     );
     assert_eq!(parse_ipc_json(&last_value)["value"], "[1] TRUE");
 }
+
+#[test]
+fn unavailable_console_reads_stop_menus_and_preserve_the_session() {
+    let process = HeadlessProcess::spawn().expect("start headless");
+    for visible in [false, true] {
+        // The R deadline also bounds the test when the input budget regresses.
+        let code = r#"setTimeLimit(elapsed = 2, transient = TRUE); menu(c("a", "b"))"#;
+        let result = if visible {
+            process.ipc_eval_visible(code)
+        } else {
+            process.ipc_eval(code)
+        }
+        .expect("evaluate menu");
+        let response = parse_ipc_json(&result);
+        assert_eq!(response["status"], "error", "{response}");
+        let diagnostic = if visible {
+            &response["stderr"]
+        } else {
+            &response["error"]
+        };
+        assert!(
+            diagnostic.as_str().unwrap().contains("more than 100 times"),
+            "{response}"
+        );
+        let followup = process.ipc_eval("1 + 1").expect("evaluate after menu");
+        assert_eq!(parse_ipc_json(&followup)["value"], "[1] 2");
+    }
+}
+
+#[test]
+fn unavailable_console_read_boundary_and_browser_exemption() {
+    let process = HeadlessProcess::spawn().expect("start headless");
+    for visible in [false, true] {
+        let code = r#"stopifnot(all(vapply(seq_len(100), function(i) readline(), "") == "")); cat("BUDGET_OK")"#;
+        let result = if visible {
+            process.ipc_eval_visible(code)
+        } else {
+            process.ipc_eval(code)
+        }
+        .unwrap();
+        let response = parse_ipc_json(&result);
+        assert_eq!(response["status"], "ok", "{response}");
+        assert!(response["stdout"].as_str().unwrap().contains("BUDGET_OK"));
+        let code = r#"for (i in seq_len(101)) readline()"#;
+        let result = if visible {
+            process.ipc_eval_visible(code)
+        } else {
+            process.ipc_eval(code)
+        }
+        .unwrap();
+        let response = parse_ipc_json(&result);
+        assert_eq!(response["status"], "error", "{response}");
+        let code = r#"(function() { for (i in seq_len(110)) browser(); cat("BROWSER_OK") })()"#;
+        let result = if visible {
+            process.ipc_eval_visible(code)
+        } else {
+            process.ipc_eval(code)
+        }
+        .unwrap();
+        let response = parse_ipc_json(&result);
+        assert_eq!(response["status"], "ok", "{response}");
+        assert!(response["stdout"].as_str().unwrap().contains("BROWSER_OK"));
+    }
+}

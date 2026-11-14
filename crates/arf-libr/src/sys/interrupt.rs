@@ -40,6 +40,7 @@ struct InterruptState {
     deadline_in_force: bool,
     deadline_requested: bool,
     silent_boundaries: bool,
+    unavailable_reads: u32,
     protected_depth: usize,
     protected_previous_phase: InterruptPhase,
     /// Re-entrant R evaluations temporarily save the outer execution here.
@@ -61,6 +62,7 @@ struct InterruptFrame {
     deadline_in_force: bool,
     deadline_requested: bool,
     silent_boundaries: bool,
+    unavailable_reads: u32,
     protected_depth: usize,
     protected_previous_phase: InterruptPhase,
 }
@@ -81,6 +83,7 @@ impl Default for InterruptState {
             deadline_in_force: false,
             deadline_requested: false,
             silent_boundaries: false,
+            unavailable_reads: 0,
             protected_depth: 0,
             protected_previous_phase: InterruptPhase::Input,
             stack: Vec::new(),
@@ -103,6 +106,7 @@ fn snapshot(state: &InterruptState) -> InterruptFrame {
         deadline_in_force: state.deadline_in_force,
         deadline_requested: state.deadline_requested,
         silent_boundaries: state.silent_boundaries,
+        unavailable_reads: state.unavailable_reads,
         protected_depth: state.protected_depth,
         protected_previous_phase: state.protected_previous_phase,
     }
@@ -122,6 +126,7 @@ fn restore(state: &mut InterruptState, frame: InterruptFrame) {
     state.deadline_in_force = frame.deadline_in_force;
     state.deadline_requested = frame.deadline_requested;
     state.silent_boundaries = frame.silent_boundaries;
+    state.unavailable_reads = frame.unavailable_reads;
     state.protected_depth = frame.protected_depth;
     state.protected_previous_phase = frame.protected_previous_phase;
 }
@@ -136,6 +141,19 @@ fn lock_interrupt_state() -> std::sync::MutexGuard<'static, InterruptState> {
     interrupt_state()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Maximum unavailable console reads allowed in one IPC execution.
+const UNAVAILABLE_READ_LIMIT: u32 = 100;
+
+/// Account for an unavailable read without holding a lock while raising R errors.
+pub(super) fn unavailable_read_limit_exceeded() -> bool {
+    let mut state = lock_interrupt_state();
+    if state.execution_id.is_none() {
+        return false;
+    }
+    state.unavailable_reads = state.unavailable_reads.saturating_add(1);
+    state.unavailable_reads > UNAVAILABLE_READ_LIMIT
 }
 
 /// Start tracking one IPC user-code evaluation.
@@ -158,6 +176,7 @@ pub fn begin_ipc_execution(execution_id: u64, eligible: bool) {
     state.deadline_in_force = false;
     state.deadline_requested = false;
     state.silent_boundaries = false;
+    state.unavailable_reads = 0;
     state.protected_depth = 0;
     state.protected_previous_phase = InterruptPhase::Input;
 }
@@ -184,6 +203,7 @@ pub fn begin_handler_ipc_execution(execution_id: u64, deadline_in_force: bool) {
     state.deadline_in_force = deadline_in_force;
     state.deadline_requested = false;
     state.silent_boundaries = false;
+    state.unavailable_reads = 0;
     state.protected_depth = 0;
     state.protected_previous_phase = InterruptPhase::Input;
 }
@@ -866,6 +886,29 @@ mod tests {
 
     /// Serializes tests that use the process-wide IPC interrupt state.
     static STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn unavailable_reads_follow_nested_execution_budgets() {
+        let _lock = STATE_TEST_LOCK.lock().unwrap();
+        assert!(!super::unavailable_read_limit_exceeded());
+        super::begin_ipc_execution(9200, true);
+        for _ in 0..99 {
+            assert!(!super::unavailable_read_limit_exceeded());
+        }
+        super::begin_handler_ipc_execution(9201, false);
+        for _ in 0..100 {
+            assert!(!super::unavailable_read_limit_exceeded());
+        }
+        assert!(super::unavailable_read_limit_exceeded());
+        assert!(super::unavailable_read_limit_exceeded());
+        super::finish_ipc_execution();
+        assert!(!super::unavailable_read_limit_exceeded());
+        assert!(super::unavailable_read_limit_exceeded());
+        super::lock_interrupt_state().unavailable_reads = u32::MAX;
+        assert!(super::unavailable_read_limit_exceeded());
+        super::finish_ipc_execution();
+        assert!(!super::unavailable_read_limit_exceeded());
+    }
 
     #[test]
     fn protected_evaluation_restores_nested_console_waits() {
