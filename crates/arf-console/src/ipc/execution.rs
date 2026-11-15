@@ -90,6 +90,9 @@ fn begin_execution_kind(
     emit_completion: bool,
 ) -> super::events::ExecutionId {
     super::flush_console_output();
+    if visible && kind == "user_code" {
+        arf_harp::conditions::reset();
+    }
     let id = super::events::ExecutionId(NEXT_EXECUTION_ID.fetch_add(1, Ordering::Relaxed));
     CURRENT_EXECUTION.set(Some(ExecutionContext {
         id,
@@ -189,7 +192,17 @@ pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionCompletion {
     };
     arf_libr::begin_ipc_execution_finishing();
     let (interrupted, deadline_requested) = arf_libr::finish_ipc_execution_outcome();
-    let status = if interrupted || status == ExecutionStatus::Interrupted {
+    let observed = if context.visible {
+        arf_harp::conditions::outcome()
+    } else {
+        None
+    };
+    let status = if let Some(condition) = observed {
+        match condition {
+            arf_harp::conditions::UnhandledCondition::Error => ExecutionStatus::Error,
+            arf_harp::conditions::UnhandledCondition::Interrupt => ExecutionStatus::Interrupted,
+        }
+    } else if interrupted || status == ExecutionStatus::Interrupted {
         ExecutionStatus::Interrupted
     } else {
         status

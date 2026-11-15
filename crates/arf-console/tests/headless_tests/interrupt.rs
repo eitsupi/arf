@@ -257,3 +257,109 @@ fn evaluation_deadline_survives_an_earlier_reply_timeout() {
     assert_eq!(parse_ipc_json(&next)["value"], "[1] 42");
     assert_eq!(parse_ipc_json(&next)["status"], "ok");
 }
+
+#[test]
+fn caught_deadline_interrupt_followed_by_error_reports_error() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    for visible in [false, true] {
+        for read in ["", "readline();"] {
+            let code = format!(
+                r#"{{ tryCatch(Sys.sleep(30), interrupt = function(e) NULL); {read} stop("deliberate error") }}"#
+            );
+            let output = deadline_eval(process.pid, &code, visible, "10000");
+            assert!(output.status.success(), "{output:?}");
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                result,
+                serde_json::json!({
+                    "stdout": result["stdout"], "stderr": result["stderr"],
+                    "value": null, "error": if visible { None } else { Some("deliberate error") },
+                    "status": "error", "execution_id": result["execution_id"]
+                })
+            );
+            if visible {
+                assert!(
+                    result["stderr"]
+                        .as_str()
+                        .unwrap()
+                        .contains("deliberate error")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn caught_manual_interrupt_followed_by_error_reports_error() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    for read in ["", "readline();"] {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("started");
+        let marker_r = serde_json::to_string(&marker.to_string_lossy()).unwrap();
+        let code = format!(
+            r#"{{ tryCatch({{ file.create({marker_r}); Sys.sleep(30) }}, interrupt = function(e) NULL); {read} stop("deliberate error") }}"#
+        );
+        let pid = process.pid;
+        let evaluation = thread::spawn(move || eval_process(pid, &code, true));
+        wait_for_file(&marker);
+        assert_eq!(interrupt_process(process.pid, None)["accepted"], true);
+        let result = evaluation.join().unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "stdout": result["stdout"], "stderr": result["stderr"], "value": null,
+                "error": null, "status": "error", "execution_id": result["execution_id"]
+            })
+        );
+        assert!(
+            result["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("deliberate error")
+        );
+    }
+}
+
+#[test]
+fn visible_error_with_recover_reports_error() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    assert!(
+        process
+            .ipc_eval(r#"options(error = recover)"#)
+            .unwrap()
+            .success
+    );
+    let output = deadline_eval(
+        process.pid,
+        r#"(function() stop("recover probe"))()"#,
+        true,
+        "10000",
+    );
+    assert!(output.status.success(), "{output:?}");
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "error", "{result}");
+    assert!(
+        process
+            .ipc_eval(r#"options(error = NULL); 42L"#)
+            .unwrap()
+            .success
+    );
+}
+
+#[test]
+fn signalled_conditions_that_return_normally_preserve_success() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    for code in [
+        r#"{ signalCondition(simpleError("notification")); 1L }"#,
+        r#"{ signalCondition(structure(list(message = "notification"), class = c("interrupt", "condition"))); 1L }"#,
+    ] {
+        let result = eval_process(process.pid, code, true);
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "stdout": "[1] 1\n", "stderr": "", "value": null,
+                "error": null, "status": "ok", "execution_id": result["execution_id"]
+            })
+        );
+    }
+}

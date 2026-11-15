@@ -44,6 +44,17 @@ code. Original line breaks and string contents are preserved; no artificial
 line breaks are added or expressions rewritten. Values, expression meanings,
 and task callback counts are preserved.
 
+To report the status of visible executions, arf registers global calling
+handlers for `error` and `interrupt` after existing handlers, and a task
+callback named `arf-condition-observer` (with a unique suffix if needed).
+These appear in `globalCallingHandlers()` and `getTaskCallbackNames()`.
+Headless sessions always register them. Interactive sessions register them
+only while the IPC server is running, at the next top-level prompt after
+`:ipc start`, and remove them after `:ipc stop`. Registration does not change
+`.Last.value` or run other task callbacks. If the observers are removed,
+visible statuses fall back to less precise detection: for example, code that
+catches an interrupt and then raises an R error can be reported as `interrupted`.
+
 Older R versions may retain native REPL limitations for long console input;
 this path does not guarantee correct handling of such inputs on R 4.0/4.1.
 
@@ -383,11 +394,6 @@ omit `interrupt_reason`, including evaluations that catch the interrupt and
 finish normally. This records acceptance of a deadline request, not its precise
 causal order relative to manual interrupts. Completion events and history retain
 their existing statuses.
-
-Known limitation: a visible evaluation whose code catches an interrupt and then
-fails with an R error is reported as `interrupted` rather than `error`, with
-`interrupt_reason` if a deadline was accepted. This also applies to interrupts
-requested with `arf ipc interrupt`. Silent evaluations report `error`.
 
 The reply wait starts at submission, while execution timing starts at evaluation
 start. With the default 300-second reply wait and a long execution deadline,
@@ -1176,10 +1182,10 @@ normal REPL execution from silent evaluation. `status` is `"ok"`, `"error"`, or
 `"interrupted"` when an IPC interrupt stopped the execution, or `"unknown"`
 when a reliable outcome is unavailable. An interrupted `evaluate` result also
 contains an `error` message identifying the interruption. Requests are
-cooperative, so an accepted interrupt can race with normal completion. If
-visible or `send` code handles the interrupt condition and then raises another
-error, the execution is still reported as `"interrupted"`; the original error
-message remains in `stderr`.
+cooperative, so an accepted interrupt can race with normal completion. Visible
+completion uses unhandled R conditions when available; if the global calling
+handlers are unavailable or removed, arf falls back to interrupt flags and
+console resets.
 
 The completion event's `status` always matches the corresponding `evaluate`
 result's `status`. The event is published before the evaluation response is

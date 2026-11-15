@@ -4,6 +4,7 @@
 //! including automatic protection and type-safe access.
 
 pub mod completion;
+pub mod conditions;
 pub mod embedding_api;
 mod error;
 mod ffi;

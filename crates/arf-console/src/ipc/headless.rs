@@ -83,6 +83,13 @@ pub fn headless_read_console(
             shutdown_before_eof(1);
         }
     }
+    if info.is_main_prompt {
+        match arf_harp::conditions::update(true) {
+            Ok(Some(action)) => return HeadlessReadConsoleResult::AtBoundary(action),
+            Ok(None) => {}
+            Err(error) => log::warn!("Could not update condition observer: {error}"),
+        }
+    }
     if !info.is_main_prompt && !info.is_continuation {
         log::error!("Headless R requested an unrecognized prompt: {prompt:?}");
         set_headless_shutdown();

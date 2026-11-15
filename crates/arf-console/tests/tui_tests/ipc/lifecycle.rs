@@ -246,3 +246,100 @@ fn existing_ipc_pid_file_is_rejected_without_mutation() -> Result<()> {
     wait_for_path_absent(Path::new(&bind_path))?;
     Ok(())
 }
+
+#[test]
+fn condition_observer_follows_ipc_without_extra_repl_tasks() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let profile = temp.path().join("profile.R");
+    fs::write(
+        &profile,
+        r#"
+.counter <- 0L
+base::globalCallingHandlers(error = function(e) base::invisible(NULL))
+base::addTaskCallback(function(expr, value, ok, visible) {
+    .counter <<- .counter + 1L
+    TRUE
+}, name = "user-profile")
+"#,
+    )?;
+    for initially_enabled in [false, true] {
+        let mut builder = Terminal::builder(format!("ipc-observer-{initially_enabled}"))
+            .vanilla(false)
+            .rows(60)
+            .args([
+                "--no-environ",
+                "--no-site-file",
+                "--no-save",
+                "--no-restore",
+            ])
+            .env("R_PROFILE_USER", profile.to_string_lossy());
+        if initially_enabled {
+            builder = builder.args(["--with-ipc"]);
+        }
+        run_case_with(builder, |terminal| {
+            terminal.wait_for_first_prompt()?;
+            let (handlers, tasks) = if initially_enabled { (3, 2) } else { (1, 1) };
+            terminal.submit(
+                r#"cat("OBSERVER_BOOT:", .counter, length(globalCallingHandlers()), length(getTaskCallbackNames()), "\nOBSERVER_BOOT_DONE\n")"#,
+                "OBSERVER_BOOT_DONE", PROMPT,
+            )?;
+            ensure!(
+                terminal
+                    .state()?
+                    .text
+                    .lines()
+                    .any(|line| line == format!("OBSERVER_BOOT: 0 {handlers} {tasks}")),
+                "observer startup changed R state: {:?}",
+                terminal.state()?.text
+            );
+            for (index, enabled) in [!initially_enabled, initially_enabled]
+                .into_iter()
+                .enumerate()
+            {
+                // A real user expression sets both the expected callback count
+                // and .Last.value immediately before the meta command.
+                terminal.submit(
+                    r#"{ .expected_count <- .counter + 1L; 54321L }"#,
+                    "[1] 54321",
+                    PROMPT,
+                )?;
+                let checkpoint = terminal.checkpoint()?;
+                terminal.enter(if enabled { ":ipc start" } else { ":ipc stop" })?;
+                terminal.key("enter")?;
+                let message = if enabled {
+                    "IPC server started:"
+                } else {
+                    "IPC server stopped."
+                };
+                terminal.wait_for("IPC transition and prompt", |_, line| {
+                    line.trim_end() == PROMPT
+                        && terminal
+                            .output_since(checkpoint)
+                            .is_ok_and(|output| output.contains(message))
+                })?;
+                let (handlers, tasks) = if enabled { (3, 2) } else { (1, 1) };
+                let code = format!(
+                    r#"cat("OBSERVER_{index}:", .counter == .expected_count, identical(.Last.value, 54321L), length(globalCallingHandlers()), length(getTaskCallbackNames()), "\nOBSERVER_DONE_{index}\n")"#
+                );
+                terminal.submit(&code, &format!("OBSERVER_DONE_{index}"), PROMPT)?;
+                ensure!(
+                    terminal
+                        .state()?
+                        .text
+                        .lines()
+                        .any(|line| line
+                            == format!("OBSERVER_{index}: TRUE TRUE {handlers} {tasks}")),
+                    "IPC transition changed R state: {:?}",
+                    terminal.state()?.text
+                );
+            }
+            terminal.key("Ctrl+D")?;
+            ensure!(
+                terminal.wait_for_exit()? == 0,
+                "observer test did not exit cleanly"
+            );
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
