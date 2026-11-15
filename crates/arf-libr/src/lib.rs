@@ -37,10 +37,10 @@ pub use types::{Rstart, SaType, UImode};
 pub use sys::askpass_handler_code;
 pub use sys::{
     CommandOutcome, ConsoleEvaluationInterruptGuard, ConsoleInputBlockGuard,
-    HeadlessReadConsoleCallback, InterruptPhase, ReadConsoleInput, ReadConsolePromptInfo,
-    ReadConsoleResult, begin_handler_ipc_execution, begin_handler_protected_execution,
-    begin_ipc_execution, begin_ipc_execution_finishing, begin_ipc_protected_evaluation,
-    begin_read_console_input, cancel_ipc_deadline, command_outcome,
+    HeadlessReadConsoleCallback, HeadlessReadConsoleResult, InterruptPhase, ReadConsoleInput,
+    ReadConsolePromptInfo, ReadConsoleResult, begin_handler_ipc_execution,
+    begin_handler_protected_execution, begin_ipc_execution, begin_ipc_execution_finishing,
+    begin_ipc_protected_evaluation, begin_read_console_input, cancel_ipc_deadline, command_outcome,
     command_outcome_tracking_available, enable_ipc_silent_boundaries, ensure_ld_library_path,
     find_r_library, finish_handler_protected_execution, finish_ipc_capture, finish_ipc_execution,
     finish_ipc_protected_evaluation, flush_reprex_buffer, frame_depth_protected, get_r_home,

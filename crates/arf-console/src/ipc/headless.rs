@@ -2,6 +2,8 @@
 //!
 //! The R mainloop reads request-owned input without an interactive editor.
 
+use arf_libr::HeadlessReadConsoleResult;
+
 use super::execution;
 use super::history_query::set_history_store;
 use super::protocol::{ExecutionStatus, IpcMethod, IpcRequest, IpcResponse};
@@ -54,9 +56,13 @@ fn begin_headless_history(code: &str) -> Option<IpcHistoryEntry> {
 pub fn headless_read_console(
     prompt: &str,
     info: arf_libr::ReadConsolePromptInfo,
-) -> Option<arf_libr::ReadConsoleInput> {
+) -> HeadlessReadConsoleResult {
     if info.hist == 0 || is_browse_prompt(prompt) {
-        return arf_libr::take_ipc_interrupt_request().then(interrupt_input);
+        return if arf_libr::take_ipc_interrupt_request() {
+            HeadlessReadConsoleResult::Interrupt
+        } else {
+            HeadlessReadConsoleResult::Unavailable
+        };
     }
     if !info.prompt_options_are_valid {
         log::error!("Headless R prompt and continuation options are missing or ambiguous");
@@ -65,7 +71,7 @@ pub fn headless_read_console(
     }
     match arf_libr::frame_depth_protected() {
         Ok(0) => {}
-        Ok(depth) if depth > 0 => return None,
+        Ok(depth) if depth > 0 => return HeadlessReadConsoleResult::Unavailable,
         Ok(depth) => {
             log::error!("R returned an invalid evaluation frame depth: {depth}");
             set_headless_shutdown();
@@ -115,7 +121,7 @@ pub fn headless_read_console(
                     request.exhausted = true;
                 }
                 arf_libr::mark_ipc_interrupt_discarded();
-                return Some(interrupt_input());
+                return HeadlessReadConsoleResult::Interrupt;
             }
             let continuation_eof = if info.is_continuation {
                 let mut active = ACTIVE_REQUEST.lock().unwrap();
@@ -146,10 +152,10 @@ pub fn headless_read_console(
             if exhausted_continuation {
                 // Let R abandon its incomplete parser buffer and return to
                 // the main prompt before completing this request.
-                return None;
+                return HeadlessReadConsoleResult::Eof;
             }
             if let Some(chunk) = next_active_chunk(info.buffer_capacity, info.is_main_prompt) {
-                return Some(chunk);
+                return HeadlessReadConsoleResult::Input(chunk);
             }
             log::error!("R ReadConsole buffer cannot fit the next request chunk");
             set_headless_shutdown();
@@ -162,7 +168,7 @@ pub fn headless_read_console(
                     if let Some(chunk) =
                         next_active_chunk(info.buffer_capacity, info.is_main_prompt)
                     {
-                        return Some(chunk);
+                        return HeadlessReadConsoleResult::Input(chunk);
                     }
                     log::error!("R ReadConsole buffer cannot fit the first request chunk");
                     set_headless_shutdown();
@@ -277,7 +283,6 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
             return Some(arf_libr::ReadConsoleInput {
                 text: String::new(),
                 has_more: false,
-                interrupt: false,
             });
         }
     }
@@ -306,19 +311,7 @@ fn next_active_chunk(capacity: usize, is_main_prompt: bool) -> Option<arf_libr::
     let text = remaining[..end].to_owned();
     request.offset += end;
     request.exhausted = !has_more;
-    Some(arf_libr::ReadConsoleInput {
-        text,
-        has_more,
-        interrupt: false,
-    })
-}
-
-fn interrupt_input() -> arf_libr::ReadConsoleInput {
-    arf_libr::ReadConsoleInput {
-        text: String::new(),
-        has_more: false,
-        interrupt: true,
-    }
+    Some(arf_libr::ReadConsoleInput { text, has_more })
 }
 
 fn is_horizontal_ascii_whitespace(byte: u8) -> bool {

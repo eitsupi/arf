@@ -48,8 +48,14 @@ Older R versions may retain native REPL limitations for long console input;
 this path does not guarantee correct handling of such inputs on R 4.0/4.1.
 
 Standard nested console reads such as `parse()` reading from the console,
-`readline()`, menus, and browser prompts receive EOF; further IPC requests
-cannot supply console responses. Native console readers without R evaluation
+`readline()`, menus, and browser prompts receive EOF initially; further IPC requests
+cannot supply console responses. During each IPC execution, the first 100
+unavailable reads receive EOF and subsequent reads raise an R error. Browser
+prompts are exempt. This is a read budget, not infinite-loop detection: even
+legitimate code requesting input 101 times can fail. Code that catches the error
+and retries can still run forever; use `arf ipc interrupt` for evaluations or
+`call --execution-timeout` for handlers. Reads outside IPC executions, including
+startup profiles, are not covered. Native console readers without R evaluation
 frames are unsupported. R's main and continuation prompt options must be
 readable, non-empty, distinct strings and must not resemble `Browse[n]>`
 prompts. `--no-echo` is unsupported in headless mode. Invalid or ambiguous
@@ -321,7 +327,10 @@ Silent eval has no console to answer input requests. In both session types,
 console reads that silent code triggers through arf, such as a `browser()`
 prompt, `readline()`, a menu, or arf's password prompt, receive EOF, so
 `browser()` does not stop and evaluation continues. How each function handles
-EOF is up to R. To debug interactively, run the code with `--visible` in an
+EOF is up to R. After 100 unavailable reads in one IPC execution, further reads
+raise an R error; browser prompts are exempt. See the budget and recovery
+limitations under [Headless console limitations](#headless-console-limitations).
+To debug interactively, run the code with `--visible` in an
 interactive session, where the person at the terminal answers the prompt.
 
 ```sh
@@ -1244,7 +1253,7 @@ return-value conversion. A deadline is cooperative: the server never replies
 until the handler has stopped, and a handler that does not check interrupts is
 allowed to continue.
 
-If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, `stderr`, and `execution_id`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler has no console: nested `readline()`, menus, `browser()`, and similar reads receive EOF, just as silent `evaluate` does. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
+If `args` is omitted, the handler receives `NULL`. The response result contains `value` (converted to JSON), `stdout`, `stderr`, and `execution_id`. Calls run on the R thread and their console output is captured. Calls do not enter R's command history. They are not subject to the code evaluation policy or `send` approval because the client selects a published function and supplies data rather than R source code. A handler has no console: nested `readline()`, menus, `browser()`, and similar reads initially receive EOF, just as silent `evaluate` does. After 100 unavailable reads in a call, further reads raise an R error; browser prompts are exempt. This budget does not stop code that catches the error and retries: use `--execution-timeout` to request interruption. See [Headless console limitations](#headless-console-limitations) for the scope of the budget. A handler can still perform arbitrary side effects, so exposing one is not a read-only or safe operation. Publish only handlers whose arguments are validated; never use client values to select files, evaluate source, or construct executable code.
 
 Call requests from all clients share one FIFO queue with a limit of 64 waiting calls and 8 MiB of queued handler names and compact JSON arguments. A full queue is rejected immediately. `queue_timeout_ms` sets how long a call may wait before it starts (default 30,000 ms; allowed range 1–300,000 ms). A call that expires before starting is not run. Closing an attached connection also drops a call that has not started; an already running R function continues and its response is discarded if the client has disconnected. Single-shot connections preserve write-half-close compatibility: a disconnect while waiting is not detected until the response is written, so use an attached connection when cancellation on disconnect is required. Calls do not interrupt one another once running.
 

@@ -642,3 +642,28 @@ fn invalid_exposure_aborts_headless_startup_with_a_diagnostic() {
         "{stderr}"
     );
 }
+
+#[test]
+fn unavailable_console_reads_stop_handler_menus() {
+    let process = exposed(
+        r#"list("demo/menu" = function(args) menu(c("a", "b")), "demo/answer" = function(args) 42L)"#,
+    );
+    let output = process
+        .ipc_call("demo/menu", "null", None, Some(2000))
+        .unwrap();
+    assert!(!output.success);
+    let response: Value = serde_json::from_str(&output.stderr).expect("structured handler error");
+    assert_eq!(response["error"]["code"], "HANDLER_R_ERROR", "{response}");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("more than 100 times"),
+        "{response}"
+    );
+    let output = process
+        .ipc_call("demo/answer", "null", None, Some(2000))
+        .unwrap();
+    assert!(output.success, "{}", output.stderr);
+    assert_eq!(parse_ipc_json(&output)["value"], 42);
+}

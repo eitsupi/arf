@@ -85,7 +85,7 @@ pub struct ReadConsolePromptInfo {
 
 /// ReadConsole callback receives the raw R prompt and option-derived metadata.
 type ReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> ReadConsoleResult;
-pub type HeadlessReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Option<ReadConsoleInput>;
+pub type HeadlessReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> HeadlessReadConsoleResult;
 
 /// Result from the interactive ReadConsole callback.
 #[derive(Debug)]
@@ -95,14 +95,21 @@ pub enum ReadConsoleResult {
     Eof,
 }
 
+/// Headless input distinguishes request EOF from unavailable nested input.
+#[derive(Debug)]
+pub enum HeadlessReadConsoleResult {
+    Input(ReadConsoleInput),
+    Interrupt,
+    Eof,
+    Unavailable,
+}
+
 /// One request-owned chunk for R's ReadConsole buffer.
 #[derive(Debug)]
 pub struct ReadConsoleInput {
     pub text: String,
     /// True when R should call ReadConsole again for the rest of this line.
     pub has_more: bool,
-    /// Return through the interrupt path after the callback's Rust frames end.
-    pub interrupt: bool,
 }
 
 /// Find the end of the next UTF-8-safe ReadConsole chunk.
@@ -262,6 +269,9 @@ thread_local! {
 /// source is consulted, including the frontend callbacks and the askpass
 /// terminal read. Use it for evaluations that have no console to answer
 /// input requests, such as silent IPC evaluation.
+/// This guard must remain outside a protected R evaluation boundary that
+/// catches errors before returning to Rust. Unavailable reads can raise an R
+/// error, whose longjmp must not skip this guard or other Rust-owned values.
 pub struct ConsoleInputBlockGuard {
     previous: bool,
 }
@@ -307,6 +317,21 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     let mut previous_execution = begin_read_console_input();
     loop {
         let result = unsafe { r_read_console_inner(prompt, buf, buflen, hist) };
+        if result == READ_CONSOLE_UNAVAILABLE {
+            finish_read_console_input(previous_execution, false);
+            let Ok(library) = crate::r_library() else {
+                return 0;
+            };
+            // All owned callback values and guards were dropped by the inner
+            // frame. The enclosing protected R evaluation receives this error.
+            unsafe {
+                (library.rf_errorcall)(
+                    *library.r_nilvalue,
+                    c"%s".as_ptr(),
+                    c"console input is unavailable in this evaluation, which requested it more than 100 times".as_ptr(),
+                );
+            }
+        }
         if result != READ_CONSOLE_INTERRUPT {
             finish_read_console_input(previous_execution, result == 1);
             return result;
@@ -354,6 +379,17 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
 }
 
 const READ_CONSOLE_INTERRUPT: c_int = 2;
+const READ_CONSOLE_UNAVAILABLE: c_int = 3;
+
+fn unavailable_console_input(prompt: &str) -> c_int {
+    // Errors at a browser prompt return to that same prompt. Raising again
+    // there would trap the session in an error loop that interrupts cannot exit.
+    if !is_browse_prompt(prompt) && super::interrupt::unavailable_read_limit_exceeded() {
+        READ_CONSOLE_UNAVAILABLE
+    } else {
+        0
+    }
+}
 
 unsafe fn r_read_console_inner(
     prompt: *const c_char,
@@ -382,7 +418,14 @@ unsafe fn r_read_console_inner(
     // terminal read below, can wait for or consume input.
     if console_input_blocked() {
         log::debug!("r_read_console: console input is blocked, returning EOF");
-        return 0;
+        let prompt = if prompt.is_null() {
+            ""
+        } else {
+            unsafe { CStr::from_ptr(prompt) }
+                .to_str()
+                .unwrap_or_default()
+        };
+        return unavailable_console_input(prompt);
     }
 
     // Read the prompt options once per invocation and share the resulting
@@ -447,13 +490,14 @@ unsafe fn r_read_console_inner(
     // A headless callback owns its complete request buffer. Invoke it before
     // the interactive shared remainder so nested prompts cannot consume it.
     if let Some(callback) = unsafe { HEADLESS_READ_CONSOLE_CALLBACK } {
-        let Some(input) = callback(prompt_str, prompt_info) else {
-            return 0;
+        return match callback(prompt_str, prompt_info) {
+            HeadlessReadConsoleResult::Input(input) => unsafe {
+                write_read_console_input(input, buf, buflen)
+            },
+            HeadlessReadConsoleResult::Interrupt => READ_CONSOLE_INTERRUPT,
+            HeadlessReadConsoleResult::Eof => 0,
+            HeadlessReadConsoleResult::Unavailable => unavailable_console_input(prompt_str),
         };
-        if input.interrupt {
-            return READ_CONSOLE_INTERRUPT;
-        }
-        return unsafe { write_read_console_input(input, buf, buflen) };
     }
 
     // Nested input owns its own chunks: an outer request's remaining code
@@ -519,7 +563,6 @@ unsafe fn r_read_console_inner(
             ReadConsoleInput {
                 text: input[..chunk_end].to_owned(),
                 has_more,
-                interrupt: false,
             },
             buf,
             buflen,
@@ -651,7 +694,6 @@ mod tests {
                 ReadConsoleInput {
                     text: "abc".to_string(),
                     has_more: false,
-                    interrupt: false,
                 },
                 buffer.as_mut_ptr().cast(),
                 buffer.len() as c_int,
@@ -670,7 +712,6 @@ mod tests {
                 ReadConsoleInput {
                     text: "abc".to_string(),
                     has_more: true,
-                    interrupt: false,
                 },
                 buffer.as_mut_ptr().cast(),
                 buffer.len() as c_int,
