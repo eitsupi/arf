@@ -44,6 +44,14 @@ code. Original line breaks and string contents are preserved; no artificial
 line breaks are added or expressions rewritten. Values, expression meanings,
 and task callback counts are preserved.
 
+To report the status of visible executions, arf registers global calling
+handlers for `error` and `interrupt` after any existing ones, and a task
+callback named `arf-condition-observer`, at the first top-level prompt. These
+appear in `globalCallingHandlers()` and `getTaskCallbackNames()` in both
+interactive and headless sessions. If they are removed, visible statuses fall
+back to less precise detection: for example, code that catches an interrupt
+and then raises an R error is reported as `interrupted`.
+
 Older R versions may retain native REPL limitations for long console input;
 this path does not guarantee correct handling of such inputs on R 4.0/4.1.
 
@@ -383,11 +391,6 @@ omit `interrupt_reason`, including evaluations that catch the interrupt and
 finish normally. This records acceptance of a deadline request, not its precise
 causal order relative to manual interrupts. Completion events and history retain
 their existing statuses.
-
-Known limitation: a visible evaluation whose code catches an interrupt and then
-fails with an R error is reported as `interrupted` rather than `error`, with
-`interrupt_reason` if a deadline was accepted. This also applies to interrupts
-requested with `arf ipc interrupt`. Silent evaluations report `error`.
 
 The reply wait starts at submission, while execution timing starts at evaluation
 start. With the default 300-second reply wait and a long execution deadline,
