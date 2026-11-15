@@ -324,6 +324,12 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     buflen: c_int,
     hist: c_int,
 ) -> c_int {
+    // A forked R worker has no console of its own, and the input state, IPC
+    // requests and spinner belong to the parent. Report EOF without them.
+    #[cfg(unix)]
+    if super::output::in_forked_child() {
+        return 0;
+    }
     // Keep the full callback implementation, including its owned values and
     // input-wait guard, in a helper frame. Rf_onintr() can longjmp to an
     // enclosing R context, so it must run only after that frame has returned
