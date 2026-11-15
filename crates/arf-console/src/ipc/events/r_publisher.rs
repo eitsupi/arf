@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::bus::PublishError;
+use super::bus::{Limits, PublishError, check_event_size};
 use super::current::publish_event;
 use super::event::{ExecutionId, Topic};
 use arf_harp::embedding_api::{PublishOutcome, set_event_publisher};
@@ -19,7 +19,29 @@ pub(crate) fn install_r_event_publisher() {
 }
 
 fn publish_from_r(topic: &str, data: Value) -> PublishOutcome {
+    // A forked R worker has a copy of the bus but no server or runtime to
+    // deliver it; using the copy can deadlock or panic. Nothing can receive
+    // its events, so after the same topic and size checks report that there
+    // is no target, without reading the copied bus or execution state.
+    if arf_libr::in_forked_child() {
+        let topic = match external_topic(topic) {
+            Ok(topic) => topic,
+            Err(rejected) => return rejected,
+        };
+        return match check_event_size(&topic, &data, Limits::default().max_event_bytes) {
+            Ok(_) => PublishOutcome::NoTarget,
+            Err(error) => PublishOutcome::Rejected(format!(
+                "event {} was not published: {error}",
+                topic.as_str()
+            )),
+        };
+    }
     publish_with(topic, data, publish_event)
+}
+
+fn external_topic(name: &str) -> Result<Topic, PublishOutcome> {
+    Topic::external(name)
+        .map_err(|error| PublishOutcome::Rejected(format!("invalid event topic {name:?}: {error}")))
 }
 
 /// Validate `topic` as one chosen by R code, publish with `publish` and map
@@ -32,11 +54,9 @@ fn publish_with(
     data: Value,
     publish: impl FnOnce(Topic, Value, Option<ExecutionId>) -> Result<u64, PublishError>,
 ) -> PublishOutcome {
-    let topic = match Topic::external(name) {
+    let topic = match external_topic(name) {
         Ok(topic) => topic,
-        Err(error) => {
-            return PublishOutcome::Rejected(format!("invalid event topic {name:?}: {error}"));
-        }
+        Err(rejected) => return rejected,
     };
     match publish(topic, data, crate::ipc::execution::current_execution_id()) {
         Ok(_) => PublishOutcome::Published,

@@ -120,6 +120,9 @@ unsafe fn initialize_r_with_args_impl(r_args: &[&str], disable_cstack_check: boo
 
     let lib = r_library()?;
 
+    // Before R can run any code: forked R workers are told apart by this PID.
+    super::output::record_r_process();
+
     // Platform-specific initialization
     #[cfg(unix)]
     unsafe {

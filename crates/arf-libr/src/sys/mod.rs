@@ -39,8 +39,8 @@ pub use interrupt::{
     take_ipc_interrupt_request,
 };
 pub use output::{
-    finish_ipc_capture, flush_reprex_buffer, set_console_output_observer, set_reprex_mode,
-    set_write_console_callback, start_ipc_capture,
+    finish_ipc_capture, flush_reprex_buffer, in_forked_child, set_console_output_observer,
+    set_reprex_mode, set_write_console_callback, start_ipc_capture,
 };
 pub use read_console::{
     ConsoleInputBlockGuard, HeadlessReadConsoleCallback, HeadlessReadConsoleResult,

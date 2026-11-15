@@ -17,6 +17,57 @@ static mut WRITE_CONSOLE_CALLBACK: Option<fn(&str, bool)> = None;
 /// Independent observer called for console output before capture/reprex routing.
 static CONSOLE_OUTPUT_OBSERVER: OnceLock<fn(&str, bool)> = OnceLock::new();
 
+/// PID of the process that initialized R.
+static R_PROCESS_ID: OnceLock<u32> = OnceLock::new();
+
+/// Record the current process as the one that owns arf's R state.
+pub(super) fn record_r_process() {
+    let _ = R_PROCESS_ID.set(std::process::id());
+}
+
+/// Whether this is a child forked from the process that initialized R, for
+/// example a worker of `parallel::mclapply()`.
+///
+/// A forked child has a copy of arf's memory but only the forking thread. The
+/// IPC server, its event delivery and the async runtime stay in the parent,
+/// locks may be held by threads that no longer exist, and on macOS the
+/// runtime's kqueue descriptor is not inherited at all. Code that a child can
+/// reach must not use that state.
+pub fn in_forked_child() -> bool {
+    R_PROCESS_ID
+        .get()
+        .is_some_and(|pid| *pid != std::process::id())
+}
+
+/// Write a forked child's console output to the inherited stdout or stderr.
+///
+/// Uses `write(2)` directly: the child must not take Rust's stdout lock, the
+/// logger, the spinner, or IPC capture and event state, which belong to the
+/// parent. The bytes are written unchanged, as R would without arf.
+#[cfg(unix)]
+unsafe fn write_forked_child_output(buf: *const c_char, buflen: c_int, otype: c_int) {
+    let fd = if otype == 0 {
+        libc::STDOUT_FILENO
+    } else {
+        libc::STDERR_FILENO
+    };
+    let mut remaining = unsafe { std::slice::from_raw_parts(buf as *const u8, buflen as usize) };
+    while !remaining.is_empty() {
+        let written = unsafe { libc::write(fd, remaining.as_ptr().cast(), remaining.len()) };
+        if written < 0 {
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return;
+        }
+        if written == 0 {
+            // No progress; give up rather than spin.
+            return;
+        }
+        remaining = &remaining[written as usize..];
+    }
+}
+
 /// IPC capture state for buffering stdout/stderr during evaluate requests.
 struct IpcCaptureState {
     visible: bool,
@@ -56,7 +107,14 @@ pub(super) unsafe extern "C" fn r_write_console_ex(
     buflen: c_int,
     otype: c_int,
 ) {
-    if buf.is_null() {
+    if buf.is_null() || buflen < 0 {
+        return;
+    }
+
+    // A forked worker writes its output without touching the parent's state.
+    #[cfg(unix)]
+    if in_forked_child() {
+        unsafe { write_forked_child_output(buf, buflen, otype) };
         return;
     }
 
@@ -457,6 +515,60 @@ pub fn flush_reprex_buffer() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A forked child's output reaches the inherited descriptor without
+    /// calling the console output observer, which belongs to the parent.
+    #[cfg(unix)]
+    #[test]
+    fn forked_child_output_bypasses_observer() {
+        fn observer(_text: &str, _is_error: bool) {
+            // Reached only if the child uses the parent's observer.
+            unsafe { libc::_exit(3) };
+        }
+        record_r_process();
+        set_console_output_observer(observer);
+        assert!(!in_forked_child());
+
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Child: only async-signal-safe calls until _exit.
+            unsafe {
+                libc::close(fds[0]);
+                libc::dup2(fds[1], libc::STDOUT_FILENO);
+                libc::dup2(fds[1], libc::STDERR_FILENO);
+                let out = b"child output\n";
+                let err = b"child error\n";
+                r_write_console_ex(out.as_ptr().cast(), out.len() as c_int, 0);
+                r_write_console_ex(out.as_ptr().cast(), 0, 0);
+                r_write_console_ex(err.as_ptr().cast(), err.len() as c_int, 1);
+                libc::_exit(if in_forked_child() { 0 } else { 4 });
+            }
+        }
+        unsafe { libc::close(fds[1]) };
+        let mut output = Vec::new();
+        let mut chunk = [0u8; 64];
+        loop {
+            let read = unsafe { libc::read(fds[0], chunk.as_mut_ptr().cast(), chunk.len()) };
+            if read <= 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..read as usize]);
+        }
+        unsafe { libc::close(fds[0]) };
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "child used the parent's observer"
+        );
+        // Bytes are unchanged: stderr is not wrapped in arf's error colors.
+        assert_eq!(output, b"child output\nchild error\n");
+    }
 
     #[test]
     fn test_format_error_output() {

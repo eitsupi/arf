@@ -10,6 +10,7 @@
 
 - Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)`.
 - `menu()` no longer occupies the session indefinitely in IPC evaluations and handler calls; repeated unanswerable console reads now raise an R error (#518).
+- Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running.
 
 ## [0.7.1] - 2026-11-14
 

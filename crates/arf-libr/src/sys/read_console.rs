@@ -324,6 +324,23 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     buflen: c_int,
     hist: c_int,
 ) -> c_int {
+    // A forked R worker has no console of its own, and the input state, IPC
+    // requests and spinner belong to the parent. Report EOF without them, but
+    // stop functions such as menu() that retry on EOF, as the parent does.
+    #[cfg(unix)]
+    if super::output::in_forked_child() {
+        let prompt = if prompt.is_null() {
+            ""
+        } else {
+            unsafe { CStr::from_ptr(prompt) }
+                .to_str()
+                .unwrap_or_default()
+        };
+        if !is_browse_prompt(prompt) && super::interrupt::forked_unavailable_read_limit_exceeded() {
+            unsafe { raise_unavailable_console_input() };
+        }
+        return 0;
+    }
     // Keep the full callback implementation, including its owned values and
     // input-wait guard, in a helper frame. Rf_onintr() can longjmp to an
     // enclosing R context, so it must run only after that frame has returned
@@ -342,18 +359,10 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
         }
         if result == READ_CONSOLE_UNAVAILABLE {
             finish_read_console_input(previous_execution, false);
-            let Ok(library) = crate::r_library() else {
-                return 0;
-            };
             // All owned callback values and guards were dropped by the inner
             // frame. The enclosing protected R evaluation receives this error.
-            unsafe {
-                (library.rf_errorcall)(
-                    *library.r_nilvalue,
-                    c"%s".as_ptr(),
-                    c"console input is unavailable in this evaluation, which requested it more than 100 times".as_ptr(),
-                );
-            }
+            unsafe { raise_unavailable_console_input() };
+            return 0;
         }
         if result != READ_CONSOLE_INTERRUPT {
             finish_read_console_input(previous_execution, result == 1);
@@ -398,6 +407,23 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
         // rather than submitting EOF or an empty browser step to R, and
         // re-enter the input phase for that read.
         previous_execution = begin_read_console_input();
+    }
+}
+
+/// Raise the R error for console input that was requested too many times.
+///
+/// This longjmps to R when R is available, so the caller must not hold any
+/// Rust values with destructors.
+unsafe fn raise_unavailable_console_input() {
+    let Ok(library) = crate::r_library() else {
+        return;
+    };
+    unsafe {
+        (library.rf_errorcall)(
+            *library.r_nilvalue,
+            c"%s".as_ptr(),
+            c"console input is unavailable in this evaluation, which requested it more than 100 times".as_ptr(),
+        );
     }
 }
 

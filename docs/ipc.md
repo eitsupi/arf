@@ -1054,6 +1054,8 @@ evaluation results.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
 
+Output from forked R workers, such as those of `parallel::mclapply()`, is not part of any of these. Each worker writes it unchanged to the stdout or stderr it inherited, which may have been redirected; it is neither captured in a response nor delivered as `arf.console_output`. A worker's console reads receive EOF; after 100 such reads in one worker, further reads raise an R error, except at browser prompts.
+
 Every `evaluate` result includes `status`: `"ok"`, `"error"`,
 `"interrupted"`, or `"unknown"`. This applies to silent and visible evaluation
 in both interactive and headless sessions. Use this field to check the outcome,
@@ -1307,7 +1309,7 @@ an execution deadline.
 
 R code running in the session can publish events to subscribed connections with two `.Call` routines, registered under `PACKAGE = "(embedding)"`:
 
-- `arf_publish_event(topic, data)` takes exactly two arguments. `topic` is a non-`NA` character string. `data` is any value that converts to JSON under the strict rules below, and `NULL` becomes JSON `null`. It returns `TRUE` when the event was queued on a running IPC server and `FALSE` when there is nowhere to publish it (no IPC server is running). `TRUE` is not a delivery guarantee: an event nobody is subscribed to is dropped.
+- `arf_publish_event(topic, data)` takes exactly two arguments. `topic` is a non-`NA` character string. `data` is any value that converts to JSON under the strict rules below, and `NULL` becomes JSON `null`. It returns `TRUE` when the event was queued on a running IPC server and `FALSE` when there is nowhere to publish it (no IPC server is running, or the call comes from a forked R worker such as one of `parallel::mclapply()`, which has no IPC server of its own). `TRUE` is not a delivery guarantee: an event nobody is subscribed to is dropped.
 - `arf_api_version()` takes no arguments and returns `1L`.
 
 Publishing does not wait for queue space or delivery: the event is queued and the IPC server delivers it, so subscribers receive it while R keeps computing. Publishing can briefly acquire shared locks. Anything wrong with the call is an R error, whether or not a server is running: a topic that is not a valid single string or that starts with the reserved `arf.` prefix (topic rules are those of [Events](#events)), a `data` value that cannot be converted (the message names the offending element by JSON Pointer), an event larger than 1 MiB (the topic and a fixed allowance for the notification envelope count towards it), or an overflow of the server's shared event queue. An overflow also disconnects the connections whose subscriptions may match the dropped event. `execution` identifies the active user-code or handler execution, and is `null` when there is no active execution.

@@ -439,3 +439,92 @@ fn test_headless_browse_url_does_not_hang() {
         result.stdout
     );
 }
+
+/// Forked R workers must not use the parent's IPC state: their output goes to
+/// the inherited stdout, and they have nowhere to publish events. On macOS a
+/// worker that reached the parent's event delivery panicked, because the async
+/// runtime's descriptor is not inherited across fork.
+#[cfg(unix)]
+#[test]
+fn test_headless_forked_workers_write_output_without_ipc_state() {
+    let process = HeadlessProcess::spawn().expect("Failed to spawn headless");
+    let code = r#"
+        publish <- function(topic, data = NULL) {
+            .Call("arf_publish_event", topic, data, PACKAGE = "(embedding)")
+        }
+        rejected <- function(expr) inherits(tryCatch(expr, error = identity), "error")
+        values <- parallel::mclapply(1:4, function(i) {
+            cat(sprintf("forked_worker_marker_%d\n", i))
+            message(sprintf("forked_worker_stderr_%d", i))
+            list(
+                value = i * 2L,
+                published = publish("demo.forked"),
+                input = readline(),
+                # Invalid events are still errors, as without a server.
+                rejected = rejected(publish("arf.reserved")) &&
+                    rejected(publish("demo.large", strrep("x", 2 * 1024 * 1024)))
+            )
+        }, mc.cores = 2)
+        stopifnot(!vapply(values, inherits, logical(1), "try-error"))
+        # menu() retries on EOF, so workers stop it after repeated reads.
+        menus <- parallel::mclapply(1:2, function(i) {
+            setTimeLimit(elapsed = 10, transient = TRUE)
+            tryCatch(menu(c("a", "b")), error = conditionMessage)
+        }, mc.cores = 2)
+        field <- function(name, type) paste(vapply(values, `[[`, type, name), collapse = ",")
+        paste(
+            "values", field("value", integer(1)),
+            "published", field("published", logical(1)),
+            "input", field("input", character(1)),
+            "rejected", field("rejected", logical(1)),
+            "menu", all(grepl("console input is unavailable", unlist(menus))),
+            "parent", publish("demo.parent")
+        )
+    "#;
+    let result = process.ipc_eval(code).expect("eval should run");
+    assert!(
+        result.success,
+        "eval should succeed: {} {}",
+        result.stdout, result.stderr
+    );
+    let value = parse_ipc_json(&result)["value"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    // Workers return their values, cannot publish, and the parent still can.
+    assert!(
+        value.contains(
+            "values 2,4,6,8 published FALSE,FALSE,FALSE,FALSE input ,,, \
+             rejected TRUE,TRUE,TRUE,TRUE menu TRUE parent TRUE"
+        ),
+        "unexpected result: {value}"
+    );
+    let output =
+        crate::common::poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            let output = process.server_output();
+            (1..=4)
+                .all(|i| {
+                    output.contains(&format!("forked_worker_marker_{i}"))
+                        && output.contains(&format!("forked_worker_stderr_{i}"))
+                })
+                .then_some(output)
+        });
+    assert!(
+        output.is_some(),
+        "worker output should reach the headless process output: {}",
+        process.server_output()
+    );
+    // The parent keeps evaluating normally afterwards.
+    let after = process.ipc_eval("21 * 2").expect("eval should run");
+    assert!(
+        after.success,
+        "eval after forking should succeed: {}",
+        after.stderr
+    );
+    assert!(
+        parse_ipc_json(&after)["value"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("42")
+    );
+}

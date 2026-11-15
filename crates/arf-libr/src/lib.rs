@@ -45,7 +45,7 @@ pub use sys::{
     enable_ipc_silent_boundaries, ensure_ld_library_path, find_r_library,
     finish_handler_protected_execution, finish_ipc_capture, finish_ipc_execution,
     finish_ipc_execution_outcome, finish_ipc_protected_evaluation, flush_reprex_buffer,
-    frame_depth_protected, get_r_home, global_error_handler_code, initialize_r,
+    frame_depth_protected, get_r_home, global_error_handler_code, in_forked_child, initialize_r,
     initialize_r_for_tests, initialize_r_with_args, is_browse_prompt, is_r_auto_discovery_disabled,
     is_r_awaiting_console_input, is_r_interrupt_flag_available,
     mark_global_error_handler_initialized, mark_ipc_interrupt_discarded,
