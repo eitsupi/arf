@@ -2,15 +2,17 @@
 
 ## [Unreleased]
 
+## [0.7.2-rc.1] - 2026-11-15
+
 ### Added
 
-- **Experimental:** IPC `evaluate` accepts `execution_timeout_ms` (CLI: `arf ipc eval --execution-timeout`), a deadline after which a running evaluation is interrupted. Servers that support it advertise `eval_execution_timeout`.
+- **Experimental:** IPC `evaluate` accepts `execution_timeout_ms` (CLI: `arf ipc eval --execution-timeout`), a deadline after which a running evaluation is interrupted. Servers that support it advertise `eval_execution_timeout` (#519).
 
 ### Fixed
 
-- Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)`.
+- Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)` (#520).
 - Repeated unanswerable console reads, such as those from `menu()`, now raise an R error in IPC evaluations and handler calls; code that catches the error and retries can still continue indefinitely (#518).
-- Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running.
+- Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running (#521).
 
 ## [0.7.1] - 2026-11-14
 
