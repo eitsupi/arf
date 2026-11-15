@@ -53,7 +53,7 @@ cannot supply console responses. During each IPC execution, the first 100
 unavailable reads receive EOF and subsequent reads raise an R error. Browser
 prompts are exempt. This is a read budget, not infinite-loop detection: even
 legitimate code requesting input 101 times can fail. Code that catches the error
-and retries can still run forever; use `arf ipc interrupt` for evaluations or
+and retries can still run forever; use `arf ipc interrupt` or eval's `--execution-timeout` for evaluations, or
 `call --execution-timeout` for handlers. Reads outside IPC executions, including
 startup profiles, are not covered. Native console readers without R evaluation
 frames are unsupported. R's main and continuation prompt options must be
@@ -348,6 +348,9 @@ arf ipc eval --timeout 10000 'Sys.sleep(5)'
 # This runs where the session shows it, so it needs no allowlist entry.
 arf ipc eval --visible 'cat("hello\n")'
 
+# Request an interrupt after 1 second of execution, allowing time for the reply
+arf ipc eval --execution-timeout 1000 --timeout 10000 'Sys.sleep(30)'
+
 # Target a specific session
 arf ipc eval --pid 12345 'getwd()'
 ```
@@ -359,11 +362,34 @@ arf ipc eval --pid 12345 'getwd()'
 | `<CODE>` | R code to evaluate (required) |
 | `--visible` | Evaluate through the R REPL and show output in the session. In an interactive session, this is governed by the same human approval as `send`; in headless mode it runs immediately. The response's `value` and `error` are `null`; autoprint and callback output are captured in `stdout`, and evaluation errors in `stderr`. |
 | `--timeout <MS>` | Timeout in milliseconds for waiting for the response, including queue waiting time (range: 1–86400000; default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout. |
+| `--execution-timeout <MS>` | Request a cooperative interrupt after 1–300000 milliseconds of execution; omitted by default. |
 | `--pid <PID>` | Target session PID |
 
 **Output format:** JSON object with `stdout` (string), `stderr` (string), `value` (string or null), `error` (string or null), and `execution_id` (number). These fields are always present. For visible evaluation, `value` and `error` are `null`; normal REPL output and errors appear in `stdout` and `stderr`. Silent evaluation (the default) uses the direct evaluation path, so the printed result appears in `value` and R evaluation errors appear in `error`, with exit code 0 — they are normal responses, not IPC failures.
 
 When the timeout fires, the server returns a `TIMEOUT` (`-32007`) JSON-RPC error response with the applied `data.timeout_ms` instead of a result, and the client prints that error as structured JSON on stderr and exits with code 4 — the timeout is therefore not reported in the result object's `error` field. An evaluation that already started continues, so the session stays busy until it finishes; a request that times out while still queued is not run. To request interruption, pass `data.execution_id` to `arf ipc interrupt --execution-id` (or the `interrupt` method's `execution_id`), so that a later evaluation is not interrupted instead. `timeout_ms = 0` is rejected with `INVALID_PARAMS`; the timeout includes time spent waiting in the queue. If execution has started, the timeout error also includes `data.execution_id`.
+
+The optional JSON parameter `execution_timeout_ms` (CLI: `--execution-timeout`)
+requests one cooperative interrupt, measured from evaluation start, excluding
+queue waiting. It applies to silent and visible evaluations in interactive and
+headless sessions; comment-only input is exempt, and `user_input` / `send` is
+out of scope. Values outside 1–300000 or of the wrong type are `INVALID_PARAMS`.
+Servers advertise `eval_execution_timeout` in both attach and session capabilities.
+
+When the deadline request is accepted and evaluation ends with
+`status: "interrupted"`, the normal result additionally contains
+`interrupt_reason: "execution_timeout"`; `error` remains `"Evaluation interrupted"`. Other results
+omit `interrupt_reason`, including evaluations that catch the interrupt and
+finish normally. This records acceptance of a deadline request, not its precise
+causal order relative to manual interrupts. Completion events and history retain
+their existing statuses.
+
+The reply wait starts at submission, while execution timing starts at evaluation
+start. With the default 300-second reply wait and a long execution deadline,
+`TIMEOUT` can arrive first; allow extra time with `--timeout` to receive the
+execution result. A started evaluation's deadline survives reply timeout or
+connection closure. This is one cooperative interrupt request, not a guarantee
+of completed termination: code may catch interrupts or defer checking them.
 
 Example (silent eval, result captured in `value`):
 
@@ -500,7 +526,7 @@ The response always has the same shape. When R is busy, the `r` field is `null` 
   "socket_path": "/run/user/1000/arf/12345.sock",
   "started_at": "2026-03-22T10:00:00+09:00",
   "log_file": null,
-  "capabilities": ["call_execution_timeout"],
+  "capabilities": ["call_execution_timeout", "eval_execution_timeout"],
   "ipc_policy": {
     "silent": {
       "mode": "restricted",
@@ -939,7 +965,7 @@ Connection: close
 
 | Method | Parameters | Description |
 |--------|-----------|-------------|
-| `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional) | Evaluate R code and return captured output |
+| `evaluate` | `code` (string), `visible` (bool, default false), `timeout_ms` (int, optional), `execution_timeout_ms` (int, optional) | Evaluate R code and return captured output |
 | `user_input` | `code` (string) | Send code as user input |
 | `interrupt` | `execution_id` (int, optional) | Request interruption of the active IPC user-code execution |
 | `session` | *(none)* | Get session information |
@@ -1099,7 +1125,7 @@ All `params` are optional. `client` is informational only and is never used for 
 The response is:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events","execution_events","call_execution_timeout"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
+{"jsonrpc":"2.0","id":1,"result":{"connection_id":3,"api_version":1,"capabilities":["events","execution_events","call_execution_timeout","eval_execution_timeout"],"session_id":"9f3c1a07d25b4e68a1c0b7e45d2f8a13","session":{"...":"as returned by the session method"}}}
 ```
 
 `session` is the same object the `session` method returns, but it never waits for R: `r` is `null` and `r_unavailable_reason` says so. Call `session` to get R's details. `session_id` identifies the arf process and is the same after the server is restarted within it.
