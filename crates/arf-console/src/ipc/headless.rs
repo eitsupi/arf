@@ -84,15 +84,10 @@ pub fn headless_read_console(
         }
     }
     if info.is_main_prompt {
-        match arf_harp::conditions::initialize() {
-            Ok(true) => {
-                return HeadlessReadConsoleResult::Input(arf_libr::ReadConsoleInput {
-                    text: arf_harp::conditions::ACTIVATE.to_owned(),
-                    has_more: false,
-                });
-            }
-            Ok(false) => {}
-            Err(error) => log::warn!("Could not install condition observer: {error}"),
+        match arf_harp::conditions::update(true) {
+            Ok(Some(action)) => return HeadlessReadConsoleResult::AtBoundary(action),
+            Ok(None) => {}
+            Err(error) => log::warn!("Could not update condition observer: {error}"),
         }
     }
     if !info.is_main_prompt && !info.is_continuation {

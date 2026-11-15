@@ -10,6 +10,10 @@ thread_local! {
     // R has one lifetime in this process. Preserve the private environment for
     // that lifetime rather than holding a PROTECT entry across REPL callbacks.
     static STATE: Cell<SEXP> = const { Cell::new(std::ptr::null_mut()) };
+    static READY: Cell<bool> = const { Cell::new(false) };
+    static ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static DESIRED: Cell<bool> = const { Cell::new(false) };
+    static PENDING: Cell<SEXP> = const { Cell::new(std::ptr::null_mut()) };
     static ATTEMPTED: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -19,17 +23,63 @@ pub enum UnhandledCondition {
     Interrupt,
 }
 
-/// Reinstall the prepared handler list on the native REPL's active stack.
-pub const ACTIVATE: &str = r#"base::local({ handlers <- base::globalCallingHandlers(NULL); base::do.call(base::globalCallingHandlers, handlers); base::invisible(NULL) })
-"#;
+/// Reconcile at a real top-level prompt, then run the returned action only
+/// after every owned ReadConsole frame and input guard has been dropped.
+/// Bare eval (as in ark's module initialization) updates the native handler
+/// stack without submitting a REPL expression or running user task callbacks.
+pub fn update(enabled: bool) -> Result<Option<unsafe extern "C-unwind" fn()>, String> {
+    if enabled == ACTIVE.get() {
+        return Ok(None);
+    }
+    // A nested reader can reuse the command prompt text. Never mutate global
+    // handlers while a user evaluation (and its local handlers) is on the stack.
+    if arf_libr::frame_depth_protected()? != 0 {
+        return Ok(None);
+    }
+    if STATE.get().is_null() && !prepare()? {
+        return Ok(None);
+    }
+    let state = STATE.get();
+    let lib = r_library().map_err(|error| error.to_string())?;
+    let name = if enabled { c"install" } else { c"uninstall" };
+    let name_ptr = name.as_ptr();
+    // SAFETY: the preserved environment owns both prebuilt calls. Only Copy
+    // values cross the protected callback; no R evaluation takes place here.
+    let call = unsafe {
+        top_level_exec(move || {
+            let symbol = (lib.rf_install)(name_ptr);
+            (lib.rf_findvar_in_frame)(state, symbol)
+        })
+    }
+    .map_err(|error| error.to_string())?;
+    PENDING.set(call);
+    DESIRED.set(enabled);
+    Ok(Some(run_pending))
+}
 
-/// Prepare once at a top-level prompt, preserving existing handlers ahead of ours.
-/// Return whether the caller must feed ACTIVATE through the native REPL.
-/// R_ToplevelExec restores the old active handler stack on return, so the
-/// registration must be committed by R itself with no Rust frames beneath it.
-pub fn initialize() -> Result<bool, String> {
+unsafe extern "C-unwind" fn run_pending() {
+    let call = PENDING.replace(std::ptr::null_mut());
+    let Ok(lib) = r_library() else { return };
+    if call.is_null() {
+        return;
+    }
+    // Mark before eval so an error/interrupt does not cause an endless retry
+    // at the next prompt. A later IPC stop/start can attempt registration again.
+    ACTIVE.set(DESIRED.get());
+    READY.set(false);
+    // SAFETY: the caller is the destructor-free outer ReadConsole frame.
+    // The call and its closure are reachable from the preserved environment.
+    // No owned Rust values or guards may live across this bare evaluation;
+    // errors and interrupts jump to R's existing top-level context.
+    unsafe {
+        (lib.rf_eval)(call, *lib.r_baseenv);
+    }
+    READY.set(DESIRED.get());
+}
+
+fn prepare() -> Result<bool, String> {
     if ATTEMPTED.replace(true) {
-        return Ok(false);
+        return Ok(!STATE.get().is_null());
     }
     let state = crate::eval_string_in_base(
         r#"
@@ -39,18 +89,40 @@ base::local({
     }
     state <- base::new.env(parent = base::emptyenv())
     state$outcome <- 0L
-    # Calling handlers also see signalCondition(), which can return normally.
-    # R invokes task callbacks after evaluation, printing, and warnings succeed;
-    # keep a condition only when its expression did not complete normally.
-    base::addTaskCallback(function(expr, value, ok, visible) {
-        if (ok) state$outcome <- 0L
-        TRUE
-    }, name = "arf-condition-observer")
+    state$callback_name <- NULL
     on_error <- function(e) { state$outcome <- 1L; base::invisible(NULL) }
     on_interrupt <- function(e) { state$outcome <- 2L; base::invisible(NULL) }
-    handlers <- base::globalCallingHandlers(NULL)
-    handlers <- base::c(handlers, base::list(error = on_error, interrupt = on_interrupt))
-    base::do.call(base::globalCallingHandlers, handlers)
+    install <- function() {
+        handlers <- base::globalCallingHandlers(NULL)
+        handlers <- base::c(handlers, base::list(error = on_error, interrupt = on_interrupt))
+        base::do.call(base::globalCallingHandlers, handlers)
+        # Conditions may return normally; only successful native REPL tasks
+        # clear them. Protected internal evaluations never run this callback.
+        names <- base::make.unique(base::c(base::getTaskCallbackNames(), "arf-condition-observer"))
+        state$callback_name <- names[[base::length(names)]]
+        base::addTaskCallback(function(expr, value, ok, visible) {
+            if (ok) state$outcome <- 0L
+            TRUE
+        }, name = state$callback_name)
+        state$outcome <- 0L
+        base::invisible(NULL)
+    }
+    uninstall <- function() {
+        handlers <- base::globalCallingHandlers(NULL)
+        handlers <- base::Filter(function(h) {
+            !base::identical(h, on_error) && !base::identical(h, on_interrupt)
+        }, handlers)
+        base::do.call(base::globalCallingHandlers, handlers)
+        if (!base::is.null(state$callback_name) &&
+            state$callback_name %in% base::getTaskCallbackNames()) {
+            base::removeTaskCallback(state$callback_name)
+        }
+        state$callback_name <- NULL
+        state$outcome <- 0L
+        base::invisible(NULL)
+    }
+    state$install <- base::as.call(base::list(install))
+    state$uninstall <- base::as.call(base::list(uninstall))
     base::invisible(state)
 })
 "#,
@@ -70,6 +142,9 @@ base::local({
 
 /// Begin a visible user-code execution. Removed global handlers stay removed.
 pub fn reset() {
+    if !READY.get() {
+        return;
+    }
     let state = STATE.get();
     let Ok(lib) = r_library() else { return };
     if state.is_null() {
@@ -88,6 +163,9 @@ pub fn reset() {
 
 /// Read the last condition whose expression did not complete normally.
 pub fn outcome() -> Option<UnhandledCondition> {
+    if !READY.get() {
+        return None;
+    }
     let state = STATE.get();
     let lib = r_library().ok()?;
     if state.is_null() {

@@ -45,12 +45,15 @@ line breaks are added or expressions rewritten. Values, expression meanings,
 and task callback counts are preserved.
 
 To report the status of visible executions, arf registers global calling
-handlers for `error` and `interrupt` after any existing ones, and a task
-callback named `arf-condition-observer`, at the first top-level prompt. These
-appear in `globalCallingHandlers()` and `getTaskCallbackNames()` in both
-interactive and headless sessions. If they are removed, visible statuses fall
-back to less precise detection: for example, code that catches an interrupt
-and then raises an R error is reported as `interrupted`.
+handlers for `error` and `interrupt` after existing handlers, and a task
+callback named `arf-condition-observer` (with a unique suffix if needed).
+These appear in `globalCallingHandlers()` and `getTaskCallbackNames()`.
+Headless sessions always register them. Interactive sessions register them
+only while the IPC server is running, at the next top-level prompt after
+`:ipc start`, and remove them after `:ipc stop`. Registration does not change
+`.Last.value` or run other task callbacks. If the observers are removed,
+visible statuses fall back to less precise detection: for example, code that
+catches an interrupt and then raises an R error can be reported as `interrupted`.
 
 Older R versions may retain native REPL limitations for long console input;
 this path does not guarantee correct handling of such inputs on R 4.0/4.1.

@@ -69,14 +69,6 @@ pub(super) fn read_console_callback(
         // one value.
         let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation, prompt_info.hist);
 
-        if prompt_kind.is_command() {
-            match arf_harp::conditions::initialize() {
-                Ok(true) => return ReadConsoleResult::Input(arf_harp::conditions::ACTIVATE.to_owned()),
-                Ok(false) => {},
-                Err(error) => log::warn!("Could not install condition observer: {error}"),
-            }
-        }
-
         initialize_error_handler_once(state, prompt_kind);
 
         // Track prompt state for IPC: true when R is idle at the command
@@ -85,6 +77,9 @@ pub(super) fn read_console_callback(
         crate::ipc::set_r_at_prompt(prompt_kind.is_command());
 
         finish_previous_command(state, prompt_kind);
+        if let Some(result) = update_condition_observer(prompt_kind) {
+            return result;
+        }
 
         // Command prompts finalize the previous execution above. A request
         // still pending at a continuation or nested prompt must unwind through
@@ -135,6 +130,10 @@ fn read_input_loop(
     prompt_kind: PromptKind,
 ) -> ReadConsoleResult {
     loop {
+        // Meta commands can start/stop IPC without returning input to R.
+        if let Some(result) = update_condition_observer(prompt_kind) {
+            return result;
+        }
         // Build prompt dynamically from config.
         let prompt = build_prompt(state, r_prompt, prompt_kind);
 
@@ -196,6 +195,21 @@ fn read_input_loop(
         };
         if let ControlFlow::Break(result) = step {
             return result.map_or(ReadConsoleResult::Eof, ReadConsoleResult::Input);
+        }
+    }
+}
+
+/// Only a real top-level prompt can reconcile global calling handlers.
+fn update_condition_observer(prompt_kind: PromptKind) -> Option<ReadConsoleResult> {
+    if !prompt_kind.is_command() {
+        return None;
+    }
+    match arf_harp::conditions::update(crate::ipc::server::is_server_running()) {
+        Ok(Some(action)) => Some(ReadConsoleResult::AtBoundary(action)),
+        Ok(None) => None,
+        Err(error) => {
+            log::warn!("Could not update condition observer: {error}");
+            None
         }
     }
 }

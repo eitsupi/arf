@@ -90,6 +90,9 @@ pub type HeadlessReadConsoleCallback = fn(&str, ReadConsolePromptInfo) -> Headle
 /// Result from the interactive ReadConsole callback.
 #[derive(Debug)]
 pub enum ReadConsoleResult {
+    /// Run only after callback-owned values and guards are dropped, then retry.
+    /// The action must itself hold no destructors across calls that may longjmp.
+    AtBoundary(unsafe extern "C-unwind" fn()),
     Input(String),
     Interrupt,
     Eof,
@@ -98,6 +101,8 @@ pub enum ReadConsoleResult {
 /// Headless input distinguishes request EOF from unavailable nested input.
 #[derive(Debug)]
 pub enum HeadlessReadConsoleResult {
+    /// Same safety contract as ReadConsoleResult::AtBoundary.
+    AtBoundary(unsafe extern "C-unwind" fn()),
     Input(ReadConsoleInput),
     Interrupt,
     Eof,
@@ -143,6 +148,15 @@ pub fn read_console_chunk_end(text: &str, capacity: usize) -> Option<(usize, boo
         max_end -= 1;
     }
     (max_end > 0).then_some((max_end, true))
+}
+
+thread_local! {
+    static BOUNDARY_ACTION: std::cell::Cell<Option<unsafe extern "C-unwind" fn()>> = const { std::cell::Cell::new(None) };
+}
+
+fn stage_boundary_action(action: unsafe extern "C-unwind" fn()) -> c_int {
+    BOUNDARY_ACTION.set(Some(action));
+    READ_CONSOLE_BOUNDARY
 }
 
 static mut READ_CONSOLE_CALLBACK: Option<ReadConsoleCallback> = None;
@@ -317,6 +331,15 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     let mut previous_execution = begin_read_console_input();
     loop {
         let result = unsafe { r_read_console_inner(prompt, buf, buflen, hist) };
+        if result == READ_CONSOLE_BOUNDARY {
+            // The inner callback, including ReplState borrows and input guards,
+            // has returned. A bare R evaluation may now jump safely to R.
+            if let Some(action) = BOUNDARY_ACTION.take() {
+                unsafe { action() };
+            }
+            previous_execution = begin_read_console_input();
+            continue;
+        }
         if result == READ_CONSOLE_UNAVAILABLE {
             finish_read_console_input(previous_execution, false);
             let Ok(library) = crate::r_library() else {
@@ -380,6 +403,7 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
 
 const READ_CONSOLE_INTERRUPT: c_int = 2;
 const READ_CONSOLE_UNAVAILABLE: c_int = 3;
+const READ_CONSOLE_BOUNDARY: c_int = 4;
 
 fn unavailable_console_input(prompt: &str) -> c_int {
     // Errors at a browser prompt return to that same prompt. Raising again
@@ -491,6 +515,7 @@ unsafe fn r_read_console_inner(
     // the interactive shared remainder so nested prompts cannot consume it.
     if let Some(callback) = unsafe { HEADLESS_READ_CONSOLE_CALLBACK } {
         return match callback(prompt_str, prompt_info) {
+            HeadlessReadConsoleResult::AtBoundary(action) => stage_boundary_action(action),
             HeadlessReadConsoleResult::Input(input) => unsafe {
                 write_read_console_input(input, buf, buflen)
             },
@@ -533,6 +558,7 @@ unsafe fn r_read_console_inner(
             if let Some(callback) = unsafe { READ_CONSOLE_CALLBACK } {
                 log::debug!("r_read_console: calling callback");
                 match callback(prompt_str, prompt_info) {
+                    ReadConsoleResult::AtBoundary(action) => return stage_boundary_action(action),
                     ReadConsoleResult::Input(s) => {
                         log::debug!("r_read_console: got input len={}", s.len());
                         s
