@@ -327,7 +327,7 @@ pub(super) unsafe extern "C-unwind" fn r_read_console(
     // A forked R worker has no console of its own, and the input state, IPC
     // requests and spinner belong to the parent. Report EOF without them.
     #[cfg(unix)]
-    if false && super::output::in_forked_child() {
+    if super::output::in_forked_child() {
         return 0;
     }
     // Keep the full callback implementation, including its owned values and
