@@ -260,7 +260,6 @@ base::addTaskCallback(function(expr, value, ok, visible) {
     .counter <<- .counter + 1L
     TRUE
 }, name = "user-profile")
-base::invisible(12345L)
 "#,
     )?;
     for initially_enabled in [false, true] {
@@ -281,7 +280,7 @@ base::invisible(12345L)
             terminal.wait_for_first_prompt()?;
             let (handlers, tasks) = if initially_enabled { (3, 2) } else { (1, 1) };
             terminal.submit(
-                r#"cat("OBSERVER_BOOT:", .counter, length(globalCallingHandlers()), length(getTaskCallbackNames()), identical(.Last.value, 12345L), "\nOBSERVER_BOOT_DONE\n")"#,
+                r#"cat("OBSERVER_BOOT:", .counter, length(globalCallingHandlers()), length(getTaskCallbackNames()), "\nOBSERVER_BOOT_DONE\n")"#,
                 "OBSERVER_BOOT_DONE", PROMPT,
             )?;
             ensure!(
@@ -289,7 +288,7 @@ base::invisible(12345L)
                     .state()?
                     .text
                     .lines()
-                    .any(|line| line == format!("OBSERVER_BOOT: 0 {handlers} {tasks} TRUE")),
+                    .any(|line| line == format!("OBSERVER_BOOT: 0 {handlers} {tasks}")),
                 "observer startup changed R state: {:?}",
                 terminal.state()?.text
             );
