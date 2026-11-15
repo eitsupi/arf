@@ -9,7 +9,7 @@
 ### Fixed
 
 - Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)`.
-- `menu()` no longer occupies the session indefinitely in IPC evaluations and handler calls; repeated unanswerable console reads now raise an R error (#518).
+- Repeated unanswerable console reads, such as those from `menu()`, now raise an R error in IPC evaluations and handler calls; code that catches the error and retries can still continue indefinitely (#518).
 - Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running.
 
 ## [0.7.1] - 2026-11-14
@@ -17,7 +17,7 @@
 ### Added
 
 - **Experimental:** `arf ipc call` calls a handler exposed by the session from the command line (#515).
-- **Experimental:** IPC `call` accepts `execution_timeout_ms`, a deadline after which a running handler is interrupted and the call fails with `HANDLER_EXECUTION_TIMEOUT` (`-32019`). Servers that support it advertise `call_execution_timeout` (#515).
+- **Experimental:** IPC `call` accepts `execution_timeout_ms`, a deadline that requests a cooperative interrupt of a running handler. The call fails with `HANDLER_EXECUTION_TIMEOUT` (`-32019`) if the interrupt escapes the handler; a handler that catches it and returns a value succeeds. Servers that support it advertise `call_execution_timeout` (#515).
 
 ### Changed
 
