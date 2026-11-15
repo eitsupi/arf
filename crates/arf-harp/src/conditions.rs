@@ -108,6 +108,9 @@ base::local({
         base::invisible(NULL)
     }
     uninstall <- function() {
+        # globalCallingHandlers(NULL) clears registrations and rebuilds the C handler
+        # stack via .addGlobHands, so removal is already complete if none remain.
+        # The later do.call re-registers survivors; with an empty list it does nothing.
         handlers <- base::globalCallingHandlers(NULL)
         handlers <- base::Filter(function(h) {
             !base::identical(h, on_error) && !base::identical(h, on_interrupt)
