@@ -227,6 +227,7 @@ Register-ArgumentCompleter -Native -CommandName 'arf' -ScriptBlock {
             break
         }
         'arf;ipc;eval' {
+            [CompletionResult]::new('--execution-timeout', '--execution-timeout', [CompletionResultType]::ParameterName, 'Request a cooperative interrupt after this many milliseconds of execution')
             [CompletionResult]::new('--pid', '--pid', [CompletionResultType]::ParameterName, 'PID of the target arf session (optional if only one session is running)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Timeout in milliseconds for waiting for the response (default: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout')
             [CompletionResult]::new('--visible', '--visible', [CompletionResultType]::ParameterName, 'Also show output in the session (REPL or headless stdout)')

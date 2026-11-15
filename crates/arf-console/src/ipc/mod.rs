@@ -111,7 +111,7 @@ pub fn start_server(
     // Requests can queue on the server thread, but R cannot execute them until
     // this R-thread startup call returns and the receiver below is installed.
     // A failed start must preserve the running server's notifier and receiver.
-    execution::install_handler_deadline_notifier(deadline_tx);
+    execution::install_execution_deadline_notifier(deadline_tx);
 
     // Note: session metadata is now cached inside server::start_server()
     // right after bind confirmation, before the server can serve any request.

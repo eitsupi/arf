@@ -1395,12 +1395,16 @@ _arf() {
             return 0
             ;;
         arf__subcmd__ipc__subcmd__eval)
-            opts="-h --pid --visible --timeout --help"
+            opts="-h --execution-timeout --pid --visible --timeout --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --execution-timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --pid)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0

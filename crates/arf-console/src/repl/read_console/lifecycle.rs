@@ -105,12 +105,12 @@ pub(super) fn finish_previous_command(state: &mut ReplState, prompt_kind: Prompt
 
         if let Some(execution_id) = crate::ipc::current_execution_id() {
             let execution_outcome = outcome.unwrap_or_else(arf_libr::command_outcome);
-            let status = crate::ipc::finish_execution(match execution_outcome {
+            let completion = crate::ipc::finish_execution(match execution_outcome {
                 arf_libr::CommandOutcome::Success => crate::ipc::ExecutionStatus::Ok,
                 arf_libr::CommandOutcome::Failure => crate::ipc::ExecutionStatus::Error,
                 arf_libr::CommandOutcome::Unavailable => crate::ipc::ExecutionStatus::Unknown,
             });
-            crate::ipc::finish_pending_visible_eval(execution_id, status);
+            crate::ipc::finish_pending_visible_eval(execution_id, completion);
         }
 
         // Update prompt status indicator for the next prompt

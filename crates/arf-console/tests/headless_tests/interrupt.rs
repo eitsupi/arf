@@ -85,7 +85,14 @@ fn ipc_interrupt_stops_evaluations_and_keeps_the_headless_session_alive() {
                 .is_some_and(|error| error.to_ascii_lowercase().contains("interrupt")),
             "evaluation should report interruption: {result}"
         );
-        assert_eq!(result["status"], "interrupted", "{result}");
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "stdout": result["stdout"], "stderr": result["stderr"], "value": null,
+                "error": "Evaluation interrupted", "status": "interrupted",
+                "execution_id": result["execution_id"]
+            })
+        );
         let value = process
             .ipc_eval("interrupt_value")
             .expect("session should accept a follow-up evaluation");
@@ -170,4 +177,83 @@ fn idle_and_stale_interrupts_do_not_affect_later_headless_evaluations() {
         .ipc_eval("6 * 7")
         .expect("evaluation after stale interrupt should succeed");
     assert_eq!(parse_ipc_json(&next)["value"], "[1] 42");
+}
+
+fn deadline_eval(pid: u32, code: &str, visible: bool, reply_timeout: &str) -> std::process::Output {
+    let pid = pid.to_string();
+    let mut args = vec![
+        "ipc",
+        "eval",
+        code,
+        "--pid",
+        &pid,
+        "--execution-timeout",
+        "500",
+        "--timeout",
+        reply_timeout,
+    ];
+    if visible {
+        args.push("--visible");
+    }
+    run_ipc_command(&args)
+}
+
+#[test]
+fn evaluation_deadlines_stop_both_modes_and_discard_remaining_input() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    for visible in [false, true] {
+        let output = deadline_eval(
+            process.pid,
+            r#"Sys.sleep(30)
+deadline_remainder <- TRUE"#,
+            visible,
+            "10000",
+        );
+        assert!(output.status.success(), "{output:?}");
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["status"], "interrupted", "{result}");
+        assert_eq!(result["interrupt_reason"], "execution_timeout", "{result}");
+        assert_eq!(result["error"], "Evaluation interrupted");
+        let next = process
+            .ipc_eval(r#"exists("deadline_remainder", envir = .GlobalEnv)"#)
+            .unwrap();
+        assert_eq!(parse_ipc_json(&next)["value"], "[1] FALSE");
+        assert_eq!(parse_ipc_json(&next)["status"], "ok");
+
+        let caught = deadline_eval(
+            process.pid,
+            r#"{ tryCatch(Sys.sleep(30), interrupt = function(e) NULL); readline(); 42L }"#,
+            visible,
+            "10000",
+        );
+        assert!(caught.status.success(), "{caught:?}");
+        let result: serde_json::Value = serde_json::from_slice(&caught.stdout).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "stdout": result["stdout"], "stderr": result["stderr"],
+                "value": if visible { serde_json::Value::Null } else { serde_json::json!("[1] 42") },
+                "error": null, "status": "ok", "execution_id": result["execution_id"]
+            })
+        );
+    }
+}
+
+#[test]
+fn evaluation_deadline_survives_an_earlier_reply_timeout() {
+    let process = HeadlessProcess::spawn().expect("headless process");
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("started");
+    let marker_r = serde_json::to_string(&marker.to_string_lossy()).unwrap();
+    let code = format!(r#"file.create({marker_r}); Sys.sleep(30)"#);
+    let pid = process.pid;
+    let evaluation = thread::spawn(move || deadline_eval(pid, &code, false, "250"));
+    wait_for_file(&marker);
+    let output = evaluation.join().unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "TIMEOUT", "{error}");
+    let next = process.ipc_eval_with_timeout("6 * 7", 3000).unwrap();
+    assert_eq!(parse_ipc_json(&next)["value"], "[1] 42");
+    assert_eq!(parse_ipc_json(&next)["status"], "ok");
 }

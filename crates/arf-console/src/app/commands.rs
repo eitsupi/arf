@@ -132,7 +132,14 @@ pub(crate) fn handle_ipc_command(action: &IpcAction) {
             pid,
             visible,
             timeout,
-        } => ipc::client::cmd_eval(code.as_deref(), *pid, *visible, *timeout),
+            execution_timeout,
+        } => ipc::client::cmd_eval(
+            code.as_deref(),
+            *pid,
+            *visible,
+            *timeout,
+            *execution_timeout,
+        ),
         IpcAction::Call {
             handler,
             args,

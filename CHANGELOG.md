@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** IPC `evaluate` accepts `execution_timeout_ms` (CLI: `arf ipc eval --execution-timeout`), a deadline after which a running evaluation is interrupted. Servers that support it advertise `eval_execution_timeout`.
+
 ### Fixed
 
 - `menu()` no longer occupies the session indefinitely in IPC evaluations and handler calls; repeated unanswerable console reads now raise an R error (#518).

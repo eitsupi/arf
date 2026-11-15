@@ -6,8 +6,8 @@
 
 use super::execution;
 use super::protocol::{
-    ExecutionStatus, INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY,
-    R_NOT_AT_PROMPT, USER_IS_TYPING,
+    INPUT_ALREADY_PENDING, IpcMethod, IpcRequest, IpcResponse, R_BUSY, R_NOT_AT_PROMPT,
+    USER_IS_TYPING,
 };
 use super::session_result::collect_session_result;
 use super::state::{drain_requests, fire_break_signal, is_in_alternate_mode, r_is_at_prompt};
@@ -98,11 +98,13 @@ pub enum PendingIpcKind {
     /// Silent evaluate: run R code in the REPL thread with output capture.
     /// Reply is sent immediately after evaluation completes.
     SilentEvaluate {
+        execution_timeout: Option<std::time::Duration>,
         reply: tokio::sync::oneshot::Sender<IpcResponse>,
     },
     /// Visible evaluate: inject code into REPL, capture output via WriteConsoleEx.
     /// Reply is deferred until R returns to the prompt.
     VisibleEvaluate {
+        execution_timeout: Option<std::time::Duration>,
         reply: tokio::sync::oneshot::Sender<IpcResponse>,
         timeout: std::time::Duration,
     },
@@ -117,7 +119,7 @@ impl PendingIpcKind {
     /// Consume the operation kind and return its reply channel.
     fn into_reply(self) -> tokio::sync::oneshot::Sender<IpcResponse> {
         match self {
-            PendingIpcKind::SilentEvaluate { reply }
+            PendingIpcKind::SilentEvaluate { reply, .. }
             | PendingIpcKind::VisibleEvaluate { reply, .. }
             | PendingIpcKind::UserInput { reply } => reply,
         }
@@ -125,7 +127,7 @@ impl PendingIpcKind {
 
     pub fn reply_is_closed(&self) -> bool {
         match self {
-            PendingIpcKind::SilentEvaluate { reply }
+            PendingIpcKind::SilentEvaluate { reply, .. }
             | PendingIpcKind::VisibleEvaluate { reply, .. }
             | PendingIpcKind::UserInput { reply } => reply.is_closed(),
         }
@@ -189,7 +191,7 @@ pub fn poll_ipc_requests() {
 /// Reply deadlines belong to the server; capture lasts until R actually finishes.
 pub(crate) fn finish_pending_visible_eval(
     execution_id: super::events::ExecutionId,
-    status: ExecutionStatus,
+    completion: execution::ExecutionCompletion,
 ) {
     let mut guard = pending_visible_eval().lock_recover();
     if guard
@@ -204,10 +206,7 @@ pub(crate) fn finish_pending_visible_eval(
     let at_prompt = r_is_at_prompt().swap(false, Ordering::AcqRel);
     let mut result = execution::finish_visible_eval();
     result.execution_id = Some(execution_id);
-    result.status = status;
-    if status == ExecutionStatus::Interrupted {
-        result.error = Some("Evaluation interrupted".to_string());
-    }
+    completion.apply(&mut result);
     let _ = pending.reply.send(IpcResponse::Evaluate(result));
     r_is_at_prompt().store(at_prompt, Ordering::Release);
 }
@@ -296,7 +295,11 @@ fn handle_request(request: IpcRequest) {
     }
 
     match method {
-        IpcMethod::SilentEvaluate { code, .. } => {
+        IpcMethod::SilentEvaluate {
+            code,
+            execution_timeout,
+            ..
+        } => {
             // Check if R is at the prompt (idle)
             if !r_is_at_prompt().load(Ordering::Acquire) {
                 reply_error(reply, R_BUSY, "R is busy");
@@ -305,20 +308,31 @@ fn handle_request(request: IpcRequest) {
 
             // Store operation and fire break signal
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
-                kind: PendingIpcKind::SilentEvaluate { reply },
+                kind: PendingIpcKind::SilentEvaluate {
+                    reply,
+                    execution_timeout,
+                },
                 code,
                 origin,
                 started_execution_id,
             });
             schedule_pending_operation();
         }
-        IpcMethod::VisibleEvaluate { code, timeout } => {
+        IpcMethod::VisibleEvaluate {
+            code,
+            timeout,
+            execution_timeout,
+        } => {
             if !r_is_at_prompt().load(Ordering::Acquire) {
                 reply_error(reply, R_BUSY, "R is busy");
                 return;
             }
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
-                kind: PendingIpcKind::VisibleEvaluate { reply, timeout },
+                kind: PendingIpcKind::VisibleEvaluate {
+                    reply,
+                    timeout,
+                    execution_timeout,
+                },
                 code,
                 origin,
                 started_execution_id,
@@ -395,11 +409,13 @@ pub fn reject_operation_user_typing(op: PendingIpcOperation, buffer: &str) {
 pub fn setup_visible_eval(
     reply: tokio::sync::oneshot::Sender<IpcResponse>,
     _timeout: std::time::Duration,
+    execution_timeout: Option<std::time::Duration>,
     code: &str,
     origin: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
 ) {
-    let execution_id = execution::begin_visible_eval(code, origin, started_execution_id);
+    let execution_id =
+        execution::begin_visible_eval(code, origin, started_execution_id, execution_timeout);
 
     // Store the reply until command completion, before the next input is read.
     // A server-side reply timeout never ends this capture or execution context.
@@ -557,6 +573,7 @@ mod tests {
                 method: IpcMethod::SilentEvaluate {
                     code: "1+1".to_string(),
                     timeout: std::time::Duration::from_secs(1),
+                    execution_timeout: None,
                 },
                 reply: reply_tx,
                 origin: 0,
@@ -627,7 +644,10 @@ mod tests {
             // Insert a dummy pending operation
             let (dummy_tx, _dummy_rx) = tokio::sync::oneshot::channel();
             *pending_ipc_operation().lock_recover() = Some(PendingIpcOperation {
-                kind: PendingIpcKind::SilentEvaluate { reply: dummy_tx },
+                kind: PendingIpcKind::SilentEvaluate {
+                    reply: dummy_tx,
+                    execution_timeout: None,
+                },
                 code: "dummy".to_string(),
                 origin: 0,
                 started_execution_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),

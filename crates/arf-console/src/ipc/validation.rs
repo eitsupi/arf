@@ -57,7 +57,16 @@ pub(super) fn validated_method(
     code: String,
     visible: bool,
     timeout_ms: Option<u64>,
+    execution_timeout_ms: Option<u64>,
 ) -> Result<IpcMethod, ValidationError> {
+    if execution_timeout_ms.is_some_and(|ms| !(1..=300_000).contains(&ms)) {
+        return Err(Box::new(JsonRpcResponse::error(
+            id.clone(),
+            INVALID_PARAMS,
+            "execution_timeout_ms must be between 1 and 300000".to_string(),
+        )));
+    }
+    let execution_timeout = execution_timeout_ms.map(std::time::Duration::from_millis);
     validate_code(id, &code)?;
     let timeout = match timeout_ms {
         Some(0) => {
@@ -81,9 +90,17 @@ pub(super) fn validated_method(
         validate_silent_evaluation(id, &code)?;
     }
     Ok(if visible {
-        IpcMethod::VisibleEvaluate { code, timeout }
+        IpcMethod::VisibleEvaluate {
+            code,
+            timeout,
+            execution_timeout,
+        }
     } else {
-        IpcMethod::SilentEvaluate { code, timeout }
+        IpcMethod::SilentEvaluate {
+            code,
+            timeout,
+            execution_timeout,
+        }
     })
 }
 
@@ -109,20 +126,20 @@ mod tests {
     #[test]
     fn validated_evaluate_methods_encode_visibility_in_the_variant() {
         assert!(matches!(
-            validated_method(&None, "1".to_string(), false, Some(4_000)).unwrap(),
-            IpcMethod::SilentEvaluate { code, timeout: actual }
+            validated_method(&None, "1".to_string(), false, Some(4_000), None).unwrap(),
+            IpcMethod::SilentEvaluate { code, timeout: actual, .. }
                 if code == "1" && actual == std::time::Duration::from_secs(4)
         ));
         assert!(matches!(
-            validated_method(&None, "1".to_string(), true, Some(4_000)).unwrap(),
-            IpcMethod::VisibleEvaluate { code, timeout: actual }
+            validated_method(&None, "1".to_string(), true, Some(4_000), None).unwrap(),
+            IpcMethod::VisibleEvaluate { code, timeout: actual, .. }
                 if code == "1" && actual == std::time::Duration::from_secs(4)
         ));
     }
 
     #[test]
     fn evaluate_timeout_must_be_greater_than_zero() {
-        let error = validated_method(&None, "1".to_string(), false, Some(0))
+        let error = validated_method(&None, "1".to_string(), false, Some(0), None)
             .err()
             .expect("zero timeout should be rejected");
         assert_eq!(error.error.unwrap().code, INVALID_PARAMS);

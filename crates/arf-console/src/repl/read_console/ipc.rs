@@ -60,7 +60,11 @@ fn approve_and_accept(
     started_execution_id: &std::sync::atomic::AtomicU64,
 ) -> Option<AcceptedInteractiveIpcOperation> {
     match kind {
-        PendingIpcKind::VisibleEvaluate { reply, timeout } => {
+        PendingIpcKind::VisibleEvaluate {
+            reply,
+            timeout,
+            execution_timeout,
+        } => {
             if reply.is_closed() {
                 return None;
             }
@@ -72,7 +76,14 @@ fn approve_and_accept(
                 crate::ipc::set_r_at_prompt(true);
                 return None;
             }
-            setup_visible_eval(reply, timeout, code, origin, started_execution_id);
+            setup_visible_eval(
+                reply,
+                timeout,
+                execution_timeout,
+                code,
+                origin,
+                started_execution_id,
+            );
             Some(AcceptedInteractiveIpcOperation {
                 wrote_newline,
                 accepted_reply: None,
@@ -159,12 +170,21 @@ pub(super) fn dispatch_pre_prompt_ipc(
         return None;
     }
 
-    if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
+    if let PendingIpcKind::SilentEvaluate {
+        reply,
+        execution_timeout,
+    } = op.kind
+    {
         // Run silent evaluate directly — no buffer conflict possible.
         // Unlike visible eval / user_input, silent eval does not return
         // code to R. Keep this background operation out of the user's REPL
         // command history, then fall through to the editor loop.
-        let result = run_silent_eval_from(&op.code, op.origin, &op.started_execution_id);
+        let result = run_silent_eval_from(
+            &op.code,
+            op.origin,
+            &op.started_execution_id,
+            execution_timeout,
+        );
         let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
         return None;
     }
@@ -223,7 +243,11 @@ pub(super) fn handle_external_break(
     }
 
     // Silent evaluate: run in-place and return to reedline
-    if let PendingIpcKind::SilentEvaluate { reply } = op.kind {
+    if let PendingIpcKind::SilentEvaluate {
+        reply,
+        execution_timeout,
+    } = op.kind
+    {
         // Show a visual indicator and run without adding a command-history
         // entry; silent background queries should not affect REPL recall.
         {
@@ -233,7 +257,12 @@ pub(super) fn handle_external_break(
             let _ = out.flush();
         }
 
-        let result = run_silent_eval_from(&op.code, op.origin, &op.started_execution_id);
+        let result = run_silent_eval_from(
+            &op.code,
+            op.origin,
+            &op.started_execution_id,
+            execution_timeout,
+        );
         let _ = reply.send(crate::ipc::protocol::IpcResponse::Evaluate(result));
 
         // Clear the indicator — reedline will repaint the prompt

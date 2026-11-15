@@ -278,6 +278,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (eval)
 _arguments "${_arguments_options[@]}" : \
+'--execution-timeout=[Request a cooperative interrupt after this many milliseconds of execution]:EXECUTION_TIMEOUT:_default' \
 '--pid=[PID of the target arf session (optional if only one session is running)]:PID:_default' \
 '--timeout=[Timeout in milliseconds for waiting for the response (default\: 300000 = 5 minutes). This does NOT cancel the R evaluation — long-running code keeps R busy after timeout]:TIMEOUT:_default' \
 '--visible[Also show output in the session (REPL or headless stdout)]' \

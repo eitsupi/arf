@@ -69,6 +69,9 @@ Examples:
   Bound the wait for a reply without cancelling the R evaluation:
     $ arf ipc eval --timeout 10000 'Sys.sleep(5); 42'
 
+  Request an interrupt after 1 second of execution, with time for the reply:
+    $ arf ipc eval --execution-timeout 1000 --timeout 10000 'Sys.sleep(30)'
+
   Run it where the session shows it, which is why it needs no allowlist entry:
     $ arf ipc eval --visible 'cat(\"hello\\n\")'
 
@@ -78,6 +81,9 @@ Examples:
   Extract the value with jq:
     $ arf ipc eval '1 + 1' | jq -r '.value'")]
     Eval {
+        /// Request a cooperative interrupt after this many milliseconds of execution
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300000))]
+        execution_timeout: Option<u64>,
         /// R code to evaluate (reads from stdin if omitted)
         code: Option<String>,
         /// PID of the target arf session (optional if only one session is running)
