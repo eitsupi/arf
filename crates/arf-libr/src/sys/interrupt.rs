@@ -170,12 +170,13 @@ static FORKED_UNAVAILABLE_READS: std::sync::atomic::AtomicU32 =
 /// Account for an unavailable read in a forked R worker, without locks.
 #[cfg(unix)]
 pub(super) fn forked_unavailable_read_limit_exceeded() -> bool {
-    let previous = FORKED_UNAVAILABLE_READS
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |reads| {
-            Some(reads.saturating_add(1))
-        })
-        .unwrap_or(u32::MAX);
-    previous >= UNAVAILABLE_READ_LIMIT
+    // Only R's thread reads the console, so a plain load and store suffice.
+    let reads = FORKED_UNAVAILABLE_READS.load(Ordering::Relaxed);
+    if reads >= UNAVAILABLE_READ_LIMIT {
+        return true;
+    }
+    FORKED_UNAVAILABLE_READS.store(reads + 1, Ordering::Relaxed);
+    false
 }
 
 /// Start tracking one IPC user-code evaluation.
