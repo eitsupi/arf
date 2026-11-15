@@ -156,9 +156,13 @@ pub(super) fn unavailable_read_limit_exceeded() -> bool {
     state.unavailable_reads > UNAVAILABLE_READ_LIMIT
 }
 
-/// Unavailable console reads in a forked R worker. A worker must not lock the
-/// parent's interrupt state, and it serves a single evaluation of the parent,
-/// so it counts its reads for its whole lifetime.
+/// Unavailable console reads in a forked R worker.
+///
+/// A worker cannot use the per-execution count above: the interrupt state's
+/// mutex may have been held at `fork()` by a parent thread that does not exist
+/// in the worker, and the execution it describes belongs to the parent. A
+/// worker serves a single evaluation of the parent, so it counts its reads for
+/// its whole lifetime instead.
 #[cfg(unix)]
 static FORKED_UNAVAILABLE_READS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
