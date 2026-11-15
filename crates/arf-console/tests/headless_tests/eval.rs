@@ -1,5 +1,4 @@
 use super::support::*;
-use crate::common::poll_until;
 use std::time::Duration;
 
 #[test]
@@ -494,15 +493,16 @@ fn test_headless_forked_workers_write_output_without_ipc_state() {
         ),
         "unexpected result: {value}"
     );
-    let output = poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
-        let output = process.server_output();
-        (1..=4)
-            .all(|i| {
-                output.contains(&format!("forked_worker_marker_{i}"))
-                    && output.contains(&format!("forked_worker_stderr_{i}"))
-            })
-            .then_some(output)
-    });
+    let output =
+        crate::common::poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            let output = process.server_output();
+            (1..=4)
+                .all(|i| {
+                    output.contains(&format!("forked_worker_marker_{i}"))
+                        && output.contains(&format!("forked_worker_stderr_{i}"))
+                })
+                .then_some(output)
+        });
     assert!(
         output.is_some(),
         "worker output should reach the headless process output: {}",
