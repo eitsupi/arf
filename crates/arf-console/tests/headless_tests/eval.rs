@@ -466,12 +466,18 @@ fn test_headless_forked_workers_write_output_without_ipc_state() {
             )
         }, mc.cores = 2)
         stopifnot(!vapply(values, inherits, logical(1), "try-error"))
+        # menu() retries on EOF, so workers stop it after repeated reads.
+        menus <- parallel::mclapply(1:2, function(i) {
+            setTimeLimit(elapsed = 10, transient = TRUE)
+            tryCatch(menu(c("a", "b")), error = conditionMessage)
+        }, mc.cores = 2)
         field <- function(name, type) paste(vapply(values, `[[`, type, name), collapse = ",")
         paste(
             "values", field("value", integer(1)),
             "published", field("published", logical(1)),
             "input", field("input", character(1)),
             "rejected", field("rejected", logical(1)),
+            "menu", all(grepl("console input is unavailable", unlist(menus))),
             "parent", publish("demo.parent")
         )
     "#;
@@ -489,7 +495,7 @@ fn test_headless_forked_workers_write_output_without_ipc_state() {
     assert!(
         value.contains(
             "values 2,4,6,8 published FALSE,FALSE,FALSE,FALSE input ,,, \
-             rejected TRUE,TRUE,TRUE,TRUE parent TRUE"
+             rejected TRUE,TRUE,TRUE,TRUE menu TRUE parent TRUE"
         ),
         "unexpected result: {value}"
     );

@@ -156,6 +156,24 @@ pub(super) fn unavailable_read_limit_exceeded() -> bool {
     state.unavailable_reads > UNAVAILABLE_READ_LIMIT
 }
 
+/// Unavailable console reads in a forked R worker. A worker must not lock the
+/// parent's interrupt state, and it serves a single evaluation of the parent,
+/// so it counts its reads for its whole lifetime.
+#[cfg(unix)]
+static FORKED_UNAVAILABLE_READS: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// Account for an unavailable read in a forked R worker, without locks.
+#[cfg(unix)]
+pub(super) fn forked_unavailable_read_limit_exceeded() -> bool {
+    let previous = FORKED_UNAVAILABLE_READS
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |reads| {
+            Some(reads.saturating_add(1))
+        })
+        .unwrap_or(u32::MAX);
+    previous >= UNAVAILABLE_READ_LIMIT
+}
+
 /// Start tracking one IPC user-code evaluation.
 pub fn begin_ipc_execution(execution_id: u64, eligible: bool) {
     let mut state = lock_interrupt_state();

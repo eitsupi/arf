@@ -1054,7 +1054,7 @@ evaluation results.
 
 The result fields in the JSON response are already properly escaped strings — tool developers do not need to handle the raw binary protocol themselves.
 
-Output from forked R workers, such as those of `parallel::mclapply()`, is not part of any of these. Each worker writes it unchanged to the stdout or stderr it inherited, which may have been redirected; it is neither captured in a response nor delivered as `arf.console_output`. A worker's console reads receive EOF.
+Output from forked R workers, such as those of `parallel::mclapply()`, is not part of any of these. Each worker writes it unchanged to the stdout or stderr it inherited, which may have been redirected; it is neither captured in a response nor delivered as `arf.console_output`. A worker's console reads receive EOF; after 100 such reads in one worker, further reads raise an R error, except at browser prompts.
 
 Every `evaluate` result includes `status`: `"ok"`, `"error"`,
 `"interrupted"`, or `"unknown"`. This applies to silent and visible evaluation
