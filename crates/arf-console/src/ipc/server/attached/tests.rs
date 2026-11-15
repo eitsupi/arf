@@ -218,7 +218,12 @@ async fn attach_result_describes_the_connection_and_session() {
     assert_eq!(result["api_version"], 1);
     assert_eq!(
         result["capabilities"],
-        json!(["events", "execution_events", "call_execution_timeout"])
+        json!([
+            "events",
+            "execution_events",
+            "call_execution_timeout",
+            "eval_execution_timeout"
+        ])
     );
     let session_id = result["session_id"].as_str().unwrap();
     assert_eq!(session_id.len(), 32);

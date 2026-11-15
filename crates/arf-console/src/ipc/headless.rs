@@ -210,9 +210,18 @@ fn start_request(request: IpcRequest) -> RequestStart {
         return RequestStart::Continue;
     }
     match method {
-        IpcMethod::SilentEvaluate { code, .. } => {
+        IpcMethod::SilentEvaluate {
+            code,
+            execution_timeout,
+            ..
+        } => {
             let history_entry = begin_headless_history(&code);
-            let result = execution::run_silent_eval_from(&code, origin, &started_execution_id);
+            let result = execution::run_silent_eval_from(
+                &code,
+                origin,
+                &started_execution_id,
+                execution_timeout,
+            );
             let exit_status = if result.error.is_some() { 1 } else { 0 };
             if let Some(entry) = history_entry {
                 entry.finish(Some(exit_status));
@@ -220,8 +229,12 @@ fn start_request(request: IpcRequest) -> RequestStart {
             let _ = reply.send(IpcResponse::Evaluate(result));
             RequestStart::Continue
         }
-        IpcMethod::VisibleEvaluate { code, .. } => {
-            execution::begin_visible_eval(&code, origin, &started_execution_id);
+        IpcMethod::VisibleEvaluate {
+            code,
+            execution_timeout,
+            ..
+        } => {
+            execution::begin_visible_eval(&code, origin, &started_execution_id, execution_timeout);
             let generation = arf_libr::reset_console_generation();
             let history_entry = begin_headless_history(&code);
             *ACTIVE_REQUEST.lock().unwrap() = Some(ActiveRequest {
@@ -326,11 +339,12 @@ fn finish_active_request() {
         ActiveKind::Evaluate(reply) => Some((reply, execution::finish_visible_eval())),
         ActiveKind::UserInput => None,
     };
-    let status = execution::finish_execution(if failed {
+    let completion = execution::finish_execution(if failed {
         ExecutionStatus::Error
     } else {
         ExecutionStatus::Ok
     });
+    let status = completion.status;
     if let Some(entry) = request.history_entry {
         entry.finish(Some(
             if status == ExecutionStatus::Error || status == ExecutionStatus::Interrupted {
@@ -341,10 +355,7 @@ fn finish_active_request() {
         ));
     }
     let result = result.map(|(reply, mut result)| {
-        result.status = status;
-        if status == ExecutionStatus::Interrupted {
-            result.error = Some("Evaluation interrupted".to_string());
-        }
+        completion.apply(&mut result);
         (reply, result)
     });
     if let Some((reply, result)) = result {

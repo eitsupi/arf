@@ -317,7 +317,13 @@ fn read_stdin_code() -> String {
 /// If `code` is `None`, reads from stdin; exits with a JSON error if stdin is a TTY.
 /// The TTY check runs first (instant), then session is resolved, then stdin is drained,
 /// so a missing-session error is reported without consuming a long stdin stream.
-pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms: Option<u64>) {
+pub fn cmd_eval(
+    code: Option<&str>,
+    pid: Option<u32>,
+    visible: bool,
+    timeout_ms: Option<u64>,
+    execution_timeout_ms: Option<u64>,
+) {
     if code.is_none() {
         require_stdin_not_tty();
     }
@@ -332,6 +338,9 @@ pub fn cmd_eval(code: Option<&str>, pid: Option<u32>, visible: bool, timeout_ms:
     };
 
     let mut params = serde_json::json!({ "code": code, "visible": visible });
+    if let Some(ms) = execution_timeout_ms {
+        params["execution_timeout_ms"] = serde_json::json!(ms);
+    }
     if let Some(ms) = timeout_ms {
         params["timeout_ms"] = serde_json::json!(ms);
     }

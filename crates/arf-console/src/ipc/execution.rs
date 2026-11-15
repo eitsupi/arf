@@ -30,36 +30,36 @@ struct ExecutionContext {
 
 static NEXT_EXECUTION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-pub(crate) struct HandlerDeadlineNotification {
+pub(crate) struct ExecutionDeadlineNotification {
     pub execution_id: super::events::ExecutionId,
     pub deadline: Instant,
 }
 
-static HANDLER_DEADLINE_NOTIFIER: OnceLock<
-    Mutex<Option<tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>>>,
+static EXECUTION_DEADLINE_NOTIFIER: OnceLock<
+    Mutex<Option<tokio::sync::mpsc::UnboundedSender<ExecutionDeadlineNotification>>>,
 > = OnceLock::new();
 
-fn handler_deadline_notifier()
--> &'static Mutex<Option<tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>>> {
-    HANDLER_DEADLINE_NOTIFIER.get_or_init(|| Mutex::new(None))
+fn execution_deadline_notifier()
+-> &'static Mutex<Option<tokio::sync::mpsc::UnboundedSender<ExecutionDeadlineNotification>>> {
+    EXECUTION_DEADLINE_NOTIFIER.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn install_handler_deadline_notifier(
-    sender: tokio::sync::mpsc::UnboundedSender<HandlerDeadlineNotification>,
+pub(crate) fn install_execution_deadline_notifier(
+    sender: tokio::sync::mpsc::UnboundedSender<ExecutionDeadlineNotification>,
 ) {
-    *handler_deadline_notifier()
+    *execution_deadline_notifier()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender);
 }
 
-pub(crate) fn clear_handler_deadline_notifier() {
-    *handler_deadline_notifier()
+pub(crate) fn clear_execution_deadline_notifier() {
+    *execution_deadline_notifier()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
-fn notify_handler_deadline(notification: HandlerDeadlineNotification) {
-    let sender = handler_deadline_notifier()
+fn notify_execution_deadline(notification: ExecutionDeadlineNotification) {
+    let sender = execution_deadline_notifier()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
@@ -68,8 +68,13 @@ fn notify_handler_deadline(notification: HandlerDeadlineNotification) {
     }
 }
 
-pub(crate) fn request_handler_deadline(execution_id: u64) -> bool {
-    arf_libr::request_ipc_deadline(execution_id)
+pub(crate) fn request_execution_deadline(execution_id: u64) -> bool {
+    if arf_libr::request_ipc_user_code_deadline(execution_id) {
+        super::state::fire_break_signal();
+        true
+    } else {
+        arf_libr::request_ipc_deadline(execution_id)
+    }
 }
 
 thread_local! {
@@ -122,7 +127,7 @@ pub(crate) fn begin_handler_execution(
     );
     arf_libr::begin_handler_ipc_execution(id.0, execution_timeout.is_some());
     if let Some(timeout) = execution_timeout {
-        notify_handler_deadline(HandlerDeadlineNotification {
+        notify_execution_deadline(ExecutionDeadlineNotification {
             execution_id: id,
             deadline: Instant::now()
                 .checked_add(timeout)
@@ -157,21 +162,45 @@ pub(super) fn console_output_context()
     })
 }
 
-/// Publish one completion and clear the active context. This must run on the
-/// R thread after all notifications produced by the evaluation were queued.
-pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
+/// Final status and interrupt metadata retrieved before execution state is cleared.
+pub(crate) struct ExecutionCompletion {
+    pub status: ExecutionStatus,
+    pub interrupt_reason: Option<String>,
+}
+
+impl ExecutionCompletion {
+    pub fn apply(self, result: &mut EvaluateResult) {
+        result.status = self.status;
+        result.interrupt_reason = self.interrupt_reason;
+        if self.status == ExecutionStatus::Interrupted {
+            result.error = Some("Evaluation interrupted".to_string());
+        }
+    }
+}
+
+/// Publish completion on the R thread after evaluation notifications were queued.
+pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionCompletion {
     super::flush_console_output();
     let Some(context) = CURRENT_EXECUTION.take() else {
-        return ExecutionStatus::Unknown;
+        return ExecutionCompletion {
+            status: ExecutionStatus::Unknown,
+            interrupt_reason: None,
+        };
     };
     arf_libr::begin_ipc_execution_finishing();
-    let status = if arf_libr::finish_ipc_execution() || status == ExecutionStatus::Interrupted {
+    let (interrupted, deadline_requested) = arf_libr::finish_ipc_execution_outcome();
+    let status = if interrupted || status == ExecutionStatus::Interrupted {
         ExecutionStatus::Interrupted
     } else {
         status
     };
+    let completion = ExecutionCompletion {
+        status,
+        interrupt_reason: (deadline_requested && status == ExecutionStatus::Interrupted)
+            .then(|| "execution_timeout".to_string()),
+    };
     if !context.emit_completion {
-        return status;
+        return completion;
     }
     let topic = super::events::Topic::internal("arf.execution_completed")
         .expect("the built-in execution topic is valid");
@@ -185,7 +214,7 @@ pub(crate) fn finish_execution(status: ExecutionStatus) -> ExecutionStatus {
     if let Err(error) = super::events::publish_event(topic, data, Some(context.id)) {
         log::debug!("Could not publish execution completion: {error}");
     }
-    status
+    completion
 }
 
 /// Request an interrupt for the active IPC-originated user-code evaluation.
@@ -204,6 +233,19 @@ pub(crate) fn request_interrupt(execution_id: Option<u64>) -> super::protocol::I
 
 pub(super) const DEFAULT_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+fn start_eval_deadline(id: super::events::ExecutionId, timeout: Option<std::time::Duration>) {
+    if let Some(timeout) = timeout
+        && arf_libr::enable_ipc_execution_deadline()
+    {
+        notify_execution_deadline(ExecutionDeadlineNotification {
+            execution_id: id,
+            deadline: Instant::now()
+                .checked_add(timeout)
+                .unwrap_or_else(Instant::now),
+        });
+    }
+}
+
 /// Run a silent evaluation while keeping the shared R prompt state accurate.
 ///
 /// History is frontend-specific: headless records external code, while the
@@ -213,6 +255,7 @@ pub(crate) fn run_silent_eval_from(
     code: &str,
     origin_id: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
+    execution_timeout: Option<std::time::Duration>,
 ) -> EvaluateResult {
     arf_libr::reset_command_error_state();
     let execution_id = begin_ipc_execution(
@@ -223,6 +266,7 @@ pub(crate) fn run_silent_eval_from(
         has_user_code(code),
     );
     arf_libr::begin_ipc_execution(execution_id.0, has_user_code(code));
+    start_eval_deadline(execution_id, execution_timeout);
     arf_libr::enable_ipc_silent_boundaries();
     r_is_at_prompt().store(false, Ordering::Release);
     // SAFETY: evaluate_with_capture enters R only through the protected harp
@@ -242,10 +286,7 @@ pub(crate) fn run_silent_eval_from(
     } else {
         result.status
     };
-    result.status = finish_execution(status);
-    if result.status == ExecutionStatus::Interrupted {
-        result.error = Some("Evaluation interrupted".to_string());
-    }
+    finish_execution(status).apply(&mut result);
     result
 }
 
@@ -254,6 +295,7 @@ pub(super) fn begin_visible_eval(
     code: &str,
     origin: u64,
     started_execution_id: &std::sync::atomic::AtomicU64,
+    execution_timeout: Option<std::time::Duration>,
 ) -> super::events::ExecutionId {
     arf_libr::reset_command_error_state();
     let id = begin_ipc_execution(
@@ -264,6 +306,7 @@ pub(super) fn begin_visible_eval(
         has_user_code(code),
     );
     arf_libr::begin_ipc_execution(id.0, has_user_code(code));
+    start_eval_deadline(id, execution_timeout);
     r_is_at_prompt().store(false, Ordering::Release);
     arf_libr::start_ipc_capture(true);
     id
@@ -274,6 +317,7 @@ pub(super) fn finish_visible_eval() -> EvaluateResult {
     let (stdout, stderr) = arf_libr::finish_ipc_capture();
     let execution_id = current_execution_id();
     EvaluateResult {
+        interrupt_reason: None,
         stdout,
         stderr,
         value: None,

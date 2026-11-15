@@ -30,11 +30,13 @@ pub use interrupt::{
     ConsoleEvaluationInterruptGuard, InterruptPhase, begin_handler_ipc_execution,
     begin_handler_protected_execution, begin_ipc_execution, begin_ipc_execution_finishing,
     begin_ipc_protected_evaluation, begin_read_console_input, cancel_ipc_deadline,
-    enable_ipc_silent_boundaries, finish_handler_protected_execution, finish_ipc_execution,
+    enable_ipc_execution_deadline, enable_ipc_silent_boundaries,
+    finish_handler_protected_execution, finish_ipc_execution, finish_ipc_execution_outcome,
     finish_ipc_protected_evaluation, is_r_awaiting_console_input, is_r_interrupt_flag_available,
     mark_ipc_interrupt_discarded, mark_ipc_interrupt_observed, process_r_events,
     process_r_events_protected, request_ipc_deadline, request_ipc_interrupt,
-    set_ipc_execution_phase, set_r_interrupt_pending, take_ipc_interrupt_request,
+    request_ipc_user_code_deadline, set_ipc_execution_phase, set_r_interrupt_pending,
+    take_ipc_interrupt_request,
 };
 pub use output::{
     finish_ipc_capture, flush_reprex_buffer, set_console_output_observer, set_reprex_mode,

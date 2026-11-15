@@ -236,8 +236,14 @@ pub fn begin_ipc_execution_finishing() {
 /// Finish tracking the current IPC evaluation and report whether R actually
 /// observed an interrupt or the pending input was discarded.
 pub fn finish_ipc_execution() -> bool {
+    finish_ipc_execution_outcome().0
+}
+
+/// Finish an execution and atomically retrieve its interrupt and deadline state.
+pub fn finish_ipc_execution_outcome() -> (bool, bool) {
     let mut state = lock_interrupt_state();
     let interrupted = state.interrupted;
+    let deadline_requested = state.deadline_requested;
     state.phase = InterruptPhase::Finishing;
     state.execution_id = None;
     state.eligible = false;
@@ -251,7 +257,8 @@ pub fn finish_ipc_execution() -> bool {
     clear_r_interrupt_pending_unlocked();
     if let Some(frame) = state.stack.pop() {
         restore(&mut state, frame);
-        if (state.requested || state.deadline_requested)
+        if (state.requested
+            || (state.kind == InterruptExecutionKind::Handler && state.deadline_requested))
             && matches!(
                 state.phase,
                 InterruptPhase::ProtectedEvaluation | InterruptPhase::TopLevelEvaluation
@@ -262,7 +269,7 @@ pub fn finish_ipc_execution() -> bool {
     } else {
         state.phase = InterruptPhase::Idle;
     }
-    interrupted
+    (interrupted, deadline_requested)
 }
 
 /// Enable protected-boundary interrupt delivery for a silent evaluation only.
@@ -336,18 +343,47 @@ pub fn finish_handler_protected_execution(execution_id: u64) -> bool {
     requested
 }
 
+/// Arm a deadline for eligible user code before notifying the timer service.
+pub fn enable_ipc_execution_deadline() -> bool {
+    let mut state = lock_interrupt_state();
+    if state.execution_id.is_some()
+        && state.eligible
+        && state.kind == InterruptExecutionKind::UserCode
+        && state.phase != InterruptPhase::Finishing
+    {
+        state.deadline_in_force = true;
+        return true;
+    }
+    false
+}
+
 /// Register a handler deadline request. A request that arrives during argument
 /// conversion is retained, but the R flag is written only while the matching
 /// protected callback is active.
 pub fn request_ipc_deadline(execution_id: u64) -> bool {
+    request_execution_deadline(execution_id, InterruptExecutionKind::Handler)
+}
+
+/// Register a user-code deadline using the normal interrupt delivery phases.
+pub fn request_ipc_user_code_deadline(execution_id: u64) -> bool {
+    request_execution_deadline(execution_id, InterruptExecutionKind::UserCode)
+}
+
+fn request_execution_deadline(execution_id: u64, kind: InterruptExecutionKind) -> bool {
     let mut state = lock_interrupt_state();
     if state.execution_id == Some(execution_id)
-        && state.kind == InterruptExecutionKind::Handler
+        && state.kind == kind
         && state.deadline_in_force
         && state.phase != InterruptPhase::Finishing
     {
         state.deadline_requested = true;
-        if state.phase == InterruptPhase::ProtectedEvaluation {
+        if state.kind == InterruptExecutionKind::UserCode {
+            state.requested = true;
+        }
+        if state.phase == InterruptPhase::ProtectedEvaluation
+            || (state.kind == InterruptExecutionKind::UserCode
+                && state.phase == InterruptPhase::TopLevelEvaluation)
+        {
             write_ipc_interrupt_flag(&mut state);
         }
         return true;
@@ -357,11 +393,14 @@ pub fn request_ipc_deadline(execution_id: u64) -> bool {
         .iter_mut()
         .rev()
         .find(|frame| frame.execution_id == Some(execution_id))
-        && frame.kind == InterruptExecutionKind::Handler
+        && frame.kind == kind
         && frame.deadline_in_force
         && frame.phase != InterruptPhase::Finishing
     {
         frame.deadline_requested = true;
+        if frame.kind == InterruptExecutionKind::UserCode {
+            frame.requested = true;
+        }
         return true;
     }
     false
@@ -592,7 +631,8 @@ pub(super) fn finish_read_console_input(
     } else {
         InterruptPhase::Input
     };
-    if (state.requested || state.deadline_requested)
+    if (state.requested
+        || (state.kind == InterruptExecutionKind::Handler && state.deadline_requested))
         && matches!(
             state.phase,
             InterruptPhase::ProtectedEvaluation | InterruptPhase::TopLevelEvaluation
@@ -802,7 +842,13 @@ fn r_interrupt_flags_clear() -> bool {
 /// interrupt that arf delivered itself with `Rf_onintr()` from a prompt counts
 /// when that was followed by such a jump.
 fn observe_interrupt_outcome(state: &mut InterruptState, previous_phase: InterruptPhase) {
-    if previous_phase == InterruptPhase::TopLevelEvaluation && state.flag_written {
+    // Silent user code can catch an interrupt and request console input before
+    // leaving its protected boundary. Do not deliver the same request again.
+    if (previous_phase == InterruptPhase::TopLevelEvaluation
+        || (previous_phase == InterruptPhase::ProtectedEvaluation
+            && state.kind == InterruptExecutionKind::UserCode))
+        && state.flag_written
+    {
         state.flag_written = false;
         if r_interrupt_flags_clear() {
             state.flag_consumed = true;
@@ -886,6 +932,46 @@ mod tests {
 
     /// Serializes tests that use the process-wide IPC interrupt state.
     static STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn user_code_deadlines_are_scoped_and_finish_atomically() {
+        let _serial = STATE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::begin_ipc_execution(9200, false);
+        assert!(!super::enable_ipc_execution_deadline());
+        assert!(!super::request_ipc_user_code_deadline(9200));
+        assert_eq!(super::finish_ipc_execution_outcome(), (false, false));
+
+        super::begin_ipc_execution(9201, true);
+        assert!(super::enable_ipc_execution_deadline());
+        assert!(!super::request_ipc_deadline(9201));
+        assert_eq!(super::request_ipc_interrupt(Some(9201)), (true, Some(9201)));
+        super::begin_ipc_execution(9202, true);
+        assert!(super::enable_ipc_execution_deadline());
+        assert!(super::request_ipc_user_code_deadline(9201));
+        assert!(super::request_ipc_user_code_deadline(9202));
+        assert!(super::take_ipc_interrupt_request());
+        super::mark_ipc_interrupt_observed();
+        assert_eq!(super::finish_ipc_execution_outcome(), (true, true));
+        assert!(super::take_ipc_interrupt_request());
+        super::mark_ipc_interrupt_observed();
+        super::begin_ipc_execution_finishing();
+        assert!(!super::request_ipc_user_code_deadline(9201));
+        assert_eq!(super::finish_ipc_execution_outcome(), (true, true));
+        assert!(!super::request_ipc_user_code_deadline(9201));
+
+        super::begin_ipc_execution(9203, true);
+        assert!(super::enable_ipc_execution_deadline());
+        super::begin_ipc_execution_finishing();
+        assert!(!super::request_ipc_user_code_deadline(9203));
+        assert_eq!(super::finish_ipc_execution_outcome(), (false, false));
+        super::begin_ipc_execution(9204, true);
+        assert!(super::enable_ipc_execution_deadline());
+        assert!(super::request_ipc_user_code_deadline(9204));
+        // A request alone is not evidence that R was interrupted.
+        assert_eq!(super::finish_ipc_execution_outcome(), (false, true));
+        super::begin_ipc_execution(9205, true);
+        assert_eq!(super::finish_ipc_execution_outcome(), (false, false));
+    }
 
     #[test]
     fn unavailable_reads_follow_nested_execution_budgets() {

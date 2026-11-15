@@ -114,14 +114,20 @@ pub struct EvaluateParams {
     /// the default (300 seconds).
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// Cooperative execution deadline, measured from evaluation start.
+    #[serde(default)]
+    pub execution_timeout_ms: Option<u64>,
 }
 
 /// Result of the `evaluate` method.
 ///
-/// All fields are always present. `value` and `error` are `null` when not
-/// applicable, ensuring a fixed JSON schema for predictable parsing.
+/// Core fields are always present. `value` and `error` are `null` when not
+/// applicable; optional interrupt metadata is omitted unless relevant.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EvaluateResult {
+    /// Present only when a deadline was accepted and evaluation was interrupted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_reason: Option<String>,
     pub stdout: String,
     pub stderr: String,
     pub value: Option<String>,
@@ -384,10 +390,12 @@ pub enum IpcMethod {
     SilentEvaluate {
         code: String,
         timeout: std::time::Duration,
+        execution_timeout: Option<std::time::Duration>,
     },
     VisibleEvaluate {
         code: String,
         timeout: std::time::Duration,
+        execution_timeout: Option<std::time::Duration>,
     },
     UserInput {
         code: String,

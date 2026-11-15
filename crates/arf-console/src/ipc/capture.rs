@@ -40,6 +40,7 @@ pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
         Err(e) => {
             return CaptureEvaluation {
                 result: EvaluateResult {
+                    interrupt_reason: None,
                     stdout: String::new(),
                     stderr: String::new(),
                     value: None,
@@ -105,6 +106,7 @@ pub fn evaluate_with_capture(code: &str) -> CaptureEvaluation {
             drop(tmpfile);
             CaptureEvaluation {
                 result: EvaluateResult {
+                    interrupt_reason: None,
                     stdout,
                     stderr,
                     value: None,
@@ -130,6 +132,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
         Err(e) => {
             return (
                 EvaluateResult {
+                    interrupt_reason: None,
                     stdout: String::new(),
                     stderr: String::new(),
                     value: None,
@@ -148,6 +151,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
         None => {
             return (
                 EvaluateResult {
+                    interrupt_reason: None,
                     stdout: String::new(),
                     stderr: String::new(),
                     value: None,
@@ -174,6 +178,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
     let Some(lengths) = lengths else {
         return (
             EvaluateResult {
+                interrupt_reason: None,
                 stdout: String::new(),
                 stderr: String::new(),
                 value: None,
@@ -211,6 +216,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
     if truncated {
         return (
             EvaluateResult {
+                interrupt_reason: None,
                 stdout: String::new(),
                 stderr: String::new(),
                 value: None,
@@ -232,6 +238,7 @@ fn parse_capture_file_with_status(path: &std::path::Path) -> (EvaluateResult, bo
     };
     (
         EvaluateResult {
+            interrupt_reason: None,
             stdout: String::new(),
             stderr: String::new(),
             value,

@@ -234,7 +234,13 @@ fn parse_method(
     match method {
         "evaluate" => {
             let params: EvaluateParams = parse_params(id, params)?;
-            validated_method(id, params.code, params.visible, params.timeout_ms)
+            validated_method(
+                id,
+                params.code,
+                params.visible,
+                params.timeout_ms,
+                params.execution_timeout_ms,
+            )
         }
         "shutdown" => Err(Box::new(handle_shutdown(id.clone()))),
         "interrupt" => Err(Box::new(handle_interrupt(id.clone(), params))),
@@ -670,6 +676,42 @@ mod tests {
         match &request.method {
             IpcMethod::Call { ticket, .. } => ticket,
             _ => panic!("expected queued handler call"),
+        }
+    }
+
+    #[test]
+    fn evaluate_execution_deadline_validates_range_and_type() {
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(300001),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("500"),
+        ] {
+            let error = parse_method(
+                &None,
+                "evaluate",
+                serde_json::json!({
+                    "code": "1", "execution_timeout_ms": value
+                }),
+            )
+            .err()
+            .expect("invalid deadline");
+            assert_eq!(error.error.unwrap().code, INVALID_PARAMS);
+        }
+        for ms in [1, 300000] {
+            let method = parse_method(
+                &None,
+                "evaluate",
+                serde_json::json!({
+                    "code": "1", "execution_timeout_ms": ms
+                }),
+            )
+            .expect("valid deadline");
+            assert!(
+                matches!(method, IpcMethod::SilentEvaluate { execution_timeout: Some(timeout), .. }
+                if timeout == std::time::Duration::from_millis(ms))
+            );
         }
     }
 

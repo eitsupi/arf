@@ -143,7 +143,7 @@ impl Drop for SocketPathGuard {
 pub fn start_server(
     tx: mpsc::Sender<IpcRequest>,
     deadline_rx: tokio::sync::mpsc::UnboundedReceiver<
-        crate::ipc::execution::HandlerDeadlineNotification,
+        crate::ipc::execution::ExecutionDeadlineNotification,
     >,
     bind: Option<&str>,
     started_at: &str,
@@ -219,7 +219,7 @@ pub fn start_server(
                 let ctx = ConnectionContext::new(tx, bus.clone(), token_clone);
                 let deadline_cancel = ctx.cancel.clone();
                 let deadline_task =
-                    tokio::spawn(run_handler_deadline_timers(deadline_rx, deadline_cancel));
+                    tokio::spawn(run_execution_deadline_timers(deadline_rx, deadline_cancel));
                 let timer_cancel = ctx.cancel.clone();
                 let server_cancel = ctx.cancel.clone();
                 let output_timer = tokio::spawn(async move {
@@ -310,21 +310,21 @@ pub fn start_server(
     Ok(session)
 }
 
-async fn run_handler_deadline_timers(
+async fn run_execution_deadline_timers(
     notifications: tokio::sync::mpsc::UnboundedReceiver<
-        crate::ipc::execution::HandlerDeadlineNotification,
+        crate::ipc::execution::ExecutionDeadlineNotification,
     >,
     cancel: CancellationToken,
 ) {
     let mut timers = tokio::task::JoinSet::new();
-    process_handler_deadline_timers(notifications, cancel, &mut timers).await;
+    process_execution_deadline_timers(notifications, cancel, &mut timers).await;
     timers.abort_all();
     while timers.join_next().await.is_some() {}
 }
 
-async fn process_handler_deadline_timers(
+async fn process_execution_deadline_timers(
     mut notifications: tokio::sync::mpsc::UnboundedReceiver<
-        crate::ipc::execution::HandlerDeadlineNotification,
+        crate::ipc::execution::ExecutionDeadlineNotification,
     >,
     cancel: CancellationToken,
     timers: &mut tokio::task::JoinSet<()>,
@@ -340,7 +340,7 @@ async fn process_handler_deadline_timers(
                     tokio::select! {
                         _ = timer_cancel.cancelled() => {}
                         _ = tokio::time::sleep_until(tokio::time::Instant::from_std(notification.deadline)) => {
-                            crate::ipc::execution::request_handler_deadline(notification.execution_id.0);
+                            crate::ipc::execution::request_execution_deadline(notification.execution_id.0);
                         }
                     }
                 });
@@ -361,7 +361,7 @@ pub fn stop_server() {
     };
 
     let state = handle_store.lock().unwrap().take();
-    crate::ipc::execution::clear_handler_deadline_notifier();
+    crate::ipc::execution::clear_execution_deadline_notifier();
     arf_libr::cancel_ipc_deadline();
     if let Some(state) = state {
         // Unlink before cancellation, keeping the old listener alive through
@@ -469,13 +469,13 @@ mod deadline_timer_tests {
     async fn completed_deadline_tasks_are_reaped_while_the_server_keeps_running() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut timers = tokio::task::JoinSet::new();
-        tx.send(crate::ipc::execution::HandlerDeadlineNotification {
+        tx.send(crate::ipc::execution::ExecutionDeadlineNotification {
             execution_id: crate::ipc::events::ExecutionId(u64::MAX),
             deadline: (tokio::time::Instant::now() + std::time::Duration::from_secs(1)).into_std(),
         })
         .unwrap();
         {
-            let mut runner = std::pin::pin!(process_handler_deadline_timers(
+            let mut runner = std::pin::pin!(process_execution_deadline_timers(
                 rx,
                 CancellationToken::new(),
                 &mut timers,
