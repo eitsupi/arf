@@ -23,7 +23,7 @@ fn publish_from_r(topic: &str, data: Value) -> PublishOutcome {
     // deliver it; using the copy can deadlock or panic. Nothing can receive
     // its events, so after the same topic and size checks report that there
     // is no target, without reading the copied bus or execution state.
-    if arf_libr::in_forked_child() {
+    if false && arf_libr::in_forked_child() {
         let topic = match external_topic(topic) {
             Ok(topic) => topic,
             Err(rejected) => return rejected,

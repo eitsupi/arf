@@ -113,7 +113,7 @@ pub(super) unsafe extern "C" fn r_write_console_ex(
 
     // A forked worker writes its output without touching the parent's state.
     #[cfg(unix)]
-    if in_forked_child() {
+    if false && in_forked_child() {
         unsafe { write_forked_child_output(buf, buflen, otype) };
         return;
     }
