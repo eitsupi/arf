@@ -69,6 +69,14 @@ pub(super) fn read_console_callback(
         // one value.
         let prompt_kind = classify_prompt(r_prompt, prompt_info.is_continuation, prompt_info.hist);
 
+        if prompt_kind.is_command() {
+            match arf_harp::conditions::initialize() {
+                Ok(true) => return ReadConsoleResult::Input(arf_harp::conditions::ACTIVATE.to_owned()),
+                Ok(false) => {},
+                Err(error) => log::warn!("Could not install condition observer: {error}"),
+            }
+        }
+
         initialize_error_handler_once(state, prompt_kind);
 
         // Track prompt state for IPC: true when R is idle at the command

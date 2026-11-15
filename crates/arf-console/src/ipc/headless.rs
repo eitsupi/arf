@@ -83,6 +83,18 @@ pub fn headless_read_console(
             shutdown_before_eof(1);
         }
     }
+    if info.is_main_prompt {
+        match arf_harp::conditions::initialize() {
+            Ok(true) => {
+                return HeadlessReadConsoleResult::Input(arf_libr::ReadConsoleInput {
+                    text: arf_harp::conditions::ACTIVATE.to_owned(),
+                    has_more: false,
+                });
+            }
+            Ok(false) => {}
+            Err(error) => log::warn!("Could not install condition observer: {error}"),
+        }
+    }
     if !info.is_main_prompt && !info.is_continuation {
         log::error!("Headless R requested an unrecognized prompt: {prompt:?}");
         set_headless_shutdown();

@@ -1176,10 +1176,10 @@ normal REPL execution from silent evaluation. `status` is `"ok"`, `"error"`, or
 `"interrupted"` when an IPC interrupt stopped the execution, or `"unknown"`
 when a reliable outcome is unavailable. An interrupted `evaluate` result also
 contains an `error` message identifying the interruption. Requests are
-cooperative, so an accepted interrupt can race with normal completion. If
-visible or `send` code handles the interrupt condition and then raises another
-error, the execution is still reported as `"interrupted"`; the original error
-message remains in `stderr`.
+cooperative, so an accepted interrupt can race with normal completion. Visible
+completion uses unhandled R conditions when available; if the global calling
+handlers are unavailable or removed, arf falls back to interrupt flags and
+console resets.
 
 The completion event's `status` always matches the corresponding `evaluate`
 result's `status`. The event is published before the evaluation response is
