@@ -355,6 +355,9 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
         r#"
         local({{
             names <- c({})
+            # Candidates usually share one left-hand side (e.g. `x$a`,
+            # `x$b`), so evaluate each distinct one only once.
+            lhs_cache <- new.env(hash = TRUE, parent = emptyenv())
             vapply(names, function(n) {{
                 # Evaluate the parsed expression to handle simple names,
                 # pkg::func, and obj$member syntax.
@@ -363,7 +366,16 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
                     env <- globalenv()
                     if (is.call(expr) && length(expr) == 3L &&
                         identical(expr[[1L]], as.name("$"))) {{
-                        lhs <- eval(expr[[2L]], env)
+                        key <- paste(deparse(expr[[2L]]), collapse = "\n")
+                        if (!exists(key, envir = lhs_cache, inherits = FALSE)) {{
+                            assign(key, tryCatch(
+                                list(value = eval(expr[[2L]], env)),
+                                error = function(e) NULL
+                            ), envir = lhs_cache)
+                        }}
+                        cached <- get(key, envir = lhs_cache, inherits = FALSE)
+                        if (is.null(cached)) return(FALSE)
+                        lhs <- cached$value
                         member <- expr[[3L]]
                         if (is.symbol(member)) member <- as.character(member)
                         # Never force an active binding just to decide

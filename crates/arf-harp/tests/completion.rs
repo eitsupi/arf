@@ -180,6 +180,11 @@ fn test_check_if_functions_skips_active_bindings() {
                 .arf_ab_forced <<- .arf_ab_forced + 1L
                 function() NULL
             }, .arf_ab_env)
+            .arf_ab_lhs_forced <- 0L
+            makeActiveBinding(".arf_ab_lhs", function() {
+                .arf_ab_lhs_forced <<- .arf_ab_lhs_forced + 1L
+                .arf_ab_env
+            }, globalenv())
             .arf_ab_s3 <- structure(new.env(), class = "arf_ab_s3")
             `$.arf_ab_s3` <- function(x, name) {
                 if (identical(name, "collect")) function() NULL else NULL
@@ -197,17 +202,25 @@ fn test_check_if_functions_skips_active_bindings() {
             ".arf_ab_env$inner$method",
             ".arf_ab_s3$collect",
             ".arf_ab_s3$other",
+            ".arf_ab_lhs$method",
+            ".arf_ab_lhs$value",
             "print",
         ];
         let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
         assert_eq!(
             result,
-            vec![true, false, false, false, true, true, false, true]
+            vec![
+                true, false, false, false, true, true, false, true, false, true
+            ]
         );
 
         eval_string_with_visibility(
             r#"if (!identical(.arf_ab_forced, 0L)) stop("active binding was forced")"#,
         )
         .expect("active bindings must not be forced");
+        eval_string_with_visibility(
+            r#"if (!identical(.arf_ab_lhs_forced, 1L)) stop("shared lhs was not evaluated once")"#,
+        )
+        .expect("a shared left-hand side should be evaluated once");
     });
 }
