@@ -355,11 +355,43 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
         r#"
         local({{
             names <- c({})
+            # Candidates usually share one left-hand side (e.g. `x$a`,
+            # `x$b`), so evaluate each distinct one only once.
+            lhs_cache <- new.env(hash = TRUE, parent = emptyenv())
             vapply(names, function(n) {{
-                # Use eval(parse()) to handle both simple names and pkg::func syntax
+                # Evaluate the parsed expression to handle simple names,
+                # pkg::func, and obj$member syntax.
                 tryCatch({{
-                    obj <- eval(parse(text = n))
-                    is.function(obj)
+                    expr <- parse(text = n, keep.source = FALSE)[[1L]]
+                    env <- globalenv()
+                    if (is.call(expr) && length(expr) == 3L &&
+                        identical(expr[[1L]], as.name("$"))) {{
+                        key <- paste(deparse(expr[[2L]]), collapse = "\n")
+                        if (!exists(key, envir = lhs_cache, inherits = FALSE)) {{
+                            assign(key, tryCatch(
+                                list(value = eval(expr[[2L]], env)),
+                                error = function(e) NULL
+                            ), envir = lhs_cache)
+                        }}
+                        cached <- get(key, envir = lhs_cache, inherits = FALSE)
+                        if (is.null(cached)) return(FALSE)
+                        lhs <- cached$value
+                        member <- expr[[3L]]
+                        if (is.symbol(member)) member <- as.character(member)
+                        # Never force an active binding just to decide
+                        # whether to append parentheses: it may be
+                        # expensive or have side effects.
+                        if (is.environment(lhs) && is.character(member) &&
+                            length(member) == 1L &&
+                            exists(member, envir = lhs, inherits = FALSE) &&
+                            bindingIsActive(member, lhs)) {{
+                            return(FALSE)
+                        }}
+                        # Reuse the evaluated lhs so `$` methods still
+                        # dispatch without evaluating the lhs twice.
+                        expr <- call("$", lhs, expr[[3L]])
+                    }}
+                    is.function(eval(expr, env))
                 }}, error = function(e) FALSE)
             }}, logical(1), USE.NAMES = FALSE)
         }})

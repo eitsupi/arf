@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tab completion no longer evaluates active bindings, such as the `columns` field of a polars LazyFrame, when checking whether `$` members are functions. Active bindings are completed without automatic parentheses (#528).
+
 ## [0.7.2-rc.1] - 2026-11-15
 
 ### Added
