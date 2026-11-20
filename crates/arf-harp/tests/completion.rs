@@ -156,3 +156,58 @@ fn test_check_if_functions_classifies_names() {
         assert!(result.is_empty(), "Empty input should return empty result");
     });
 }
+
+/// Function detection for `$` members must not force active bindings, which
+/// may be expensive or have side effects, while still detecting regular and
+/// `$`-method-provided function members.
+#[test]
+fn test_check_if_functions_skips_active_bindings() {
+    with_r!(test_check_if_functions_skips_active_bindings, {
+        eval_string_with_visibility(
+            r#"
+            .arf_ab_forced <- 0L
+            .arf_ab_env <- new.env()
+            .arf_ab_env$method <- function() NULL
+            .arf_ab_env$value <- 1L
+            .arf_ab_env$inner <- new.env()
+            .arf_ab_env$inner$method <- function() NULL
+            makeActiveBinding("data", function() {
+                .arf_ab_forced <<- .arf_ab_forced + 1L
+                warning("Potentially expensive operation.")
+                1L
+            }, .arf_ab_env)
+            makeActiveBinding("fun", function() {
+                .arf_ab_forced <<- .arf_ab_forced + 1L
+                function() NULL
+            }, .arf_ab_env)
+            .arf_ab_s3 <- structure(new.env(), class = "arf_ab_s3")
+            `$.arf_ab_s3` <- function(x, name) {
+                if (identical(name, "collect")) function() NULL else NULL
+            }
+            invisible(NULL)
+            "#,
+        )
+        .expect("fixture setup should succeed");
+
+        let names = vec![
+            ".arf_ab_env$method",
+            ".arf_ab_env$value",
+            ".arf_ab_env$data",
+            ".arf_ab_env$fun",
+            ".arf_ab_env$inner$method",
+            ".arf_ab_s3$collect",
+            ".arf_ab_s3$other",
+            "print",
+        ];
+        let result = arf_harp::completion::check_if_functions(&names).expect("should succeed");
+        assert_eq!(
+            result,
+            vec![true, false, false, false, true, true, false, true]
+        );
+
+        eval_string_with_visibility(
+            r#"if (!identical(.arf_ab_forced, 0L)) stop("active binding was forced")"#,
+        )
+        .expect("active bindings must not be forced");
+    });
+}

@@ -356,10 +356,30 @@ pub fn check_if_functions(names: &[&str]) -> HarpResult<Vec<bool>> {
         local({{
             names <- c({})
             vapply(names, function(n) {{
-                # Use eval(parse()) to handle both simple names and pkg::func syntax
+                # Evaluate the parsed expression to handle simple names,
+                # pkg::func, and obj$member syntax.
                 tryCatch({{
-                    obj <- eval(parse(text = n))
-                    is.function(obj)
+                    expr <- parse(text = n, keep.source = FALSE)[[1L]]
+                    env <- globalenv()
+                    if (is.call(expr) && length(expr) == 3L &&
+                        identical(expr[[1L]], as.name("$"))) {{
+                        lhs <- eval(expr[[2L]], env)
+                        member <- expr[[3L]]
+                        if (is.symbol(member)) member <- as.character(member)
+                        # Never force an active binding just to decide
+                        # whether to append parentheses: it may be
+                        # expensive or have side effects.
+                        if (is.environment(lhs) && is.character(member) &&
+                            length(member) == 1L &&
+                            exists(member, envir = lhs, inherits = FALSE) &&
+                            bindingIsActive(member, lhs)) {{
+                            return(FALSE)
+                        }}
+                        # Reuse the evaluated lhs so `$` methods still
+                        # dispatch without evaluating the lhs twice.
+                        expr <- call("$", lhs, expr[[3L]])
+                    }}
+                    is.function(eval(expr, env))
                 }}, error = function(e) FALSE)
             }}, logical(1), USE.NAMES = FALSE)
         }})
