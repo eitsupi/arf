@@ -2,11 +2,7 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Tab completion no longer evaluates active bindings, such as the `columns` field of a polars LazyFrame, when checking whether `$` members are functions. Active bindings are completed without automatic parentheses (#528).
-
-## [0.7.2-rc.1] - 2026-11-15
+## [0.7.2] - 2026-11-20
 
 ### Added
 
@@ -14,9 +10,10 @@
 
 ### Fixed
 
-- Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)` (#520).
-- Repeated unanswerable console reads, such as those from `menu()`, now raise an R error in IPC evaluations and handler calls; code that catches the error and retries can still continue indefinitely (#518).
-- Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running (#521).
+- Tab completion after `$` no longer evaluates active bindings (#528).
+- **Experimental:** Visible IPC evaluations now distinguish R errors from caught interrupts and report errors under `options(error = recover)` (#520).
+- **Experimental:** Repeated unanswerable console reads, such as those from `menu()`, now raise an R error in IPC evaluations and handler calls; code that catches the error and retries can still continue indefinitely (#518).
+- **Experimental:** Forked R workers, such as those of `parallel::mclapply()`, no longer crash on macOS when they print output while the IPC server is running (#521).
 
 ## [0.7.1] - 2026-11-14
 
